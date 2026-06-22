@@ -1,0 +1,242 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\CartStatus;
+use App\Enums\InventoryMovementType;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Exceptions\InsufficientStock;
+use App\Exceptions\InvalidCheckout;
+use App\Exceptions\InvalidOrderTransition;
+use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Customer;
+use App\Models\InventoryMovement;
+use App\Models\Order;
+use App\Models\Product;
+use App\Services\CartService;
+use App\Services\InvoiceNumberGenerator;
+use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
+use Illuminate\Database\QueryException;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class Phase4OrderCartDomainTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_duplicate_checkout_returns_existing_order(): void
+    {
+        $cart = $this->cartWithProduct(stock: 2);
+        $service = app(OrderCheckoutService::class);
+
+        $order = $service->checkout($cart);
+        $again = $service->checkout($cart->fresh());
+
+        $this->assertTrue($order->is($again));
+        $this->assertSame(1, Order::where('cart_id', $cart->id)->count());
+    }
+
+    public function test_two_carts_stock_one_only_first_checkout_succeeds(): void
+    {
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $first = $this->cartWithProduct($product);
+        $second = $this->cartWithProduct($product);
+
+        app(OrderCheckoutService::class)->checkout($first);
+
+        $this->expectException(InsufficientStock::class);
+        app(OrderCheckoutService::class)->checkout($second);
+    }
+
+    public function test_paid_once_moves_to_processing_and_preserves_stock_on_retry(): void
+    {
+        $cart = $this->cartWithProduct(stock: 3, quantity: 2);
+        $order = app(OrderCheckoutService::class)->checkout($cart);
+        $payment = $order->payments()->first();
+
+        app(OrderStateMachine::class)->markPaymentPaid($payment);
+        app(OrderStateMachine::class)->markPaymentPaid($payment->fresh());
+
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(1, Product::first()->stock);
+        $this->assertSame(0, Product::first()->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_expiry_and_cancel_release_once(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
+
+        app(OrderStateMachine::class)->expirePendingOrder($order);
+        app(OrderStateMachine::class)->expirePendingOrder($order->fresh());
+
+        $this->assertSame(0, Product::first()->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $order2 = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
+        app(OrderStateMachine::class)->cancelPendingOrder($order2);
+        app(OrderStateMachine::class)->cancelPendingOrder($order2->fresh());
+        $this->assertSame(2, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_paid_after_expired_throws_without_mutating_stock(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), expiresAt: now()->subMinute());
+        app(OrderStateMachine::class)->expirePendingOrder($order);
+
+        try {
+            app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
+            $this->fail('Expected paid-after-expired transition to be rejected.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(1, Product::first()->stock);
+            $this->assertSame(0, Product::first()->reserved_stock);
+        }
+
+    }
+
+    public function test_checkout_rejects_inactive_soft_deleted_and_understocked_products(): void
+    {
+        $this->expectException(InvalidCheckout::class);
+        app(OrderCheckoutService::class)->checkout($this->cartWithProduct(Product::factory()->create(['is_active' => false])));
+    }
+
+    public function test_checkout_rejects_soft_deleted_product(): void
+    {
+        $product = Product::factory()->create();
+        $cart = $this->cartWithProduct($product);
+        $product->delete();
+
+        $this->expectException(InvalidCheckout::class);
+        app(OrderCheckoutService::class)->checkout($cart);
+    }
+
+    public function test_checkout_rejects_understocked_product(): void
+    {
+        $this->expectException(InsufficientStock::class);
+        app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 0));
+    }
+
+    public function test_reference_collision_retries(): void
+    {
+        Order::factory()->create(['invoice_number' => 'INV-COLLIDE']);
+        $this->app->bind(InvoiceNumberGenerator::class, fn () => new class extends InvoiceNumberGenerator
+        {
+            public int $calls = 0;
+
+            public function invoiceNumber(): string
+            {
+                return $this->calls++ === 0 ? 'INV-COLLIDE' : 'INV-OK';
+            }
+
+            public function merchantReference(): string
+            {
+                return 'PAY-OK-'.$this->calls;
+            }
+        });
+
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct());
+
+        $this->assertSame('INV-OK', $order->invoice_number);
+    }
+
+    public function test_db_unique_movement_constraint_is_enforced(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct());
+        $movement = InventoryMovement::first();
+
+        $this->expectException(QueryException::class);
+        InventoryMovement::create($movement->only(['product_id', 'order_id', 'type', 'quantity', 'notes']) + ['created_at' => now()]);
+    }
+
+    public function test_expiry_command_chunk_one_processes_all_due_orders(): void
+    {
+        $orders = collect([
+            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
+            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
+            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
+        ]);
+
+        $this->artisan('orders:expire-pending', ['--chunk' => 1])->assertSuccessful();
+
+        $orders->each(fn (Order $order) => $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status));
+        $this->assertSame(3, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_paid_and_release_still_work_after_product_soft_deleted_post_checkout(): void
+    {
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        $paidOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
+        $product->delete();
+
+        app(OrderStateMachine::class)->markPaymentPaid($paidOrder->payments()->first());
+
+        $this->assertSame(OrderStatus::Processing, $paidOrder->fresh()->order_status);
+        $this->assertSame(2, $product->fresh()->stock);
+
+        $product2 = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        $expiredOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product2), expiresAt: now()->subMinute());
+        $product2->delete();
+
+        app(OrderStateMachine::class)->expirePendingOrder($expiredOrder);
+        $this->assertSame(OrderStatus::Expired, $expiredOrder->fresh()->order_status);
+        $this->assertSame(0, $product2->fresh()->reserved_stock);
+    }
+
+    public function test_sale_requires_matching_reservation_and_does_not_mutate_stock(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
+        InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Reservation)->delete();
+        $before = Product::first()->only(['stock', 'reserved_stock']);
+
+        try {
+            app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
+            $this->fail('Expected missing reservation proof to fail.');
+        } catch (InvalidOrderTransition) {
+            $after = Product::first()->only(['stock', 'reserved_stock']);
+            $this->assertSame($before, $after);
+            $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        }
+    }
+
+    public function test_release_requires_matching_reservation_and_does_not_mutate_stock(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
+        InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Reservation)->delete();
+        $before = Product::first()->only(['stock', 'reserved_stock']);
+
+        try {
+            app(OrderStateMachine::class)->expirePendingOrder($order);
+            $this->fail('Expected missing reservation proof to fail.');
+        } catch (InvalidOrderTransition) {
+            $after = Product::first()->only(['stock', 'reserved_stock']);
+            $this->assertSame($before, $after);
+            $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        }
+    }
+
+    public function test_active_cart_for_reuses_existing_active_cart(): void
+    {
+        $customer = Customer::factory()->create();
+        $service = app(CartService::class);
+
+        $first = $service->activeCartFor($customer);
+        $second = $service->activeCartFor($customer);
+
+        $this->assertTrue($first->is($second));
+        $this->assertSame(1, Cart::where('customer_id', $customer->id)->where('status', CartStatus::Active)->count());
+    }
+
+    private function cartWithProduct(?Product $product = null, int $stock = 10, int $quantity = 1): Cart
+    {
+        $customer = Customer::factory()->create();
+        $product ??= Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0]);
+        $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
+
+        return $cart;
+    }
+}
