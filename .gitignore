@@ -20,3 +20,6 @@ src/node_modules/
 src/storage/*.key
 src/storage/logs/
 src/bootstrap/cache/*.php
+
+# Local deepwork session notes
+.slim/deepwork/
