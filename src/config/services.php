@@ -42,6 +42,7 @@ return [
         'base_url' => env('TRIPAY_BASE_URL', 'https://tripay.co.id/api-sandbox'),
         'callback_url' => env('TRIPAY_CALLBACK_URL'),
         'return_url' => env('TRIPAY_RETURN_URL'),
+        'webhook_rate_limit_per_minute' => env('TRIPAY_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
     ],
 
     'telegram' => [

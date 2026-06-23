@@ -13,7 +13,30 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $trustedProxies = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TRUSTED_PROXIES', ''))
+        )));
+
+        if ($trustedProxies !== []) {
+            $middleware->trustProxies(
+                at: $trustedProxies,
+                headers: Request::HEADER_X_FORWARDED_FOR
+                    | Request::HEADER_X_FORWARDED_HOST
+                    | Request::HEADER_X_FORWARDED_PORT
+                    | Request::HEADER_X_FORWARDED_PROTO
+                    | Request::HEADER_X_FORWARDED_PREFIX
+            );
+        }
+
+        $trustedHosts = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TRUSTED_HOSTS', ''))
+        )));
+
+        if ($trustedHosts !== []) {
+            $middleware->trustHosts(at: fn () => $trustedHosts);
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
