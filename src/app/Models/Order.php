@@ -45,4 +45,14 @@ class Order extends Model
     {
         return $this->hasMany(InventoryMovement::class);
     }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(AuditLog::class, 'subject_id', 'audit_subject_id')->where('subject_type', self::class);
+    }
+
+    public function getAuditSubjectIdAttribute(): string
+    {
+        return (string) $this->getKey();
+    }
 }
