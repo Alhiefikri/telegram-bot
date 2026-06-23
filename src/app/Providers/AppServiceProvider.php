@@ -27,7 +27,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->validateProductionConfiguration();
 
-        if ((bool) config('app.force_https') && ! in_array(config('app.env'), ['local', 'testing'], true)) {
+        if ((bool) config('app.force_https') && ! in_array(config('app.env'), ['local', 'testing'], true) && ! $this->isLoopbackHttpRequest()) {
             URL::forceScheme('https');
         }
 
@@ -74,5 +74,16 @@ class AppServiceProvider extends ServiceProvider
         if (! str_starts_with((string) config('app.url'), 'https://')) {
             throw new RuntimeException('APP_URL must use HTTPS in production.');
         }
+    }
+
+    private function isLoopbackHttpRequest(): bool
+    {
+        $request = request();
+
+        if ($request->isSecure()) {
+            return false;
+        }
+
+        return in_array(trim($request->getHost(), '[]'), ['localhost', '127.0.0.1', '::1'], true);
     }
 }

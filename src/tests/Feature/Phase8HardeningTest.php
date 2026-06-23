@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Providers\AppServiceProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -41,6 +42,29 @@ class Phase8HardeningTest extends TestCase
         (new AppServiceProvider(app()))->boot();
 
         $this->assertStringStartsWith('https://', URL::to('/up'));
+    }
+
+    public function test_force_https_does_not_break_loopback_http_compose_requests(): void
+    {
+        config([
+            'app.force_https' => true,
+            'app.env' => 'production',
+            'app.key' => 'base64:test-key',
+            'app.url' => 'https://example.test',
+            'services.tripay.api_key' => 'tripay-key',
+            'services.tripay.private_key' => 'tripay-private',
+            'services.tripay.merchant_code' => 'T0001',
+            'services.tripay.callback_url' => 'https://example.test/api/webhook/tripay',
+            'services.tripay.return_url' => 'https://example.test/thanks',
+            'services.telegram.token' => 'telegram-token',
+            'services.telegram.webhook_secret' => 'telegram-secret',
+        ]);
+        app()->detectEnvironment(fn () => 'production');
+        app()->instance('request', Request::create('http://localhost:8080/admin/login'));
+
+        (new AppServiceProvider(app()))->boot();
+
+        $this->assertStringStartsWith('http://localhost:8080/', URL::to('/livewire/livewire.min.js'));
     }
 
     public function test_tripay_webhook_uses_named_rate_limiter(): void
