@@ -14,13 +14,14 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Services\Tripay\TripayClient;
 use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 class OrderCheckoutService
 {
-    public function __construct(private readonly InvoiceNumberGenerator $numbers) {}
+    public function __construct(private readonly InvoiceNumberGenerator $numbers, private readonly TripayClient $tripay) {}
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null): Order
     {
@@ -28,7 +29,12 @@ class OrderCheckoutService
 
         for ($i = 0; $i < 5; $i++) {
             try {
-                return DB::transaction(fn () => $this->checkoutOnce($cart, $paymentMethod, $provider, $expiresAt), 5);
+                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentMethod, $provider, $expiresAt), 5);
+                if ($provider === 'tripay' && ! $order->payments()->where('provider', 'tripay')->whereNotNull('provider_reference')->exists()) {
+                    $this->tripay->createTransaction($order->payments()->where('provider', 'tripay')->firstOrFail());
+                }
+
+                return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {
                 if (! $this->isUniqueViolation($e) || $i === 4) {
                     throw $e;
