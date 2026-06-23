@@ -30,6 +30,7 @@ class Phase6TelegramBotTest extends TestCase
         parent::setUp();
         config()->set('services.telegram', ['token' => 'bot-token', 'webhook_secret' => 'secret', 'api_base_url' => 'https://api.telegram.org', 'default_payment_method' => 'BRIVA']);
         config()->set('services.tripay', ['api_key' => 'k', 'private_key' => 'p', 'merchant_code' => 'M', 'base_url' => 'https://tripay.test', 'callback_url' => null, 'return_url' => null]);
+        config()->set('queue.default', 'sync');
     }
 
     public function test_webhook_secret_stores_update_and_dispatches_job(): void
@@ -123,6 +124,123 @@ class Phase6TelegramBotTest extends TestCase
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
+    }
+
+    public function test_cari_without_keyword_sends_usage_instruction(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(123, '/cari'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Ketik /cari')
+            && str_contains($r['text'], '/cari netflix'));
+    }
+
+    public function test_cari_with_matching_keyword_lists_active_available_products(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $matching = Product::factory()->create(['name' => 'Netflix Premium', 'description' => 'Akun streaming', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Spotify Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(124, '/cari netflix'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Hasil pencarian: netflix')
+            && str_contains($r['text'], 'Netflix Premium')
+            && ! str_contains($r['text'], 'Spotify Premium')
+            && str_contains(json_encode($r->data()), 'product:'.$matching->id));
+    }
+
+    public function test_cari_result_can_be_selected_and_continues_existing_product_flow(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $product = Product::factory()->create(['name' => 'Canva Pro', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(125, '/cari canva'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(126, 'cb-search-product', 'product:'.$product->id), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Canva Pro')
+            && str_contains($r['text'], 'Pilih jumlah')
+            && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
+    }
+
+    public function test_cari_without_matching_keyword_sends_fallback_to_catalog(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(127, '/cari zoom'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'tidak ditemukan')
+            && str_contains($r['text'], '/katalog')
+            && str_contains(json_encode($r->data()), 'katalog'));
+    }
+
+    public function test_cari_does_not_show_inactive_products(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => false, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(128, '/cari netflix'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
+        Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
+    }
+
+    public function test_cari_matches_case_insensitively(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(129, '/cari NETFLIX'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Netflix Premium')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id));
+    }
+
+    public function test_cari_does_not_show_products_from_inactive_categories(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $inactiveCategory = Category::factory()->create(['name' => 'Streaming', 'is_active' => false]);
+        Product::factory()->create(['name' => 'Netflix Premium', 'category_id' => $inactiveCategory->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(130, '/cari netflix'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
+        Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
+    }
+
+    public function test_cari_does_not_show_fully_reserved_products(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 5]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(131, '/cari netflix'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
+        Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
+    }
+
+    public function test_cari_can_match_active_category_name(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $category = Category::factory()->create(['name' => 'Streaming', 'is_active' => true]);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'category_id' => $category->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(132, '/cari streaming'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Netflix Premium')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
     public function test_product_callback_shows_stock_choices_and_quantity_button_adds_cart_item(): void

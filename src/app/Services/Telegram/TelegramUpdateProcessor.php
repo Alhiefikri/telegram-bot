@@ -72,6 +72,19 @@ class TelegramUpdateProcessor
 
             return;
         }
+        if ($text === '/cari' || str_starts_with($text, '/cari ')) {
+            Cache::forget($this->intentKey($customer));
+            $keyword = trim(substr($text, strlen('/cari')));
+            if ($keyword === '') {
+                $this->bot->sendMessage($chatId, "Ketik /cari diikuti kata kunci produk.\nContoh: /cari netflix");
+
+                return;
+            }
+
+            $this->sendSearchResults($chatId, $keyword);
+
+            return;
+        }
         if ($text === '/batal') {
             Cache::forget($this->intentKey($customer));
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
@@ -256,6 +269,49 @@ class TelegramUpdateProcessor
         $keyboard[] = [['text' => '⬅️ Kembali ke kategori', 'callback_data' => 'back:categories']];
 
         $this->bot->sendMessage($chatId, $products->isEmpty() ? 'Produk kategori ini kosong.' : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
+
+    private function sendSearchResults(string $chatId, string $keyword): void
+    {
+        $limit = 5;
+        $like = '%'.addcslashes(strtolower($keyword), '%_\\').'%';
+        $products = Product::query()
+            ->where('is_active', true)
+            ->whereColumn('stock', '>', 'reserved_stock')
+            ->where(function ($query) {
+                $query->whereNull('category_id')
+                    ->orWhereHas('category', fn ($category) => $category->where('is_active', true));
+            })
+            ->where(function ($query) use ($like) {
+                $query->whereRaw('LOWER(name) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(description) LIKE ?', [$like])
+                    ->orWhereHas('category', fn ($category) => $category->where('is_active', true)->whereRaw('LOWER(name) LIKE ?', [$like]));
+            })
+            ->orderBy('name')
+            ->limit($limit + 1)
+            ->get();
+
+        if ($products->isEmpty()) {
+            $this->bot->sendMessage($chatId, "Produk dengan kata kunci \"{$keyword}\" tidak ditemukan.\nCoba kata kunci lain atau buka /katalog.", ['inline_keyboard' => [[['text' => 'Lihat Katalog', 'callback_data' => 'katalog']]]]);
+
+            return;
+        }
+
+        $hasMore = $products->count() > $limit;
+        $products = $products->take($limit)->values();
+        $lines = ['🔎 Hasil pencarian: '.$keyword, ''];
+        foreach ($products as $i => $product) {
+            $lines[] = ($i + 1).'. '.$product->name.' - Rp '.number_format($product->price_amount, 0, ',', '.').' (stok '.($product->stock - $product->reserved_stock).')';
+        }
+        if ($hasMore) {
+            $lines[] = '';
+            $lines[] = 'Hasil lebih banyak tersedia. Persempit kata kunci agar lebih spesifik.';
+        }
+
+        $keyboard = $products->map(fn ($product, $i) => [['text' => (string) ($i + 1), 'callback_data' => 'product:'.$product->id]])->all();
+        $keyboard[] = [['text' => 'Lihat Katalog', 'callback_data' => 'katalog']];
+
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
     private function sendPaymentInstructions(string $chatId, Order $order, ?Payment $payment): void

@@ -25,9 +25,9 @@ Alur customer berjalan dari Telegram:
 
 1. Customer mengirim `/start`.
 2. Bot membuat atau menggunakan ulang data customer Telegram, lalu menampilkan katalog kategori.
-3. Customer juga bisa membuka katalog dengan `/katalog`.
-4. Customer memilih kategori dari tombol inline.
-5. Bot menampilkan produk aktif dengan stok tersedia pada kategori tersebut.
+3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
+4. Customer memilih kategori dari tombol inline, atau memilih hasil pencarian.
+5. Bot menampilkan produk aktif dengan stok tersedia pada kategori tersebut atau dari hasil pencarian.
 6. Customer memilih produk.
 7. Bot menampilkan pilihan quantity berdasarkan stok tersedia. Customer dapat memilih tombol quantity, atau mengetik angka ketika bot sedang menunggu input jumlah.
 8. Produk dimasukkan ke cart aktif.
@@ -40,9 +40,9 @@ Alur customer berjalan dari Telegram:
 Diagram sederhana:
 
 ```text
-/start atau /katalog
+/start, /katalog, atau /cari keyword
         ↓
-Pilih kategori
+Pilih kategori / hasil pencarian
         ↓
 Pilih produk
         ↓
@@ -62,6 +62,7 @@ Payment paid / expired / failed / refunded
 Catatan:
 
 - `/batal` membatalkan cart aktif, bukan membatalkan semua histori order.
+- `/cari keyword` mencari produk aktif dengan stok tersedia. Jika hasil tidak ditemukan, customer diarahkan kembali ke `/katalog`.
 - `/status` dan `/pesanan` menampilkan order terakhir customer dengan kombinasi status order dan status payment.
 - Flow Telegram yang terlihat saat ini melakukan checkout manual DANA dari tombol checkout. Codebase juga memiliki dukungan service untuk payment provider Tripay.
 
