@@ -14,6 +14,10 @@ class TelegramWebhookController extends Controller
     public function __invoke(Request $request): JsonResponse
     {
         $secret = (string) config('services.telegram.webhook_secret');
+        if ($secret === '' && ! app()->environment(['local', 'testing'])) {
+            return response()->json(['message' => 'Telegram webhook secret is not configured.'], 500);
+        }
+
         if ($secret !== '' && ! hash_equals($secret, (string) $request->header('X-Telegram-Bot-Api-Secret-Token'))) {
             return response()->json(['message' => 'Forbidden'], 403);
         }

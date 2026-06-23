@@ -9,12 +9,12 @@ class AuditLogPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewRawPaymentPayloads() ?? false;
     }
 
     public function view(User $user, AuditLog $auditLog): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewRawPaymentPayloads() ?? false;
     }
 
     public function create(User $user): bool

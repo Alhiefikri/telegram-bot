@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Orders\Tables;
 
 use App\Services\Admin\AdminOrderOperations;
+use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
@@ -17,7 +18,7 @@ class OrdersTable
             TextColumn::make('customer.username')->label('Customer')->searchable(),
             TextColumn::make('order_status')->badge()->sortable(),
             TextColumn::make('payment_status')->badge()->sortable(),
-            TextColumn::make('total_amount')->money('IDR', divideBy: 100)->sortable(),
+            TextColumn::make('total_amount')->formatStateUsing(fn ($state) => Money::idr($state))->sortable(),
             TextColumn::make('expires_at')->dateTime()->sortable(),
         ])->recordActions([
             EditAction::make(),

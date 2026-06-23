@@ -15,8 +15,9 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Services\OrderCheckoutService;
-use App\Services\Tripay\TripayClient;
+use App\Services\OrderStateMachine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -124,6 +125,72 @@ class Phase5TripaySandboxTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://tripay.co.id/api-sandbox/transaction/detail?reference=TREF-DETAIL');
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Reconciliation)->count());
+    }
+
+    public function test_reconciliation_resolves_late_paid_expired_payment_without_sale_movement(): void
+    {
+        $this->fakeTripayCreate();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), 'BRIVA', 'tripay', now()->subMinute());
+        $payment = $order->payments()->first();
+        $payment->update(['provider_reference' => 'TREF-LATE']);
+        app(OrderStateMachine::class)->expirePendingOrder($order);
+        Http::fake([
+            'https://tripay.co.id/api-sandbox/transaction/detail*' => Http::response(['success' => true, 'data' => $this->tripayPayload($payment->merchant_ref, $payment->amount, 'TREF-LATE')], 200),
+        ]);
+
+        $this->artisan('tripay:reconcile', ['--chunk' => 1])->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(1, Product::first()->stock);
+        $this->assertSame(0, Product::first()->reserved_stock);
+    }
+
+    public function test_refund_callback_updates_parent_order_payment_status(): void
+    {
+        $this->fakeTripayCreate();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), 'BRIVA', 'tripay');
+        $payment = $order->payments()->first();
+        $this->postTripayCallback($this->tripayPayload($payment->merchant_ref, $payment->amount))->assertOk();
+        $payload = $this->tripayPayload($payment->merchant_ref, $payment->amount, 'TREF-REFUND');
+        $payload['status'] = 'REFUND';
+
+        $this->postTripayCallback($payload)->assertOk();
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+    }
+
+    public function test_replayed_paid_callback_does_not_reverse_refunded_payment(): void
+    {
+        $this->fakeTripayCreate();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), 'BRIVA', 'tripay');
+        $payment = $order->payments()->first();
+        $paidPayload = $this->tripayPayload($payment->merchant_ref, $payment->amount);
+        $refundPayload = $paidPayload;
+        $refundPayload['status'] = 'REFUND';
+
+        $this->postTripayCallback($paidPayload)->assertOk();
+        $this->postTripayCallback($refundPayload)->assertOk();
+        $this->postTripayCallback($paidPayload)->assertOk();
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_oversized_tripay_callback_is_rejected_before_logging(): void
+    {
+        config()->set('services.tripay.webhook_max_body_bytes', 8);
+
+        $this->postTripayCallback(['merchant_ref' => 'PAY-LARGE', 'reference' => 'TREF-LARGE', 'status' => 'PAID', 'total_amount' => 10000])->assertStatus(413);
+
+        $this->assertSame(0, PaymentEvent::count());
     }
 
     public function test_missing_identifiers_signed_callback_logs_null_payment_and_does_not_mutate(): void
@@ -265,7 +332,7 @@ class Phase5TripaySandboxTest extends TestCase
         try {
             app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'BRIVA', 'tripay');
             $this->fail('Expected non-2xx Tripay create response to fail closed.');
-        } catch (\Illuminate\Http\Client\RequestException) {
+        } catch (RequestException) {
             $this->assertSame(0, Payment::whereNotNull('provider_reference')->count());
         }
     }

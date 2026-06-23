@@ -2,10 +2,9 @@
 
 namespace App\Services\Tripay;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
-use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
-use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
@@ -80,13 +79,13 @@ class TripayCallbackProcessor
                 throw new UnprocessableEntityHttpException('Unsupported Tripay payment status.');
             }
 
-            $wasPaid = $payment->status === PaymentStatus::Paid;
+            $orderStatusBefore = $payment->order?->order_status;
 
             match ($status) {
                 'PAID' => $this->orders->markPaymentPaid($payment),
                 'EXPIRED' => $this->orders->expirePendingOrder($payment->order),
                 'FAILED' => $this->orders->cancelPendingOrder($payment->order),
-                'REFUND' => $this->markRefundedOrderFirst($payment),
+                'REFUND' => $this->orders->markPaymentRefunded($payment),
                 default => null,
             };
 
@@ -94,21 +93,13 @@ class TripayCallbackProcessor
                 Payment::whereKey($payment->id)->update(['provider_reference' => $reference]);
             }
 
-            if ($status === 'PAID' && ! $wasPaid) {
+            $payment->refresh();
+            $payment->unsetRelation('order');
+            if ($status === 'PAID' && $orderStatusBefore !== $payment->order->order_status && $payment->order->order_status === OrderStatus::Processing) {
                 SendTelegramReceipt::dispatch($payment->order_id)->afterCommit();
             }
 
             $paymentEvent->update(['processed_at' => now()]);
-        }, 5);
-    }
-
-    private function markRefundedOrderFirst(Payment $payment): void
-    {
-        DB::transaction(function () use ($payment): void {
-            Order::whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
-            Payment::where('order_id', $payment->order_id)->orderBy('id')->lockForUpdate()->get()
-                ->firstWhere('id', $payment->id)
-                ?->update(['status' => PaymentStatus::Refunded]);
         }, 5);
     }
 

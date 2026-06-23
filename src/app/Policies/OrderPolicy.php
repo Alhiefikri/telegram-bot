@@ -9,12 +9,12 @@ class OrderPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewOrdersAndPayments() ?? false;
     }
 
     public function view(User $user, Order $order): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewOrdersAndPayments() ?? false;
     }
 
     public function create(User $user): bool
@@ -34,6 +34,6 @@ class OrderPolicy
 
     public function resendReceipt(User $user, Order $order): bool
     {
-        return $user->role !== null;
+        return $user->role?->canResendReceipts() ?? false;
     }
 }

@@ -83,19 +83,35 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(2, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
 
-    public function test_paid_after_expired_throws_without_mutating_stock(): void
+    public function test_paid_after_expired_records_payment_without_mutating_stock(): void
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), expiresAt: now()->subMinute());
         app(OrderStateMachine::class)->expirePendingOrder($order);
 
-        try {
-            app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
-            $this->fail('Expected paid-after-expired transition to be rejected.');
-        } catch (InvalidOrderTransition) {
-            $this->assertSame(1, Product::first()->stock);
-            $this->assertSame(0, Product::first()->reserved_stock);
-        }
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first()->fresh());
 
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payments()->first()->fresh()->status);
+        $this->assertSame(1, Product::first()->stock);
+        $this->assertSame(0, Product::first()->reserved_stock);
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_refund_updates_payment_and_order_payment_status(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1));
+        $payment = $order->payments()->first();
+        app(OrderStateMachine::class)->markPaymentPaid($payment);
+
+        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
     }
 
     public function test_checkout_rejects_inactive_soft_deleted_and_understocked_products(): void

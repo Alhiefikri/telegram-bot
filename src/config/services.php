@@ -43,6 +43,7 @@ return [
         'callback_url' => env('TRIPAY_CALLBACK_URL'),
         'return_url' => env('TRIPAY_RETURN_URL'),
         'webhook_rate_limit_per_minute' => env('TRIPAY_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
+        'webhook_max_body_bytes' => env('TRIPAY_WEBHOOK_MAX_BODY_BYTES', 65536),
     ],
 
     'telegram' => [

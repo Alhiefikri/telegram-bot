@@ -18,7 +18,7 @@ class ReconcileTripayPayments extends Command
     {
         Payment::query()
             ->where('provider', 'tripay')
-            ->where('status', PaymentStatus::Pending)
+            ->whereIn('status', [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed])
             ->whereNotNull('provider_reference')
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($payments) use ($client, $processor): void {

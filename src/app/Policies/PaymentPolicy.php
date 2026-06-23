@@ -9,12 +9,12 @@ class PaymentPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewOrdersAndPayments() ?? false;
     }
 
     public function view(User $user, Payment $payment): bool
     {
-        return $user->role !== null;
+        return $user->role?->canViewOrdersAndPayments() ?? false;
     }
 
     public function create(User $user): bool
@@ -34,6 +34,6 @@ class PaymentPolicy
 
     public function reconcile(User $user, Payment $payment): bool
     {
-        return $user->role !== null;
+        return $user->role?->canReconcilePayments() ?? false;
     }
 }

@@ -12,6 +12,6 @@ class PaymentEventsRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
-        return $table->columns([TextColumn::make('event_type')->badge(), TextColumn::make('provider'), TextColumn::make('merchant_ref'), TextColumn::make('provider_reference'), TextColumn::make('provider_status'), TextColumn::make('raw_payload')->json(), TextColumn::make('received_at')->dateTime(), TextColumn::make('processed_at')->dateTime()]);
+        return $table->columns([TextColumn::make('event_type')->badge(), TextColumn::make('provider'), TextColumn::make('merchant_ref'), TextColumn::make('provider_reference'), TextColumn::make('provider_status'), TextColumn::make('raw_payload')->json()->visible(fn () => auth()->user()?->role?->canViewRawPaymentPayloads() ?? false), TextColumn::make('received_at')->dateTime(), TextColumn::make('processed_at')->dateTime()]);
     }
 }

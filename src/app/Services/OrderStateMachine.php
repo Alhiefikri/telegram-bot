@@ -23,7 +23,7 @@ class OrderStateMachine
             $lockedPayment = $payments->firstWhere('id', $payment->id);
 
             if ($order->order_status === OrderStatus::Expired || $order->order_status === OrderStatus::Cancelled) {
-                throw new InvalidOrderTransition('Cannot pay an expired or cancelled order.');
+                return $this->markLatePaymentPaid($lockedPayment, $order);
             }
 
             $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
@@ -56,6 +56,56 @@ class OrderStateMachine
 
             return $order->fresh(['payments']);
         }, 5);
+    }
+
+    public function markPaymentRefunded(Payment $payment): Order
+    {
+        return DB::transaction(function () use ($payment) {
+            $initial = Payment::findOrFail($payment->id);
+            $order = Order::whereKey($initial->order_id)->lockForUpdate()->firstOrFail();
+            $lockedPayment = Payment::where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get()->firstWhere('id', $payment->id);
+
+            if (! $lockedPayment) {
+                throw new InvalidOrderTransition('Payment is not attached to order.');
+            }
+
+            if ($lockedPayment->status !== PaymentStatus::Refunded) {
+                $lockedPayment->update(['status' => PaymentStatus::Refunded]);
+            }
+
+            $updates = ['payment_status' => PaymentStatus::Refunded];
+            if ($order->order_status !== OrderStatus::Completed) {
+                $updates['order_status'] = OrderStatus::Cancelled;
+            }
+            $order->update($updates);
+
+            return $order->fresh(['payments']);
+        }, 5);
+    }
+
+    private function markLatePaymentPaid(Payment $payment, Order $order): Order
+    {
+        if ($payment->status === PaymentStatus::Refunded) {
+            if ($order->payment_status !== PaymentStatus::Refunded) {
+                $order->update(['payment_status' => PaymentStatus::Refunded]);
+            }
+
+            return $order->fresh(['payments']);
+        }
+
+        if (! in_array($payment->status, [PaymentStatus::Paid, PaymentStatus::Expired, PaymentStatus::Failed], true)) {
+            throw new InvalidOrderTransition('Late payment cannot be marked paid from current payment state.');
+        }
+
+        if ($payment->status !== PaymentStatus::Paid) {
+            $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => $payment->paid_at ?? now()]);
+        }
+
+        if ($order->payment_status !== PaymentStatus::Paid) {
+            $order->update(['payment_status' => PaymentStatus::Paid]);
+        }
+
+        return $order->fresh(['payments']);
     }
 
     public function expirePendingOrder(Order $order): ?Order

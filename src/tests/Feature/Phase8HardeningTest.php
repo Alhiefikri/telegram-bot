@@ -23,7 +23,19 @@ class Phase8HardeningTest extends TestCase
     {
         $this->assertFalse((bool) config('app.force_https'));
 
-        config(['app.force_https' => true, 'app.env' => 'production']);
+        config([
+            'app.force_https' => true,
+            'app.env' => 'production',
+            'app.key' => 'base64:test-key',
+            'app.url' => 'https://example.test',
+            'services.tripay.api_key' => 'tripay-key',
+            'services.tripay.private_key' => 'tripay-private',
+            'services.tripay.merchant_code' => 'T0001',
+            'services.tripay.callback_url' => 'https://example.test/api/webhook/tripay',
+            'services.tripay.return_url' => 'https://example.test/thanks',
+            'services.telegram.token' => 'telegram-token',
+            'services.telegram.webhook_secret' => 'telegram-secret',
+        ]);
         app()->detectEnvironment(fn () => 'production');
 
         (new AppServiceProvider(app()))->boot();
