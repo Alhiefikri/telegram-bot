@@ -1,0 +1,33 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use Illuminate\Support\Facades\Http;
+
+class TelegramBotClient
+{
+    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): void
+    {
+        $payload = ['chat_id' => $chatId, 'text' => $text];
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        Http::post($this->url('sendMessage'), $payload)->throw();
+    }
+
+    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
+    {
+        Http::post($this->url('answerCallbackQuery'), array_filter([
+            'callback_query_id' => $callbackQueryId,
+            'text' => $text,
+            'show_alert' => $text !== null,
+        ], fn ($value) => $value !== null))->throw();
+    }
+
+    private function url(string $method): string
+    {
+        return rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/')
+            .'/bot'.config('services.telegram.token').'/'.$method;
+    }
+}

@@ -44,4 +44,12 @@ return [
         'return_url' => env('TRIPAY_RETURN_URL'),
     ],
 
+    'telegram' => [
+        'token' => env('TELEGRAM_BOT_TOKEN'),
+        'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
+        'api_base_url' => env('TELEGRAM_API_BASE_URL', 'https://api.telegram.org'),
+        'default_payment_method' => env('TELEGRAM_DEFAULT_PAYMENT_METHOD', 'BRIVA'),
+        'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
+    ],
+
 ];

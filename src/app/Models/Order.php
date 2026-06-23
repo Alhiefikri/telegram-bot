@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['customer_id', 'cart_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'expires_at'])]
+#[Fillable(['customer_id', 'cart_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'expires_at', 'telegram_receipt_sent_at'])]
 class Order extends Model
 {
     /** @use HasFactory<OrderFactory> */
@@ -18,7 +18,7 @@ class Order extends Model
 
     protected function casts(): array
     {
-        return ['order_status' => OrderStatus::class, 'payment_status' => PaymentStatus::class, 'total_amount' => 'integer', 'expires_at' => 'datetime'];
+        return ['order_status' => OrderStatus::class, 'payment_status' => PaymentStatus::class, 'total_amount' => 'integer', 'expires_at' => 'datetime', 'telegram_receipt_sent_at' => 'datetime'];
     }
 
     public function customer()

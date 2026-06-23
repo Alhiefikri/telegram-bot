@@ -4,6 +4,7 @@ namespace App\Services\Tripay;
 
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
@@ -79,6 +80,8 @@ class TripayCallbackProcessor
                 throw new UnprocessableEntityHttpException('Unsupported Tripay payment status.');
             }
 
+            $wasPaid = $payment->status === PaymentStatus::Paid;
+
             match ($status) {
                 'PAID' => $this->orders->markPaymentPaid($payment),
                 'EXPIRED' => $this->orders->expirePendingOrder($payment->order),
@@ -89,6 +92,10 @@ class TripayCallbackProcessor
 
             if ($reference = Arr::get($payload, 'reference')) {
                 Payment::whereKey($payment->id)->update(['provider_reference' => $reference]);
+            }
+
+            if ($status === 'PAID' && ! $wasPaid) {
+                SendTelegramReceipt::dispatch($payment->order_id)->afterCommit();
             }
 
             $paymentEvent->update(['processed_at' => now()]);
