@@ -35,7 +35,7 @@ Alur customer berjalan dari Telegram:
 10. Saat checkout, sistem membuat order dan payment dengan status awal pending.
 11. Customer menerima instruksi pembayaran.
 12. Customer dapat membatalkan cart aktif dengan `/batal`.
-13. Customer dapat mengecek status order terakhir dengan `/status` atau `/pesanan`.
+13. Customer dapat mengecek status order terakhir dengan `/status` atau `/pesanan`, melihat riwayat dengan `/riwayat`, dan membuka detail invoice dengan `/order NOMOR_INVOICE`.
 
 Diagram sederhana:
 
@@ -64,6 +64,7 @@ Catatan:
 - `/batal` membatalkan cart aktif, bukan membatalkan semua histori order.
 - `/cari keyword` mencari produk aktif dengan stok tersedia. Jika hasil tidak ditemukan, customer diarahkan kembali ke `/katalog`.
 - `/status` dan `/pesanan` menampilkan order terakhir customer dengan kombinasi status order dan status payment.
+- `/riwayat` menampilkan hingga 5 order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail order milik customer yang sama.
 - Flow Telegram yang terlihat saat ini melakukan checkout manual DANA dari tombol checkout. Codebase juga memiliki dukungan service untuk payment provider Tripay.
 
 ## 3. Payment Flow
