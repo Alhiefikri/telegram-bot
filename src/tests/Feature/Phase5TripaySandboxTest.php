@@ -354,6 +354,7 @@ class Phase5TripaySandboxTest extends TestCase
     {
         Http::fake([
             'https://tripay.co.id/api-sandbox/transaction/create' => Http::response(['success' => true, 'data' => ['reference' => $reference]], 200),
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
     }
 

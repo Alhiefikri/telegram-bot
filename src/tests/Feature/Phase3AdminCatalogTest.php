@@ -4,12 +4,16 @@ namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
 use App\Enums\UserRole;
+use App\Filament\Resources\AuditLogs\Pages\ListAuditLogs;
+use App\Filament\Resources\Categories\Pages\CreateCategory;
 use App\Filament\Resources\Products\Pages\CreateProduct;
 use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Models\AuditLog;
+use App\Models\Category;
 use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\User;
+use App\Policies\CategoryPolicy;
 use App\Policies\ProductPolicy;
 use App\Services\StockAdjustmentService;
 use Filament\Facades\Filament;
@@ -65,6 +69,31 @@ class Phase3AdminCatalogTest extends TestCase
             $this->assertFalse($policy->adjustStock($user, $product));
             $this->assertFalse($policy->forceDelete($user, $product));
             $this->assertFalse($policy->forceDeleteAny($user));
+        }
+    }
+
+    public function test_category_policy_by_role(): void
+    {
+        $policy = new CategoryPolicy;
+        $category = Category::factory()->create();
+
+        foreach ([UserRole::Owner, UserRole::Admin] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $this->assertTrue($policy->create($user));
+            $this->assertTrue($policy->update($user, $category));
+            $this->assertTrue($policy->delete($user, $category));
+            $this->assertTrue($policy->restore($user, $category));
+            $this->assertFalse($policy->forceDelete($user, $category));
+        }
+
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $this->assertTrue($policy->view($user, $category));
+            $this->assertFalse($policy->create($user));
+            $this->assertFalse($policy->update($user, $category));
+            $this->assertFalse($policy->delete($user, $category));
+            $this->assertFalse($policy->restore($user, $category));
+            $this->assertFalse($policy->forceDelete($user, $category));
         }
     }
 
@@ -126,23 +155,55 @@ class Phase3AdminCatalogTest extends TestCase
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
         Livewire::test(CreateProduct::class)
-            ->fillForm(['name' => 'A', 'description' => 'B', 'price_amount' => 1000, 'currency' => 'IDR', 'stock' => 99, 'reserved_stock' => 50, 'is_active' => true])
+            ->set('data.name', 'A')
+            ->set('data.description', 'B')
+            ->set('data.price_amount', 1000)
+            ->set('data.currency', 'IDR')
+            ->set('data.stock', 99)
+            ->set('data.reserved_stock', 50)
+            ->set('data.is_active', true)
             ->call('create')
             ->assertHasNoFormErrors();
 
-        $product = Product::firstOrFail();
+        $product = Product::query()->where('name', 'A')->firstOrFail();
         $this->assertSame(0, $product->stock);
         $this->assertSame(0, $product->reserved_stock);
 
         $product->forceFill(['stock' => 10, 'reserved_stock' => 3])->save();
 
         Livewire::test(EditProduct::class, ['record' => $product->id])
-            ->fillForm(['name' => 'C', 'description' => 'D', 'price_amount' => 2000, 'currency' => 'IDR', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => false])
+            ->set('data.name', 'C')
+            ->set('data.description', 'D')
+            ->set('data.price_amount', 2000)
+            ->set('data.currency', 'IDR')
+            ->set('data.stock', 1)
+            ->set('data.reserved_stock', 1)
+            ->set('data.is_active', false)
             ->call('save')
             ->assertHasNoFormErrors();
 
         $this->assertSame(10, $product->fresh()->stock);
         $this->assertSame(3, $product->fresh()->reserved_stock);
+    }
+
+    public function test_category_resource_create_and_product_category_relationship(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        Livewire::test(CreateCategory::class)
+            ->set('data.name', 'Streaming')
+            ->set('data.slug', 'streaming-e2e')
+            ->set('data.description', 'Digital')
+            ->set('data.sort_order', 1)
+            ->set('data.is_active', true)
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $category = Category::query()->where('slug', 'streaming-e2e')->firstOrFail();
+        $product = Product::factory()->create(['category_id' => $category->id]);
+
+        $this->assertSame('Streaming', $product->fresh()->category->name);
+        $this->assertCount(1, $category->products);
     }
 
     public function test_product_audit_visibility_relationships(): void
@@ -166,14 +227,12 @@ class Phase3AdminCatalogTest extends TestCase
         ]);
 
         Livewire::test(EditProduct::class, ['record' => $product->id])
-            ->fillForm([
-                'name' => $product->name,
-                'description' => $product->description,
-                'price_amount' => 2500,
-                'currency' => 'IDR',
-                'image_path' => ['products/new.jpg'],
-                'is_active' => false,
-            ])
+            ->set('data.name', $product->name)
+            ->set('data.description', $product->description)
+            ->set('data.price_amount', 2500)
+            ->set('data.currency', 'IDR')
+            ->set('data.image_path', ['products/new.jpg'])
+            ->set('data.is_active', false)
             ->call('save')
             ->assertHasNoFormErrors();
 
@@ -191,22 +250,37 @@ class Phase3AdminCatalogTest extends TestCase
     public function test_bootstrap_owner_refuses_existing_owner_without_force(): void
     {
         User::factory()->create(['role' => UserRole::Owner]);
+        $ownerCountBefore = User::query()->where('role', UserRole::Owner)->count();
 
         $exitCode = Artisan::call('admin:bootstrap-owner', ['email' => 'second@example.com']);
 
         $this->assertSame(1, $exitCode);
-        $this->assertSame(1, User::query()->where('role', UserRole::Owner)->count());
+        $this->assertSame($ownerCountBefore, User::query()->where('role', UserRole::Owner)->count());
     }
 
     public function test_bootstrap_owner_allows_existing_owner_with_force(): void
     {
         User::factory()->create(['role' => UserRole::Owner]);
+        $ownerCountBefore = User::query()->where('role', UserRole::Owner)->count();
 
         $this->artisan('admin:bootstrap-owner', ['email' => 'second@example.com', '--force' => true])
             ->expectsQuestion('Owner name', 'Second Owner')
             ->expectsQuestion('Owner password', 'S3cure!Password')
             ->assertSuccessful();
 
-        $this->assertSame(2, User::query()->where('role', UserRole::Owner)->count());
+        $this->assertSame($ownerCountBefore + 1, User::query()->where('role', UserRole::Owner)->count());
+    }
+
+    public function test_audit_logs_resource_table_renders_json_payloads(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $auditLog = AuditLog::factory()->create([
+            'old_values' => ['price_amount' => 1000],
+            'new_values' => ['price_amount' => 2500],
+        ]);
+
+        Livewire::test(ListAuditLogs::class)
+            ->assertCanSeeTableRecords([$auditLog]);
     }
 }

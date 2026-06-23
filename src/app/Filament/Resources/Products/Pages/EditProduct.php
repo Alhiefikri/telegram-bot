@@ -32,7 +32,7 @@ class EditProduct extends EditRecord
 
     protected function beforeSave(): void
     {
-        $this->auditOldValues = $this->record->only(['name', 'description', 'price_amount', 'currency', 'image_path', 'is_active']);
+        $this->auditOldValues = $this->record->only(['category_id', 'name', 'description', 'price_amount', 'currency', 'image_path', 'is_active']);
     }
 
     protected function afterSave(): void

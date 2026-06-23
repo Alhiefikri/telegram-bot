@@ -36,4 +36,9 @@ class OrderPolicy
     {
         return $user->role?->canResendReceipts() ?? false;
     }
+
+    public function completeManual(User $user, Order $order): bool
+    {
+        return $user->role?->canCompleteManualOrders() ?? false;
+    }
 }

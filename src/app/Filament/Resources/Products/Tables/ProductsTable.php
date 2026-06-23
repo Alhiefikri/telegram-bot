@@ -26,6 +26,7 @@ class ProductsTable
             ->columns([
                 ImageColumn::make('image_path')->disk('public'),
                 TextColumn::make('name')->searchable()->sortable(),
+                TextColumn::make('category.name')->label('Category')->searchable()->sortable(),
                 TextColumn::make('price_amount')->formatStateUsing(fn ($state) => Money::idr($state))->sortable(),
                 TextColumn::make('currency'),
                 TextColumn::make('stock')->sortable(),

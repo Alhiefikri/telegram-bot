@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Products\Schemas;
 
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -16,6 +17,7 @@ class ProductForm
         return $schema
             ->components([
                 TextInput::make('name')->required()->maxLength(255),
+                Select::make('category_id')->relationship('category', 'name')->searchable()->preload()->nullable(),
                 Textarea::make('description')->required()->columnSpanFull(),
                 TextInput::make('price_amount')->label('Price')->required()->integer()->minValue(0),
                 TextInput::make('currency')->required()->length(3)->default('IDR'),

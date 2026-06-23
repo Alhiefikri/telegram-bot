@@ -22,6 +22,10 @@ class OrdersTable
             TextColumn::make('expires_at')->dateTime()->sortable(),
         ])->recordActions([
             EditAction::make(),
+            Action::make('completeManual')->label('Transaksi selesai')->authorize('completeManual')
+                ->visible(fn ($record, AdminOrderOperations $operations) => $operations->canCompleteManualOrder($record))
+                ->requiresConfirmation()
+                ->action(fn ($record, AdminOrderOperations $operations) => $operations->completeManualOrder($record, auth()->user(), request()->ip())),
             Action::make('resendReceipt')->label('Resend receipt')->authorize('resendReceipt')
                 ->visible(fn ($record, AdminOrderOperations $operations) => $operations->canResendReceipt($record))
                 ->action(fn ($record, AdminOrderOperations $operations) => $operations->resendReceipt($record, auth()->user(), request()->ip())),

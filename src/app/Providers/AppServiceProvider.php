@@ -56,14 +56,19 @@ class AppServiceProvider extends ServiceProvider
 
         $required = [
             'APP_KEY' => config('app.key'),
-            'TRIPAY_API_KEY' => config('services.tripay.api_key'),
-            'TRIPAY_PRIVATE_KEY' => config('services.tripay.private_key'),
-            'TRIPAY_MERCHANT_CODE' => config('services.tripay.merchant_code'),
-            'TRIPAY_CALLBACK_URL' => config('services.tripay.callback_url'),
-            'TRIPAY_RETURN_URL' => config('services.tripay.return_url'),
             'TELEGRAM_BOT_TOKEN' => config('services.telegram.token'),
             'TELEGRAM_WEBHOOK_SECRET' => config('services.telegram.webhook_secret'),
         ];
+
+        if (config('services.telegram.payment_mode') === 'tripay') {
+            $required += [
+                'TRIPAY_API_KEY' => config('services.tripay.api_key'),
+                'TRIPAY_PRIVATE_KEY' => config('services.tripay.private_key'),
+                'TRIPAY_MERCHANT_CODE' => config('services.tripay.merchant_code'),
+                'TRIPAY_CALLBACK_URL' => config('services.tripay.callback_url'),
+                'TRIPAY_RETURN_URL' => config('services.tripay.return_url'),
+            ];
+        }
 
         $missing = array_keys(array_filter($required, fn ($value) => blank($value)));
 

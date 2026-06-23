@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Enums\PaymentStatus;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\CartItem;
+use App\Models\Category;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -82,38 +84,60 @@ class Phase6TelegramBotTest extends TestCase
     public function test_start_creates_customer_and_sends_welcome(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $category = Category::factory()->create(['name' => 'AI Tools']);
+        Product::factory()->create(['category_id' => $category->id, 'stock' => 5, 'reserved_stock' => 0]);
 
         $this->postJson('/api/webhook/telegram', $this->messageUpdate(11, '/start', ['first_name' => 'Ali', 'username' => 'ali']), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'Selamat datang'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'Katalog Produk'));
     }
 
-    public function test_katalog_lists_only_active_products_with_inline_keyboard(): void
+    public function test_katalog_lists_active_available_categories_with_inline_keyboard(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
-        $active = Product::factory()->create(['name' => 'Aktif', 'is_active' => true]);
+        $category = Category::factory()->create(['name' => 'Streaming']);
+        Product::factory()->create(['name' => 'Aktif', 'category_id' => $category->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Mati', 'is_active' => false]);
 
         $this->postJson('/api/webhook/telegram', $this->messageUpdate(12, '/katalog'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['reply_markup']['inline_keyboard'][0][0]['callback_data'] === 'product:'.$active->id
+            && $r['reply_markup']['inline_keyboard'][0][0]['callback_data'] === 'category:'.$category->id
             && ! str_contains(json_encode($r->data()), 'Mati'));
     }
 
-    public function test_product_callback_and_quantity_adds_cart_item(): void
+    public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $category = Category::factory()->create(['name' => 'Games', 'description' => 'Voucher game']);
+        $product = Product::factory()->create(['name' => 'Diamond', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
+
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(121, 'cat1', 'category:'.$category->id), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(122, '/katalog'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Games')
+            && str_contains($r['text'], 'Diamond')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'category:uncategorized'));
+    }
+
+    public function test_product_callback_shows_stock_choices_and_quantity_button_adds_cart_item(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
         $product = Product::factory()->create(['name' => 'Kopi', 'stock' => 5, 'is_active' => true]);
 
         $this->postJson('/api/webhook/telegram', $this->callbackUpdate(13, 'cb1', 'product:'.$product->id), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
-        $this->postJson('/api/webhook/telegram', $this->messageUpdate(14, '2'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(14, 'cb-qty', 'qty:'.$product->id.':2'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
         $this->assertSame(1, CartItem::count());
         $this->assertSame(2, CartItem::first()->quantity);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery'));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'checkout'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'qty:'.$product->id.':2'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'Pembayaran'));
     }
 
     public function test_invalid_product_callback_and_invalid_quantity_do_not_mutate_cart(): void
@@ -122,7 +146,7 @@ class Phase6TelegramBotTest extends TestCase
         $inactive = Product::factory()->create(['is_active' => false]);
 
         $this->postJson('/api/webhook/telegram', $this->callbackUpdate(15, 'cb2', 'product:'.$inactive->id), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
-        $this->postJson('/api/webhook/telegram', $this->messageUpdate(16, '0'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(16, 'cb-qty-bad', 'qty:'.$inactive->id.':1'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
         $this->assertSame(0, CartItem::count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery') && ($r['text'] ?? '') === 'Produk tidak tersedia.');
@@ -164,39 +188,26 @@ class Phase6TelegramBotTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], $order->invoice_number));
     }
 
-    public function test_checkout_infrastructure_failure_leaves_update_unprocessed_and_existing_payment_is_retried(): void
+    public function test_checkout_callback_creates_manual_order_sends_payment_instructions_and_notifies_admin(): void
     {
-        Http::fake(['https://tripay.test/transaction/create' => Http::response([], 500), 'https://api.telegram.org/*' => Http::response(['ok' => true])]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
-        $product = Product::factory()->create(['stock' => 5]);
-        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        try {
-            app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'BRIVA', 'tripay');
-        } catch (\Throwable) {
-            // Durable order/payment remain and Telegram retry should retry Tripay create, not create a new empty-cart failure.
-        }
-        $update = TelegramUpdate::create(['update_id' => 117, 'payload' => $this->callbackUpdate(117, 'cb-retry', 'checkout'), 'created_at' => now()]);
-
-        try {
-            (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
-            $this->fail('Expected Tripay infrastructure exception.');
-        } catch (\Throwable) {
-            // expected
-        }
-        $this->assertNull($update->fresh()->processed_at);
-    }
-
-    public function test_checkout_callback_uses_tripay_and_sends_payment_instructions(): void
-    {
-        Http::fake(['https://tripay.test/transaction/create' => Http::response(['success' => true, 'data' => ['reference' => 'TREF']]), 'https://api.telegram.org/*' => Http::response(['ok' => true])]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
-        $product = Product::factory()->create(['stock' => 5]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        ManualPaymentSetting::create(['admin_contact_url' => 'https://t.me/adminsedulur', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postJson('/api/webhook/telegram', $this->callbackUpdate(17, 'cb3', 'checkout'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
-        $this->assertDatabaseHas('payments', ['provider' => 'tripay', 'method' => 'BRIVA', 'provider_reference' => 'TREF']);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'TREF'));
+        $order = Order::firstOrFail();
+        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'DANA_QR', 'provider_reference' => null]);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '12345'
+            && str_contains($r['text'], 'Halo admin, saya ingin konfirmasi pembelian')
+            && str_contains($r['text'], 'GPT Plus'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '999'
+            && str_contains($r['text'], 'Order manual baru masuk dashboard')
+            && str_contains($r['text'], $order->invoice_number));
     }
 
     public function test_receipt_notifier_sends_paid_order_receipt(): void
