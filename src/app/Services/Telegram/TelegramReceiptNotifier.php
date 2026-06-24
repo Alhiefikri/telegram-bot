@@ -11,7 +11,7 @@ class TelegramReceiptNotifier
 {
     public function __construct(private TelegramBotClient $bot) {}
 
-    public function send(Order $order): void
+    public function send(Order $order, bool $force = false): void
     {
         if (blank(config('services.telegram.token'))) {
             return;
@@ -23,9 +23,9 @@ class TelegramReceiptNotifier
         }
 
         try {
-            $claimed = DB::transaction(function () use ($order) {
+            $claimed = DB::transaction(function () use ($order, $force) {
                 $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->payment_status !== PaymentStatus::Paid || $locked->telegram_receipt_sent_at !== null) {
+                if ($locked->payment_status !== PaymentStatus::Paid || (! $force && $locked->telegram_receipt_sent_at !== null)) {
                     return null;
                 }
 
@@ -42,7 +42,11 @@ class TelegramReceiptNotifier
             }
 
             $this->bot->sendMessage($claimed->customer->telegram_id, 'Pembayaran diterima untuk '.$claimed->invoice_number.'. Terima kasih.');
-            Order::whereKey($claimed->id)->whereNull('telegram_receipt_sent_at')->update(['telegram_receipt_sent_at' => now()]);
+            $receiptSentAt = Order::whereKey($claimed->id);
+            if (! $force) {
+                $receiptSentAt->whereNull('telegram_receipt_sent_at');
+            }
+            $receiptSentAt->update(['telegram_receipt_sent_at' => now()]);
         } finally {
             $lock->release();
         }

@@ -22,6 +22,7 @@ use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\Tripay\TripayClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
@@ -50,8 +51,27 @@ class Phase7AdminOperationsTest extends TestCase
 
         app(AdminOrderOperations::class)->resendReceipt($order, $user, '127.0.0.1');
 
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id);
+        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id && $job->force);
         $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'order.receipt_resent', 'subject_id' => (string) $order->id]);
+    }
+
+    public function test_resend_receipt_sends_again_when_receipt_was_already_sent(): void
+    {
+        config()->set('services.telegram.token', 'test-token');
+        config()->set('queue.default', 'sync');
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $order = Order::factory()->create([
+            'customer_id' => Customer::factory()->create(['telegram_id' => 12345])->id,
+            'invoice_number' => 'INV-RESENT',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'telegram_receipt_sent_at' => now()->subMinute(),
+        ]);
+
+        app(AdminOrderOperations::class)->resendReceipt($order);
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'INV-RESENT'));
     }
 
     public function test_resend_receipt_guard_rejects_unpaid_or_missing_telegram_target(): void

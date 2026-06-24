@@ -58,7 +58,7 @@ class AdminOrderOperations
             throw new InvalidArgumentException('Receipt can only be resent for paid orders with a Telegram customer.');
         }
 
-        SendTelegramReceipt::dispatch($order->getKey())->onQueue('notifications');
+        SendTelegramReceipt::dispatch($order->getKey(), force: true)->onQueue('notifications');
 
         $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
     }

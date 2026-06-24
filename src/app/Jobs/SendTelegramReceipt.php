@@ -11,10 +11,10 @@ class SendTelegramReceipt implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(public string $orderId) {}
+    public function __construct(public string $orderId, public bool $force = false) {}
 
     public function handle(TelegramReceiptNotifier $notifier): void
     {
-        $notifier->send(Order::findOrFail($this->orderId));
+        $notifier->send(Order::findOrFail($this->orderId), force: $this->force);
     }
 }
