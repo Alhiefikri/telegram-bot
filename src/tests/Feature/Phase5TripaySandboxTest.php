@@ -220,6 +220,22 @@ class Phase5TripaySandboxTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
     }
 
+    public function test_callback_with_conflicting_known_identifiers_is_rejected_without_processing(): void
+    {
+        $first = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'manual')->payments()->first();
+        $first->update(['provider' => 'tripay', 'provider_reference' => 'TREF-FIRST-CREATE']);
+        $second = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'manual')->payments()->first();
+        $second->update(['provider' => 'tripay', 'provider_reference' => 'TREF-CONFLICT']);
+
+        $this->postTripayCallback($this->tripayPayload($first->merchant_ref, $first->amount, 'TREF-CONFLICT'))->assertUnprocessable();
+
+        $event = PaymentEvent::first();
+        $this->assertNull($event->processed_at);
+        $this->assertNull($event->payment_id);
+        $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
+        $this->assertSame(PaymentStatus::Pending, $second->fresh()->status);
+    }
+
     public function test_invalid_callback_event_header_is_rejected_and_logged(): void
     {
         $this->fakeTripayCreate();

@@ -34,6 +34,10 @@ class TripayCallbackProcessor
             throw new AccessDeniedHttpException('Invalid Tripay callback signature.');
         }
 
+        if ($this->hasConflictingIdentifiers($payload, $payment)) {
+            throw new UnprocessableEntityHttpException('Tripay identifiers belong to different payments.');
+        }
+
         $this->applyPayload($paymentEvent, $payload);
 
         return $paymentEvent->fresh();
@@ -70,6 +74,13 @@ class TripayCallbackProcessor
                 throw new UnprocessableEntityHttpException('Tripay payload does not match payment.');
             }
 
+            $reference = Arr::get($payload, 'reference');
+            if ($reference) {
+                if (Payment::where('provider', 'tripay')->where('provider_reference', $reference)->whereKeyNot($payment->id)->exists()) {
+                    throw new UnprocessableEntityHttpException('Tripay provider reference belongs to another payment.');
+                }
+            }
+
             $method = Arr::get($payload, 'payment_method_code', Arr::get($payload, 'payment_method'));
             if ($method && $payment->method !== $method) {
                 throw new UnprocessableEntityHttpException('Tripay payment method does not match payment.');
@@ -89,7 +100,7 @@ class TripayCallbackProcessor
                 default => null,
             };
 
-            if ($reference = Arr::get($payload, 'reference')) {
+            if ($reference) {
                 Payment::whereKey($payment->id)->update(['provider_reference' => $reference]);
             }
 
@@ -127,6 +138,19 @@ class TripayCallbackProcessor
             return null;
         }
 
+        if ($merchantRef && $reference) {
+            $payment = Payment::query()
+                ->where('provider', 'tripay')
+                ->where('merchant_ref', $merchantRef)
+                ->first();
+
+            if (! $payment || Payment::where('provider', 'tripay')->where('provider_reference', $reference)->whereKeyNot($payment->id)->exists()) {
+                return null;
+            }
+
+            return $payment;
+        }
+
         return Payment::query()
             ->where('provider', 'tripay')
             ->where(function ($query) use ($merchantRef, $reference): void {
@@ -134,5 +158,22 @@ class TripayCallbackProcessor
                     ->when($reference, fn ($query, $ref) => $query->orWhere('provider_reference', $ref));
             })
             ->first();
+    }
+
+    private function hasConflictingIdentifiers(array $payload, ?Payment $payment): bool
+    {
+        $merchantRef = Arr::get($payload, 'merchant_ref');
+        $reference = Arr::get($payload, 'reference');
+
+        if (! $merchantRef || ! $reference || $payment) {
+            return false;
+        }
+
+        return Payment::where('provider', 'tripay')
+            ->where(function ($query) use ($merchantRef, $reference): void {
+                $query->where('merchant_ref', $merchantRef)
+                    ->orWhere('provider_reference', $reference);
+            })
+            ->exists();
     }
 }
