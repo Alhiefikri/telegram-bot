@@ -119,8 +119,16 @@ class TelegramUpdateProcessor
 
             return;
         }
-        if (ctype_digit($text) && ($productId = Cache::pull($this->intentKey($customer)))) {
-            $this->addProductToCart($customer, $chatId, (int) $productId, (int) $text);
+        if ($productId = Cache::get($this->intentKey($customer))) {
+            if (ctype_digit($text) && $this->addProductToCart($customer, $chatId, (int) $productId, (int) $text)) {
+                Cache::forget($this->intentKey($customer));
+
+                return;
+            }
+
+            if (! ctype_digit($text)) {
+                $this->bot->sendMessage($chatId, 'Jumlah tidak valid. Ketik angka sesuai stok yang tersedia.');
+            }
 
             return;
         }
@@ -245,12 +253,12 @@ class TelegramUpdateProcessor
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
-    private function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity): void
+    private function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity): bool
     {
         if ($quantity < 1) {
             $this->bot->sendMessage($chatId, 'Jumlah tidak valid.');
 
-            return;
+            return false;
         }
 
         try {
@@ -258,8 +266,12 @@ class TelegramUpdateProcessor
             $cart = $this->carts->activeCartFor($customer);
             $this->carts->addItem($cart, $product, $quantity);
             $this->bot->sendMessage($chatId, "Keranjang: {$product->name} x {$quantity}", ['inline_keyboard' => [[['text' => 'Pembayaran', 'callback_data' => 'checkout']]]]);
+
+            return true;
         } catch (Throwable) {
             $this->bot->sendMessage($chatId, 'Produk tidak tersedia atau stok tidak cukup.');
+
+            return false;
         }
     }
 
@@ -440,7 +452,9 @@ class TelegramUpdateProcessor
         $instructions = $settings?->instructions;
 
         if (! $danaQrImageUrl && $danaQrImagePath) {
-            $danaQrImageUrl = Storage::disk('public')->url($danaQrImagePath);
+            /** @var \Illuminate\Filesystem\FilesystemAdapter $publicDisk */
+            $publicDisk = Storage::disk('public');
+            $danaQrImageUrl = $publicDisk->url($danaQrImagePath);
         }
 
         $lines = [

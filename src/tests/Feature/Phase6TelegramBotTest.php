@@ -260,6 +260,19 @@ class Phase6TelegramBotTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'Pembayaran'));
     }
 
+    public function test_manual_non_numeric_quantity_keeps_selected_product_for_retry(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $product = Product::factory()->create(['name' => 'Kopi', 'stock' => 5, 'is_active' => true]);
+
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(9001, 'cb-product', 'product:'.$product->id), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(9002, 'abc'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(9003, '2'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        $this->assertSame(1, CartItem::count());
+        $this->assertSame(2, CartItem::first()->quantity);
+    }
+
     public function test_invalid_product_callback_and_invalid_quantity_do_not_mutate_cart(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
