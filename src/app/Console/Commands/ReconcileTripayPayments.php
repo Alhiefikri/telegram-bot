@@ -16,21 +16,55 @@ class ReconcileTripayPayments extends Command
 
     public function handle(TripayClient $client, TripayCallbackProcessor $processor): int
     {
+        $processed = 0;
+        $skipped = 0;
+        $failed = 0;
+
         Payment::query()
             ->where('provider', 'tripay')
             ->whereIn('status', [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed])
             ->whereNotNull('provider_reference')
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($payments) use ($client, $processor): void {
+            ->chunkById((int) $this->option('chunk'), function ($payments) use ($client, $processor, &$processed, &$skipped, &$failed): void {
                 foreach ($payments as $payment) {
                     try {
-                        $processor->processReconciliationForPayment($payment, $client->detail($payment->provider_reference));
+                        $event = $processor->processReconciliationForPayment($payment, $client->detail($payment->provider_reference));
+
+                        if ($event->processed_at === null) {
+                            $skipped++;
+
+                            continue;
+                        }
+
+                        $processed++;
                     } catch (\Throwable $e) {
-                        $this->warn('Tripay reconciliation skipped payment '.$payment->id.': '.$e->getMessage());
+                        $failed++;
+                        $this->error('Tripay reconciliation failed payment '.$payment->id.': '.$e->getMessage());
                     }
                 }
             });
 
-        return self::SUCCESS;
+        $this->writeSummary($processed, $skipped, $failed);
+
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function writeSummary(int $processed, int $skipped, int $failed): void
+    {
+        $summary = "processed={$processed} skipped={$skipped} failed={$failed}";
+
+        if ($failed > 0) {
+            $this->error('tripay:reconcile completed with partial failures: '.$summary);
+
+            return;
+        }
+
+        if ($skipped > 0) {
+            $this->warn('tripay:reconcile completed with skips: '.$summary);
+
+            return;
+        }
+
+        $this->info('tripay:reconcile completed cleanly: '.$summary);
     }
 }

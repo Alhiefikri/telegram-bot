@@ -176,10 +176,64 @@ class Phase4OrderCartDomainTest extends TestCase
             app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
         ]);
 
-        $this->artisan('orders:expire-pending', ['--chunk' => 1])->assertSuccessful();
+        $this->artisan('orders:expire-pending', ['--chunk' => 1])
+            ->expectsOutputToContain('orders:expire-pending completed cleanly: processed=3 skipped=0 failed=0')
+            ->assertSuccessful();
 
         $orders->each(fn (Order $order) => $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status));
         $this->assertSame(3, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_expiry_command_reports_skipped_orders(): void
+    {
+        $skipped = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
+        $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
+        $this->app->instance(OrderStateMachine::class, new class($skipped->id) extends OrderStateMachine
+        {
+            public function __construct(private readonly string $skippedOrderId) {}
+
+            public function expirePendingOrder(Order $order): ?Order
+            {
+                if ($order->id === $this->skippedOrderId) {
+                    return null;
+                }
+
+                return parent::expirePendingOrder($order);
+            }
+        });
+
+        $this->artisan('orders:expire-pending', ['--chunk' => 1])
+            ->expectsOutputToContain('orders:expire-pending completed with skips: processed=1 skipped=1 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(OrderStatus::PendingPayment, $skipped->fresh()->order_status);
+        $this->assertSame(OrderStatus::Expired, $processed->fresh()->order_status);
+    }
+
+    public function test_expiry_command_reports_partial_failures_and_continues(): void
+    {
+        $failed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
+        $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
+        $this->app->instance(OrderStateMachine::class, new class($failed->id) extends OrderStateMachine
+        {
+            public function __construct(private readonly string $failedOrderId) {}
+
+            public function expirePendingOrder(Order $order): ?Order
+            {
+                if ($order->id === $this->failedOrderId) {
+                    throw new InvalidOrderTransition('Injected order failure.');
+                }
+
+                return parent::expirePendingOrder($order);
+            }
+        });
+
+        $this->artisan('orders:expire-pending', ['--chunk' => 1])
+            ->expectsOutputToContain('orders:expire-pending completed with partial failures: processed=1 skipped=0 failed=1')
+            ->assertFailed();
+
+        $this->assertSame(OrderStatus::PendingPayment, $failed->fresh()->order_status);
+        $this->assertSame(OrderStatus::Expired, $processed->fresh()->order_status);
     }
 
     public function test_paid_and_release_still_work_after_product_soft_deleted_post_checkout(): void

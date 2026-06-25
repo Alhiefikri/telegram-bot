@@ -121,7 +121,9 @@ class Phase5TripaySandboxTest extends TestCase
             'https://tripay.co.id/api-sandbox/transaction/detail*' => Http::response(['success' => true, 'data' => $this->tripayPayload($payment->merchant_ref, $payment->amount, 'TREF-DETAIL')], 200),
         ]);
 
-        $this->artisan('tripay:reconcile', ['--chunk' => 1])->assertSuccessful();
+        $this->artisan('tripay:reconcile', ['--chunk' => 1])
+            ->expectsOutputToContain('tripay:reconcile completed cleanly: processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
 
         Http::assertSent(fn ($request) => $request->url() === 'https://tripay.co.id/api-sandbox/transaction/detail?reference=TREF-DETAIL');
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
@@ -301,11 +303,36 @@ class Phase5TripaySandboxTest extends TestCase
                 : Http::response(['success' => true, 'data' => $this->tripayPayload($second->merchant_ref, $second->amount, 'GOOD-DETAIL')], 200);
         });
 
-        $this->artisan('tripay:reconcile', ['--chunk' => 1])->assertSuccessful();
+        $this->artisan('tripay:reconcile', ['--chunk' => 1])
+            ->expectsOutputToContain('tripay:reconcile completed with skips: processed=1 skipped=1 failed=0')
+            ->assertSuccessful();
 
         $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
         $this->assertSame(PaymentStatus::Paid, $second->fresh()->status);
         $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Reconciliation)->count());
+        $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Reconciliation)->whereNotNull('processed_at')->count());
+    }
+
+    public function test_reconciliation_command_reports_partial_failures_and_continues(): void
+    {
+        $this->fakeTripayCreate();
+        $first = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'tripay')->payments()->first();
+        $first->update(['provider_reference' => 'BAD-DETAIL']);
+        $second = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'tripay')->payments()->first();
+        $second->update(['provider_reference' => 'GOOD-DETAIL']);
+        Http::fake(function ($request) use ($second) {
+            return str_contains($request->url(), 'BAD-DETAIL')
+                ? Http::response(['success' => false], 500)
+                : Http::response(['success' => true, 'data' => $this->tripayPayload($second->merchant_ref, $second->amount, 'GOOD-DETAIL')], 200);
+        });
+
+        $this->artisan('tripay:reconcile', ['--chunk' => 1])
+            ->expectsOutputToContain('tripay:reconcile completed with partial failures: processed=1 skipped=0 failed=1')
+            ->assertFailed();
+
+        $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $second->fresh()->status);
+        $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Reconciliation)->count());
         $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Reconciliation)->whereNotNull('processed_at')->count());
     }
 
