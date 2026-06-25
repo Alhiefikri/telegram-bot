@@ -3,8 +3,22 @@
 @tailwind utilities;
 
 @layer base {
+    :root {
+        --sf-paper: #fffaf4;
+        --sf-surface: #ffffff;
+        --sf-surface-warm: #fff3e6;
+        --sf-ink: #211407;
+        --sf-muted: #7a6047;
+        --sf-border: #f2dfca;
+        --sf-orange: #f97316;
+        --sf-orange-deep: #ea580c;
+        --sf-orange-soft: #fed7aa;
+        --sf-success: #15803d;
+        --sf-warning: #b45309;
+    }
+
     html {
-        background: #09090b;
+        background: var(--sf-paper);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -22,37 +36,51 @@
 @layer utilities {
     .storefront-shell {
         background:
-            radial-gradient(circle at 18% 10%, rgba(255, 132, 38, 0.26), transparent 27rem),
-            radial-gradient(circle at 82% 14%, rgba(255, 76, 36, 0.16), transparent 32rem),
-            radial-gradient(circle at 48% 52%, rgba(255, 190, 92, 0.08), transparent 34rem),
-            linear-gradient(180deg, #09090b 0%, #121113 46%, #09090b 100%);
+            radial-gradient(circle at 12% 8%, rgba(249, 115, 22, 0.14), transparent 24rem),
+            radial-gradient(circle at 82% 18%, rgba(254, 215, 170, 0.46), transparent 30rem),
+            linear-gradient(180deg, var(--sf-paper) 0%, #fff 52%, var(--sf-paper) 100%);
     }
 
-    .storefront-grain::before {
+    .storefront-grid::before {
         position: fixed;
         inset: 0;
         z-index: 0;
         pointer-events: none;
         content: '';
-        opacity: 0.16;
+        opacity: 0.46;
         background-image:
-            linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-        background-size: 42px 42px;
-        mask-image: linear-gradient(to bottom, black, transparent 75%);
+            linear-gradient(rgba(249, 115, 22, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(249, 115, 22, 0.07) 1px, transparent 1px);
+        background-size: 44px 44px;
+        mask-image: linear-gradient(to bottom, black, transparent 72%);
     }
 
-    .storefront-ambient-orb {
+    .storefront-wave {
         position: absolute;
         pointer-events: none;
         border-radius: 9999px;
-        filter: blur(4px);
-        opacity: 0.72;
-        will-change: transform, opacity;
+        opacity: 0.78;
+        filter: blur(2px);
+        background:
+            repeating-linear-gradient(
+                135deg,
+                rgba(249, 115, 22, 0.16) 0 10px,
+                rgba(254, 215, 170, 0.42) 10px 20px
+            );
+        will-change: transform, opacity, filter;
     }
 
-    .storefront-hero-card {
+    .storefront-wave-soft {
+        opacity: 0.44;
+        filter: blur(6px);
+    }
+
+    .storefront-hero-card,
+    .storefront-popular-card {
         will-change: transform, filter;
     }
 
+    .storefront-popular-card:hover {
+        filter: saturate(1.04);
+    }
 }

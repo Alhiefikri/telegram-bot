@@ -2,41 +2,96 @@
 
 return [
     'meta' => [
-        'title' => ':brand | Premium AI Products & Developer Tools',
-        'description' => 'Dapatkan akses langsung ke model AI tercanggih dan lisensi premium. Tingkatkan produktivitas Anda tanpa batas, bayar instan via QRIS.',
+        'title' => ':brand | Akun AI Premium Siap Pakai',
+        'description' => 'Warung AI menyediakan akun AI premium siap pakai dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
+    ],
+
+    'nav' => [
+        ['label' => 'Produk', 'href' => '#products'],
+        ['label' => 'Cara Beli', 'href' => '#cara-beli'],
+        ['label' => 'FAQ', 'href' => '#faq'],
+        ['label' => 'Support', 'href' => '#support'],
     ],
 
     'hero' => [
-        'eyebrow' => 'Platform AI Premium Indonesia',
-        'headline' => 'Tingkatkan Bisnis dengan',
-        'body' => 'Pilih produk AI premium, cek stok, lalu lanjutkan pembelian dengan bantuan support yang siap membantu.',
-        'primary_cta' => 'Mulai Belanja',
-        'secondary_cta' => 'Contact Support',
+        'eyebrow' => 'Warung akun AI premium',
+        'headline' => 'Akun AI Premium Siap Pakai.',
+        'body' => 'Pilih akun AI, cek stok langsung, lalu lanjutkan order dengan instruksi yang jelas. Cocok untuk kerja, belajar, riset, desain, dan produksi konten harian.',
+        'primary_cta' => 'Belanja Sekarang',
+        'secondary_cta' => 'Lihat Cara Beli',
+        'popular_label' => 'Produk populer',
+        'popular_empty' => 'Produk populer akan tampil setelah stok aktif tersedia.',
+    ],
+
+    'trust_indicators' => [
+        [
+            'title' => 'Stok real-time',
+            'body' => 'Jumlah stok siap terlihat di setiap kartu produk.',
+        ],
+        [
+            'title' => 'Akses cepat',
+            'body' => 'Akun digital disiapkan setelah pembayaran terkonfirmasi.',
+        ],
+        [
+            'title' => 'Bantuan Telegram',
+            'body' => 'Support membantu cek stok, pembayaran, dan kendala akses.',
+        ],
+        [
+            'title' => 'Harga jelas',
+            'body' => 'Harga katalog tampil sebelum Anda menghubungi support.',
+        ],
+    ],
+
+    'catalog' => [
+        'eyebrow' => 'Katalog Warung AI',
+        'title' => 'Pilih akun AI sesuai kebutuhan.',
+        'body' => 'Cari ChatGPT, Claude, Gemini, Canva, dan akun AI premium lain yang sedang tersedia. Produk aktif dari admin otomatis tampil di katalog ini.',
+        'search_placeholder' => 'Cari akun AI...',
+        'empty_title' => 'Katalog publik sedang disiapkan.',
+        'empty_body' => 'Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Sambil menunggu, pelanggan bisa menghubungi support untuk rekomendasi akun AI yang tersedia.',
+        'empty_category_title' => 'Kategori akan segera hadir.',
+        'empty_category_body' => 'Tim toko sedang menyiapkan kategori publik pertama agar katalog mudah dijelajahi.',
+    ],
+
+    'featured' => [
+        'eyebrow' => 'Pilihan hari ini',
+        'empty_title' => 'Promo pilihan menunggu stok siap.',
+        'empty_body' => 'Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca, dan pelanggan dapat menghubungi support untuk rekomendasi.',
+        'empty_cta' => 'Minta rekomendasi ke support',
     ],
 
     'benefits' => [
         [
-            'title' => 'Produk premium',
-            'body' => 'Katalog berisi tools AI, lisensi, dan layanan digital yang dikurasi untuk kebutuhan kerja modern.',
+            'title' => 'Akun siap pakai',
+            'body' => 'Produk dikurasi untuk kebutuhan AI harian: menulis, coding, riset, desain, sampai konten sosial.',
         ],
         [
-            'title' => 'Akses cepat',
-            'body' => 'Status stok tampil jelas dan proses bantuan order diarahkan ke kanal support toko.',
+            'title' => 'Tanpa tebak stok',
+            'body' => 'Status sisa stok dan kondisi habis tampil jelas sebelum Anda lanjut ke support.',
         ],
         [
-            'title' => 'Support responsif',
-            'body' => 'Tim support membantu pertanyaan stok, pembayaran, dan pengiriman akses digital.',
+            'title' => 'Order dibantu manusia',
+            'body' => 'Support membantu memastikan pilihan produk, instruksi bayar, dan pengiriman akses tetap jelas.',
         ],
     ],
 
     'payment_flow' => [
-        'eyebrow' => 'Pricing',
-        'title' => 'Harga transparan sebelum checkout.',
-        'body' => 'Pelanggan memilih produk, mengecek ketersediaan, lalu mengikuti instruksi pembayaran yang diberikan pada kanal checkout atau support. Pembayaran diproses sesuai metode yang tersedia tanpa mengubah webhook pembayaran.',
+        'eyebrow' => 'Cara beli',
+        'title' => 'Belanja akun AI dalam tiga langkah.',
+        'body' => 'Pilih produk dari katalog, hubungi support untuk instruksi pembayaran, lalu tunggu akses digital dikirim setelah konfirmasi.',
         'steps' => [
-            'Pilih produk dan pastikan stok masih tersedia.',
-            'Terima instruksi nominal, metode, dan batas waktu pembayaran.',
-            'Setelah pembayaran terkonfirmasi, order masuk ke proses pengiriman digital.',
+            [
+                'title' => 'Pilih produk',
+                'body' => 'Cari akun AI yang dibutuhkan dan pastikan badge stok masih tersedia.',
+            ],
+            [
+                'title' => 'Hubungi support',
+                'body' => 'Kirim nama produk agar support memberi instruksi nominal, metode bayar, dan batas waktu.',
+            ],
+            [
+                'title' => 'Terima akses',
+                'body' => 'Setelah pembayaran terkonfirmasi, order masuk proses pengiriman akun digital.',
+            ],
         ],
     ],
 
@@ -47,46 +102,38 @@ return [
     ],
 
     'telegram_support' => [
-        'eyebrow' => 'Contact Support',
+        'eyebrow' => 'Support',
         'title' => 'Bot dan admin Telegram membantu status order.',
         'body' => 'Telegram dipakai untuk notifikasi dan bantuan order yang sudah berjalan. Halaman ini hanya menjelaskan kanal bantuan; perilaku bot dan webhook Telegram tidak berubah.',
     ],
 
-    'trust_indicators' => [
-        [
-            'title' => 'Pembayaran aman',
-            'body' => 'Instruksi pembayaran jelas dan konfirmasi mengikuti status order.',
-        ],
-        [
-            'title' => 'Pengiriman cepat',
-            'body' => 'Produk digital disiapkan setelah pembayaran valid dan stok tersedia.',
-        ],
-        [
-            'title' => 'Support Telegram',
-            'body' => 'Bantuan order tersedia lewat kanal Telegram toko.',
-        ],
-        [
-            'title' => 'Stok transparan',
-            'body' => 'Katalog menampilkan stok siap agar pelanggan tidak menebak ketersediaan.',
+    'testimonial' => [
+        'quote' => 'Butuh akun AI cepat untuk kerja harian. Di Warung AI, stoknya jelas dan proses tanyanya tidak ribet.',
+        'name' => 'Pelanggan Warung AI',
+        'role' => 'Pengguna akun AI premium',
+        'stats' => [
+            ['value' => '24 jam', 'label' => 'support order'],
+            ['value' => 'Real-time', 'label' => 'status stok katalog'],
+            ['value' => 'Digital', 'label' => 'pengiriman akses'],
         ],
     ],
 
     'faq' => [
         [
-            'question' => 'Bagaimana cara mendapatkan produk setelah membayar?',
-            'answer' => 'Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia. Support akan membantu jika order memerlukan verifikasi manual.',
+            'question' => 'Bagaimana cara membeli akun AI di Warung AI?',
+            'answer' => 'Pilih produk dari katalog, hubungi support melalui tombol yang tersedia, lalu ikuti instruksi pembayaran. Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia.',
         ],
         [
-            'question' => 'Apakah produk di Warung AI resmi dan aman?',
-            'answer' => 'Produk yang tampil di katalog diproses melalui operasional toko dan stok yang tersedia. Pastikan detail order dan instruksi pembayaran sudah jelas sebelum membayar.',
+            'question' => 'Apakah stok yang tampil benar-benar tersedia?',
+            'answer' => 'Katalog menampilkan stok siap berdasarkan data produk aktif di admin. Jika stok habis, kartu produk akan berubah menjadi status tanya stok agar pelanggan tidak mengira produk siap dibeli.',
+        ],
+        [
+            'question' => 'Produk apa saja yang tersedia?',
+            'answer' => 'Produk dapat berubah mengikuti stok toko. Katalog biasanya berisi akun AI premium dan produk digital pendukung seperti ChatGPT, Claude, Gemini, Canva, atau layanan serupa yang dipublikasikan admin.',
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
             'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, atau kendala teknis produk digital.',
-        ],
-        [
-            'question' => 'Apakah saya bisa membeli dalam jumlah besar?',
-            'answer' => 'Bisa. Untuk pembelian kuantitas besar atau kebutuhan kemitraan, hubungi support agar tim toko dapat menyiapkan penawaran dan prioritas bantuan.',
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
@@ -95,8 +142,18 @@ return [
     ],
 
     'support' => [
-        'eyebrow' => 'Siap Memulai?',
-        'title' => 'Bergabung dengan Ribuan Pengguna Warung AI',
-        'body' => 'Tingkatkan efisiensi kerja Anda sekarang dengan alat AI terdepan. Gunakan kanal support toko untuk bertanya tentang stok, pembayaran, dan pengiriman produk digital.',
+        'eyebrow' => 'Siap belanja?',
+        'title' => 'Temukan akun AI premium yang pas untuk hari ini.',
+        'body' => 'Gunakan katalog untuk memilih produk, lalu hubungi support Warung AI untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
+        'primary_cta' => 'Chat Support',
+        'secondary_cta' => 'Login Admin',
+    ],
+
+    'footer' => [
+        'body' => 'Warung AI membantu pelanggan menemukan akun AI premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
+        'platform_title' => 'Toko',
+        'help_title' => 'Bantuan',
+        'copyright_suffix' => 'Warung AI. Semua hak dilindungi.',
+        'powered_by' => 'Dibangun untuk katalog akun AI premium.',
     ],
 ];

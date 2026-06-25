@@ -24,22 +24,27 @@ class ExampleTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Premium AI Products')
+            ->assertSee('Akun AI Premium Siap Pakai')
+            ->assertSee('Warung akun AI premium')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
             ->assertSee('/admin/login')
             ->assertDontSee("Let's get started");
     }
 
-    public function test_storefront_exposes_motion_safe_landing_design_hooks(): void
+    public function test_storefront_exposes_light_warung_ai_landing_design_hooks(): void
     {
         $this->get('/')
             ->assertOk()
-            ->assertSee('storefront-ambient-orb', false)
+            ->assertSee('storefront-shell', false)
+            ->assertSee('storefront-wave', false)
+            ->assertSee('storefront-grid', false)
             ->assertSee('storefront-hero-card', false)
+            ->assertSee('storefront-popular-card', false)
             ->assertSee('motion-safe:animate-storefront-float', false)
             ->assertSee('motion-safe:animate-storefront-reveal', false)
-            ->assertSee('motion-reduce:animate-none', false);
+            ->assertSee('motion-reduce:animate-none', false)
+            ->assertDontSee('bg-[#09090b]', false);
     }
 
     public function test_local_testing_seeded_user_can_access_admin_panel_with_advertised_credentials(): void
@@ -59,14 +64,18 @@ class ExampleTest extends TestCase
 
         $this->get('/')
             ->assertOk()
-            ->assertSee('Pricing')
+            ->assertSee('Produk')
+            ->assertSee('Cara Beli')
+            ->assertSee('FAQ')
+            ->assertSee('Support')
+            ->assertSee('Belanja akun AI dalam tiga langkah')
             ->assertSee('Setelah pembayaran terkonfirmasi')
             ->assertSee('Pengiriman digital')
             ->assertSee('Bot dan admin Telegram membantu status order')
-            ->assertSee('Produk premium')
-            ->assertSee('Akses cepat')
-            ->assertSee('Support responsif')
-            ->assertSee('Bagaimana cara mendapatkan produk setelah membayar?')
+            ->assertSee('Akun siap pakai')
+            ->assertSee('Tanpa tebak stok')
+            ->assertSee('Order dibantu manusia')
+            ->assertSee('Bagaimana cara membeli akun AI di Warung AI?')
             ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);
@@ -79,7 +88,8 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->assertSee('Katalog publik sedang disiapkan')
             ->assertSee('Kategori akan segera hadir')
-            ->assertSee('pelanggan bisa menghubungi support');
+            ->assertSee('pelanggan bisa menghubungi support')
+            ->assertSee('Produk populer akan tampil');
     }
 
     public function test_active_products_render_while_inactive_and_deleted_products_stay_hidden(): void
@@ -181,11 +191,11 @@ class ExampleTest extends TestCase
 
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
 
-        $this->assertStringContainsString('FLASH SALE', $featuredHtml);
+        $this->assertStringContainsString('Pilihan hari ini', $featuredHtml);
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Sikat Sekarang', $featuredHtml);
+        $this->assertStringContainsString('Belanja Sekarang', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -214,7 +224,7 @@ class ExampleTest extends TestCase
 
         $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
         $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
-        $this->assertStringNotContainsString('Chat support untuk beli', $featuredHtml);
+        $this->assertStringNotContainsString('Belanja Sekarang', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
     }
@@ -255,7 +265,7 @@ class ExampleTest extends TestCase
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
             ->assertSee('Stok habis')
             ->assertSee('Tanya stok ke support')
-            ->assertSee('Sikat Sekarang')
+            ->assertSee('Belanja Sekarang')
             ->assertSee('href="#support"', false);
     }
 
@@ -277,7 +287,7 @@ class ExampleTest extends TestCase
             ->assertSee('value="chat"', false)
             ->getContent();
 
-        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="features"');
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="cara-beli"');
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);
