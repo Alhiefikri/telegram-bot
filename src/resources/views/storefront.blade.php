@@ -120,7 +120,7 @@
                                     $availableStock = max(0, (int) $product->stock - (int) $product->reserved_stock);
                                     $imageUrl = $product->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($product->image_path) : null;
                                 @endphp
-                                <article class="flex h-full flex-col overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+                                <article class="flex h-full flex-col overflow-hidden rounded-[1.5rem] border {{ $availableStock > 0 ? 'border-slate-200 bg-white' : 'border-amber-200 bg-slate-50 opacity-90' }} shadow-sm">
                                     @if ($imageUrl)
                                         <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="aspect-[4/3] w-full object-cover" loading="lazy">
                                     @else
@@ -135,13 +135,13 @@
                                                 <h3 class="mt-2 text-xl font-black">{{ $product->name }}</h3>
                                             </div>
                                             <span class="rounded-full {{ $availableStock > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800' }} px-3 py-1 text-xs font-bold">
-                                                {{ $availableStock > 0 ? 'Stok '.$availableStock : 'Cek stok' }}
+                                                {{ $availableStock > 0 ? 'Stok '.$availableStock : 'Stok habis' }}
                                             </span>
                                         </div>
                                         <p class="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{{ $product->description }}</p>
                                         <div class="mt-5 flex items-center justify-between gap-3">
                                             <p class="text-2xl font-black">{{ \App\Support\Money::idr($product->price_amount) }}</p>
-                                            <a href="#support" class="inline-flex min-h-11 items-center rounded-full bg-slate-950 px-4 text-sm font-bold text-white hover:bg-slate-800">Minat</a>
+                                            <a href="#support" class="inline-flex min-h-11 items-center rounded-full bg-slate-950 px-4 text-sm font-bold text-white hover:bg-slate-800">{{ $availableStock > 0 ? 'Minat beli' : 'Tanya stok' }}</a>
                                         </div>
                                     </div>
                                 </article>

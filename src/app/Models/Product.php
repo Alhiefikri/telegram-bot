@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Services\AuditLogger;
 use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -18,6 +19,31 @@ class Product extends Model
     protected function casts(): array
     {
         return ['category_id' => 'integer', 'price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean'];
+    }
+
+    /**
+     * @param  Builder<Product>  $query
+     * @return Builder<Product>
+     */
+    public function scopePublicVisible(Builder $query): Builder
+    {
+        return $query
+            ->where('is_active', true)
+            ->where(fn (Builder $query) => $query
+                ->whereNull('category_id')
+                ->orWhereHas('category', fn (Builder $category) => $category->where('is_active', true)));
+    }
+
+    /**
+     * @param  Builder<Product>  $query
+     * @return Builder<Product>
+     */
+    public function scopeStorefrontOrder(Builder $query): Builder
+    {
+        return $query
+            ->orderByRaw('CASE WHEN stock > reserved_stock THEN 0 ELSE 1 END')
+            ->orderBy('name')
+            ->orderBy('id');
     }
 
     protected static function booted(): void

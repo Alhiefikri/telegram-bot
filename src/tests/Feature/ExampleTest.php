@@ -50,6 +50,11 @@ class ExampleTest extends TestCase
             'image_path' => null,
             'is_active' => true,
         ]);
+        $inactiveCategory = Category::factory()->create(['name' => 'Kategori Produk Nonaktif', 'slug' => 'kategori-produk-nonaktif', 'is_active' => false]);
+        Product::factory()->create(['category_id' => $inactiveCategory->id, 'name' => 'Produk Dari Kategori Nonaktif']);
+        $deletedCategory = Category::factory()->create(['name' => 'Kategori Produk Terhapus', 'slug' => 'kategori-produk-terhapus']);
+        Product::factory()->create(['category_id' => $deletedCategory->id, 'name' => 'Produk Dari Kategori Terhapus']);
+        $deletedCategory->delete();
         Product::factory()->create(['name' => 'Produk Nonaktif', 'is_active' => false]);
         $deleted = Product::factory()->create(['name' => 'Produk Terhapus']);
         $deleted->delete();
@@ -62,7 +67,9 @@ class ExampleTest extends TestCase
             ->assertSee('Stok 5')
             ->assertSee('Gambar produk menyusul')
             ->assertDontSee('Produk Nonaktif')
-            ->assertDontSee('Produk Terhapus');
+            ->assertDontSee('Produk Terhapus')
+            ->assertDontSee('Produk Dari Kategori Nonaktif')
+            ->assertDontSee('Produk Dari Kategori Terhapus');
     }
 
     public function test_active_categories_render_in_sort_order_while_inactive_and_deleted_stay_hidden(): void
@@ -78,5 +85,29 @@ class ExampleTest extends TestCase
             ->assertSeeInOrder(['Akun Premium', 'AI Tools'])
             ->assertDontSee('Kategori Nonaktif')
             ->assertDontSee('Kategori Terhapus');
+    }
+
+    public function test_out_of_stock_products_are_deprioritized_and_not_presented_as_ready_to_buy(): void
+    {
+        Product::factory()->create([
+            'name' => 'Akun Kosong',
+            'description' => 'Produk tanpa stok siap kirim.',
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Zeta Ready',
+            'description' => 'Produk dengan stok siap kirim.',
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
+            ->assertSee('Stok habis')
+            ->assertSee('Tanya stok');
     }
 }
