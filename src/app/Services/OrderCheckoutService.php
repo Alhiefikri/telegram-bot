@@ -21,17 +21,25 @@ use Illuminate\Support\Facades\DB;
 
 class OrderCheckoutService
 {
-    public function __construct(private readonly InvoiceNumberGenerator $numbers, private readonly TripayClient $tripay) {}
+    public function __construct(
+        private readonly InvoiceNumberGenerator $numbers,
+        private readonly TripayClient $tripay,
+        private readonly OrderStateMachine $stateMachine,
+    ) {}
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null): Order
     {
         $expiresAt ??= now()->addMinutes((int) config('orders.pending_payment_ttl_minutes', 60));
 
+        $order = null;
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentMethod, $provider, $expiresAt), 5);
-                if ($provider === 'tripay' && ! $order->payments()->where('provider', 'tripay')->whereNotNull('provider_reference')->exists()) {
-                    $this->tripay->createTransaction($order->payments()->where('provider', 'tripay')->firstOrFail());
+                if ($provider === 'tripay') {
+                    $payment = $order->payments()->where('provider', 'tripay')->firstOrFail();
+                    if ($payment->provider_reference === null) {
+                        $this->tripay->createTransaction($payment);
+                    }
                 }
 
                 return $order->fresh(['orderItems', 'payments']);
@@ -39,6 +47,12 @@ class OrderCheckoutService
                 if (! $this->isUniqueViolation($e) || $i === 4) {
                     throw $e;
                 }
+            } catch (\Throwable $e) {
+                if ($provider === 'tripay' && $order && $order->exists && $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending) {
+                    $this->stateMachine->cancelPendingOrder($order);
+                }
+
+                throw $e;
             }
         }
 

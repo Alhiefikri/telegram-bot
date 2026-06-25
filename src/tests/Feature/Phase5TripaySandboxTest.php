@@ -11,6 +11,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
@@ -350,6 +351,29 @@ class Phase5TripaySandboxTest extends TestCase
             $this->fail('Expected non-2xx Tripay create response to fail closed.');
         } catch (RequestException) {
             $this->assertSame(0, Payment::whereNotNull('provider_reference')->count());
+        }
+    }
+
+    public function test_tripay_create_exception_releases_or_marks_retryable_without_stranding_reserved_stock(): void
+    {
+        Http::fake([
+            'https://tripay.co.id/api-sandbox/transaction/create' => Http::response(['success' => false], 500),
+        ]);
+
+        try {
+            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 3), 'BRIVA', 'tripay');
+            $this->fail('Expected Tripay create failure to throw and clean up reserved stock.');
+        } catch (RequestException) {
+            $order = Order::firstOrFail();
+            $payment = Payment::firstOrFail();
+            $product = Product::firstOrFail();
+
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+            $this->assertSame(PaymentStatus::Failed, $payment->fresh()->status);
+            $this->assertNull($payment->fresh()->provider_reference);
+            $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         }
     }
 
