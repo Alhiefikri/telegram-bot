@@ -2,9 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessTelegramUpdate;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Category;
 use App\Models\Product;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
@@ -22,6 +26,27 @@ class ExampleTest extends TestCase
             ->assertSee('property="og:title"', false)
             ->assertSee('/admin/login')
             ->assertDontSee("Let's get started");
+    }
+
+    public function test_root_path_renders_trust_payment_telegram_and_faq_content_without_dispatching_webhook_jobs(): void
+    {
+        Bus::fake([ProcessTelegramUpdate::class]);
+        Queue::fake([SendTelegramReceipt::class]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Alur pembayaran')
+            ->assertSee('Setelah pembayaran terkonfirmasi')
+            ->assertSee('Pengiriman digital')
+            ->assertSee('Bot dan admin Telegram membantu status order')
+            ->assertSee('Pembayaran aman')
+            ->assertSee('Pengiriman cepat')
+            ->assertSee('Stok transparan')
+            ->assertSee('Metode pembayaran apa yang tersedia?')
+            ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
+
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
     public function test_empty_catalog_renders_customer_facing_state(): void

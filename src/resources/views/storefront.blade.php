@@ -1,7 +1,8 @@
 @php
     $brand = config('app.name', 'Telegram Bot Store');
-    $pageTitle = $brand.' - Toko Produk Digital Instan';
-    $pageDescription = 'Toko produk digital dengan katalog kurasi, pembayaran jelas, dan dukungan Telegram untuk bantuan order.';
+    $copy = config('storefront');
+    $pageTitle = str_replace(':brand', $brand, $copy['meta']['title']);
+    $pageDescription = $copy['meta']['description'];
     $canonicalUrl = url('/');
     $telegramUsername = config('services.telegram.admin_username');
     $supportHref = config('services.telegram.admin_contact_url') ?: ($telegramUsername ? 'https://t.me/'.ltrim($telegramUsername, '@') : null);
@@ -13,21 +14,6 @@
     $categoriesWithProducts = $categories->filter(fn ($category) => $products->contains('category_id', $category->id));
     $featuredCategoryDestination = $featuredProduct && $featuredProduct->category && $categoriesWithProducts->contains('id', $featuredProduct->category_id) ? '#'.$categoryAnchor($featuredProduct->category) : '#products';
     $productsWithoutVisibleCategory = $products->reject(fn ($product) => $product->category_id && $categories->contains('id', $product->category_id));
-    $benefits = [
-        ['title' => 'Produk digital siap pakai', 'body' => 'Katalog difokuskan pada kebutuhan produktivitas, akun digital, dan akses layanan yang praktis.'],
-        ['title' => 'Pembayaran jelas', 'body' => 'Instruksi pembayaran ditampilkan sebelum konfirmasi sehingga pelanggan tahu langkah berikutnya.'],
-        ['title' => 'Bantuan lewat Telegram', 'body' => 'Support order tetap dekat dengan kanal Telegram yang sudah dipakai operasional toko.'],
-    ];
-    $steps = [
-        'Pilih produk dari kategori yang tersedia.',
-        'Ikuti instruksi checkout atau hubungi support jika alur pembelian belum tersedia.',
-        'Produk digital dikirim setelah pembayaran dan stok tervalidasi.',
-    ];
-    $faqs = [
-        ['question' => 'Apakah produk langsung dikirim?', 'answer' => 'Produk digital dikirim setelah pembayaran terkonfirmasi dan stok tersedia.'],
-        ['question' => 'Bagaimana jika produk belum muncul di katalog?', 'answer' => 'Katalog publik sedang dibuka bertahap. Hubungi support untuk rekomendasi atau permintaan khusus.'],
-        ['question' => 'Apakah admin panel masih tersedia?', 'answer' => 'Ya. Operator tetap bisa masuk melalui tautan Admin tanpa mengganggu pengalaman pelanggan.'],
-    ];
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -71,12 +57,12 @@
         <main>
             <section class="mx-auto grid w-full max-w-7xl gap-10 px-5 pb-16 pt-10 sm:px-8 lg:grid-cols-[1.06fr_0.94fr] lg:px-10 lg:pb-24 lg:pt-16">
                 <div class="max-w-3xl">
-                    <p class="mb-5 inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">Storefront publik pertama untuk produk digital pilihan</p>
-                    <h1 class="text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">Beli produk digital dengan alur sederhana dan support yang jelas.</h1>
-                    <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-300">{{ $pageDescription }} Jelajahi katalog, pahami cara order, lalu lanjutkan ke kanal pembelian yang tersedia.</p>
+                    <p class="mb-5 inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">{{ $copy['hero']['eyebrow'] }}</p>
+                    <h1 class="text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">{{ $copy['hero']['headline'] }}</h1>
+                    <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-300">{{ $pageDescription }} {{ $copy['hero']['body'] }}</p>
                     <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-                        <a href="#products" class="inline-flex min-h-12 items-center justify-center rounded-full bg-cyan-300 px-6 text-base font-bold text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-100">Lihat produk</a>
-                        <a href="#support" class="inline-flex min-h-12 items-center justify-center rounded-full border border-white/20 px-6 text-base font-bold text-white transition hover:border-white/50 focus:outline-none focus:ring-2 focus:ring-cyan-100">Butuh bantuan?</a>
+                        <a href="#products" class="inline-flex min-h-12 items-center justify-center rounded-full bg-cyan-300 px-6 text-base font-bold text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-100">{{ $copy['hero']['primary_cta'] }}</a>
+                        <a href="#support" class="inline-flex min-h-12 items-center justify-center rounded-full border border-white/20 px-6 text-base font-bold text-white transition hover:border-white/50 focus:outline-none focus:ring-2 focus:ring-cyan-100">{{ $copy['hero']['secondary_cta'] }}</a>
                     </div>
                 </div>
                 <div class="rounded-[2rem] border border-white/10 bg-white/10 p-4 shadow-2xl shadow-slate-950/40 backdrop-blur">
@@ -275,7 +261,7 @@
                         <h2 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Dibuat untuk pembelian digital yang ringan, jelas, dan cepat.</h2>
                     </div>
                     <div class="grid gap-4 sm:grid-cols-3">
-                        @foreach ($benefits as $benefit)
+                        @foreach ($copy['benefits'] as $benefit)
                             <div class="rounded-3xl border border-slate-200 bg-slate-50 p-6">
                                 <h3 class="font-black">{{ $benefit['title'] }}</h3>
                                 <p class="mt-3 text-sm leading-6 text-slate-600">{{ $benefit['body'] }}</p>
@@ -283,13 +269,42 @@
                         @endforeach
                     </div>
                 </div>
-                <div class="mx-auto mt-10 max-w-7xl rounded-[2rem] bg-slate-950 p-6 text-white sm:p-8">
-                    <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200">Cara kerja</p>
-                    <div class="mt-5 grid gap-4 md:grid-cols-3">
-                        @foreach ($steps as $index => $step)
-                            <div class="rounded-3xl border border-white/10 bg-white/5 p-5">
-                                <span class="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300 font-black text-slate-950">{{ $index + 1 }}</span>
-                                <p class="mt-4 leading-7 text-slate-200">{{ $step }}</p>
+
+                <div class="mx-auto mt-10 grid max-w-7xl gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+                    <div class="rounded-[2rem] bg-slate-950 p-6 text-white sm:p-8">
+                        <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200">{{ $copy['payment_flow']['eyebrow'] }}</p>
+                        <h3 class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{{ $copy['payment_flow']['title'] }}</h3>
+                        <p class="mt-4 leading-7 text-slate-300">{{ $copy['payment_flow']['body'] }}</p>
+                        <div class="mt-6 grid gap-4 md:grid-cols-3">
+                            @foreach ($copy['payment_flow']['steps'] as $index => $step)
+                                <div class="rounded-3xl border border-white/10 bg-white/5 p-5">
+                                    <span class="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300 font-black text-slate-950">{{ $index + 1 }}</span>
+                                    <p class="mt-4 leading-7 text-slate-200">{{ $step }}</p>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                    <div class="grid gap-5">
+                        <div class="rounded-[2rem] border border-slate-200 bg-slate-50 p-6 sm:p-8">
+                            <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-700">{{ $copy['delivery']['eyebrow'] }}</p>
+                            <h3 class="mt-3 text-2xl font-black tracking-tight">{{ $copy['delivery']['title'] }}</h3>
+                            <p class="mt-4 leading-7 text-slate-600">{{ $copy['delivery']['body'] }}</p>
+                        </div>
+                        <div class="rounded-[2rem] border border-cyan-200 bg-cyan-50 p-6 sm:p-8">
+                            <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-700">{{ $copy['telegram_support']['eyebrow'] }}</p>
+                            <h3 class="mt-3 text-2xl font-black tracking-tight">{{ $copy['telegram_support']['title'] }}</h3>
+                            <p class="mt-4 leading-7 text-slate-700">{{ $copy['telegram_support']['body'] }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mx-auto mt-10 max-w-7xl rounded-[2rem] border border-slate-200 bg-slate-50 p-6 sm:p-8">
+                    <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-700">Indikator kepercayaan</p>
+                    <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        @foreach ($copy['trust_indicators'] as $indicator)
+                            <div class="rounded-3xl bg-white p-5 shadow-sm">
+                                <h3 class="font-black">{{ $indicator['title'] }}</h3>
+                                <p class="mt-3 text-sm leading-6 text-slate-600">{{ $indicator['body'] }}</p>
                             </div>
                         @endforeach
                     </div>
@@ -301,7 +316,7 @@
                     <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-700">FAQ</p>
                     <h2 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Pertanyaan umum pelanggan</h2>
                     <div class="mt-8 space-y-4">
-                        @foreach ($faqs as $faq)
+                        @foreach ($copy['faq'] as $faq)
                             <details class="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm" @if ($loop->first) open @endif>
                                 <summary class="cursor-pointer list-none font-black">{{ $faq['question'] }}</summary>
                                 <p class="mt-3 leading-7 text-slate-600">{{ $faq['answer'] }}</p>
@@ -314,9 +329,9 @@
             <section id="support" class="bg-slate-950 px-5 py-16 text-white sm:px-8 lg:px-10 lg:py-24">
                 <div class="mx-auto flex max-w-7xl flex-col gap-6 rounded-[2rem] border border-white/10 bg-white/5 p-8 sm:p-10 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                        <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200">Support</p>
-                        <h2 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Butuh rekomendasi produk atau bantuan order?</h2>
-                        <p class="mt-4 max-w-2xl leading-7 text-slate-300">Gunakan kanal support toko untuk bertanya tentang stok, pembayaran, dan pengiriman produk digital. Admin panel tetap tersedia hanya untuk operator.</p>
+                        <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200">{{ $copy['support']['eyebrow'] }}</p>
+                        <h2 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">{{ $copy['support']['title'] }}</h2>
+                        <p class="mt-4 max-w-2xl leading-7 text-slate-300">{{ $copy['support']['body'] }}</p>
                     </div>
                     <div class="flex flex-col gap-3 sm:flex-row lg:flex-col xl:flex-row">
                         @if ($supportHref)
