@@ -4,9 +4,12 @@ namespace Tests\Feature;
 
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendTelegramReceipt;
+use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -21,11 +24,32 @@ class ExampleTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Toko Produk Digital Instan')
+            ->assertSee('Premium AI Products')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
             ->assertSee('/admin/login')
             ->assertDontSee("Let's get started");
+    }
+
+    public function test_storefront_exposes_motion_safe_landing_design_hooks(): void
+    {
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('storefront-ambient-orb', false)
+            ->assertSee('storefront-hero-card', false)
+            ->assertSee('motion-safe:animate-storefront-float', false)
+            ->assertSee('motion-safe:animate-storefront-reveal', false)
+            ->assertSee('motion-reduce:animate-none', false);
+    }
+
+    public function test_local_testing_seeded_user_can_access_admin_panel_with_advertised_credentials(): void
+    {
+        $this->seed();
+
+        $user = User::where('email', 'test@example.com')->firstOrFail();
+
+        $this->assertTrue(Hash::check('password', $user->password));
+        $this->assertSame(UserRole::Owner, $user->role);
     }
 
     public function test_root_path_renders_trust_payment_telegram_and_faq_content_without_dispatching_webhook_jobs(): void
@@ -35,14 +59,14 @@ class ExampleTest extends TestCase
 
         $this->get('/')
             ->assertOk()
-            ->assertSee('Alur pembayaran')
+            ->assertSee('Pricing')
             ->assertSee('Setelah pembayaran terkonfirmasi')
             ->assertSee('Pengiriman digital')
             ->assertSee('Bot dan admin Telegram membantu status order')
-            ->assertSee('Pembayaran aman')
-            ->assertSee('Pengiriman cepat')
-            ->assertSee('Stok transparan')
-            ->assertSee('Metode pembayaran apa yang tersedia?')
+            ->assertSee('Produk premium')
+            ->assertSee('Akses cepat')
+            ->assertSee('Support responsif')
+            ->assertSee('Bagaimana cara mendapatkan produk setelah membayar?')
             ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);
@@ -88,8 +112,8 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->assertSee('Canva Pro Bulanan')
             ->assertSee('AI Tools')
-            ->assertSee('IDR 125.000')
-            ->assertSee('Stok 5')
+            ->assertSee('Rp125.000')
+            ->assertSee('Sisa 5')
             ->assertSee('Gambar produk menyusul')
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
@@ -157,11 +181,11 @@ class ExampleTest extends TestCase
 
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
 
-        $this->assertStringContainsString('Promo pilihan hari ini', $featuredHtml);
+        $this->assertStringContainsString('FLASH SALE', $featuredHtml);
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
-        $this->assertStringContainsString('IDR 99.000', $featuredHtml);
-        $this->assertStringContainsString('Stok siap 3', $featuredHtml);
-        $this->assertStringContainsString('Chat support untuk beli', $featuredHtml);
+        $this->assertStringContainsString('Rp99.000', $featuredHtml);
+        $this->assertStringContainsString('Sisa 3', $featuredHtml);
+        $this->assertStringContainsString('Sikat Sekarang', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -231,9 +255,32 @@ class ExampleTest extends TestCase
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
             ->assertSee('Stok habis')
             ->assertSee('Tanya stok ke support')
-            ->assertSee('Chat support untuk beli')
-            ->assertSee('checkout/detail publik belum dibuka')
+            ->assertSee('Sikat Sekarang')
             ->assertSee('href="#support"', false);
+    }
+
+    public function test_catalog_search_filters_public_products(): void
+    {
+        Product::factory()->create([
+            'name' => 'Chat GPT Plus',
+            'description' => 'Akses model premium.',
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Canva Pro',
+            'description' => 'Desain premium.',
+            'is_active' => true,
+        ]);
+
+        $html = $this->get('/?q=chat')
+            ->assertOk()
+            ->assertSee('value="chat"', false)
+            ->getContent();
+
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="features"');
+
+        $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
+        $this->assertStringNotContainsString('Canva Pro', $catalogHtml);
     }
 
     private function htmlBetween(string $html, string $start, string $end): string
