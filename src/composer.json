@@ -49,6 +49,10 @@
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"
         ],
+        "test:concurrency": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test --env=testing --group=concurrency"
+        ],
         "test:foundation": [
             "@php artisan config:clear --ansi",
             "@php artisan test --filter=FoundationInfrastructureTest"

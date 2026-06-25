@@ -6,9 +6,11 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\OrderStateMachine;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class AdminOrderOperations
@@ -28,19 +30,34 @@ class AdminOrderOperations
 
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
-        if (! $this->canCompleteManualOrder($order)) {
-            throw new InvalidArgumentException('Only pending manual orders can be completed.');
-        }
+        return DB::transaction(function () use ($order, $user, $ip): Order {
+            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $lockedOrder->load('payments');
 
-        $payment = $order->payments()->where('provider', 'manual')->where('status', PaymentStatus::Pending)->oldest()->firstOrFail();
-        $paidOrder = $this->orders->markPaymentPaid($payment);
-        $paidOrder->update(['order_status' => OrderStatus::Completed]);
+            if (! $this->canCompleteManualOrder($lockedOrder)) {
+                throw new InvalidArgumentException('Only pending manual orders can be completed.');
+            }
 
-        SendTelegramReceipt::dispatch($paidOrder->getKey())->onQueue('notifications');
+            $payment = Payment::where('order_id', $lockedOrder->id)
+                ->where('provider', 'manual')
+                ->where('status', PaymentStatus::Pending)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $this->audit->log('order.manual_completed', $paidOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
+            $paidOrder = $this->orders->markPaymentPaid($payment);
+            if ($paidOrder->order_status !== OrderStatus::Processing || $paidOrder->payment_status !== PaymentStatus::Paid) {
+                throw new InvalidArgumentException('Only newly paid manual orders can be completed.');
+            }
 
-        return $paidOrder->fresh(['payments']);
+            $paidOrder->update(['order_status' => OrderStatus::Completed]);
+
+            SendTelegramReceipt::dispatch($paidOrder->getKey())->onQueue('notifications')->afterCommit();
+
+            $this->audit->log('order.manual_completed', $paidOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
+
+            return $paidOrder->fresh(['payments']);
+        }, 5);
     }
 
     public function canResendReceipt(Order $order): bool
