@@ -87,6 +87,103 @@ class ExampleTest extends TestCase
             ->assertDontSee('Kategori Terhapus');
     }
 
+    public function test_featured_offer_selects_available_public_product_only(): void
+    {
+        $category = Category::factory()->create([
+            'name' => 'Akun Premium',
+            'slug' => 'akun-premium',
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Akun Habis',
+            'description' => 'Produk aktif tetapi stoknya tidak tersedia.',
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Produk Nonaktif',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => false,
+        ]);
+        $deleted = Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Produk Terhapus',
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $deleted->delete();
+        Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Canva Pro Promo',
+            'description' => 'Offer utama dengan stok siap kirim.',
+            'price_amount' => 99000,
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $html = $this->get('/')
+            ->assertOk()
+            ->getContent();
+
+        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
+
+        $this->assertStringContainsString('Promo pilihan hari ini', $featuredHtml);
+        $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
+        $this->assertStringContainsString('IDR 99.000', $featuredHtml);
+        $this->assertStringContainsString('Stok siap 3', $featuredHtml);
+        $this->assertStringContainsString('Chat support untuk beli', $featuredHtml);
+        $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
+        $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
+        $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
+    }
+
+    public function test_featured_offer_has_safe_empty_state_without_suitable_product(): void
+    {
+        Product::factory()->create([
+            'name' => 'Akun Habis',
+            'stock' => 2,
+            'reserved_stock' => 2,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Produk Nonaktif Siap',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => false,
+        ]);
+
+        $html = $this->get('/')
+            ->assertOk()
+            ->getContent();
+
+        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
+
+        $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
+        $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
+        $this->assertStringNotContainsString('Chat support untuk beli', $featuredHtml);
+        $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
+        $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
+    }
+
+    public function test_category_controls_link_to_ordered_catalog_sections(): void
+    {
+        $later = Category::factory()->create(['name' => 'AI Tools', 'slug' => 'ai-tools', 'sort_order' => 20, 'is_active' => true]);
+        $first = Category::factory()->create(['name' => 'Akun Premium', 'slug' => 'akun-premium', 'sort_order' => 10, 'is_active' => true]);
+        Product::factory()->create(['category_id' => $later->id, 'name' => 'Produk AI', 'is_active' => true]);
+        Product::factory()->create(['category_id' => $first->id, 'name' => 'Produk Premium', 'is_active' => true]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSeeInOrder(['href="#category-akun-premium"', 'href="#category-ai-tools"'], false)
+            ->assertSee('id="category-akun-premium"', false)
+            ->assertSee('id="category-ai-tools"', false);
+    }
+
     public function test_out_of_stock_products_are_deprioritized_and_not_presented_as_ready_to_buy(): void
     {
         Product::factory()->create([
@@ -108,6 +205,20 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
             ->assertSee('Stok habis')
-            ->assertSee('Tanya stok');
+            ->assertSee('Tanya stok ke support')
+            ->assertSee('Chat support untuk beli')
+            ->assertSee('checkout/detail publik belum dibuka')
+            ->assertSee('href="#support"', false);
+    }
+
+    private function htmlBetween(string $html, string $start, string $end): string
+    {
+        $startPosition = strpos($html, $start);
+        $this->assertNotFalse($startPosition, "Missing start marker [{$start}].");
+
+        $endPosition = strpos($html, $end, $startPosition);
+        $this->assertNotFalse($endPosition, "Missing end marker [{$end}].");
+
+        return substr($html, $startPosition, $endPosition - $startPosition);
     }
 }

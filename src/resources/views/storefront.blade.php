@@ -5,6 +5,14 @@
     $canonicalUrl = url('/');
     $telegramUsername = config('services.telegram.admin_username');
     $supportHref = config('services.telegram.admin_contact_url') ?: ($telegramUsername ? 'https://t.me/'.ltrim($telegramUsername, '@') : null);
+    $supportDestination = '#support';
+    $stockAvailable = fn ($product) => max(0, (int) $product->stock - (int) $product->reserved_stock);
+    $categoryAnchor = fn ($category) => 'category-'.($category->slug ?: $category->id);
+    $featuredStock = $featuredProduct ? $stockAvailable($featuredProduct) : 0;
+    $featuredImageUrl = $featuredProduct && $featuredProduct->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($featuredProduct->image_path) : null;
+    $categoriesWithProducts = $categories->filter(fn ($category) => $products->contains('category_id', $category->id));
+    $featuredCategoryDestination = $featuredProduct && $featuredProduct->category && $categoriesWithProducts->contains('id', $featuredProduct->category_id) ? '#'.$categoryAnchor($featuredProduct->category) : '#products';
+    $productsWithoutVisibleCategory = $products->reject(fn ($product) => $product->category_id && $categories->contains('id', $product->category_id));
     $benefits = [
         ['title' => 'Produk digital siap pakai', 'body' => 'Katalog difokuskan pada kebutuhan produktivitas, akun digital, dan akses layanan yang praktis.'],
         ['title' => 'Pembayaran jelas', 'body' => 'Instruksi pembayaran ditampilkan sebelum konfirmasi sehingga pelanggan tahu langkah berikutnya.'],
@@ -76,7 +84,7 @@
                         <p class="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Preview katalog</p>
                         <div class="mt-5 space-y-3">
                             @forelse ($categories as $category)
-                                <a href="#products" class="flex min-h-14 items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 text-left transition hover:border-cyan-300/50">
+                                <a href="{{ $products->contains('category_id', $category->id) ? '#'.$categoryAnchor($category) : '#products' }}" class="flex min-h-14 items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 text-left transition hover:border-cyan-300/50">
                                     <span>
                                         <span class="block font-semibold text-white">{{ $category->name }}</span>
                                         @if ($category->description)
@@ -96,14 +104,55 @@
                 </div>
             </section>
 
+            <section id="featured-offer" class="bg-slate-950 px-5 pb-16 text-white sm:px-8 lg:px-10 lg:pb-24">
+                <div class="mx-auto max-w-7xl overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-white/10 shadow-2xl shadow-slate-950/30">
+                    @if ($featuredProduct)
+                        <div class="grid gap-0 lg:grid-cols-[0.92fr_1.08fr]">
+                            <div class="bg-gradient-to-br from-cyan-300/20 via-white/10 to-slate-950 p-6 sm:p-8">
+                                @if ($featuredImageUrl)
+                                    <img src="{{ $featuredImageUrl }}" alt="{{ $featuredProduct->name }}" class="aspect-[4/3] w-full rounded-[1.5rem] object-cover shadow-xl" loading="eager">
+                                @else
+                                    <div class="flex aspect-[4/3] w-full items-center justify-center rounded-[1.5rem] bg-gradient-to-br from-cyan-200 via-white to-slate-100 p-6 text-center text-sm font-black uppercase tracking-[0.2em] text-cyan-900 shadow-xl">Gambar promo menyusul</div>
+                                @endif
+                            </div>
+                            <div class="flex flex-col justify-center p-6 sm:p-8 lg:p-10">
+                                <p class="text-sm font-bold uppercase tracking-[0.24em] text-cyan-200">Promo pilihan hari ini</p>
+                                @if ($featuredProduct->category)
+                                    <a href="{{ $featuredCategoryDestination }}" class="mt-4 inline-flex w-fit min-h-11 items-center rounded-full border border-cyan-300/30 px-4 text-sm font-bold text-cyan-100 hover:border-cyan-200">Kategori {{ $featuredProduct->category->name }}</a>
+                                @endif
+                                <h2 class="mt-5 text-3xl font-black tracking-tight sm:text-4xl">{{ $featuredProduct->name }}</h2>
+                                <p class="mt-4 max-w-2xl leading-7 text-slate-300">{{ $featuredProduct->description }}</p>
+                                <div class="mt-6 flex flex-wrap items-center gap-3">
+                                    <span class="rounded-full bg-white px-4 py-2 text-2xl font-black text-slate-950">{{ \App\Support\Money::idr($featuredProduct->price_amount) }}</span>
+                                    <span class="rounded-full bg-emerald-300/15 px-4 py-2 text-sm font-bold text-emerald-100">Stok siap {{ $featuredStock }}</span>
+                                </div>
+                                <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+                                    <a href="{{ $supportDestination }}" class="inline-flex min-h-12 items-center justify-center rounded-full bg-cyan-300 px-6 font-bold text-slate-950 hover:bg-cyan-200">Chat support untuk beli</a>
+                                    <a href="#products" class="inline-flex min-h-12 items-center justify-center rounded-full border border-white/20 px-6 font-bold text-white hover:border-white/50">Bandingkan produk lain</a>
+                                </div>
+                                <p class="mt-4 text-sm leading-6 text-slate-400">Checkout publik belum tersedia di halaman ini, jadi pembelian diarahkan jelas ke support toko.</p>
+                            </div>
+                        </div>
+                    @else
+                        <div class="p-8 text-center sm:p-12">
+                            <p class="text-sm font-bold uppercase tracking-[0.24em] text-cyan-200">Promo pilihan hari ini</p>
+                            <h2 class="mt-4 text-3xl font-black tracking-tight">Promo pilihan menunggu stok siap.</h2>
+                            <p class="mx-auto mt-4 max-w-2xl leading-7 text-slate-300">Belum ada produk aktif dengan stok tersedia untuk dijadikan offer utama. Katalog tetap bisa dibaca, dan pelanggan dapat menghubungi support untuk rekomendasi.</p>
+                            <a href="{{ $supportDestination }}" class="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-cyan-300 px-6 font-bold text-slate-950 hover:bg-cyan-200">Minta rekomendasi ke support</a>
+                        </div>
+                    @endif
+                </div>
+            </section>
+
             <section id="products" class="bg-slate-50 px-5 py-16 text-slate-950 sm:px-8 lg:px-10 lg:py-24">
                 <div class="mx-auto max-w-7xl">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p class="text-sm font-bold uppercase tracking-[0.2em] text-cyan-700">Katalog</p>
                             <h2 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Produk digital pilihan</h2>
+                            <p class="mt-3 max-w-2xl leading-7 text-slate-600">Pilih kategori untuk lompat ke area produk. Tombol beli saat ini mengarah ke support karena checkout/detail publik belum dibuka.</p>
                         </div>
-                        <a href="#support" class="inline-flex min-h-11 items-center rounded-full border border-slate-300 px-5 text-sm font-bold text-slate-700 hover:border-slate-950 hover:text-slate-950">Tanya stok</a>
+                        <a href="{{ $supportDestination }}" class="inline-flex min-h-11 items-center rounded-full border border-slate-300 px-5 text-sm font-bold text-slate-700 hover:border-slate-950 hover:text-slate-950">Tanya stok ke support</a>
                     </div>
 
                     @if ($products->isEmpty())
@@ -111,41 +160,109 @@
                             <p class="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-cyan-100 text-sm font-black uppercase tracking-[0.18em] text-cyan-800">Produk</p>
                             <h3 class="mt-6 text-2xl font-black">Katalog publik sedang disiapkan.</h3>
                             <p class="mx-auto mt-3 max-w-2xl text-base leading-7 text-slate-600">Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Sambil menunggu, pelanggan bisa menghubungi support untuk rekomendasi produk digital yang tersedia.</p>
-                            <a href="#support" class="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 font-bold text-white hover:bg-slate-800">Hubungi support</a>
+                            <a href="{{ $supportDestination }}" class="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 font-bold text-white hover:bg-slate-800">Hubungi support</a>
                         </div>
                     @else
-                        <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                            @foreach ($products as $product)
+                        @if ($categoriesWithProducts->isNotEmpty())
+                            <nav aria-label="Kategori katalog" class="mt-8 flex gap-3 overflow-x-auto pb-2">
+                                @foreach ($categoriesWithProducts as $category)
+                                    <a href="#{{ $categoryAnchor($category) }}" class="inline-flex min-h-11 shrink-0 items-center rounded-full border border-cyan-200 bg-white px-5 text-sm font-bold text-cyan-800 shadow-sm hover:border-cyan-500">
+                                        {{ $category->name }}
+                                    </a>
+                                @endforeach
+                            </nav>
+                        @endif
+
+                        <div class="mt-10 space-y-12">
+                            @foreach ($categoriesWithProducts as $category)
                                 @php
-                                    $availableStock = max(0, (int) $product->stock - (int) $product->reserved_stock);
-                                    $imageUrl = $product->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($product->image_path) : null;
+                                    $categoryProducts = $products->where('category_id', $category->id);
                                 @endphp
-                                <article class="flex h-full flex-col overflow-hidden rounded-[1.5rem] border {{ $availableStock > 0 ? 'border-slate-200 bg-white' : 'border-amber-200 bg-slate-50 opacity-90' }} shadow-sm">
-                                    @if ($imageUrl)
-                                        <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="aspect-[4/3] w-full object-cover" loading="lazy">
-                                    @else
-                                        <div class="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-cyan-100 via-white to-slate-100 p-6 text-center text-sm font-bold uppercase tracking-[0.18em] text-cyan-800">Gambar produk menyusul</div>
-                                    @endif
-                                    <div class="flex flex-1 flex-col p-5">
-                                        <div class="flex items-start justify-between gap-3">
-                                            <div>
-                                                @if ($product->category)
-                                                    <p class="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">{{ $product->category->name }}</p>
-                                                @endif
-                                                <h3 class="mt-2 text-xl font-black">{{ $product->name }}</h3>
-                                            </div>
-                                            <span class="rounded-full {{ $availableStock > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800' }} px-3 py-1 text-xs font-bold">
-                                                {{ $availableStock > 0 ? 'Stok '.$availableStock : 'Stok habis' }}
-                                            </span>
+                                <section id="{{ $categoryAnchor($category) }}" class="scroll-mt-24">
+                                    <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                        <div>
+                                            <p class="text-sm font-bold uppercase tracking-[0.18em] text-cyan-700">Kategori</p>
+                                            <h3 class="text-2xl font-black">{{ $category->name }}</h3>
                                         </div>
-                                        <p class="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{{ $product->description }}</p>
-                                        <div class="mt-5 flex items-center justify-between gap-3">
-                                            <p class="text-2xl font-black">{{ \App\Support\Money::idr($product->price_amount) }}</p>
-                                            <a href="#support" class="inline-flex min-h-11 items-center rounded-full bg-slate-950 px-4 text-sm font-bold text-white hover:bg-slate-800">{{ $availableStock > 0 ? 'Minat beli' : 'Tanya stok' }}</a>
-                                        </div>
+                                        @if ($category->description)
+                                            <p class="max-w-2xl text-sm leading-6 text-slate-600">{{ $category->description }}</p>
+                                        @endif
                                     </div>
-                                </article>
+                                    <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                                        @foreach ($categoryProducts as $product)
+                                            @php
+                                                $cardStock = $stockAvailable($product);
+                                                $imageUrl = $product->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($product->image_path) : null;
+                                            @endphp
+                                            <article class="flex h-full flex-col overflow-hidden rounded-[1.5rem] border {{ $cardStock > 0 ? 'border-slate-200 bg-white' : 'border-amber-200 bg-slate-50 opacity-90' }} shadow-sm">
+                                                @if ($imageUrl)
+                                                    <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="aspect-[4/3] w-full object-cover" loading="lazy">
+                                                @else
+                                                    <div class="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-cyan-100 via-white to-slate-100 p-6 text-center text-sm font-bold uppercase tracking-[0.18em] text-cyan-800">Gambar produk menyusul</div>
+                                                @endif
+                                                <div class="flex flex-1 flex-col p-5">
+                                                    <div class="flex items-start justify-between gap-3">
+                                                        <div>
+                                                            <p class="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">{{ $category->name }}</p>
+                                                            <h4 class="mt-2 text-xl font-black">{{ $product->name }}</h4>
+                                                        </div>
+                                                        <span class="rounded-full {{ $cardStock > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800' }} px-3 py-1 text-xs font-bold">
+                                                            {{ $cardStock > 0 ? 'Stok '.$cardStock : 'Stok habis' }}
+                                                        </span>
+                                                    </div>
+                                                    <p class="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{{ $product->description }}</p>
+                                                    <div class="mt-5 flex items-center justify-between gap-3">
+                                                        <p class="text-2xl font-black">{{ \App\Support\Money::idr($product->price_amount) }}</p>
+                                                        <a href="{{ $supportDestination }}" class="inline-flex min-h-11 items-center rounded-full bg-slate-950 px-4 text-sm font-bold text-white hover:bg-slate-800">{{ $cardStock > 0 ? 'Chat support untuk beli' : 'Tanya stok ke support' }}</a>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        @endforeach
+                                    </div>
+                                </section>
                             @endforeach
+
+                            @if ($productsWithoutVisibleCategory->isNotEmpty())
+                                <section id="category-lainnya" class="scroll-mt-24">
+                                    <div class="mb-5">
+                                        <p class="text-sm font-bold uppercase tracking-[0.18em] text-cyan-700">Kategori</p>
+                                        <h3 class="text-2xl font-black">Pilihan lainnya</h3>
+                                    </div>
+                                    <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                                        @foreach ($productsWithoutVisibleCategory as $product)
+                                            @php
+                                                $cardStock = $stockAvailable($product);
+                                                $imageUrl = $product->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($product->image_path) : null;
+                                            @endphp
+                                            <article class="flex h-full flex-col overflow-hidden rounded-[1.5rem] border {{ $cardStock > 0 ? 'border-slate-200 bg-white' : 'border-amber-200 bg-slate-50 opacity-90' }} shadow-sm">
+                                                @if ($imageUrl)
+                                                    <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="aspect-[4/3] w-full object-cover" loading="lazy">
+                                                @else
+                                                    <div class="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-cyan-100 via-white to-slate-100 p-6 text-center text-sm font-bold uppercase tracking-[0.18em] text-cyan-800">Gambar produk menyusul</div>
+                                                @endif
+                                                <div class="flex flex-1 flex-col p-5">
+                                                    <div class="flex items-start justify-between gap-3">
+                                                        <div>
+                                                            @if ($product->category)
+                                                                <p class="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">{{ $product->category->name }}</p>
+                                                            @endif
+                                                            <h4 class="mt-2 text-xl font-black">{{ $product->name }}</h4>
+                                                        </div>
+                                                        <span class="rounded-full {{ $cardStock > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800' }} px-3 py-1 text-xs font-bold">
+                                                            {{ $cardStock > 0 ? 'Stok '.$cardStock : 'Stok habis' }}
+                                                        </span>
+                                                    </div>
+                                                    <p class="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{{ $product->description }}</p>
+                                                    <div class="mt-5 flex items-center justify-between gap-3">
+                                                        <p class="text-2xl font-black">{{ \App\Support\Money::idr($product->price_amount) }}</p>
+                                                        <a href="{{ $supportDestination }}" class="inline-flex min-h-11 items-center rounded-full bg-slate-950 px-4 text-sm font-bold text-white hover:bg-slate-800">{{ $cardStock > 0 ? 'Chat support untuk beli' : 'Tanya stok ke support' }}</a>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        @endforeach
+                                    </div>
+                                </section>
+                            @endif
                         </div>
                     @endif
                 </div>

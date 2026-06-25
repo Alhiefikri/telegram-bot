@@ -12,6 +12,14 @@ Route::get('/', function () {
         ->limit(8)
         ->get();
 
+    $featuredProduct = Product::query()
+        ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
+        ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
+        ->publicVisible()
+        ->whereColumn('stock', '>', 'reserved_stock')
+        ->storefrontOrder()
+        ->first();
+
     $products = Product::query()
         ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
         ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
@@ -23,5 +31,6 @@ Route::get('/', function () {
     return view('storefront', [
         'categories' => $categories,
         'products' => $products,
+        'featuredProduct' => $featuredProduct,
     ]);
 })->name('storefront.home');
