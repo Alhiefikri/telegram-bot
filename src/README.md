@@ -289,13 +289,15 @@ Opsi tersedia:
 - `--queue-schema`: cek tabel penting untuk database queue/session/cache;
 - `--supervisor`: cek proses yang dikelola Supervisor sesuai konfigurasi command.
 
-Smoke check aset admin sebelum deploy:
+Smoke check admin sebelum deploy:
 
 ```bash
 ../scripts/smoke-admin-assets.sh
+../scripts/smoke-admin-rendering.sh
 ```
 
-Command ini menjalankan `npm run build`, lalu memastikan `public/build/manifest.json` berisi entry theme Filament admin yang dibutuhkan `/admin/login`.
+`smoke-admin-assets.sh` menjalankan `npm run build`, lalu memastikan `public/build/manifest.json` berisi entry theme Filament admin yang dibutuhkan `/admin/login`.
+`smoke-admin-rendering.sh` menjalankan build, membuat database SQLite sementara, login ke admin lewat browser, lalu memastikan Dashboard dan Categories tidak memiliki icon Filament berukuran abnormal atau scroll height kosong yang berlebihan.
 
 ### 5.6 Expire pending orders
 

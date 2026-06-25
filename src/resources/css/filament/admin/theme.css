@@ -1,7 +1,4 @@
-@import '../../../../vendor/filament/filament/resources/css/theme.css';
-
-@source '../../../../app/Filament/**/*.php';
-@source '../../../../resources/views/filament/**/*.blade.php';
+@import '../../../../vendor/filament/filament/dist/theme.css';
 
 :root {
     --nb-paper: #fff8df;
@@ -16,6 +13,8 @@
     --nb-font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
     --nb-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
     --nb-meta-tracking: 0.12em;
+    --nb-danger: #a60036;
+    --nb-danger-surface: #ffe1ec;
     --nb-control-weight: 800;
     --nb-border: 2px solid var(--nb-ink);
     --nb-border-thin: 1px solid var(--nb-ink);
@@ -99,6 +98,19 @@
         font-weight: var(--nb-control-weight);
         letter-spacing: var(--nb-meta-tracking);
         text-transform: uppercase;
+    }
+
+    .fi-fo-field .fi-fo-field-label-content,
+    .fi-fo-field .fi-fo-field-label {
+        color: var(--nb-ink);
+        font-weight: var(--nb-control-weight);
+    }
+
+    .fi-fo-field .fi-fo-field-label-required-mark,
+    .fi-fo-field .fi-fo-field-wrp-error-message,
+    .fi-fo-file-upload-error-message {
+        color: var(--nb-danger);
+        font-weight: var(--nb-control-weight);
     }
 
     .fi-section,
@@ -200,11 +212,13 @@
         color: var(--nb-ink);
     }
 
+    input.fi-input,
     .fi-input,
     .fi-select-input,
     .fi-textarea {
         color: var(--nb-ink);
         font-weight: 650;
+        caret-color: var(--nb-ink);
     }
 
     .fi-input::placeholder,
