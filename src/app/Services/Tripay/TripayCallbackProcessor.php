@@ -94,7 +94,7 @@ class TripayCallbackProcessor
 
             match ($status) {
                 'PAID' => $this->orders->markPaymentPaid($payment),
-                'EXPIRED' => $this->orders->expirePendingOrder($payment->order),
+                'EXPIRED' => $this->orders->markPaymentExpired($payment),
                 'FAILED' => $this->orders->cancelPendingOrder($payment->order),
                 'REFUND' => $this->orders->markPaymentRefunded($payment),
                 default => null,

@@ -83,6 +83,14 @@ class OrderStateMachine
         }, 5);
     }
 
+    public function markPaymentExpired(Payment $payment): ?Order
+    {
+        $initial = Payment::findOrFail($payment->id);
+        $order = Order::whereKey($initial->order_id)->firstOrFail();
+
+        return $this->releasePending($order, OrderStatus::Expired, PaymentStatus::Expired, false);
+    }
+
     private function markLatePaymentPaid(Payment $payment, Order $order): Order
     {
         if ($payment->status === PaymentStatus::Refunded) {

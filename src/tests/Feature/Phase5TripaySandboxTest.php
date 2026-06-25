@@ -84,6 +84,60 @@ class Phase5TripaySandboxTest extends TestCase
         $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->count());
     }
 
+    public function test_expired_callback_marks_order_expired_payment_expired_and_releases_reservation_once(): void
+    {
+        $this->fakeTripayCreate();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'tripay');
+        $payment = $order->payments()->first();
+        $payload = $this->tripayPayload($payment->merchant_ref, $payment->amount, 'TREF-EXPIRED');
+        $payload['status'] = 'EXPIRED';
+
+        $this->postTripayCallback($payload)->assertOk()->assertJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Expired, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $event = PaymentEvent::first();
+        $this->assertSame(PaymentEventType::Callback, $event->event_type);
+        $this->assertSame('TREF-EXPIRED', $event->provider_reference);
+        $this->assertSame('EXPIRED', $event->provider_status);
+        $this->assertNotNull($event->processed_at);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $this->postTripayCallback($payload)->assertOk();
+
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->count());
+        $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->count());
+    }
+
+    public function test_failed_callback_cancels_order_marks_payment_failed_and_releases_reservation_once(): void
+    {
+        $this->fakeTripayCreate();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'BRIVA', 'tripay');
+        $payment = $order->payments()->first();
+        $payload = $this->tripayPayload($payment->merchant_ref, $payment->amount, 'TREF-FAILED');
+        $payload['status'] = 'FAILED';
+
+        $this->postTripayCallback($payload)->assertOk()->assertJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Failed, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $event = PaymentEvent::first();
+        $this->assertSame(PaymentEventType::Callback, $event->event_type);
+        $this->assertSame('TREF-FAILED', $event->provider_reference);
+        $this->assertSame('FAILED', $event->provider_status);
+        $this->assertNotNull($event->processed_at);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $this->postTripayCallback($payload)->assertOk();
+
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->count());
+        $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->count());
+    }
+
     public function test_invalid_callback_signature_logs_raw_event_and_is_forbidden(): void
     {
         $this->fakeTripayCreate();
