@@ -1,0 +1,251 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "Warung AI Logo" [ref=e5] [cursor=pointer]:
+        - /url: http://127.0.0.1:8012
+        - img "Warung AI Logo" [ref=e7]
+      - navigation "Navigasi utama" [ref=e8]:
+        - link "Products" [ref=e9] [cursor=pointer]:
+          - /url: "#products"
+        - link "Features" [ref=e10] [cursor=pointer]:
+          - /url: "#features"
+        - link "Pricing" [ref=e11] [cursor=pointer]:
+          - /url: "#pricing"
+        - link "User Dashboard" [ref=e12] [cursor=pointer]:
+          - /url: http://127.0.0.1:8012/admin/login
+        - link "Contact Support" [ref=e13] [cursor=pointer]:
+          - /url: "#support"
+      - link "Dashboard" [ref=e14] [cursor=pointer]:
+        - /url: http://127.0.0.1:8012/admin/login
+  - main [ref=e15]:
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - paragraph [ref=e18]: Platform AI Premium Indonesia
+        - heading "Tingkatkan Bisnis dengan AI Super" [level=1] [ref=e19]
+        - paragraph [ref=e20]: Dapatkan akses langsung ke model AI tercanggih dan lisensi premium. Tingkatkan produktivitas Anda tanpa batas, bayar instan via QRIS. Pilih produk AI premium, cek stok, lalu lanjutkan pembelian dengan bantuan support yang siap membantu.
+        - generic [ref=e21]:
+          - link "Mulai Belanja" [ref=e22] [cursor=pointer]:
+            - /url: "#products"
+            - text: Mulai Belanja
+            - generic [ref=e23]: →
+          - link "Contact Support" [ref=e24] [cursor=pointer]:
+            - /url: "#support"
+        - generic [ref=e25]:
+          - generic [ref=e27]: Pembayaran aman
+          - generic [ref=e29]: Pengiriman cepat
+          - generic [ref=e31]: Support Telegram
+      - generic [ref=e33]:
+        - paragraph [ref=e35]: SUPER DEAL
+        - generic [ref=e36]:
+          - link "Streaming Produk langganan streaming populer. →" [ref=e37] [cursor=pointer]:
+            - /url: "#category-streaming"
+            - generic [ref=e38]:
+              - generic [ref=e39]: Streaming
+              - generic [ref=e40]: Produk langganan streaming populer.
+            - generic [ref=e41]: →
+          - link "Tools Digital Produk tools digital untuk produktivitas. →" [ref=e42] [cursor=pointer]:
+            - /url: "#category-tools-digital"
+            - generic [ref=e43]:
+              - generic [ref=e44]: Tools Digital
+              - generic [ref=e45]: Produk tools digital untuk produktivitas.
+            - generic [ref=e46]: →
+    - generic [ref=e49]:
+      - generic [ref=e51]: Gambar promo menyusul
+      - generic [ref=e52]:
+        - paragraph [ref=e53]: FLASH SALE
+        - link "Kategori Tools Digital" [ref=e54] [cursor=pointer]:
+          - /url: "#category-tools-digital"
+        - heading "Canva Pro 1 Bulan" [level=2] [ref=e55]
+        - paragraph [ref=e56]: Akses Canva Pro 1 bulan sebagai dummy item katalog.
+        - generic [ref=e57]:
+          - generic [ref=e58]: Rp25.000
+          - generic [ref=e59]: Sisa 35
+        - generic [ref=e60]:
+          - link "Sikat Sekarang" [ref=e61] [cursor=pointer]:
+            - /url: "#support"
+            - text: Sikat Sekarang
+            - generic [ref=e62]: →
+          - link "Lihat katalog" [ref=e63] [cursor=pointer]:
+            - /url: "#products"
+    - generic [ref=e65]:
+      - generic [ref=e66]:
+        - generic [ref=e67]:
+          - paragraph [ref=e68]: Katalog Produk
+          - heading "Produk AI premium siap pakai" [level=2] [ref=e69]
+          - paragraph [ref=e70]: Pilih tools AI, lisensi premium, dan produk digital pilihan. Stok dan harga tampil jelas sebelum Anda menghubungi support.
+        - generic [ref=e71]:
+          - generic [ref=e72]: Cari produk
+          - textbox "Cari produk" [ref=e73]:
+            - /placeholder: Cari produk...
+          - generic: ⌕
+      - navigation "Kategori katalog" [ref=e74]:
+        - link "Streaming" [ref=e75] [cursor=pointer]:
+          - /url: "#category-streaming"
+        - link "Tools Digital" [ref=e76] [cursor=pointer]:
+          - /url: "#category-tools-digital"
+      - generic [ref=e78]:
+        - article [ref=e79]:
+          - generic [ref=e80]:
+            - generic [ref=e81]: Gambar produk menyusul
+            - generic [ref=e82]: Tools Digital
+            - generic [ref=e83]: Sisa 35
+          - generic [ref=e84]:
+            - heading "Canva Pro 1 Bulan" [level=3] [ref=e85]
+            - paragraph [ref=e86]: Akses Canva Pro 1 bulan sebagai dummy item katalog.
+            - generic [ref=e87]:
+              - paragraph [ref=e88]: Rp25.000
+              - link "Sikat Sekarang" [ref=e89] [cursor=pointer]:
+                - /url: "#support"
+        - article [ref=e90]:
+          - generic [ref=e91]:
+            - generic [ref=e92]: Gambar produk menyusul
+            - generic [ref=e93]: Streaming
+            - generic [ref=e94]: Sisa 25
+          - generic [ref=e95]:
+            - heading "Netflix Premium 1 Bulan" [level=3] [ref=e96]
+            - paragraph [ref=e97]: Akun Netflix Premium private 1 bulan untuk testing katalog bot.
+            - generic [ref=e98]:
+              - paragraph [ref=e99]: Rp45.000
+              - link "Sikat Sekarang" [ref=e100] [cursor=pointer]:
+                - /url: "#support"
+        - article [ref=e101]:
+          - generic [ref=e102]:
+            - generic [ref=e103]: Gambar produk menyusul
+            - generic [ref=e104]: Streaming
+            - generic [ref=e105]: Sisa 40
+          - generic [ref=e106]:
+            - heading "Netflix Sharing 1 Bulan" [level=3] [ref=e107]
+            - paragraph [ref=e108]: Slot sharing Netflix 1 bulan. Produk dummy untuk simulasi order.
+            - generic [ref=e109]:
+              - paragraph [ref=e110]: Rp28.000
+              - link "Sikat Sekarang" [ref=e111] [cursor=pointer]:
+                - /url: "#support"
+        - article [ref=e112]:
+          - generic [ref=e113]:
+            - generic [ref=e114]: Gambar produk menyusul
+            - generic [ref=e115]: Streaming
+            - generic [ref=e116]: Sisa 30
+          - generic [ref=e117]:
+            - heading "Spotify Premium 1 Bulan" [level=3] [ref=e118]
+            - paragraph [ref=e119]: Paket Spotify Premium 1 bulan untuk data contoh katalog.
+            - generic [ref=e120]:
+              - paragraph [ref=e121]: Rp30.000
+              - link "Sikat Sekarang" [ref=e122] [cursor=pointer]:
+                - /url: "#support"
+        - article [ref=e123]:
+          - generic [ref=e124]:
+            - generic [ref=e125]: Gambar produk menyusul
+            - generic [ref=e126]: Streaming
+            - generic [ref=e127]: Sisa 20
+          - generic [ref=e128]:
+            - heading "YouTube Premium 1 Bulan" [level=3] [ref=e129]
+            - paragraph [ref=e130]: Paket YouTube Premium 1 bulan untuk simulasi produk digital.
+            - generic [ref=e131]:
+              - paragraph [ref=e132]: Rp35.000
+              - link "Sikat Sekarang" [ref=e133] [cursor=pointer]:
+                - /url: "#support"
+    - generic [ref=e135]:
+      - generic [ref=e136]:
+        - paragraph [ref=e137]: Features
+        - heading "Platform AI premium Indonesia." [level=2] [ref=e138]
+        - paragraph [ref=e139]: Akses cepat, stok transparan, dan dukungan order yang jelas untuk produk digital.
+      - generic [ref=e140]:
+        - generic [ref=e141]:
+          - heading "Produk premium" [level=3] [ref=e142]
+          - paragraph [ref=e143]: Katalog berisi tools AI, lisensi, dan layanan digital yang dikurasi untuk kebutuhan kerja modern.
+        - generic [ref=e144]:
+          - heading "Akses cepat" [level=3] [ref=e145]
+          - paragraph [ref=e146]: Status stok tampil jelas dan proses bantuan order diarahkan ke kanal support toko.
+        - generic [ref=e147]:
+          - heading "Support responsif" [level=3] [ref=e148]
+          - paragraph [ref=e149]: Tim support membantu pertanyaan stok, pembayaran, dan pengiriman akses digital.
+    - generic [ref=e151]:
+      - generic [ref=e152]:
+        - paragraph [ref=e153]: Pricing
+        - heading "Harga transparan sebelum checkout." [level=2] [ref=e154]
+        - paragraph [ref=e155]: Pelanggan memilih produk, mengecek ketersediaan, lalu mengikuti instruksi pembayaran yang diberikan pada kanal checkout atau support. Pembayaran diproses sesuai metode yang tersedia tanpa mengubah webhook pembayaran.
+        - generic [ref=e156]:
+          - generic [ref=e157]:
+            - generic [ref=e158]: "1"
+            - paragraph [ref=e159]: Pilih produk dan pastikan stok masih tersedia.
+          - generic [ref=e160]:
+            - generic [ref=e161]: "2"
+            - paragraph [ref=e162]: Terima instruksi nominal, metode, dan batas waktu pembayaran.
+          - generic [ref=e163]:
+            - generic [ref=e164]: "3"
+            - paragraph [ref=e165]: Setelah pembayaran terkonfirmasi, order masuk ke proses pengiriman digital.
+      - generic [ref=e166]:
+        - generic [ref=e167]:
+          - paragraph [ref=e168]: Pengiriman digital
+          - heading "Akses dikirim setelah pembayaran terkonfirmasi." [level=3] [ref=e169]
+          - paragraph [ref=e170]: Produk digital disiapkan setelah status pembayaran valid dan stok tervalidasi. Jika ada antrean verifikasi manual, support akan membantu memberi status order melalui kanal yang tersedia.
+        - generic [ref=e171]:
+          - paragraph [ref=e172]: Contact Support
+          - heading "Bot dan admin Telegram membantu status order." [level=3] [ref=e173]
+          - paragraph [ref=e174]: Telegram dipakai untuk notifikasi dan bantuan order yang sudah berjalan. Halaman ini hanya menjelaskan kanal bantuan; perilaku bot dan webhook Telegram tidak berubah.
+    - generic [ref=e176]:
+      - paragraph [ref=e177]: Pertanyaan Populer (FAQ)
+      - heading "Masih ragu? Temukan jawabannya di sini." [level=2] [ref=e178]
+      - generic [ref=e179]:
+        - group [ref=e180]:
+          - generic "Bagaimana cara mendapatkan produk setelah membayar? ⌄" [ref=e181] [cursor=pointer]:
+            - text: Bagaimana cara mendapatkan produk setelah membayar?
+            - generic [ref=e182]: ⌄
+          - paragraph [ref=e183]: Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia. Support akan membantu jika order memerlukan verifikasi manual.
+        - group [ref=e184]:
+          - generic "Apakah produk di Warung AI resmi dan aman? ⌄" [ref=e185] [cursor=pointer]:
+            - text: Apakah produk di Warung AI resmi dan aman?
+            - generic [ref=e186]: ⌄
+        - group [ref=e187]:
+          - generic "Bagaimana jika pesanan saya bermasalah? ⌄" [ref=e188] [cursor=pointer]:
+            - text: Bagaimana jika pesanan saya bermasalah?
+            - generic [ref=e189]: ⌄
+        - group [ref=e190]:
+          - generic "Apakah saya bisa membeli dalam jumlah besar? ⌄" [ref=e191] [cursor=pointer]:
+            - text: Apakah saya bisa membeli dalam jumlah besar?
+            - generic [ref=e192]: ⌄
+        - group [ref=e193]:
+          - generic "Apakah bot Telegram memproses order dari halaman ini? ⌄" [ref=e194] [cursor=pointer]:
+            - text: Apakah bot Telegram memproses order dari halaman ini?
+            - generic [ref=e195]: ⌄
+    - generic [ref=e197]:
+      - generic [ref=e198]:
+        - paragraph [ref=e199]: Siap Memulai?
+        - heading "Bergabung dengan Ribuan Pengguna Warung AI" [level=2] [ref=e200]
+        - paragraph [ref=e201]: Tingkatkan efisiensi kerja Anda sekarang dengan alat AI terdepan. Gunakan kanal support toko untuk bertanya tentang stok, pembayaran, dan pengiriman produk digital.
+      - generic [ref=e202]:
+        - generic [ref=e203]: Support Telegram segera tersedia
+        - link "User Dashboard" [ref=e204] [cursor=pointer]:
+          - /url: http://127.0.0.1:8012/admin/login
+  - contentinfo [ref=e205]:
+    - generic [ref=e206]:
+      - generic [ref=e207]:
+        - img "Warung AI Logo" [ref=e209]
+        - paragraph [ref=e210]: Elevate your workflow with premium, state-of-the-art AI solutions. All systems operational.
+      - generic [ref=e211]:
+        - heading "Platform" [level=3] [ref=e212]
+        - list [ref=e213]:
+          - listitem [ref=e214]:
+            - link "Products" [ref=e215] [cursor=pointer]:
+              - /url: "#products"
+          - listitem [ref=e216]:
+            - link "Features" [ref=e217] [cursor=pointer]:
+              - /url: "#features"
+          - listitem [ref=e218]:
+            - link "Pricing" [ref=e219] [cursor=pointer]:
+              - /url: "#pricing"
+          - listitem [ref=e220]:
+            - link "User Dashboard" [ref=e221] [cursor=pointer]:
+              - /url: http://127.0.0.1:8012/admin/login
+      - generic [ref=e222]:
+        - heading "Legal" [level=3] [ref=e223]
+        - list [ref=e224]:
+          - listitem [ref=e225]:
+            - link "Contact Support" [ref=e226] [cursor=pointer]:
+              - /url: "#support"
+          - listitem [ref=e227]:
+            - link "FAQ" [ref=e228] [cursor=pointer]:
+              - /url: "#faq"
+    - generic [ref=e229]:
+      - paragraph [ref=e230]: © 2026 Warung AI. All rights reserved.
+      - paragraph [ref=e231]: Powered by WarungAI
