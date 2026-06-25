@@ -180,6 +180,8 @@ console.log(`${label}: ok, text contrast >= 4.5:1`);
 NODE
 }
 
+agent-browser --session "$SESSION_NAME" set viewport 375 900 >/dev/null
+
 agent-browser --session "$SESSION_NAME" open "$BASE_URL/" >/dev/null
 agent-browser --session "$SESSION_NAME" wait --load networkidle >/dev/null
 
@@ -214,18 +216,71 @@ measure_page() {
   local metrics
   metrics=$(agent-browser --session "$SESSION_NAME" eval --stdin <<'JS'
 (() => {
+  const root = document.documentElement;
   const icons = Array.from(document.querySelectorAll('svg.fi-icon, .fi-icon > svg')).map((icon) => {
     const rect = icon.getBoundingClientRect();
     return Math.max(rect.width, rect.height);
   });
 
+  const isVisible = (element) => {
+    if (!element || element.hidden || element.closest('[hidden], [aria-hidden="true"]')) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+
+    return rect.width > 0 && rect.height > 0;
+  };
+
+  const nearestHorizontalScroller = (element) => {
+    for (let current = element.parentElement; current && current !== document.body; current = current.parentElement) {
+      if (current.scrollWidth > current.clientWidth + 1) {
+        return current;
+      }
+    }
+
+    return null;
+  };
+
+  const tableActions = Array.from(document.querySelectorAll('.fi-ta button, .fi-ta a[href]')).filter(isVisible);
+  const unreachableActions = tableActions
+    .map((action) => {
+      const scroller = nearestHorizontalScroller(action);
+      const originalScrollLeft = scroller?.scrollLeft ?? null;
+
+      action.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+      const rect = action.getBoundingClientRect();
+      const reachable = rect.right > 0
+        && rect.left < window.innerWidth
+        && rect.bottom > 0
+        && rect.top < window.innerHeight;
+
+      if (scroller && originalScrollLeft !== null) {
+        scroller.scrollLeft = originalScrollLeft;
+      }
+
+      return reachable ? null : (action.textContent || action.getAttribute('aria-label') || action.href || action.tagName).trim();
+    })
+    .filter(Boolean);
+
   return {
     url: location.href,
     title: document.title,
-    scrollHeight: document.documentElement.scrollHeight,
+    scrollHeight: root.scrollHeight,
     bodyScrollHeight: document.body.scrollHeight,
-    maxIconSize: icons.length ? Math.round(Math.max(...icons)) : 0,
+    scrollWidth: root.scrollWidth,
     viewportHeight: window.innerHeight,
+    viewportWidth: window.innerWidth,
+    maxIconSize: icons.length ? Math.round(Math.max(...icons)) : 0,
+    tableActionCount: tableActions.length,
+    unreachableActions,
   };
 })()
 JS
@@ -241,6 +296,10 @@ if (metrics.url !== expectedUrl) {
   throw new Error(`${label}: expected ${expectedUrl}, got ${metrics.url}`);
 }
 
+if (metrics.scrollWidth > metrics.viewportWidth) {
+  throw new Error(`${label}: document scroll width ${metrics.scrollWidth}px exceeds viewport width ${metrics.viewportWidth}px`);
+}
+
 if (metrics.maxIconSize > 64) {
   throw new Error(`${label}: largest icon is ${metrics.maxIconSize}px, expected <= 64px`);
 }
@@ -249,11 +308,18 @@ if (metrics.scrollHeight > maxScrollHeight || metrics.bodyScrollHeight > maxScro
   throw new Error(`${label}: scroll height ${metrics.scrollHeight}/${metrics.bodyScrollHeight}px exceeds ${maxScrollHeight}px`);
 }
 
-console.log(`${label}: ok, max icon ${metrics.maxIconSize}px, scroll height ${metrics.scrollHeight}px`);
+if (metrics.unreachableActions.length > 0) {
+  throw new Error(`${label}: table actions are not reachable on mobile: ${metrics.unreachableActions.join(', ')}`);
+}
+
+console.log(`${label}: ok, ${metrics.scrollWidth}px document width within ${metrics.viewportWidth}px viewport, ${metrics.tableActionCount} table actions reachable`);
 NODE
 }
 
 measure_page '/admin' 'Dashboard' 2500
 measure_page '/admin/categories' 'Categories list' 2500
+measure_page '/admin/products' 'Products list' 2500
+measure_page '/admin/payments' 'Payments list' 2500
+measure_page '/admin/audit-logs' 'Audit logs list' 2500
 
 printf 'Admin rendering smoke check passed.\n'

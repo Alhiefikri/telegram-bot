@@ -297,7 +297,7 @@ Smoke check admin sebelum deploy:
 ```
 
 `smoke-admin-assets.sh` menjalankan `npm run build`, lalu memastikan `public/build/manifest.json` berisi entry theme Filament admin yang dibutuhkan `/admin/login`.
-`smoke-admin-rendering.sh` menjalankan build, membuat database SQLite sementara, login ke admin lewat browser, lalu memastikan Dashboard dan Categories tidak memiliki icon Filament berukuran abnormal atau scroll height kosong yang berlebihan.
+`smoke-admin-rendering.sh` menjalankan build, membuat database SQLite sementara, login ke admin lewat browser pada viewport 375px, lalu memastikan Dashboard, Categories, Products, Payments, dan Audit Logs tidak memiliki overflow horizontal dokumen, aksi tabel tetap terjangkau, icon Filament tidak berukuran abnormal, atau scroll height kosong yang berlebihan.
 
 ### 5.6 Expire pending orders
 
