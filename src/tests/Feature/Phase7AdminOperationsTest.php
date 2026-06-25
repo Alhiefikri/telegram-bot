@@ -7,20 +7,26 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Filament\Resources\ManualPaymentSettings\Pages\CreateManualPaymentSetting;
 use App\Filament\Resources\Orders\Pages\ListOrders;
+use App\Filament\Resources\Payments\Pages\EditPayment;
 use App\Filament\Resources\Payments\Pages\ListPayments;
+use App\Filament\Resources\Payments\RelationManagers\PaymentEventsRelationManager;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\User;
+use App\Policies\OrderPolicy;
+use App\Policies\PaymentPolicy;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\Tripay\TripayClient;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -41,6 +47,86 @@ class Phase7AdminOperationsTest extends TestCase
 
         Livewire::test(ListOrders::class)->assertCanSeeTableRecords([$order]);
         Livewire::test(ListPayments::class)->assertCanSeeTableRecords([$payment]);
+    }
+
+    public function test_order_and_payment_policy_matrix_by_role(): void
+    {
+        $orderPolicy = new OrderPolicy;
+        $paymentPolicy = new PaymentPolicy;
+        $order = Order::factory()->create();
+        $payment = Payment::factory()->create(['order_id' => $order->id]);
+
+        $expectations = [
+            'owner' => ['role' => UserRole::Owner, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
+            'admin' => ['role' => UserRole::Admin, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
+            'finance' => ['role' => UserRole::Finance, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
+            'support' => ['role' => UserRole::Support, 'view' => true, 'completeManual' => false, 'resendReceipt' => true, 'reconcile' => false],
+            'null-role' => ['role' => null, 'view' => false, 'completeManual' => false, 'resendReceipt' => false, 'reconcile' => false],
+        ];
+
+        foreach ($expectations as $case => $expected) {
+            $user = User::factory()->create(['role' => $expected['role']]);
+
+            $this->assertSame($expected['view'], $orderPolicy->viewAny($user), "{$case} order viewAny");
+            $this->assertSame($expected['view'], $orderPolicy->view($user, $order), "{$case} order view");
+            $this->assertFalse($orderPolicy->create($user), "{$case} order create");
+            $this->assertFalse($orderPolicy->update($user, $order), "{$case} order update");
+            $this->assertFalse($orderPolicy->delete($user, $order), "{$case} order delete");
+            $this->assertSame($expected['completeManual'], $orderPolicy->completeManual($user, $order), "{$case} order completeManual");
+            $this->assertSame($expected['resendReceipt'], $orderPolicy->resendReceipt($user, $order), "{$case} order resendReceipt");
+
+            $this->assertSame($expected['view'], $paymentPolicy->viewAny($user), "{$case} payment viewAny");
+            $this->assertSame($expected['view'], $paymentPolicy->view($user, $payment), "{$case} payment view");
+            $this->assertFalse($paymentPolicy->create($user), "{$case} payment create");
+            $this->assertFalse($paymentPolicy->update($user, $payment), "{$case} payment update");
+            $this->assertFalse($paymentPolicy->delete($user, $payment), "{$case} payment delete");
+            $this->assertSame($expected['reconcile'], $paymentPolicy->reconcile($user, $payment), "{$case} payment reconcile");
+        }
+    }
+
+    public function test_filament_operation_actions_follow_role_policy_and_record_state(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 123]);
+        $manualOrder = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create(['order_id' => $manualOrder->id, 'provider' => 'manual', 'status' => PaymentStatus::Pending]);
+        $paidOrder = Order::factory()->create(['customer_id' => $customer->id, 'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
+        $tripayPayment = Payment::factory()->create(['provider' => 'tripay', 'status' => PaymentStatus::Pending, 'provider_reference' => 'TRX-ACTION']);
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
+        Livewire::test(ListOrders::class)
+            ->assertActionVisible(TestAction::make('completeManual')->table($manualOrder))
+            ->assertActionVisible(TestAction::make('resendReceipt')->table($paidOrder));
+        Livewire::test(ListPayments::class)
+            ->assertActionVisible(TestAction::make('reconcile')->table($tripayPayment));
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Support]));
+        Livewire::test(ListOrders::class)
+            ->assertActionHidden(TestAction::make('completeManual')->table($manualOrder))
+            ->assertActionVisible(TestAction::make('resendReceipt')->table($paidOrder));
+        Livewire::test(ListPayments::class)
+            ->assertActionHidden(TestAction::make('reconcile')->table($tripayPayment));
+    }
+
+    public function test_raw_payment_payload_visibility_by_role(): void
+    {
+        $payment = Payment::factory()->create();
+        PaymentEvent::factory()->create(['payment_id' => $payment->id, 'raw_payload' => ['status' => 'PAID']]);
+
+        foreach ([UserRole::Owner, UserRole::Admin, UserRole::Finance] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]));
+            Livewire::test(PaymentEventsRelationManager::class, [
+                'ownerRecord' => $payment,
+                'pageClass' => EditPayment::class,
+            ])->assertTableColumnVisible('raw_payload');
+        }
+
+        foreach ([UserRole::Support, null] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]));
+            Livewire::test(PaymentEventsRelationManager::class, [
+                'ownerRecord' => $payment,
+                'pageClass' => EditPayment::class,
+            ])->assertTableColumnHidden('raw_payload');
+        }
     }
 
     public function test_resend_receipt_dispatches_notification_job_and_audits(): void

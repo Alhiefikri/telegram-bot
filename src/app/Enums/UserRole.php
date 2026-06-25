@@ -26,7 +26,7 @@ enum UserRole: string
 
     public function canResendReceipts(): bool
     {
-        return in_array($this, [self::Owner, self::Admin, self::Finance], true);
+        return in_array($this, [self::Owner, self::Admin, self::Finance, self::Support], true);
     }
 
     public function canCompleteManualOrders(): bool

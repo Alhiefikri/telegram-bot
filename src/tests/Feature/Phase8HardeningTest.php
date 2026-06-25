@@ -6,6 +6,7 @@ use App\Providers\AppServiceProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
@@ -129,6 +130,97 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('curl --fail', $contents);
     }
 
+    public function test_restore_drill_script_dry_run_accepts_sql_gz_without_mutation(): void
+    {
+        $workspace = $this->makeShellWorkspace('restore');
+        $script = base_path('../scripts/restore-db.sh');
+
+        try {
+            $backups = [
+                $workspace.'/backup.sql' => 'select 1;',
+                $workspace.'/backup.sql.gz' => gzencode('select 1;'),
+                $workspace.'/backup.sql.gz.gpg' => 'encrypted backup placeholder',
+            ];
+
+            foreach ($backups as $backup => $contents) {
+                file_put_contents($backup, $contents);
+
+                $result = $this->runShellScript(['bash', $script, '--dry-run', $backup], [
+                    'COMPOSE' => $workspace.'/compose-must-not-run',
+                ]);
+
+                $this->assertSame(0, $result['exitCode'], $result['stderr']);
+                $this->assertStringContainsString('Restore target:', $result['stdout']);
+                $this->assertStringContainsString('Dry run only; no restore executed.', $result['stdout']);
+                $this->assertFileExists($backup);
+            }
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public function test_smoke_production_script_fails_closed_without_base_url(): void
+    {
+        $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')]);
+
+        $this->assertSame(2, $result['exitCode'], $result['stderr']);
+        $this->assertStringContainsString('BASE_URL or APP_URL is required.', $result['stderr']);
+        $this->assertStringNotContainsString('Smoke check passed', $result['stdout']);
+    }
+
+    public function test_smoke_production_script_fails_closed_on_bad_local_base_url(): void
+    {
+        $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
+            'BASE_URL' => 'http://127.0.0.1:65536',
+            'SMOKE_TIMEOUT' => '1',
+        ]);
+
+        $this->assertNotSame(0, $result['exitCode']);
+        $this->assertStringNotContainsString('Smoke check passed', $result['stdout']);
+    }
+
+    public function test_backup_script_writes_gzip_to_safe_temp_path_with_fake_compose(): void
+    {
+        $workspace = $this->makeShellWorkspace('backup');
+        $backupDir = $workspace.'/backups';
+        $fakeCompose = $workspace.'/fake-compose';
+        $argsFile = $workspace.'/compose-args';
+
+        try {
+            mkdir($backupDir, 0700);
+            $this->writeExecutable($fakeCompose, <<<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FAKE_COMPOSE_ARGS_FILE"
+printf '%s\n' 'create table shell_smoke(id int);'
+SH);
+
+            $result = $this->runShellScript(['bash', base_path('../scripts/backup-db.sh')], [
+                'BACKUP_DIR' => $backupDir,
+                'COMPOSE' => $fakeCompose,
+                'DB_SERVICE' => 'safe-db',
+                'FAKE_COMPOSE_ARGS_FILE' => $argsFile,
+                'POSTGRES_DB' => 'shell_smoke',
+                'POSTGRES_PASSWORD' => 'local-password',
+                'POSTGRES_USER' => 'shell_user',
+            ]);
+
+            $this->assertSame(0, $result['exitCode'], $result['stderr']);
+            $this->assertStringContainsString('Backup written to ', $result['stdout']);
+
+            $backups = glob($backupDir.'/shell_smoke_*.sql.gz') ?: [];
+            $this->assertCount(1, $backups);
+            $this->assertSame("create table shell_smoke(id int);\n", gzdecode((string) file_get_contents($backups[0])));
+            $this->assertSame('600', substr(sprintf('%o', fileperms($backups[0]) & 0777), -3));
+            $this->assertSame(
+                'exec -T -e PGPASSWORD=local-password safe-db pg_dump -U shell_user -d shell_smoke --no-owner --no-privileges',
+                trim((string) file_get_contents($argsFile))
+            );
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
     public function test_admin_asset_smoke_script_builds_and_checks_vite_manifest(): void
     {
         $script = base_path('../scripts/smoke-admin-assets.sh');
@@ -166,5 +258,60 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('cpus:', $compose);
         $this->assertStringContainsString('mem_limit:', $compose);
         $this->assertStringContainsString('max-size: "10m"', $compose);
+    }
+
+    private function makeShellWorkspace(string $prefix): string
+    {
+        $directory = sys_get_temp_dir().'/telegram-bot-'.$prefix.'-'.bin2hex(random_bytes(8));
+
+        if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
+            $this->fail('Unable to create shell test workspace.');
+        }
+
+        return $directory;
+    }
+
+    private function writeExecutable(string $path, string $contents): void
+    {
+        file_put_contents($path, $contents);
+        chmod($path, 0700);
+    }
+
+    /**
+     * @param  list<string>  $command
+     * @param  array<string, string>  $environment
+     * @return array{exitCode: int, stdout: string, stderr: string}
+     */
+    private function runShellScript(array $command, array $environment = []): array
+    {
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open($command, $descriptorSpec, $pipes, base_path('..'), array_merge([
+            'APP_URL' => '',
+            'BASE_URL' => '',
+            'COMPOSE_PROJECT_NAME' => '',
+            'HOME' => sys_get_temp_dir(),
+            'PATH' => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
+            'SMOKE_COMPOSE_PROJECT' => '',
+        ], $environment));
+
+        if (! is_resource($process)) {
+            $this->fail('Unable to start shell script process.');
+        }
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [
+            'exitCode' => proc_close($process),
+            'stdout' => (string) $stdout,
+            'stderr' => (string) $stderr,
+        ];
     }
 }
