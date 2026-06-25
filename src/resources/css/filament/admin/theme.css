@@ -359,3 +359,15 @@
         transform: none;
     }
 }
+
+@media (max-width: 640px) {
+    .fi-simple-layout {
+        padding-inline: 1rem;
+    }
+
+    .fi-simple-main {
+        box-sizing: border-box;
+        max-width: calc(100vw - 2rem);
+        box-shadow: 4px 4px 0 var(--nb-ink);
+    }
+}

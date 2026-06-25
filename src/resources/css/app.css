@@ -1,3 +1,58 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    html {
+        background: #09090b;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        ::before,
+        ::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            scroll-behavior: auto !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+}
+
+@layer utilities {
+    .storefront-shell {
+        background:
+            radial-gradient(circle at 18% 10%, rgba(255, 132, 38, 0.26), transparent 27rem),
+            radial-gradient(circle at 82% 14%, rgba(255, 76, 36, 0.16), transparent 32rem),
+            radial-gradient(circle at 48% 52%, rgba(255, 190, 92, 0.08), transparent 34rem),
+            linear-gradient(180deg, #09090b 0%, #121113 46%, #09090b 100%);
+    }
+
+    .storefront-grain::before {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        content: '';
+        opacity: 0.16;
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, black, transparent 75%);
+    }
+
+    .storefront-ambient-orb {
+        position: absolute;
+        pointer-events: none;
+        border-radius: 9999px;
+        filter: blur(4px);
+        opacity: 0.72;
+        will-change: transform, opacity;
+    }
+
+    .storefront-hero-card {
+        will-change: transform, filter;
+    }
+
+}

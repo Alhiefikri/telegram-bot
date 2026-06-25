@@ -2,7 +2,7 @@
 
 ## Product surface
 
-The admin dashboard for this Telegram commerce bot uses Filament. The design system below applies to the Filament admin panel only; customer Telegram flows, payment logic, order logic, and public Laravel starter views are out of scope.
+The admin dashboard for this Telegram commerce bot uses Filament. The public storefront is a Laravel Blade catalog and landing page for Warung AI products. Customer Telegram flows, payment logic, and order logic are out of scope for visual-system changes.
 
 ## Visual direction
 
@@ -63,3 +63,25 @@ Gen Z neobrutalist operations desk: light paper background, black ink, hard bord
 - Filament theme CSS lives at `src/resources/css/filament/admin/theme.css` and imports Filament's base theme.
 - The admin panel registers the theme through `->viteTheme('resources/css/filament/admin/theme.css')` in `AdminPanelProvider`.
 - Vite builds the theme by adding `resources/css/filament/admin/theme.css` to the Laravel plugin input list.
+
+## Public storefront system
+
+The storefront uses a separate clean modern Warung AI-inspired system: deep charcoal backgrounds, warm orange gradients, cream-white text, glassy dark cards, rounded product surfaces, and restrained motion. Tokens are implemented with Tailwind utilities in `src/resources/views/storefront.blade.php` and shared motion helpers in `src/resources/css/app.css`.
+
+Storefront color tokens:
+
+| Token | Value | Usage |
+| --- | --- | --- |
+| `--sf-ink` | `#09090b` | Page background and header glass base |
+| `--sf-panel` | `#111114` | Product cards, hero preview, FAQ panels |
+| `--sf-orange` | `#f97316` | Primary CTA, product price, active accents |
+| `--sf-red-orange` | `#ef4444` | CTA gradient depth and warm highlights |
+| `--sf-cream` | `#fff7ed` | High-emphasis text on dark surfaces |
+| `--sf-muted` | `#a1a1aa` | Supporting copy and secondary labels |
+
+Storefront component rules:
+
+- Product and offer cards use dark glass panels, thin translucent borders, large rounded corners, and orange-tinted hover depth.
+- Primary CTAs use orange-to-red gradients with white text. Secondary CTAs use translucent dark surfaces with orange focus rings.
+- Hero and product motion must be GPU-only: `transform`, `opacity`, or `filter`. Do not animate layout properties.
+- Motion must be contextual and calm: ambient floating orbs, hero card drift, and small entrance reveals. Disable animation for `prefers-reduced-motion: reduce`.

@@ -2,36 +2,36 @@
 
 return [
     'meta' => [
-        'title' => ':brand - Toko Produk Digital Instan',
-        'description' => 'Toko produk digital dengan katalog kurasi, pembayaran jelas, dan dukungan Telegram untuk bantuan order.',
+        'title' => ':brand | Premium AI Products & Developer Tools',
+        'description' => 'Dapatkan akses langsung ke model AI tercanggih dan lisensi premium. Tingkatkan produktivitas Anda tanpa batas, bayar instan via QRIS.',
     ],
 
     'hero' => [
-        'eyebrow' => 'Storefront publik untuk produk digital pilihan',
-        'headline' => 'Beli produk digital dengan alur sederhana dan support yang jelas.',
-        'body' => 'Jelajahi katalog, cek stok dan harga, lalu lanjutkan ke kanal pembelian yang tersedia tanpa menebak langkah berikutnya.',
-        'primary_cta' => 'Lihat produk',
-        'secondary_cta' => 'Butuh bantuan?',
+        'eyebrow' => 'Platform AI Premium Indonesia',
+        'headline' => 'Tingkatkan Bisnis dengan',
+        'body' => 'Pilih produk AI premium, cek stok, lalu lanjutkan pembelian dengan bantuan support yang siap membantu.',
+        'primary_cta' => 'Mulai Belanja',
+        'secondary_cta' => 'Contact Support',
     ],
 
     'benefits' => [
         [
-            'title' => 'Produk digital siap pakai',
-            'body' => 'Katalog difokuskan pada kebutuhan produktivitas, akun digital, dan akses layanan yang praktis.',
+            'title' => 'Produk premium',
+            'body' => 'Katalog berisi tools AI, lisensi, dan layanan digital yang dikurasi untuk kebutuhan kerja modern.',
         ],
         [
-            'title' => 'Pembayaran jelas',
-            'body' => 'Instruksi pembayaran ditampilkan sebelum konfirmasi sehingga pelanggan tahu nominal, metode, dan batas waktunya.',
+            'title' => 'Akses cepat',
+            'body' => 'Status stok tampil jelas dan proses bantuan order diarahkan ke kanal support toko.',
         ],
         [
-            'title' => 'Bantuan lewat Telegram',
-            'body' => 'Support order tetap dekat dengan kanal Telegram yang sudah dipakai operasional toko.',
+            'title' => 'Support responsif',
+            'body' => 'Tim support membantu pertanyaan stok, pembayaran, dan pengiriman akses digital.',
         ],
     ],
 
     'payment_flow' => [
-        'eyebrow' => 'Alur pembayaran',
-        'title' => 'Bayar setelah detail order jelas.',
+        'eyebrow' => 'Pricing',
+        'title' => 'Harga transparan sebelum checkout.',
         'body' => 'Pelanggan memilih produk, mengecek ketersediaan, lalu mengikuti instruksi pembayaran yang diberikan pada kanal checkout atau support. Pembayaran diproses sesuai metode yang tersedia tanpa mengubah webhook pembayaran.',
         'steps' => [
             'Pilih produk dan pastikan stok masih tersedia.',
@@ -47,7 +47,7 @@ return [
     ],
 
     'telegram_support' => [
-        'eyebrow' => 'Telegram support',
+        'eyebrow' => 'Contact Support',
         'title' => 'Bot dan admin Telegram membantu status order.',
         'body' => 'Telegram dipakai untuk notifikasi dan bantuan order yang sudah berjalan. Halaman ini hanya menjelaskan kanal bantuan; perilaku bot dan webhook Telegram tidak berubah.',
     ],
@@ -59,7 +59,7 @@ return [
         ],
         [
             'title' => 'Pengiriman cepat',
-            'body' => 'Produk digital diproses setelah pembayaran valid dan stok siap.',
+            'body' => 'Produk digital disiapkan setelah pembayaran valid dan stok tersedia.',
         ],
         [
             'title' => 'Support Telegram',
@@ -67,36 +67,36 @@ return [
         ],
         [
             'title' => 'Stok transparan',
-            'body' => 'Kartu produk menampilkan stok siap atau status habis sebelum pelanggan bertanya.',
+            'body' => 'Katalog menampilkan stok siap agar pelanggan tidak menebak ketersediaan.',
         ],
     ],
 
     'faq' => [
         [
-            'question' => 'Metode pembayaran apa yang tersedia?',
-            'answer' => 'Metode pembayaran mengikuti instruksi order yang diberikan saat checkout atau oleh support. Nominal dan batas waktu dikirim sebelum pelanggan membayar.',
+            'question' => 'Bagaimana cara mendapatkan produk setelah membayar?',
+            'answer' => 'Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia. Support akan membantu jika order memerlukan verifikasi manual.',
         ],
         [
-            'question' => 'Kapan produk digital dikirim?',
-            'answer' => 'Produk digital dikirim setelah pembayaran terkonfirmasi dan stok tersedia. Support akan membantu jika order memerlukan verifikasi manual.',
+            'question' => 'Apakah produk di Warung AI resmi dan aman?',
+            'answer' => 'Produk yang tampil di katalog diproses melalui operasional toko dan stok yang tersedia. Pastikan detail order dan instruksi pembayaran sudah jelas sebelum membayar.',
         ],
         [
-            'question' => 'Bagaimana jika stok habis?',
-            'answer' => 'Produk yang stoknya habis ditandai di katalog. Pelanggan bisa menanyakan estimasi restock atau alternatif produk lewat support Telegram.',
+            'question' => 'Bagaimana jika pesanan saya bermasalah?',
+            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, atau kendala teknis produk digital.',
+        ],
+        [
+            'question' => 'Apakah saya bisa membeli dalam jumlah besar?',
+            'answer' => 'Bisa. Untuk pembelian kuantitas besar atau kebutuhan kemitraan, hubungi support agar tim toko dapat menyiapkan penawaran dan prioritas bantuan.',
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
             'answer' => 'Tidak. Halaman ini hanya menampilkan informasi publik. Bot Telegram dan webhook pembayaran tetap berjalan di alur operasional yang sudah ada.',
         ],
-        [
-            'question' => 'Apakah admin panel masih tersedia?',
-            'answer' => 'Ya. Operator tetap bisa masuk melalui tautan Admin tanpa mengganggu pengalaman pelanggan.',
-        ],
     ],
 
     'support' => [
-        'eyebrow' => 'Support',
-        'title' => 'Butuh rekomendasi produk atau bantuan order?',
-        'body' => 'Gunakan kanal support toko untuk bertanya tentang stok, pembayaran, dan pengiriman produk digital. Admin panel tetap tersedia hanya untuk operator.',
+        'eyebrow' => 'Siap Memulai?',
+        'title' => 'Bergabung dengan Ribuan Pengguna Warung AI',
+        'body' => 'Tingkatkan efisiensi kerja Anda sekarang dengan alat AI terdepan. Gunakan kanal support toko untuk bertanya tentang stok, pembayaran, dan pengiriman produk digital.',
     ],
 ];

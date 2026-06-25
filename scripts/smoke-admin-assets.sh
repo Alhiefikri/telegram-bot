@@ -6,9 +6,27 @@ ROOT_DIR=$(dirname -- "$SCRIPT_DIR")
 APP_DIR=${APP_DIR:-"$ROOT_DIR/src"}
 MANIFEST_PATH="$APP_DIR/public/build/manifest.json"
 ADMIN_THEME_ENTRY='resources/css/filament/admin/theme.css'
+TAILWIND_CONFIG_PATH="$APP_DIR/tailwind.config.cjs"
 
 printf 'Building Laravel admin assets with npm run build...\n'
 npm --prefix "$APP_DIR" run build
+
+TAILWIND_CONFIG_PATH="$TAILWIND_CONFIG_PATH" node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs';
+
+const configPath = process.env.TAILWIND_CONFIG_PATH;
+const config = readFileSync(configPath, 'utf8');
+const requiredPaths = [
+  './app/Filament/**/*.php',
+  './vendor/filament/**/*.blade.php',
+];
+
+const missingPaths = requiredPaths.filter((path) => !config.includes(path));
+
+if (missingPaths.length > 0) {
+  throw new Error(`Tailwind config is missing Filament content paths required by /admin/login: ${missingPaths.join(', ')}`);
+}
+NODE
 
 if [ ! -s "$MANIFEST_PATH" ]; then
   printf 'Admin asset smoke check failed: /admin/login would be served without the Vite manifest at %s. Run npm run build in %s before deploy.\n' "$MANIFEST_PATH" "$APP_DIR" >&2
