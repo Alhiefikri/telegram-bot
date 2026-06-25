@@ -66,22 +66,30 @@ Gen Z neobrutalist operations desk: light paper background, black ink, hard bord
 
 ## Public storefront system
 
-The storefront uses a separate clean modern Warung AI-inspired system: deep charcoal backgrounds, warm orange gradients, cream-white text, glassy dark cards, rounded product surfaces, and restrained motion. Tokens are implemented with Tailwind utilities in `src/resources/views/storefront.blade.php` and shared motion helpers in `src/resources/css/app.css`.
+The storefront uses a separate Warung AI ecommerce system: warm white page surfaces, orange brand actions, ink text, subtle orange wave/grid accents, rounded white cards, and restrained motion. Tokens are implemented with Tailwind utilities in `src/resources/views/storefront.blade.php` and shared motion helpers in `src/resources/css/app.css`.
 
 Storefront color tokens:
 
 | Token | Value | Usage |
 | --- | --- | --- |
-| `--sf-ink` | `#09090b` | Page background and header glass base |
-| `--sf-panel` | `#111114` | Product cards, hero preview, FAQ panels |
-| `--sf-orange` | `#f97316` | Primary CTA, product price, active accents |
-| `--sf-red-orange` | `#ef4444` | CTA gradient depth and warm highlights |
-| `--sf-cream` | `#fff7ed` | High-emphasis text on dark surfaces |
-| `--sf-muted` | `#a1a1aa` | Supporting copy and secondary labels |
+| `--sf-paper` | `#fffaf4` | Page background and broad section surfaces |
+| `--sf-surface` | `#ffffff` | Header, product cards, FAQ panels, trust cards |
+| `--sf-surface-warm` | `#fff3e6` | Orange-tinted panels, step cards, CTA wash |
+| `--sf-ink` | `#211407` | Headlines, nav text, high-emphasis copy |
+| `--sf-muted` | `#7a6047` | Supporting copy and secondary labels |
+| `--sf-border` | `#f2dfca` | Soft card borders and dividers |
+| `--sf-orange` | `#f97316` | Primary CTA, logo accent, active category chips, prices |
+| `--sf-orange-deep` | `#ea580c` | CTA hover, strong accents, focus rings |
+| `--sf-orange-soft` | `#fed7aa` | Badges, stock chips, decorative marks |
+| `--sf-success` | `#15803d` | In-stock text and ready badges |
+| `--sf-warning` | `#b45309` | Out-of-stock and waitlist badges |
 
 Storefront component rules:
 
-- Product and offer cards use dark glass panels, thin translucent borders, large rounded corners, and orange-tinted hover depth.
-- Primary CTAs use orange-to-red gradients with white text. Secondary CTAs use translucent dark surfaces with orange focus rings.
+- Header is white, sticky, lightly bordered, and keeps the Warung AI logo image with text fallback behavior from the Blade.
+- Primary CTAs use solid orange or orange-to-deep-orange gradients with white text. Secondary CTAs use white surfaces with orange borders and ink text.
+- Product, FAQ, trust, and process cards use white or warm-white surfaces, `--sf-border`, large rounded corners, and orange-tinted shadows. Cards never use dark glass on the public page.
+- Category chips and stock badges are pill-shaped, semantic, and anchored to the same orange palette; success green is reserved only for stock-ready status.
+- Page texture comes from low-contrast orange waves, radial washes, and grid marks in `app.css`; no purple/blue AI gradients and no dark SaaS shell.
 - Hero and product motion must be GPU-only: `transform`, `opacity`, or `filter`. Do not animate layout properties.
-- Motion must be contextual and calm: ambient floating orbs, hero card drift, and small entrance reveals. Disable animation for `prefers-reduced-motion: reduce`.
+- Motion must be contextual and calm: small reveal, product-card lift, and decorative mark drift. Disable animation for `prefers-reduced-motion: reduce`.
