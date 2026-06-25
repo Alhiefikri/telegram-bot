@@ -129,6 +129,32 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('curl --fail', $contents);
     }
 
+    public function test_admin_asset_smoke_script_builds_and_checks_vite_manifest(): void
+    {
+        $script = base_path('../scripts/smoke-admin-assets.sh');
+
+        $this->assertFileExists($script);
+
+        $contents = file_get_contents($script);
+        $this->assertStringContainsString('npm --prefix "$APP_DIR" run build', $contents);
+        $this->assertStringContainsString('public/build/manifest.json', $contents);
+        $this->assertStringContainsString('/admin/login', $contents);
+        $this->assertStringContainsString('resources/css/filament/admin/theme.css', $contents);
+    }
+
+    public function test_admin_asset_smoke_workflow_uses_no_production_credentials(): void
+    {
+        $workflow = base_path('../.github/workflows/admin-asset-smoke.yml');
+
+        $this->assertFileExists($workflow);
+
+        $contents = file_get_contents($workflow);
+        $this->assertStringContainsString('../scripts/smoke-admin-assets.sh', $contents);
+        $this->assertStringContainsString('npm ci', $contents);
+        $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
+        $this->assertStringNotContainsString('TRIPAY_API_KEY', $contents);
+    }
+
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));
