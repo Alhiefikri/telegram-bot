@@ -12,7 +12,7 @@ class ReconcileTripayPayments extends Command
 {
     protected $signature = 'tripay:reconcile {--chunk=100}';
 
-    protected $description = 'Reconcile pending Tripay payments from Tripay transaction detail.';
+    protected $description = 'Reconcile legacy Tripay payments from Tripay transaction detail.';
 
     public function handle(TripayClient $client, TripayCallbackProcessor $processor): int
     {
