@@ -436,6 +436,7 @@ class Phase6TelegramBotTest extends TestCase
 
     public function test_checkout_callback_creates_manual_order_sends_payment_instructions_and_notifies_admin(): void
     {
+        config()->set('services.telegram.payment_mode', 'manual_dana');
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
         ManualPaymentSetting::create(['admin_contact_url' => 'https://t.me/adminsedulur', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
@@ -454,6 +455,33 @@ class Phase6TelegramBotTest extends TestCase
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Order manual baru masuk dashboard')
             && str_contains($r['text'], $order->invoice_number));
+    }
+
+    public function test_checkout_callback_in_pakasir_mode_sends_hosted_payment_link(): void
+    {
+        config()->set('services.telegram.payment_mode', 'pakasir');
+        config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'price_amount' => 15000, 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 2);
+
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(18, 'cb-pakasir', 'checkout'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        $order = Order::firstOrFail();
+        $payment = $order->payments()->firstOrFail();
+        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'pakasir', 'method' => 'hosted', 'amount' => 30000]);
+        $this->assertNotEmpty($payment->merchant_ref);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '12345'
+            && str_contains($r['text'], $order->invoice_number)
+            && str_contains($r['text'], 'Rp 30.000')
+            && str_contains($r['text'], 'Batas pembayaran:')
+            && str_contains($r['text'], 'https://app.pakasir.test/pay/sedulur-digital/30000?order_id='.rawurlencode($payment->merchant_ref)));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '999'
+            && str_contains($r['text'], 'Order manual baru masuk dashboard'));
     }
 
     public function test_receipt_notifier_sends_paid_order_receipt(): void

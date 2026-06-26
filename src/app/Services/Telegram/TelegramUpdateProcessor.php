@@ -17,6 +17,7 @@ use App\Models\Product;
 use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\Pakasir\PakasirClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -24,7 +25,7 @@ use Throwable;
 
 class TelegramUpdateProcessor
 {
-    public function __construct(private TelegramBotClient $bot, private CartService $carts, private OrderCheckoutService $checkout) {}
+    public function __construct(private TelegramBotClient $bot, private CartService $carts, private OrderCheckoutService $checkout, private PakasirClient $pakasir) {}
 
     public function process(TelegramUpdate $update): void
     {
@@ -203,14 +204,22 @@ class TelegramUpdateProcessor
         if ($data === 'checkout') {
             $this->bot->answerCallbackQuery($id);
             try {
-                $order = $this->checkout->checkout($this->carts->activeCartFor($customer), 'DANA_QR', 'manual');
+                $paymentMode = (string) config('services.telegram.payment_mode', 'manual_dana');
+                $order = $paymentMode === 'pakasir'
+                    ? $this->checkout->checkout($this->carts->activeCartFor($customer), 'hosted', 'pakasir')
+                    : $this->checkout->checkout($this->carts->activeCartFor($customer), 'DANA_QR', 'manual');
             } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
                 $this->bot->sendMessage($chatId, 'Checkout gagal. Pastikan keranjang tidak kosong.');
 
                 return;
             }
-            $this->sendPaymentInstructions($chatId, $order, $order->payments()->latest()->first());
-            $this->notifyAdminAboutManualOrder($order);
+            $payment = $order->payments()->latest()->first();
+            if ($payment?->provider === 'pakasir') {
+                $this->sendPakasirPaymentInstructions($chatId, $order, $payment);
+            } else {
+                $this->sendPaymentInstructions($chatId, $order, $payment);
+                $this->notifyAdminAboutManualOrder($order);
+            }
 
             return;
         }
@@ -469,7 +478,7 @@ class TelegramUpdateProcessor
         }
 
         if ($order->expires_at) {
-            $lines[] = 'Batas pembayaran: '.$order->expires_at->timezone(config('app.timezone'))->format('d M Y H:i').' WIB';
+            $lines[] = 'Batas pembayaran: '.$this->formatDate($order->expires_at);
         }
 
         $lines[] = '';
@@ -524,6 +533,29 @@ class TelegramUpdateProcessor
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), $replyMarkup);
+    }
+
+    private function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
+    {
+        $lines = [
+            '✅ Checkout berhasil dibuat.',
+            '',
+            'Invoice: '.$order->invoice_number,
+            'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            'Kode Referensi: '.$payment->merchant_ref,
+        ];
+
+        if ($order->expires_at) {
+            $lines[] = 'Batas pembayaran: '.$this->formatDate($order->expires_at);
+        }
+
+        $lines[] = '';
+        $lines[] = 'Link pembayaran Pakasir:';
+        $lines[] = $this->pakasir->hostedPaymentUrl($payment);
+        $lines[] = '';
+        $lines[] = 'Klik link di atas, lalu pilih metode pembayaran di Pakasir.';
+
+        $this->bot->sendMessage($chatId, implode("\n", $lines));
     }
 
     private function notifyAdminAboutManualOrder(Order $order): void
