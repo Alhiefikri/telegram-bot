@@ -32,10 +32,14 @@ class DatabaseSeeder extends Seeder
             );
         }
 
+        // Clear existing categories and products for a clean seed matching the mockup
+        DB::table('products')->delete();
+        DB::table('categories')->delete();
+
         $now = now();
         $categories = [
-            ['name' => 'Streaming', 'slug' => 'streaming', 'description' => 'Produk langganan streaming populer.', 'sort_order' => 10],
-            ['name' => 'Tools Digital', 'slug' => 'tools-digital', 'description' => 'Produk tools digital untuk produktivitas.', 'sort_order' => 20],
+            ['name' => 'AI Premium', 'slug' => 'ai-premium', 'description' => 'Akun AI premium untuk menunjang produktivitas.', 'sort_order' => 10],
+            ['name' => 'Tools Digital', 'slug' => 'tools-digital', 'description' => 'Layanan digital dan cloud storage premium.', 'sort_order' => 20],
         ];
 
         foreach ($categories as $category) {
@@ -52,41 +56,41 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        $categoryIds = DB::table('categories')->whereIn('slug', ['streaming', 'tools-digital'])->pluck('id', 'slug');
+        $categoryIds = DB::table('categories')->whereIn('slug', ['ai-premium', 'tools-digital'])->pluck('id', 'slug');
         $products = [
             [
-                'name' => 'Netflix Premium 1 Bulan',
-                'description' => 'Akun Netflix Premium private 1 bulan untuk testing katalog bot.',
-                'price_amount' => 45000,
-                'stock' => 25,
-                'category_id' => $categoryIds['streaming'] ?? null,
+                'name' => 'ChatGPT Plus',
+                'description' => 'Akun ChatGPT Plus premium dengan akses GPT-4o, DALL-E 3, dan analisis data tingkat lanjut.',
+                'price_amount' => 49000,
+                'stock' => 128,
+                'category_id' => $categoryIds['ai-premium'] ?? null,
             ],
             [
-                'name' => 'Netflix Sharing 1 Bulan',
-                'description' => 'Slot sharing Netflix 1 bulan. Produk dummy untuk simulasi order.',
-                'price_amount' => 28000,
-                'stock' => 40,
-                'category_id' => $categoryIds['streaming'] ?? null,
+                'name' => 'Claude Pro',
+                'description' => 'Akun Claude Pro premium dengan akses Claude 3.5 Sonnet, context window lebih besar, dan prioritas akses.',
+                'price_amount' => 59000,
+                'stock' => 96,
+                'category_id' => $categoryIds['ai-premium'] ?? null,
             ],
             [
-                'name' => 'Spotify Premium 1 Bulan',
-                'description' => 'Paket Spotify Premium 1 bulan untuk data contoh katalog.',
-                'price_amount' => 30000,
-                'stock' => 30,
-                'category_id' => $categoryIds['streaming'] ?? null,
+                'name' => 'Midjourney',
+                'description' => 'Akun Midjourney premium siap pakai untuk pembuatan gambar AI berkualitas tinggi dan ultra-realistis.',
+                'price_amount' => 69000,
+                'stock' => 74,
+                'category_id' => $categoryIds['ai-premium'] ?? null,
             ],
             [
-                'name' => 'YouTube Premium 1 Bulan',
-                'description' => 'Paket YouTube Premium 1 bulan untuk simulasi produk digital.',
-                'price_amount' => 35000,
-                'stock' => 20,
-                'category_id' => $categoryIds['streaming'] ?? null,
+                'name' => 'Google One 2TB',
+                'description' => 'Langganan Google One 2TB untuk penyimpanan cloud Google Drive, Google Photos, dan akses Google Gemini Advanced.',
+                'price_amount' => 39000,
+                'stock' => 112,
+                'category_id' => $categoryIds['tools-digital'] ?? null,
             ],
             [
-                'name' => 'Canva Pro 1 Bulan',
-                'description' => 'Akses Canva Pro 1 bulan sebagai dummy item katalog.',
-                'price_amount' => 25000,
-                'stock' => 35,
+                'name' => 'Microsoft 365 Personal',
+                'description' => 'Akses Microsoft 365 Personal siap pakai termasuk Word, Excel, PowerPoint, Outlook, dan penyimpanan cloud OneDrive 1TB.',
+                'price_amount' => 65000,
+                'stock' => 58,
                 'category_id' => $categoryIds['tools-digital'] ?? null,
             ],
         ];

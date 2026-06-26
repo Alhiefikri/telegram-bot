@@ -2,15 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendTelegramReceipt;
-use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -25,7 +25,7 @@ class ExampleTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Akun AI Premium Siap Pakai')
-            ->assertSee('Warung akun AI premium')
+            ->assertSee('Katalog akun AI premium')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
             ->assertSee('/admin/login')
@@ -75,7 +75,7 @@ class ExampleTest extends TestCase
             ->assertSee('Akun siap pakai')
             ->assertSee('Tanpa tebak stok')
             ->assertSee('Order dibantu manusia')
-            ->assertSee('Bagaimana cara membeli akun AI di Warung AI?')
+            ->assertSee('Bagaimana cara membeli akun AI di Lhie Store?')
             ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);

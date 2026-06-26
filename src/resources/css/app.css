@@ -19,6 +19,7 @@
 
     html {
         background: var(--sf-paper);
+        scroll-behavior: smooth;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -31,14 +32,20 @@
             transition-duration: 0.01ms !important;
         }
     }
+
+    /* Typographic quote style for testimonials */
+    .quote-mark {
+        font-family: 'Georgia', serif;
+        line-height: 0.6;
+    }
 }
 
 @layer utilities {
     .storefront-shell {
         background:
-            radial-gradient(circle at 12% 8%, rgba(249, 115, 22, 0.14), transparent 24rem),
-            radial-gradient(circle at 82% 18%, rgba(254, 215, 170, 0.46), transparent 30rem),
-            linear-gradient(180deg, var(--sf-paper) 0%, #fff 52%, var(--sf-paper) 100%);
+            radial-gradient(ellipse at 12% 8%, rgba(249, 115, 22, 0.10), transparent 28rem),
+            radial-gradient(ellipse at 82% 18%, rgba(254, 215, 170, 0.30), transparent 34rem),
+            linear-gradient(180deg, var(--sf-paper) 0%, #fff 40%, var(--sf-paper) 100%);
     }
 
     .storefront-grid::before {
@@ -47,40 +54,36 @@
         z-index: 0;
         pointer-events: none;
         content: '';
-        opacity: 0.46;
+        opacity: 0.30;
         background-image:
-            linear-gradient(rgba(249, 115, 22, 0.08) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(249, 115, 22, 0.07) 1px, transparent 1px);
-        background-size: 44px 44px;
-        mask-image: linear-gradient(to bottom, black, transparent 72%);
+            linear-gradient(rgba(249, 115, 22, 0.06) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(249, 115, 22, 0.05) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: linear-gradient(to bottom, black, transparent 70%);
     }
 
     .storefront-wave {
         position: absolute;
         pointer-events: none;
         border-radius: 9999px;
-        opacity: 0.78;
-        filter: blur(2px);
+        opacity: 0.50;
+        filter: blur(3px);
         background:
             repeating-linear-gradient(
                 135deg,
-                rgba(249, 115, 22, 0.16) 0 10px,
-                rgba(254, 215, 170, 0.42) 10px 20px
+                rgba(249, 115, 22, 0.10) 0 10px,
+                rgba(254, 215, 170, 0.28) 10px 20px
             );
         will-change: transform, opacity, filter;
     }
 
     .storefront-wave-soft {
-        opacity: 0.44;
-        filter: blur(6px);
+        opacity: 0.28;
+        filter: blur(8px);
     }
 
     .storefront-hero-card,
     .storefront-popular-card {
         will-change: transform, filter;
-    }
-
-    .storefront-popular-card:hover {
-        filter: saturate(1.04);
     }
 }

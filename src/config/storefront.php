@@ -3,7 +3,7 @@
 return [
     'meta' => [
         'title' => ':brand | Akun AI Premium Siap Pakai',
-        'description' => 'Warung AI menyediakan akun AI premium siap pakai dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
+        'description' => 'Lhie Store menyediakan akun AI premium siap pakai dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
     ],
 
     'nav' => [
@@ -14,7 +14,7 @@ return [
     ],
 
     'hero' => [
-        'eyebrow' => 'Warung akun AI premium',
+        'eyebrow' => 'Katalog akun AI premium',
         'headline' => 'Akun AI Premium Siap Pakai.',
         'body' => 'Pilih akun AI, cek stok langsung, lalu lanjutkan order dengan instruksi yang jelas. Cocok untuk kerja, belajar, riset, desain, dan produksi konten harian.',
         'primary_cta' => 'Belanja Sekarang',
@@ -43,7 +43,7 @@ return [
     ],
 
     'catalog' => [
-        'eyebrow' => 'Katalog Warung AI',
+        'eyebrow' => 'Katalog Lhie Store',
         'title' => 'Pilih akun AI sesuai kebutuhan.',
         'body' => 'Cari ChatGPT, Claude, Gemini, Canva, dan akun AI premium lain yang sedang tersedia. Produk aktif dari admin otomatis tampil di katalog ini.',
         'search_placeholder' => 'Cari akun AI...',
@@ -108,8 +108,8 @@ return [
     ],
 
     'testimonial' => [
-        'quote' => 'Butuh akun AI cepat untuk kerja harian. Di Warung AI, stoknya jelas dan proses tanyanya tidak ribet.',
-        'name' => 'Pelanggan Warung AI',
+        'quote' => 'Butuh akun AI cepat untuk kerja harian. Di Lhie Store, stoknya jelas dan proses tanyanya tidak ribet.',
+        'name' => 'Pelanggan Lhie Store',
         'role' => 'Pengguna akun AI premium',
         'stats' => [
             ['value' => '24 jam', 'label' => 'support order'],
@@ -120,7 +120,7 @@ return [
 
     'faq' => [
         [
-            'question' => 'Bagaimana cara membeli akun AI di Warung AI?',
+            'question' => 'Bagaimana cara membeli akun AI di Lhie Store?',
             'answer' => 'Pilih produk dari katalog, hubungi support melalui tombol yang tersedia, lalu ikuti instruksi pembayaran. Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia.',
         ],
         [
@@ -133,7 +133,7 @@ return [
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
-            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, atau kendala teknis produk digital.',
+            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, or kendala teknis produk digital.',
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
@@ -144,16 +144,16 @@ return [
     'support' => [
         'eyebrow' => 'Siap belanja?',
         'title' => 'Temukan akun AI premium yang pas untuk hari ini.',
-        'body' => 'Gunakan katalog untuk memilih produk, lalu hubungi support Warung AI untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
+        'body' => 'Gunakan katalog untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
         'primary_cta' => 'Chat Support',
         'secondary_cta' => 'Login Admin',
     ],
 
     'footer' => [
-        'body' => 'Warung AI membantu pelanggan menemukan akun AI premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
+        'body' => 'Lhie Store membantu pelanggan menemukan akun AI premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
         'platform_title' => 'Toko',
         'help_title' => 'Bantuan',
-        'copyright_suffix' => 'Warung AI. Semua hak dilindungi.',
+        'copyright_suffix' => 'Lhie Store. Semua hak dilindungi.',
         'powered_by' => 'Dibangun untuk katalog akun AI premium.',
     ],
 ];
