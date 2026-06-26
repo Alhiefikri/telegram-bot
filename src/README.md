@@ -13,7 +13,6 @@ Komponen utama:
 - **Telegram**: antarmuka utama untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
 - **Pakasir**: gateway aktif untuk hosted-link checkout dengan API-key verification.
-- **Tripay legacy**: jalur kompatibilitas untuk record lama dan test; callback lama diterima melalui `POST /api/webhook/tripay`.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
 - **Queue**: memproses pekerjaan background, termasuk pemrosesan update Telegram dan pengiriman receipt.
 - **Scheduler**: menjalankan expiry order pending dan rekonsiliasi pembayaran berkala.
@@ -66,11 +65,9 @@ Catatan:
 - `/cari keyword` mencari produk aktif dengan stok tersedia. Jika hasil tidak ditemukan, customer diarahkan kembali ke `/katalog`.
 - `/status` dan `/pesanan` menampilkan order terakhir customer dengan kombinasi status order dan status payment.
 - `/riwayat` menampilkan hingga 5 order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail order milik customer yang sama.
-- Mode pembayaran utama adalah Pakasir untuk hosted-link checkout dan API-key verification. Manual DANA tetap tersedia, sedangkan Tripay legacy hanya untuk kompatibilitas record lama/test.
 
 ## 3. Payment Flow
 
-Codebase memperlihatkan jalur pembayaran **Pakasir**, **manual payment**, dan **Tripay legacy payment/callback**.
 
 ### 3.1 Status utama
 
@@ -119,36 +116,23 @@ Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order 
 
 Pada jalur Pakasir aktif, checkout membuat payment pending, mengirim customer ke hosted-link checkout Pakasir, lalu sistem melakukan API-key verification untuk memastikan status pembayaran sebelum update order/payment.
 
-### 3.5 Tripay legacy payment dan callback
 
-Pada jalur Tripay legacy:
 
-1. Checkout membuat payment provider `tripay` dengan status `pending`.
-2. Sistem membuat transaksi ke Tripay dan menyimpan referensi provider jika berhasil.
-3. Tripay mengirim callback ke `POST /api/webhook/tripay` ketika status pembayaran berubah.
 4. Callback harus lolos validasi signature dan event header.
 5. Payload dicocokkan dengan payment internal menggunakan `merchant_ref`, `reference`, nominal, dan payment method.
-6. Status dari Tripay diterapkan ke order/payment.
 
-Mapping status callback Tripay:
 
 - `PAID`: payment menjadi `paid`, order masuk `processing`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
 - `EXPIRED`: order pending menjadi `expired`, payment menjadi `expired`, dan reservasi stok dilepas.
 - `FAILED`: order pending menjadi `cancelled`, payment menjadi `failed`, dan reservasi stok dilepas.
 - `REFUND`: payment menjadi `refunded`; order menjadi `cancelled` kecuali order sudah `completed`.
 
-Callback Tripay juga dicatat sebagai payment event agar bisa diaudit.
 
-### 3.6 Rekonsiliasi pembayaran Tripay legacy
 
-Rekonsiliasi Tripay legacy digunakan ketika callback lama terlambat, gagal diterima, atau status internal perlu disamakan dengan status di Tripay untuk record kompatibilitas.
 
 Ada dua cara yang terlihat di codebase:
 
-- command scheduled: `php artisan tripay:reconcile --chunk=100`;
-- operasi admin manual untuk payment Tripay legacy pending yang sudah memiliki provider reference.
 
-Rekonsiliasi mengambil detail transaksi dari Tripay, memvalidasi kesesuaian referensi dan nominal, lalu menerapkan status seperti callback.
 
 ## 4. Admin Flow
 
@@ -159,7 +143,6 @@ Kemampuan admin yang terlihat di codebase:
 - melihat dan mengelola data order/payment melalui admin panel;
 - menyelesaikan manual order setelah pembayaran diverifikasi;
 - mengirim ulang receipt untuk order paid yang memiliki customer Telegram;
-- melakukan rekonsiliasi manual payment Tripay legacy;
 - mengelola setting pembayaran manual seperti instruksi, data DANA, QR, dan kontak admin;
 - mencatat audit log untuk operasi penting admin.
 
@@ -181,16 +164,13 @@ Receipt dikirim ke customer via queue
 Audit log operasi admin tersimpan
 ```
 
-Untuk Tripay legacy:
 
 ```text
-Payment Tripay pending
         ↓
 Callback masuk otomatis atau status belum sinkron
         ↓
 Admin dapat trigger reconcile
         ↓
-Sistem ambil detail dari Tripay
         ↓
 Status internal diperbarui bila payload valid
         ↓
@@ -220,23 +200,17 @@ Hal penting:
 
 Jika secret Telegram tidak dikonfigurasi di production, aplikasi dirancang untuk fail fast.
 
-### 5.2 Webhook Tripay legacy
 
 Endpoint aplikasi:
 
 ```text
-POST /api/webhook/tripay
 ```
 
 Hal penting:
 
 - gunakan HTTPS di production;
-- set callback URL di Tripay ke endpoint public yang benar;
-- pastikan signature key/private key Tripay sesuai;
 - callback harus berisi event `payment_status` dan signature valid;
-- endpoint memiliki size guard dan rate limiter `tripay`.
 
-Catatan: `.env.example` harus disesuaikan dengan route production yang benar. Route aplikasi untuk Tripay adalah `/api/webhook/tripay`.
 
 ### 5.3 Queue worker
 
@@ -263,7 +237,6 @@ Scheduler menjalankan command periodik dari `routes/console.php`:
 
 ```text
 orders:expire-pending          setiap menit
-tripay:reconcile --chunk=100   setiap 5 menit
 ```
 
 Pastikan cron Laravel aktif, biasanya:
@@ -319,18 +292,14 @@ Fungsi:
 - mengubah payment pending menjadi `expired`;
 - melepas reservasi stok.
 
-### 5.7 Reconcile legacy Tripay payments
 
 Command manual:
 
 ```bash
-php artisan tripay:reconcile --chunk=100
 ```
 
 Fungsi:
 
-- mencari payment Tripay legacy dengan status `pending`, `expired`, atau `failed` yang memiliki provider reference;
-- mengambil detail transaksi dari Tripay;
 - menerapkan status valid ke sistem internal.
 
 ### 5.8 Logging dan monitoring
@@ -340,7 +309,6 @@ Hal yang perlu dimonitor:
 - error log Laravel;
 - failed jobs;
 - queue length/backlog;
-- response webhook Telegram, Pakasir, dan Tripay legacy;
 - status scheduler berjalan tepat waktu;
 - audit log admin untuk operasi manual penting;
 - hasil `ops:health`.
@@ -369,10 +337,6 @@ Sebelum production, cek minimal:
 - [ ] Setting payment manual/admin sudah benar: `DANA_QR_IMAGE_URL`, `DANA_ACCOUNT_NAME`, `DANA_ACCOUNT_NUMBER`, `TELEGRAM_ADMIN_CONTACT_URL`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
 - [ ] `TELEGRAM_PAYMENT_MODE=pakasir` untuk gateway aktif, dan `TELEGRAM_DEFAULT_PAYMENT_METHOD` sesuai kebutuhan.
 - [ ] Credential Pakasir terisi: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`.
-- [ ] Credential Tripay legacy hanya diisi untuk kompatibilitas record lama/test: `TRIPAY_API_KEY`, `TRIPAY_PRIVATE_KEY`, `TRIPAY_MERCHANT_CODE`.
-- [ ] `TRIPAY_BASE_URL` mengarah ke sandbox/production sesuai kebutuhan.
-- [ ] `TRIPAY_CALLBACK_URL` dan `TRIPAY_RETURN_URL` memakai URL production yang benar.
-- [ ] `TRIPAY_WEBHOOK_RATE_LIMIT_PER_MINUTE` dan `TRIPAY_WEBHOOK_MAX_BODY_BYTES` sesuai kebutuhan.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
 - [ ] Queue worker berjalan di Supervisor/systemd/container process manager.
@@ -420,24 +384,18 @@ Langkah cek:
 - cek error log Laravel;
 - cek koneksi database dengan `php artisan ops:health --db`.
 
-### Payment Tripay legacy tidak berubah status
 
 Kemungkinan penyebab:
 
-- callback URL Tripay salah;
 - signature/private key salah;
 - event header bukan `payment_status`;
 - provider reference atau merchant reference tidak cocok;
 - nominal atau payment method tidak cocok;
 - callback ditolak oleh rate limit atau size guard;
-- Tripay belum mengirim callback.
 
 Langkah cek:
 
-- pastikan URL callback mengarah ke `/api/webhook/tripay`;
-- cek credential Tripay dan signature key;
 - cek payment event yang masuk;
-- jalankan `php artisan tripay:reconcile --chunk=100`;
 - cek log untuk pesan validasi callback.
 
 ### Order pending tidak expired
@@ -483,7 +441,6 @@ Kemungkinan penyebab:
 - worker tidak berjalan;
 - worker hanya memproses queue tertentu dan melewatkan queue penting;
 - database queue table belum tersedia;
-- job error berulang karena config Telegram/Pakasir/Tripay legacy salah;
 - timeout atau koneksi eksternal bermasalah.
 
 Langkah cek:
@@ -513,24 +470,16 @@ Langkah cek:
 
 ## 8. Important Files / Reference
 
-- `src/routes/api.php` — mendefinisikan endpoint webhook Telegram, Pakasir, dan Tripay legacy beserta middleware rate limit/size guard.
 - `src/app/Http/Controllers/TelegramWebhookController.php` — validasi secret Telegram, filter payload, simpan update, dispatch job pemrosesan update.
-- `src/app/Http/Controllers/TripayWebhookController.php` — menerima raw callback Tripay dan mendelegasikan proses ke callback processor.
 - `src/app/Services/Telegram/TelegramUpdateProcessor.php` — command Telegram, katalog, cart, checkout manual, instruksi pembayaran, dan notifikasi admin manual order.
-- `src/app/Services/Tripay/TripayCallbackProcessor.php` — validasi callback/rekonsiliasi Tripay, pencatatan payment event, dan penerapan status payment/order.
 - `src/app/Services/Admin/AdminOrderOperations.php` — operasi admin untuk complete manual order dan resend receipt, termasuk audit log.
-- `src/app/Services/Admin/AdminPaymentOperations.php` — operasi admin untuk rekonsiliasi manual payment Tripay, termasuk audit log.
-- `src/app/Services/OrderCheckoutService.php` — pembuatan order/payment dari cart aktif, reservasi stok, dan inisiasi transaksi Tripay bila provider Tripay digunakan.
 - `src/app/Services/OrderStateMachine.php` — transisi status order/payment, release reservasi, sale stock movement, refund, cancel, dan expiry.
 - `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor}`.
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
-- `src/app/Console/Commands/ReconcileTripayPayments.php` — command `tripay:reconcile {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.
-- `src/config/services.php` — konfigurasi Telegram, Pakasir, Tripay legacy, payment manual/admin contact, dan webhook rate limit.
 - `src/config/orders.php` — konfigurasi TTL pending payment.
 - `src/tests/Feature/Phase6TelegramBotTest.php` — coverage flow customer Telegram, checkout manual, receipt, callback paid, dan rate limit.
 - `src/tests/Feature/Phase7AdminOperationsTest.php` — coverage operasi admin, resend receipt, complete manual order, reconcile payment, dan health check.
 - `src/tests/Feature/Phase8HardeningTest.php` — coverage hardening operasional/security sesuai fase project.
-- `src/tests/Feature/Phase5TripaySandboxTest.php` — coverage sandbox Tripay, callback signature, reconciliation, refund, dan payload guard.
 - `src/tests/Feature/Phase4OrderCartDomainTest.php` — coverage cart/order state machine, expiry, cancel, paid/refund transitions, dan stok.

@@ -9,5 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
-Schedule::command('tripay:reconcile --chunk=100')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('pakasir:reconcile --chunk=100')->everyFiveMinutes()->withoutOverlapping();

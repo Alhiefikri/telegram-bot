@@ -18,6 +18,9 @@ use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
+use chillerlan\QRCode\Output\QROutputInterface;
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -65,13 +68,32 @@ class TelegramUpdateProcessor
     {
         if ($text === '/start') {
             Cache::forget($this->intentKey($customer));
+            $this->sendMainMenu($chatId);
             $this->sendCategoryCatalog($chatId);
 
             return;
         }
-        if ($text === '/katalog') {
+        if (in_array($text, ['/katalog', '🛍️ Marketplace'], true)) {
             Cache::forget($this->intentKey($customer));
             $this->sendCategoryCatalog($chatId);
+
+            return;
+        }
+        if (in_array($text, ['/menu', '☰ Menu'], true)) {
+            Cache::forget($this->intentKey($customer));
+            $this->sendMainMenu($chatId);
+
+            return;
+        }
+        if (in_array($text, ['/support', '💬 Support'], true)) {
+            Cache::forget($this->intentKey($customer));
+            $this->sendSupport($chatId);
+
+            return;
+        }
+        if (in_array($text, ['/akun', '👤 Akun Saya'], true)) {
+            Cache::forget($this->intentKey($customer));
+            $this->sendAccountSummary($customer, $chatId);
 
             return;
         }
@@ -95,7 +117,7 @@ class TelegramUpdateProcessor
 
             return;
         }
-        if (in_array($text, ['/status', '/pesanan'], true)) {
+        if (in_array($text, ['/status', '/pesanan', '📦 Pesanan'], true)) {
             Cache::forget($this->intentKey($customer));
             $order = $customer->orders()->latest()->first();
             $this->bot->sendMessage($chatId, $order ? 'Status pesanan '.$order->invoice_number.': '.$order->order_status->value.' / '.$order->payment_status->value."\nLihat riwayat: /riwayat atau detail: /order {$order->invoice_number}" : 'Belum ada pesanan. Buka /katalog untuk mulai belanja.');
@@ -135,6 +157,56 @@ class TelegramUpdateProcessor
         }
         Cache::forget($this->intentKey($customer));
         $this->bot->sendMessage($chatId, 'Perintah tidak dikenal. Ketik /katalog.');
+    }
+
+    private function sendMainMenu(string $chatId): void
+    {
+        $this->bot->sendMessage($chatId, "☰ Menu utama\nPilih tombol di bawah supaya lebih cepat belanja.", $this->mainMenuKeyboard());
+    }
+
+    private function mainMenuKeyboard(): array
+    {
+        return [
+            'keyboard' => [
+                [['text' => '🛍️ Marketplace'], ['text' => '📦 Pesanan']],
+                [['text' => '👤 Akun Saya'], ['text' => '💬 Support']],
+                [['text' => '☰ Menu']],
+            ],
+            'resize_keyboard' => true,
+            'is_persistent' => true,
+            'input_field_placeholder' => 'Pilih menu atau ketik /cari produk',
+        ];
+    }
+
+    private function sendSupport(string $chatId): void
+    {
+        $adminContactUrl = config('services.telegram.admin_contact_url');
+        $adminUsername = config('services.telegram.admin_username');
+        $replyMarkup = [];
+        if ($adminContactUrl) {
+            $replyMarkup = ['inline_keyboard' => [[['text' => '💬 Chat Admin', 'url' => $adminContactUrl]]]];
+        } elseif ($adminUsername) {
+            $replyMarkup = ['inline_keyboard' => [[['text' => '💬 Chat Admin', 'url' => 'https://t.me/'.ltrim((string) $adminUsername, '@')]]]];
+        }
+
+        $this->bot->sendMessage($chatId, "💬 Support\nButuh bantuan order atau pembayaran? Hubungi admin, atau kirim detail invoice kamu di sini.", $replyMarkup);
+    }
+
+    private function sendAccountSummary(Customer $customer, string $chatId): void
+    {
+        $ordersCount = $customer->orders()->count();
+        $latestOrder = $customer->orders()->latest()->first();
+        $lines = [
+            '👤 Akun Saya',
+            'Nama: '.($customer->first_name ?: '-'),
+            'Username: @'.($customer->username ?: '-'),
+            'Total pesanan: '.$ordersCount,
+        ];
+        if ($latestOrder) {
+            $lines[] = 'Pesanan terakhir: '.$latestOrder->invoice_number.' · '.$latestOrder->payment_status->value;
+        }
+
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => '📦 Lihat Pesanan', 'callback_data' => 'status']]]]);
     }
 
     private function callback(Customer $customer, string $chatId, string $id, string $data): void
@@ -204,7 +276,7 @@ class TelegramUpdateProcessor
         if ($data === 'checkout') {
             $this->bot->answerCallbackQuery($id);
             try {
-                $paymentMode = (string) config('services.telegram.payment_mode', 'manual_dana');
+                $paymentMode = (string) config('services.telegram.payment_mode', 'pakasir');
                 $order = $paymentMode === 'pakasir'
                     ? $this->checkout->checkout($this->carts->activeCartFor($customer), 'hosted', 'pakasir')
                     : $this->checkout->checkout($this->carts->activeCartFor($customer), 'DANA_QR', 'manual');
@@ -239,7 +311,7 @@ class TelegramUpdateProcessor
             $keyboard[] = [['text' => '📂 Lainnya', 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? 'Katalog kosong.' : "🛍️ Katalog Produk\n[BANNER PLACEHOLDER - isi URL/gambar di admin kategori]\n\nPilih kategori:", ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $keyboard === [] ? "🛍️ Katalog masih kosong.\nProduk baru akan tampil di sini setelah admin menambah stok." : "🛍️ Katalog Produk\n━━━━━━━━━━━━━━\nPilih kategori favorit kamu di bawah.\n\n✨ Produk aktif dan ready stock akan otomatis tampil.", ['inline_keyboard' => $keyboard]);
     }
 
     private function sendStockChoices(string $chatId, Product $product, int $availableStock): void
@@ -253,10 +325,11 @@ class TelegramUpdateProcessor
 
         $lines = [
             '📦 '.$product->name,
-            'Harga: Rp '.number_format($product->price_amount, 0, ',', '.'),
-            'Stok tersedia: '.$availableStock,
+            '━━━━━━━━━━━━━━',
+            '💰 Harga: Rp '.number_format($product->price_amount, 0, ',', '.'),
+            '📦 Stok tersedia: '.$availableStock,
             '',
-            'Pilih jumlah:',
+            '🔢 Pilih jumlah yang ingin dibeli:',
         ];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -274,7 +347,7 @@ class TelegramUpdateProcessor
             $product = Product::findOrFail($productId);
             $cart = $this->carts->activeCartFor($customer);
             $this->carts->addItem($cart, $product, $quantity);
-            $this->bot->sendMessage($chatId, "Keranjang: {$product->name} x {$quantity}", ['inline_keyboard' => [[['text' => 'Pembayaran', 'callback_data' => 'checkout']]]]);
+            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n\nSiap checkout?", ['inline_keyboard' => [[['text' => '💳 Pembayaran', 'callback_data' => 'checkout']]]]);
 
             return true;
         } catch (Throwable) {
@@ -303,19 +376,20 @@ class TelegramUpdateProcessor
         }
 
         $products = $query->limit(9)->get();
-        $lines = ['📂 '.$title];
+        $lines = ['📂 '.$title, '━━━━━━━━━━━━━━'];
         if ($category?->description) {
             $lines[] = $category->description;
         }
         $lines[] = $category?->banner_image_path ? '[BANNER: '.$category->banner_image_path.']' : '[BANNER PLACEHOLDER - isi URL/gambar di admin kategori]';
         $lines[] = '';
         foreach ($products as $i => $product) {
-            $lines[] = ($i + 1).'. '.$product->name.' - Rp '.number_format($product->price_amount, 0, ',', '.').' (stok '.($product->stock - $product->reserved_stock).')';
+            $lines[] = ($i + 1).'. ✅ '.$product->name;
+            $lines[] = '   💰 Rp '.number_format($product->price_amount, 0, ',', '.').' · 📦 Stok '.($product->stock - $product->reserved_stock);
         }
         $keyboard = $products->values()->map(fn ($product, $i) => [['text' => (string) ($i + 1), 'callback_data' => 'product:'.$product->id]])->all();
         $keyboard[] = [['text' => '⬅️ Kembali ke kategori', 'callback_data' => 'back:categories']];
 
-        $this->bot->sendMessage($chatId, $products->isEmpty() ? 'Produk kategori ini kosong.' : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $products->isEmpty() ? "📂 Produk kategori ini masih kosong.\nCoba kategori lain atau kembali ke katalog." : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
     private function sendSearchResults(string $chatId, string $keyword): void
@@ -537,25 +611,49 @@ class TelegramUpdateProcessor
 
     private function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
     {
+        $order->loadMissing('orderItems');
+        $paymentUrl = $this->pakasir->hostedPaymentUrl($payment);
+
         $lines = [
-            '✅ Checkout berhasil dibuat.',
-            '',
-            'Invoice: '.$order->invoice_number,
-            'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
-            'Kode Referensi: '.$payment->merchant_ref,
+            '🧾 Invoice: '.$order->invoice_number,
+            '📦 Produk: '.$this->orderItemsSummary($order),
+            '🔢 Jumlah: '.$order->orderItems->sum('quantity'),
+            '💰 Total : Rp'.number_format($order->total_amount, 0, ',', '.').' ⚠️ wajib SAMA PERSIS',
         ];
 
         if ($order->expires_at) {
-            $lines[] = 'Batas pembayaran: '.$this->formatDate($order->expires_at);
+            $lines[] = '⏳ Order kadaluarsa pukul '.$this->formatDate($order->expires_at).'.';
         }
 
         $lines[] = '';
-        $lines[] = 'Link pembayaran Pakasir:';
-        $lines[] = $this->pakasir->hostedPaymentUrl($payment);
-        $lines[] = '';
-        $lines[] = 'Klik link di atas, lalu pilih metode pembayaran di Pakasir.';
+        $lines[] = '📲 Scan QRIS atau tap 💳 Bayar Melalui Website (Direct) untuk halaman pembayaran.';
+        $lines[] = '✅ Pembayaran otomatis terverifikasi — produk langsung dikirim setelah pembayaran berhasil.';
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines));
+        $this->bot->sendPhoto(
+            $chatId,
+            $this->qrPng($paymentUrl),
+            'pakasir-'.$payment->merchant_ref.'.png',
+            implode("\n", $lines),
+            ['inline_keyboard' => [[['text' => '💳 Bayar Melalui Website (Direct)', 'url' => $paymentUrl]]]],
+        );
+    }
+
+    private function orderItemsSummary(Order $order): string
+    {
+        return $order->orderItems
+            ->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))
+            ->join(', ');
+    }
+
+    private function qrPng(string $content): string
+    {
+        $options = new QROptions([
+            'outputType' => QROutputInterface::GDIMAGE_PNG,
+            'outputBase64' => false,
+            'scale' => 8,
+        ]);
+
+        return (new QRCode($options))->render($content);
     }
 
     private function notifyAdminAboutManualOrder(Order $order): void

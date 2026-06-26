@@ -39,13 +39,12 @@ class ProductionConcurrencyTest extends TestCase
             'api_base_url' => 'https://api.telegram.org',
             'default_payment_method' => 'BRIVA',
         ]);
-        config()->set('services.tripay', [
-            'api_key' => 'sandbox-key',
-            'private_key' => 'sandbox-private',
-            'merchant_code' => 'T0001',
-            'base_url' => 'https://tripay.test',
-            'callback_url' => 'https://example.test/api/webhook/tripay',
-            'return_url' => 'https://example.test/thanks',
+        config()->set('services.pakasir', [
+            'slug' => 'warung-ai',
+            'api_key' => 'pakasir-secret',
+            'base_url' => 'https://pakasir.test',
+            'redirect_url' => 'https://example.test/thanks',
+            'qris_only' => false,
         ]);
         config()->set('queue.default', 'sync');
 
@@ -93,14 +92,14 @@ class ProductionConcurrencyTest extends TestCase
         $this->requireConcurrencyLane();
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
 
-        $order = $this->tripayReadyOrder(stock: 2, quantity: 1, expiresAt: now()->addHour());
+        $order = $this->pakasirReadyOrder(stock: 2, quantity: 1, expiresAt: now()->addHour());
         $payment = $order->payments()->firstOrFail();
-        $rawPayload = json_encode($this->tripayPayload($payment), JSON_THROW_ON_ERROR);
-        $signature = hash_hmac('sha256', $rawPayload, 'sandbox-private');
+        $payload = $this->pakasirPayload($payment);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
         $results = $this->runConcurrently([
-            fn () => $this->processTripayCallback($rawPayload, $signature),
-            fn () => $this->processTripayCallback($rawPayload, $signature),
+            fn () => $this->processPakasirCallback($payload),
+            fn () => $this->processPakasirCallback($payload),
         ]);
 
         $this->assertSame(2, $this->successfulResultCount($results));
@@ -127,13 +126,13 @@ class ProductionConcurrencyTest extends TestCase
         $this->requireConcurrencyLane();
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
 
-        $order = $this->tripayReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());
+        $order = $this->pakasirReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());
         $payment = $order->payments()->firstOrFail();
-        $rawPayload = json_encode($this->tripayPayload($payment), JSON_THROW_ON_ERROR);
-        $signature = hash_hmac('sha256', $rawPayload, 'sandbox-private');
+        $payload = $this->pakasirPayload($payment);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
         $this->runConcurrently([
-            fn () => $this->processTripayCallback($rawPayload, $signature),
+            fn () => $this->processPakasirCallback($payload),
             fn () => app(OrderStateMachine::class)->expirePendingOrder(Order::findOrFail($order->id))?->id,
         ]);
 
@@ -365,35 +364,27 @@ class ProductionConcurrencyTest extends TestCase
         return app(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual', $expiresAt);
     }
 
-    private function tripayReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
+    private function pakasirReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
     {
         $order = $this->manualReadyOrder($stock, $quantity, $expiresAt);
-        $order->payments()->firstOrFail()->update(['provider' => 'tripay', 'method' => 'BRIVA']);
+        $order->payments()->firstOrFail()->update(['provider' => 'pakasir', 'method' => 'hosted']);
 
         return $order->fresh(['payments']);
     }
 
-    private function tripayPayload(Payment $payment): array
+    private function pakasirPayload(Payment $payment): array
     {
         return [
-            'reference' => 'TREF-CONCURRENT',
-            'merchant_ref' => $payment->merchant_ref,
-            'payment_method' => 'BRIVA',
-            'payment_method_code' => 'BRIVA',
-            'total_amount' => $payment->amount,
-            'status' => 'PAID',
-            'paid_at' => now()->timestamp,
+            'project' => 'warung-ai',
+            'order_id' => $payment->merchant_ref,
+            'amount' => $payment->amount,
+            'status' => 'completed',
         ];
     }
 
-    private function processTripayCallback(string $rawPayload, string $signature): int
+    private function processPakasirCallback(array $payload): int
     {
-        $response = $this->call('POST', '/api/webhook/tripay', [], [], [], [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json',
-            'HTTP_X_CALLBACK_SIGNATURE' => $signature,
-            'HTTP_X_CALLBACK_EVENT' => 'payment_status',
-        ], $rawPayload);
+        $response = $this->postJson('/api/webhook/pakasir', $payload);
 
         $response->assertOk();
 

@@ -30,13 +30,12 @@ class Phase8HardeningTest extends TestCase
             'app.env' => 'production',
             'app.key' => 'base64:test-key',
             'app.url' => 'https://example.test',
-            'services.tripay.api_key' => 'tripay-key',
-            'services.tripay.private_key' => 'tripay-private',
-            'services.tripay.merchant_code' => 'T0001',
-            'services.tripay.callback_url' => 'https://example.test/api/webhook/tripay',
-            'services.tripay.return_url' => 'https://example.test/thanks',
             'services.telegram.token' => 'telegram-token',
             'services.telegram.webhook_secret' => 'telegram-secret',
+            'services.telegram.payment_mode' => 'pakasir',
+            'services.pakasir.slug' => 'warung-ai',
+            'services.pakasir.api_key' => 'pakasir-key',
+            'services.pakasir.base_url' => 'https://app.pakasir.test',
         ]);
         app()->detectEnvironment(fn () => 'production');
 
@@ -52,13 +51,12 @@ class Phase8HardeningTest extends TestCase
             'app.env' => 'production',
             'app.key' => 'base64:test-key',
             'app.url' => 'https://example.test',
-            'services.tripay.api_key' => 'tripay-key',
-            'services.tripay.private_key' => 'tripay-private',
-            'services.tripay.merchant_code' => 'T0001',
-            'services.tripay.callback_url' => 'https://example.test/api/webhook/tripay',
-            'services.tripay.return_url' => 'https://example.test/thanks',
             'services.telegram.token' => 'telegram-token',
             'services.telegram.webhook_secret' => 'telegram-secret',
+            'services.telegram.payment_mode' => 'pakasir',
+            'services.pakasir.slug' => 'warung-ai',
+            'services.pakasir.api_key' => 'pakasir-key',
+            'services.pakasir.base_url' => 'https://app.pakasir.test',
         ]);
         app()->detectEnvironment(fn () => 'production');
         app()->instance('request', Request::create('http://localhost:8080/admin/login'));
@@ -66,17 +64,6 @@ class Phase8HardeningTest extends TestCase
         (new AppServiceProvider(app()))->boot();
 
         $this->assertStringStartsWith('http://localhost:8080/', URL::to('/livewire/livewire.min.js'));
-    }
-
-    public function test_tripay_webhook_uses_named_rate_limiter(): void
-    {
-        config(['services.tripay.webhook_rate_limit_per_minute' => 1]);
-
-        $payload = ['merchant_ref' => 'phase8-hardening-rate-limit'];
-
-        $this->postJson('/api/webhook/tripay', $payload);
-
-        $this->postJson('/api/webhook/tripay', $payload)->assertTooManyRequests();
     }
 
     public function test_logging_defaults_to_daily_rotation_and_env_example_exposes_defaults(): void
@@ -244,7 +231,6 @@ SH);
         $this->assertStringContainsString('../scripts/smoke-admin-assets.sh', $contents);
         $this->assertStringContainsString('npm ci', $contents);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
-        $this->assertStringNotContainsString('TRIPAY_API_KEY', $contents);
     }
 
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void

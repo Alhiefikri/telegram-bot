@@ -98,7 +98,6 @@ Komposisi container minimum:
 
 2. **web**
    - Nginx atau Caddy.
-   - Reverse proxy untuk Admin, Telegram webhook, dan Tripay webhook.
 
 3. **db**
    - PostgreSQL 16+.
@@ -151,7 +150,6 @@ Semua endpoint public wajib melalui HTTPS:
 
 - `/admin`
 - `/api/webhook/telegram`
-- `/api/webhook/tripay`
 
 Opsi ringan:
 
@@ -322,9 +320,6 @@ Menyimpan transaksi payment gateway.
 |---|---|---|---|
 | id | uuid | PK | ID payment internal. |
 | order_id | uuid | FK, indexed | Order terkait. |
-| provider | string | indexed | Contoh: `tripay`. |
-| merchant_ref | string | unique, indexed | Reference internal yang dikirim ke Tripay. |
-| provider_reference | string | nullable, unique | Reference resmi dari Tripay. |
 | method | string | not null | QRIS, OVO, VA_MANDIRI, dll. |
 | amount | bigint | not null | Nominal payment. |
 | currency | string(3) | default `IDR` | Mata uang. |
@@ -341,7 +336,6 @@ Menyimpan seluruh callback/event dari payment provider secara append-only.
 |---|---|---|---|
 | id | bigint | PK | ID event. |
 | payment_id | uuid | nullable FK | Payment terkait jika ditemukan. |
-| provider | string | indexed | Contoh: `tripay`. |
 | event_type | string | indexed | callback, reconciliation, manual_update. |
 | provider_reference | string | nullable, indexed | Reference dari provider. |
 | raw_payload | jsonb | not null | Payload mentah. |
@@ -465,9 +459,7 @@ Jika update yang sama diterima ulang:
 - jangan kurangi stok ulang,
 - jangan kirim pesan duplikat jika sudah selesai diproses.
 
-## 9.2 Tripay Callback
 
-Setiap callback Tripay wajib dicatat di `payment_events`.
 
 Callback wajib diproses secara idempotent berdasarkan kombinasi:
 
@@ -486,19 +478,15 @@ Sistem tidak boleh membuat lebih dari satu order aktif untuk checkout cart yang 
 
 ---
 
-# 10. Tripay Payment Requirement
 
 ## 10.1 Create Transaction
 
-Saat checkout, backend membuat transaksi Tripay dengan `merchant_ref` unik yang terhubung ke `payments.merchant_ref`.
 
 ## 10.2 Callback Verification
 
-Endpoint `/api/webhook/tripay` wajib:
 
 1. membaca raw payload,
 2. menyimpan event awal ke `payment_events`,
-3. memverifikasi signature/HMAC sesuai dokumentasi Tripay,
 4. memvalidasi `merchant_ref`,
 5. memvalidasi nominal pembayaran,
 6. memvalidasi payment method/channel jika tersedia,
@@ -508,7 +496,6 @@ Endpoint `/api/webhook/tripay` wajib:
 
 ## 10.3 Reconciliation Job
 
-Sistem wajib memiliki command/job rekonsiliasi berkala untuk mengecek payment pending ke Tripay.
 
 Tujuannya:
 
@@ -648,7 +635,6 @@ Admin dapat:
 Admin dapat:
 
 - melihat payment status,
-- melihat Tripay reference,
 - menjalankan manual reconciliation terbatas,
 - melihat raw callback event,
 - melihat paid_at dan expired_at.
@@ -704,7 +690,6 @@ Redis bukan requirement MVP, tapi arsitektur tidak boleh menghalangi migrasi ke 
 ## 15.1 Webhook Security
 
 - Telegram webhook wajib memakai secret token jika tersedia.
-- Tripay webhook wajib signature verification.
 - Semua callback disimpan raw payload-nya.
 - Semua callback diproses idempotent.
 - Replay protection wajib dipertimbangkan.
@@ -732,7 +717,6 @@ Redis bukan requirement MVP, tapi arsitektur tidak boleh menghalangi migrasi ke 
 Sistem wajib memiliki structured logs untuk:
 
 - Telegram webhook,
-- Tripay callback,
 - order creation,
 - payment transition,
 - inventory movement,
@@ -764,7 +748,6 @@ Minimal perlu mekanisme pengecekan untuk:
 - queue menumpuk,
 - backup gagal,
 - disk hampir penuh,
-- Tripay callback gagal diproses.
 
 ---
 
@@ -774,8 +757,6 @@ Minimal test sebelum production:
 
 ## 17.1 Payment Tests
 
-- Tripay callback valid.
-- Tripay callback signature invalid.
 - Duplicate callback tidak menggandakan proses.
 - Amount mismatch ditolak.
 - Merchant reference tidak ditemukan dicatat sebagai event.
@@ -819,14 +800,12 @@ Customer pilih produk
 -> backend validasi stok
 -> buat cart/order/payment dalam transaction
 -> reserve stock
--> request transaksi Tripay
 -> kirim instruksi pembayaran / QRIS ke customer
 ```
 
 ## 18.3 Payment Callback Flow
 
 ```text
-Tripay callback
 -> simpan raw event
 -> verify signature
 -> cek merchant_ref dan amount
@@ -895,7 +874,6 @@ Urutan implementasi wajib mengikuti fondasi transaksi terlebih dahulu, bukan lan
 - expiry job,
 - order/payment state machine.
 
-## Phase 5 — Tripay Sandbox
 
 - create transaction,
 - signature verification,
@@ -946,7 +924,6 @@ PRD dianggap siap untuk implementation session baru jika semua poin berikut dite
 - [x] `order_status` dan `payment_status` dipisahkan.
 - [x] `order_items` menyimpan snapshot produk.
 - [x] Stock reservation dan inventory movement didefinisikan.
-- [x] Tripay callback wajib signature verification + idempotency.
 - [x] Deployment baseline mencakup TLS, healthcheck, secrets, backup, dan restore.
 - [x] Admin security mencakup RBAC dan audit log.
 - [x] Testing minimum untuk payment, order, inventory, dan Telegram sudah didefinisikan.

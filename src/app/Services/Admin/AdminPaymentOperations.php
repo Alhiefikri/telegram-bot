@@ -9,15 +9,11 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirClient;
-use App\Services\Tripay\TripayCallbackProcessor;
-use App\Services\Tripay\TripayClient;
 use InvalidArgumentException;
 
 class AdminPaymentOperations
 {
     public function __construct(
-        private readonly TripayClient $client,
-        private readonly TripayCallbackProcessor $processor,
         private readonly AuditLogger $audit,
         private readonly PakasirClient $pakasirClient,
         private readonly PakasirCallbackProcessor $pakasirProcessor,
@@ -25,11 +21,6 @@ class AdminPaymentOperations
 
     public function canReconcile(Payment $payment): bool
     {
-        if ($payment->provider === 'tripay') {
-            return $payment->status === PaymentStatus::Pending
-                && filled($payment->provider_reference);
-        }
-
         return $payment->provider === 'pakasir'
             && $payment->status === PaymentStatus::Pending
             && filled($payment->merchant_ref)
@@ -44,7 +35,6 @@ class AdminPaymentOperations
         }
 
         $event = match ($payment->provider) {
-            'tripay' => $this->processor->processReconciliationForPayment($payment, $this->client->detail($payment->provider_reference)),
             'pakasir' => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
             default => throw new InvalidArgumentException('Only supported pending payments with provider identifiers can be reconciled.'),
         };

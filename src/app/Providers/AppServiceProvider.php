@@ -41,11 +41,6 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute((int) config('services.telegram.webhook_rate_limit_per_minute', 120))->by('telegram:'.$key);
         });
 
-        RateLimiter::for('tripay', function (Request $request) {
-            $limit = (int) config('services.tripay.webhook_rate_limit_per_minute', 30);
-
-            return Limit::perMinute($limit)->by('tripay:ip:'.$request->ip());
-        });
     }
 
     private function validateProductionConfiguration(): void
@@ -59,16 +54,6 @@ class AppServiceProvider extends ServiceProvider
             'TELEGRAM_BOT_TOKEN' => config('services.telegram.token'),
             'TELEGRAM_WEBHOOK_SECRET' => config('services.telegram.webhook_secret'),
         ];
-
-        if (config('services.telegram.payment_mode') === 'tripay') {
-            $required += [
-                'TRIPAY_API_KEY' => config('services.tripay.api_key'),
-                'TRIPAY_PRIVATE_KEY' => config('services.tripay.private_key'),
-                'TRIPAY_MERCHANT_CODE' => config('services.tripay.merchant_code'),
-                'TRIPAY_CALLBACK_URL' => config('services.tripay.callback_url'),
-                'TRIPAY_RETURN_URL' => config('services.tripay.return_url'),
-            ];
-        }
 
         if (config('services.telegram.payment_mode') === 'pakasir') {
             $required += [

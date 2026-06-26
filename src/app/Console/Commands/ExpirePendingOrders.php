@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Services\OrderStateMachine;
+use App\Services\Telegram\TelegramOrderExpiredNotifier;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -14,7 +15,7 @@ class ExpirePendingOrders extends Command
 
     protected $description = 'Expire due pending-payment orders and release reservations.';
 
-    public function handle(OrderStateMachine $orders): int
+    public function handle(OrderStateMachine $orders, TelegramOrderExpiredNotifier $notifier): int
     {
         $processed = 0;
         $skipped = 0;
@@ -23,15 +24,17 @@ class ExpirePendingOrders extends Command
         Order::where('order_status', OrderStatus::PendingPayment)
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', now())
-            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, &$processed, &$skipped, &$failed): void {
+            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed): void {
                 foreach ($chunk as $order) {
                     try {
-                        if ($orders->expirePendingOrder($order) === null) {
+                        $expired = $orders->expirePendingOrder($order);
+                        if ($expired === null) {
                             $skipped++;
 
                             continue;
                         }
 
+                        $notifier->send($expired);
                         $processed++;
                     } catch (Throwable $e) {
                         report($e);

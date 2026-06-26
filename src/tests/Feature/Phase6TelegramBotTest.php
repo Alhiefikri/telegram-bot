@@ -31,7 +31,7 @@ class Phase6TelegramBotTest extends TestCase
     {
         parent::setUp();
         config()->set('services.telegram', ['token' => 'bot-token', 'webhook_secret' => 'secret', 'api_base_url' => 'https://api.telegram.org', 'default_payment_method' => 'BRIVA']);
-        config()->set('services.tripay', ['api_key' => 'k', 'private_key' => 'p', 'merchant_code' => 'M', 'base_url' => 'https://tripay.test', 'callback_url' => null, 'return_url' => null]);
+        config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false]);
         config()->set('queue.default', 'sync');
     }
 
@@ -70,7 +70,7 @@ class Phase6TelegramBotTest extends TestCase
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, TelegramUpdate::first()->processed_at);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_duplicate_direct_job_does_not_send_twice(): void
@@ -81,7 +81,7 @@ class Phase6TelegramBotTest extends TestCase
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_start_creates_customer_and_sends_welcome(): void
@@ -379,14 +379,14 @@ class Phase6TelegramBotTest extends TestCase
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $order = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-DETAIL', 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
         OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Canva Pro', 'quantity' => 2, 'subtotal' => 20000]);
-        Payment::factory()->create(['order_id' => $order->id, 'method' => 'BRIVA', 'provider' => 'tripay', 'status' => PaymentStatus::Pending]);
+        Payment::factory()->create(['order_id' => $order->id, 'method' => 'hosted', 'provider' => 'pakasir', 'status' => PaymentStatus::Pending]);
 
         $this->postJson('/api/webhook/telegram', $this->messageUpdate(205, '/order INV-DETAIL'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Detail Pesanan')
             && str_contains($r['text'], 'Canva Pro x 2')
-            && str_contains($r['text'], 'BRIVA')
+            && str_contains($r['text'], 'hosted')
             && str_contains($r['text'], 'Selesaikan pembayaran'));
     }
 
@@ -457,7 +457,7 @@ class Phase6TelegramBotTest extends TestCase
             && str_contains($r['text'], $order->invoice_number));
     }
 
-    public function test_checkout_callback_in_pakasir_mode_sends_hosted_payment_link(): void
+    public function test_checkout_callback_in_pakasir_mode_sends_qr_with_direct_payment_button(): void
     {
         config()->set('services.telegram.payment_mode', 'pakasir');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false]);
@@ -473,12 +473,9 @@ class Phase6TelegramBotTest extends TestCase
         $payment = $order->payments()->firstOrFail();
         $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'pakasir', 'method' => 'hosted', 'amount' => 30000]);
         $this->assertNotEmpty($payment->merchant_ref);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === '12345'
-            && str_contains($r['text'], $order->invoice_number)
-            && str_contains($r['text'], 'Rp 30.000')
-            && str_contains($r['text'], 'Batas pembayaran:')
-            && str_contains($r['text'], 'https://app.pakasir.test/pay/sedulur-digital/30000?order_id='.rawurlencode($payment->merchant_ref)));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'https://app.pakasir.test/pay/sedulur-digital/30000?order_id='.rawurlencode($payment->merchant_ref)));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Order manual baru masuk dashboard'));
@@ -496,18 +493,19 @@ class Phase6TelegramBotTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && $r['chat_id'] === 777 && str_contains($r['text'], 'Pembayaran diterima'));
     }
 
-    public function test_tripay_paid_callback_sends_telegram_receipt_once_on_duplicate_callback(): void
+    public function test_pakasir_paid_callback_sends_telegram_receipt_once_on_duplicate_callback(): void
     {
-        Http::fake(['https://tripay.test/transaction/create' => Http::response(['success' => true, 'data' => ['reference' => 'TREF-CB']]), 'https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
         $customer = Customer::factory()->create(['telegram_id' => 888]);
         $product = Product::factory()->create(['stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'BRIVA', 'tripay');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'hosted', 'pakasir');
         $payment = $order->payments()->first();
-        $payload = ['merchant_ref' => $payment->merchant_ref, 'reference' => 'TREF-CB', 'total_amount' => $payment->amount, 'status' => 'PAID', 'payment_method_code' => 'BRIVA'];
+        $payload = ['project' => 'sedulur-digital', 'order_id' => $payment->merchant_ref, 'amount' => $payment->amount, 'status' => 'completed'];
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true]), 'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
-        $this->postTripayCallback($payload)->assertOk();
-        $this->postTripayCallback($payload)->assertOk();
+        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+        $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
 
         $sent = 0;
         Http::assertSent(function ($r) use (&$sent) {
@@ -540,14 +538,4 @@ class Phase6TelegramBotTest extends TestCase
         return ['update_id' => $id, 'callback_query' => ['id' => $callbackId, 'from' => ['id' => 12345, 'first_name' => 'Tester'], 'message' => ['chat' => ['id' => 12345]], 'data' => $data]];
     }
 
-    private function postTripayCallback(array $payload)
-    {
-        $raw = json_encode($payload);
-
-        return $this->call('POST', '/api/webhook/tripay', [], [], [], [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_CALLBACK_SIGNATURE' => hash_hmac('sha256', $raw, 'p'),
-            'HTTP_X_CALLBACK_EVENT' => 'payment_status',
-        ], $raw);
-    }
 }

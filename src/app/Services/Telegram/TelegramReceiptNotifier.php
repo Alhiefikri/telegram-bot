@@ -41,7 +41,7 @@ class TelegramReceiptNotifier
                 return;
             }
 
-            $this->bot->sendMessage($claimed->customer->telegram_id, 'Pembayaran diterima untuk '.$claimed->invoice_number.'. Terima kasih.');
+            $this->bot->sendMessage($claimed->customer->telegram_id, "✅ Pembayaran diterima\n━━━━━━━━━━━━━━\n🧾 Invoice: {$claimed->invoice_number}\n\nTerima kasih. Pesanan kamu sedang diproses otomatis.");
             $receiptSentAt = Order::whereKey($claimed->id);
             if (! $force) {
                 $receiptSentAt->whereNull('telegram_receipt_sent_at');

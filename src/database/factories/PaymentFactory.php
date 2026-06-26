@@ -14,6 +14,6 @@ class PaymentFactory extends Factory
 
     public function definition(): array
     {
-        return ['order_id' => Order::factory(), 'provider' => 'tripay', 'merchant_ref' => 'MR-'.fake()->unique()->numerify('########'), 'provider_reference' => fake()->unique()->numerify('TRX########'), 'method' => 'QRIS', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending, 'paid_at' => null, 'expired_at' => now()->addHour()];
+        return ['order_id' => Order::factory(), 'provider' => 'pakasir', 'merchant_ref' => 'MR-'.fake()->unique()->numerify('########'), 'provider_reference' => null, 'method' => 'hosted', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending, 'paid_at' => null, 'expired_at' => now()->addHour()];
     }
 }

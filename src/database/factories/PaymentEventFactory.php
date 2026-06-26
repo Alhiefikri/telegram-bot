@@ -14,6 +14,6 @@ class PaymentEventFactory extends Factory
 
     public function definition(): array
     {
-        return ['payment_id' => Payment::factory(), 'provider' => 'tripay', 'event_type' => PaymentEventType::Callback, 'merchant_ref' => 'MR-'.fake()->numerify('########'), 'provider_reference' => fake()->numerify('TRX########'), 'provider_status' => 'PAID', 'raw_payload' => ['status' => 'PAID'], 'signature' => 'sig', 'received_at' => now(), 'processed_at' => null];
+        return ['payment_id' => Payment::factory(), 'provider' => 'pakasir', 'event_type' => PaymentEventType::Callback, 'merchant_ref' => 'MR-'.fake()->numerify('########'), 'provider_reference' => null, 'provider_status' => 'completed', 'raw_payload' => ['status' => 'completed'], 'signature' => null, 'received_at' => now(), 'processed_at' => null];
     }
 }

@@ -181,6 +181,27 @@ class PakasirWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_expire_pending_orders_sends_telegram_expired_notice(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
+        $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
+        $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'hosted', 'pakasir', now()->subMinute());
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $order->payments()->firstOrFail()->fresh()->status);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && $request['chat_id'] === '12345'
+            && str_contains($request['text'], '⏳ Transaksi Kedaluwarsa')
+            && str_contains($request['text'], $order->invoice_number)
+            && str_contains($request['text'], 'Ready API KEY')
+            && str_contains($request['text'], 'Rp7.000'));
+    }
+
     private function payload(string $orderId, int $amount, array $overrides = []): array
     {
         return array_merge([

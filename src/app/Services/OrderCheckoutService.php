@@ -14,7 +14,6 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
-use App\Services\Tripay\TripayClient;
 use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -23,8 +22,6 @@ class OrderCheckoutService
 {
     public function __construct(
         private readonly InvoiceNumberGenerator $numbers,
-        private readonly TripayClient $tripay,
-        private readonly OrderStateMachine $stateMachine,
     ) {}
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null): Order
@@ -35,24 +32,12 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentMethod, $provider, $expiresAt), 5);
-                if ($provider === 'tripay') {
-                    $payment = $order->payments()->where('provider', 'tripay')->firstOrFail();
-                    if ($payment->provider_reference === null) {
-                        $this->tripay->createTransaction($payment);
-                    }
-                }
 
                 return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {
                 if (! $this->isUniqueViolation($e) || $i === 4) {
                     throw $e;
                 }
-            } catch (\Throwable $e) {
-                if ($provider === 'tripay' && $order && $order->exists && $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending) {
-                    $this->stateMachine->cancelPendingOrder($order);
-                }
-
-                throw $e;
             }
         }
 
