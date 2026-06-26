@@ -70,10 +70,21 @@ class AppServiceProvider extends ServiceProvider
             ];
         }
 
+        if (config('services.telegram.payment_mode') === 'pakasir') {
+            $required += [
+                'PAKASIR_SLUG' => config('services.pakasir.slug'),
+                'PAKASIR_API_KEY' => config('services.pakasir.api_key'),
+            ];
+        }
+
         $missing = array_keys(array_filter($required, fn ($value) => blank($value)));
 
         if ($missing !== []) {
             throw new RuntimeException('Missing required production configuration: '.implode(', ', $missing));
+        }
+
+        if (config('services.telegram.payment_mode') === 'pakasir' && ! str_starts_with((string) config('services.pakasir.base_url'), 'https://')) {
+            throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
         }
 
         if (! str_starts_with((string) config('app.url'), 'https://')) {

@@ -46,6 +46,14 @@ return [
         'webhook_max_body_bytes' => env('TRIPAY_WEBHOOK_MAX_BODY_BYTES', 65536),
     ],
 
+    'pakasir' => [
+        'slug' => env('PAKASIR_SLUG'),
+        'api_key' => env('PAKASIR_API_KEY'),
+        'base_url' => env('PAKASIR_BASE_URL', 'https://app.pakasir.com'),
+        'redirect_url' => env('PAKASIR_REDIRECT_URL'),
+        'qris_only' => env('PAKASIR_QRIS_ONLY', false),
+    ],
+
     'telegram' => [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
