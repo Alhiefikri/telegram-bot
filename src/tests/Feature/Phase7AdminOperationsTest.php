@@ -25,6 +25,7 @@ use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\Pakasir\PakasirClient;
 use App\Services\Tripay\TripayClient;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -91,20 +92,35 @@ class Phase7AdminOperationsTest extends TestCase
         Payment::factory()->create(['order_id' => $manualOrder->id, 'provider' => 'manual', 'status' => PaymentStatus::Pending]);
         $paidOrder = Order::factory()->create(['customer_id' => $customer->id, 'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
         $tripayPayment = Payment::factory()->create(['provider' => 'tripay', 'status' => PaymentStatus::Pending, 'provider_reference' => 'TRX-ACTION']);
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $pakasirPayment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-ACTION']);
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
         Livewire::test(ListOrders::class)
             ->assertActionVisible(TestAction::make('completeManual')->table($manualOrder))
             ->assertActionVisible(TestAction::make('resendReceipt')->table($paidOrder));
         Livewire::test(ListPayments::class)
-            ->assertActionVisible(TestAction::make('reconcile')->table($tripayPayment));
+            ->assertActionVisible(TestAction::make('reconcile')->table($tripayPayment))
+            ->assertActionVisible(TestAction::make('reconcile')->table($pakasirPayment));
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Support]));
         Livewire::test(ListOrders::class)
             ->assertActionHidden(TestAction::make('completeManual')->table($manualOrder))
             ->assertActionVisible(TestAction::make('resendReceipt')->table($paidOrder));
         Livewire::test(ListPayments::class)
-            ->assertActionHidden(TestAction::make('reconcile')->table($tripayPayment));
+            ->assertActionHidden(TestAction::make('reconcile')->table($tripayPayment))
+            ->assertActionHidden(TestAction::make('reconcile')->table($pakasirPayment));
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
+        config()->set('services.pakasir.api_key', '');
+        Livewire::test(ListPayments::class)
+            ->assertActionHidden(TestAction::make('reconcile')->table($pakasirPayment));
+
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $pakasirPayment->update(['merchant_ref' => '']);
+        Livewire::test(ListPayments::class)
+            ->assertActionHidden(TestAction::make('reconcile')->table($pakasirPayment));
     }
 
     public function test_raw_payment_payload_visibility_by_role(): void
@@ -201,6 +217,44 @@ class Phase7AdminOperationsTest extends TestCase
         $this->assertTrue($event->fresh()->processed_at !== null);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'payment.manually_reconciled', 'subject_id' => (string) $payment->id]);
+    }
+
+    public function test_manual_reconciliation_fetches_pakasir_detail_processes_and_audits(): void
+    {
+        Queue::fake();
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $user = User::factory()->create(['role' => UserRole::Finance]);
+        $payment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-777', 'amount' => 10000]);
+        $this->mock(PakasirClient::class, function ($mock) use ($payment): void {
+            $mock->shouldReceive('transactionDetail')->once()->with($payment)->andReturn(['transaction' => ['project' => 'warung-ai', 'order_id' => 'PKS-777', 'amount' => 10000, 'status' => 'completed']]);
+        });
+
+        $event = app(AdminPaymentOperations::class)->reconcile($payment, $user, '127.0.0.1');
+
+        $this->assertTrue($event->fresh()->processed_at !== null);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'payment.manually_reconciled', 'subject_id' => (string) $payment->id]);
+    }
+
+    public function test_manual_pakasir_reconciliation_api_failure_does_not_mutate_or_audit(): void
+    {
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $user = User::factory()->create(['role' => UserRole::Finance]);
+        $payment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-FAIL', 'amount' => 10000]);
+        $this->mock(PakasirClient::class, function ($mock) use ($payment): void {
+            $mock->shouldReceive('transactionDetail')->once()->with($payment)->andThrow(new \RuntimeException('Pakasir unavailable'));
+        });
+
+        try {
+            app(AdminPaymentOperations::class)->reconcile($payment, $user, '127.0.0.1');
+            $this->fail('Expected Pakasir API failure to fail safely.');
+        } catch (\RuntimeException) {
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+            $this->assertSame(0, PaymentEvent::count());
+            $this->assertSame(0, AuditLog::where('action', 'payment.manually_reconciled')->count());
+        }
     }
 
     public function test_audit_logs_are_related_to_operations_records(): void

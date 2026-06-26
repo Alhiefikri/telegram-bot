@@ -11,6 +11,7 @@ use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Throwable;
 
@@ -25,6 +26,29 @@ class PakasirCallbackProcessor
 
         $this->validatePayload($payload, $payment);
         $this->verifyWithPakasir($payment);
+        $this->applyPaid($event);
+
+        return $event->fresh();
+    }
+
+    public function processReconciliationForPayment(Payment $payment, array $payload): PaymentEvent
+    {
+        $this->ensureConfigured();
+
+        $transaction = $this->transactionFromPayload($payload);
+        $eventPayload = is_array($transaction) ? $transaction : $payload;
+        $event = $this->logEvent(PaymentEventType::Reconciliation, $eventPayload, $payment);
+
+        if ($payment->provider !== 'pakasir'
+            || $payment->status !== PaymentStatus::Pending
+            || ! is_array($transaction)
+            || Arr::get($transaction, 'project') !== config('services.pakasir.slug')
+            || (int) Arr::get($transaction, 'amount') !== $payment->amount
+            || Arr::get($transaction, 'order_id') !== $payment->merchant_ref
+            || strcasecmp((string) Arr::get($transaction, 'status'), 'completed') !== 0) {
+            return $event;
+        }
+
         $this->applyPaid($event);
 
         return $event->fresh();
@@ -57,7 +81,7 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir status is not completed.');
         }
 
-        if (! config('services.pakasir.api_key')) {
+        if (! filled(config('services.pakasir.api_key'))) {
             throw new UnprocessableEntityHttpException('Pakasir verification is not configured.');
         }
     }
@@ -70,10 +94,7 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir verification failed.');
         }
 
-        $transaction = Arr::get($response, 'transaction', Arr::get($response, 'data', $response));
-        if (is_array($transaction) && isset($transaction['transaction']) && is_array($transaction['transaction'])) {
-            $transaction = $transaction['transaction'];
-        }
+        $transaction = $this->transactionFromPayload($response);
 
         if (! is_array($transaction)
             || Arr::get($transaction, 'project') !== config('services.pakasir.slug')
@@ -104,12 +125,18 @@ class PakasirCallbackProcessor
         }, 5);
     }
 
-    private function logEvent(array $payload, ?Payment $payment): PaymentEvent
+    private function logEvent(PaymentEventType|array $type, array|Payment|null $payload = null, ?Payment $payment = null): PaymentEvent
     {
+        if (is_array($type)) {
+            $payment = $payload instanceof Payment ? $payload : $payment;
+            $payload = $type;
+            $type = PaymentEventType::Callback;
+        }
+
         return PaymentEvent::create([
             'payment_id' => $payment?->id,
             'provider' => 'pakasir',
-            'event_type' => PaymentEventType::Callback,
+            'event_type' => $type,
             'merchant_ref' => Arr::get($payload, 'order_id'),
             'provider_status' => Arr::get($payload, 'status'),
             'raw_payload' => $payload,
@@ -123,5 +150,25 @@ class PakasirCallbackProcessor
             ->where('provider', 'pakasir')
             ->where('merchant_ref', Arr::get($payload, 'order_id'))
             ->first();
+    }
+
+    private function transactionFromPayload(array $payload): mixed
+    {
+        $transaction = Arr::get($payload, 'transaction', Arr::get($payload, 'data', $payload));
+        if (is_array($transaction) && isset($transaction['transaction']) && is_array($transaction['transaction'])) {
+            return $transaction['transaction'];
+        }
+
+        return $transaction;
+    }
+
+    private function ensureConfigured(): void
+    {
+        foreach (['slug' => 'project', 'api_key' => 'API key'] as $key => $label) {
+            $value = config('services.pakasir.'.$key);
+            if (! is_string($value) || trim($value) === '') {
+                throw new RuntimeException('Pakasir '.$label.' is not configured.');
+            }
+        }
     }
 }

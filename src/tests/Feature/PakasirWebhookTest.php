@@ -116,6 +116,71 @@ class PakasirWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_reconcile_command_processes_completed_pakasir_payment_and_logs_reconciliation(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+
+        $this->artisan('pakasir:reconcile')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $event = PaymentEvent::firstOrFail();
+        $this->assertSame(PaymentEventType::Reconciliation, $event->event_type);
+        $this->assertNotNull($event->processed_at);
+    }
+
+    public function test_pakasir_reconciliation_is_scheduled_when_configured(): void
+    {
+        $this->artisan('schedule:list')
+            ->expectsOutputToContain('pakasir:reconcile --chunk=100')
+            ->assertSuccessful();
+    }
+
+    public function test_reconcile_command_skips_mismatches_without_mutating_order(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount, ['amount' => $payment->amount + 1]);
+
+        $this->artisan('pakasir:reconcile')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
+    }
+
+    public function test_reconcile_command_reports_api_failures_without_mutating_order(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        Http::fake(['https://app.pakasir.com/api/transactiondetail*' => Http::response(['message' => 'down'], 500)]);
+
+        $this->artisan('pakasir:reconcile')
+            ->expectsOutputToContain('pakasir:reconcile completed with partial failures: processed=0 skipped=0 failed=1')
+            ->assertFailed();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(0, PaymentEvent::count());
+    }
+
+    public function test_reconcile_command_fails_safely_when_api_key_is_missing(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        config()->set('services.pakasir.api_key', '');
+        Http::fake();
+
+        $this->artisan('pakasir:reconcile')->assertFailed();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(0, PaymentEvent::count());
+        Http::assertNothingSent();
+    }
+
     private function payload(string $orderId, int $amount, array $overrides = []): array
     {
         return array_merge([
