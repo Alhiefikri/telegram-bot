@@ -110,6 +110,17 @@ class Phase6TelegramBotTest extends TestCase
             && ! str_contains(json_encode($r->data()), 'Mati'));
     }
 
+    public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+
+        $this->postJson('/api/webhook/telegram', $this->messageUpdate(119, '/menu'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Menu utama')
+            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Marketplace');
+    }
+
     public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
@@ -584,5 +595,4 @@ class Phase6TelegramBotTest extends TestCase
     {
         return ['update_id' => $id, 'callback_query' => ['id' => $callbackId, 'from' => ['id' => 12345, 'first_name' => 'Tester'], 'message' => ['chat' => ['id' => 12345]], 'data' => $data]];
     }
-
 }

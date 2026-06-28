@@ -1,0 +1,135 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use App\Enums\CartStatus;
+use App\Models\Customer;
+use Illuminate\Support\Arr;
+
+class TelegramMessageRouter
+{
+    public function __construct(
+        private TelegramBotClient $bot,
+        private TelegramIntentSession $session,
+        private TelegramMenuIntents $menu,
+        private TelegramCatalogIntents $catalog,
+        private TelegramCartIntents $cart,
+        private TelegramOrderIntents $orders,
+        private TelegramManualPaymentIntents $manualPayments,
+    ) {}
+
+    public function route(Customer $customer, string $chatId, array $message): void
+    {
+        $text = trim((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
+
+        if ($text === '/start') {
+            $this->session->forget($customer);
+            $this->menu->sendMainMenu($chatId);
+            $this->catalog->sendCategoryCatalog($chatId);
+
+            return;
+        }
+
+        if (in_array($text, ['/katalog', '🛍️ Marketplace'], true)) {
+            $this->session->forget($customer);
+            $this->catalog->sendCategoryCatalog($chatId);
+
+            return;
+        }
+
+        if (in_array($text, ['/menu', '☰ Menu'], true)) {
+            $this->session->forget($customer);
+            $this->menu->sendMainMenu($chatId);
+
+            return;
+        }
+
+        if (in_array($text, ['/support', '💬 Support'], true)) {
+            $this->session->forget($customer);
+            $this->menu->sendSupport($chatId);
+
+            return;
+        }
+
+        if (in_array($text, ['/akun', '👤 Akun Saya'], true)) {
+            $this->session->forget($customer);
+            $this->menu->sendAccountSummary($customer, $chatId);
+
+            return;
+        }
+
+        if ($text === '/cari' || str_starts_with($text, '/cari ')) {
+            $this->session->forget($customer);
+            $keyword = trim(substr($text, strlen('/cari')));
+            if ($keyword === '') {
+                $this->bot->sendMessage($chatId, "Ketik /cari diikuti kata kunci produk.\nContoh: /cari netflix");
+
+                return;
+            }
+
+            $this->catalog->sendSearchResults($chatId, $keyword);
+
+            return;
+        }
+
+        if ($text === '/batal') {
+            $this->session->forget($customer);
+            $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
+            $this->bot->sendMessage($chatId, 'Keranjang aktif dibatalkan.');
+
+            return;
+        }
+
+        if ($text === '/payment' || str_starts_with($text, '/payment ')) {
+            $this->session->forget($customer);
+            $this->manualPayments->submitManualPaymentProof($customer, $chatId, $message, trim(substr($text, strlen('/payment'))));
+
+            return;
+        }
+
+        if (in_array($text, ['/status', '/pesanan', '📦 Pesanan'], true)) {
+            $this->session->forget($customer);
+            $order = $customer->orders()->latest()->first();
+            $this->bot->sendMessage($chatId, $order ? 'Status pesanan '.$order->invoice_number.': '.$order->order_status->value.' / '.$order->payment_status->value."\nLihat riwayat: /riwayat atau detail: /order {$order->invoice_number}" : 'Belum ada pesanan. Buka /katalog untuk mulai belanja.');
+
+            return;
+        }
+
+        if ($text === '/riwayat') {
+            $this->session->forget($customer);
+            $this->orders->sendOrderHistory($customer, $chatId);
+
+            return;
+        }
+
+        if ($text === '/order' || str_starts_with($text, '/order ')) {
+            $this->session->forget($customer);
+            $invoice = trim(substr($text, strlen('/order')));
+            if ($invoice === '') {
+                $this->bot->sendMessage($chatId, "Ketik /order diikuti nomor invoice.\nContoh: /order INV-12345678");
+
+                return;
+            }
+            $this->orders->sendOrderDetail($customer, $chatId, $invoice);
+
+            return;
+        }
+
+        if ($productId = $this->session->getSelectedProductId($customer)) {
+            if (ctype_digit($text) && $this->cart->addProductToCart($customer, $chatId, (int) $productId, (int) $text)) {
+                $this->session->forget($customer);
+
+                return;
+            }
+
+            if (! ctype_digit($text)) {
+                $this->bot->sendMessage($chatId, 'Jumlah tidak valid. Ketik angka sesuai stok yang tersedia.');
+            }
+
+            return;
+        }
+
+        $this->session->forget($customer);
+        $this->bot->sendMessage($chatId, 'Perintah tidak dikenal. Ketik /katalog.');
+    }
+}
