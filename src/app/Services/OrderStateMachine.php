@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
@@ -14,6 +13,10 @@ use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine
 {
+    public function __construct(
+        private readonly InventoryLedger $inventory,
+    ) {}
+
     public function markPaymentPaid(Payment $payment): Order
     {
         return DB::transaction(function () use ($payment) {
@@ -30,7 +33,7 @@ class OrderStateMachine
             $movements = InventoryMovement::where('order_id', $order->id)->lockForUpdate()->get();
             $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
-            if ($lockedPayment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->hasMatchingMovements($items, $movements, InventoryMovementType::Sale, -1)) {
+            if ($lockedPayment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProof($items, $movements)) {
                 return $order->fresh();
             }
 
@@ -38,18 +41,7 @@ class OrderStateMachine
                 throw new InvalidOrderTransition('Payment cannot be marked paid from current state.');
             }
 
-            foreach ($items as $item) {
-                $product = $products[$item->product_id] ?? throw new InvalidOrderTransition('Order product is missing.');
-                $this->assertMatchingReservation($item, $movements);
-                if ($product->reserved_stock < $item->quantity || $product->stock < $item->quantity) {
-                    throw new InvalidOrderTransition('Reserved stock invariant violated.');
-                }
-                $product->forceFill([
-                    'stock' => $product->stock - $item->quantity,
-                    'reserved_stock' => $product->reserved_stock - $item->quantity,
-                ])->save();
-                InventoryMovement::firstOrCreate(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale], ['quantity' => -$item->quantity, 'notes' => 'Order sale', 'created_at' => now()]);
-            }
+            $this->inventory->recordSales($order, $items, $products, $movements);
 
             $lockedPayment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
             $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
@@ -136,7 +128,7 @@ class OrderStateMachine
             $movements = InventoryMovement::where('order_id', $lockedOrder->id)->lockForUpdate()->get();
 
             if ($lockedOrder->order_status === $orderStatus) {
-                if (! $this->hasMatchingMovements($items, $movements, InventoryMovementType::Release, -1)) {
+                if (! $this->inventory->hasReleaseProof($items, $movements)) {
                     throw new InvalidOrderTransition('Release movement proof is missing.');
                 }
 
@@ -151,17 +143,7 @@ class OrderStateMachine
 
             $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
-            foreach ($items as $item) {
-                $product = $products[$item->product_id] ?? throw new InvalidOrderTransition('Order product is missing.');
-                $this->assertMatchingReservation($item, $movements);
-                if ($product->reserved_stock < $item->quantity) {
-                    throw new InvalidOrderTransition('Reserved stock invariant violated.');
-                }
-                $release = InventoryMovement::firstOrCreate(['order_id' => $lockedOrder->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Release], ['quantity' => -$item->quantity, 'notes' => 'Order reservation release', 'created_at' => now()]);
-                if ($release->wasRecentlyCreated) {
-                    $product->decrement('reserved_stock', $item->quantity);
-                }
-            }
+            $this->inventory->releaseReservations($lockedOrder, $items, $products, $movements);
 
             foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
                 $payment->update(['status' => $paymentStatus]);
@@ -170,33 +152,5 @@ class OrderStateMachine
 
             return $lockedOrder->fresh(['payments']);
         }, 5);
-    }
-
-    private function assertMatchingReservation($item, $movements): void
-    {
-        $reservation = $movements
-            ->where('product_id', $item->product_id)
-            ->where('type', InventoryMovementType::Reservation)
-            ->first();
-
-        if (! $reservation || $reservation->quantity !== $item->quantity || $reservation->quantity <= 0) {
-            throw new InvalidOrderTransition('Reservation movement proof is missing or mismatched.');
-        }
-    }
-
-    private function hasMatchingMovements($items, $movements, InventoryMovementType $type, int $sign): bool
-    {
-        foreach ($items as $item) {
-            $movement = $movements
-                ->where('product_id', $item->product_id)
-                ->where('type', $type)
-                ->first();
-
-            if (! $movement || $movement->quantity !== ($sign * $item->quantity)) {
-                return false;
-            }
-        }
-
-        return $items->isNotEmpty();
     }
 }

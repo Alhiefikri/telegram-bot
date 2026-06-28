@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\EloquentInventoryLedger;
+use App\Services\InventoryLedger;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -17,7 +19,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(InventoryLedger::class, EloquentInventoryLedger::class);
     }
 
     /**

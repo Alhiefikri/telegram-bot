@@ -16,6 +16,7 @@ use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\InventoryLedger;
 use App\Services\InvoiceNumberGenerator;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
@@ -168,8 +169,29 @@ class Phase4OrderCartDomainTest extends TestCase
         InventoryMovement::create($movement->only(['product_id', 'order_id', 'type', 'quantity', 'notes']) + ['created_at' => now()]);
     }
 
+    public function test_inventory_ledger_verifies_sale_and_release_proofs(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
+        $items = $order->orderItems()->get();
+        $movements = InventoryMovement::where('order_id', $order->id)->get();
+        $ledger = app(InventoryLedger::class);
+
+        $this->assertFalse($ledger->hasSaleProof($items, $movements));
+
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
+
+        $this->assertTrue($ledger->hasSaleProof($items, InventoryMovement::where('order_id', $order->id)->get()));
+
+        $releaseOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
+        app(OrderStateMachine::class)->expirePendingOrder($releaseOrder);
+
+        $this->assertTrue($ledger->hasReleaseProof($releaseOrder->orderItems()->get(), InventoryMovement::where('order_id', $releaseOrder->id)->get()));
+    }
+
     public function test_expiry_command_chunk_one_processes_all_due_orders(): void
     {
+        config(['services.telegram.token' => null]);
+
         $orders = collect([
             app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
             app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2)),
@@ -186,11 +208,16 @@ class Phase4OrderCartDomainTest extends TestCase
 
     public function test_expiry_command_reports_skipped_orders(): void
     {
+        config(['services.telegram.token' => null]);
+
         $skipped = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $this->app->instance(OrderStateMachine::class, new class($skipped->id) extends OrderStateMachine
         {
-            public function __construct(private readonly string $skippedOrderId) {}
+            public function __construct(private readonly string $skippedOrderId)
+            {
+                parent::__construct(app(InventoryLedger::class));
+            }
 
             public function expirePendingOrder(Order $order): ?Order
             {
@@ -212,11 +239,16 @@ class Phase4OrderCartDomainTest extends TestCase
 
     public function test_expiry_command_reports_partial_failures_and_continues(): void
     {
+        config(['services.telegram.token' => null]);
+
         $failed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $this->app->instance(OrderStateMachine::class, new class($failed->id) extends OrderStateMachine
         {
-            public function __construct(private readonly string $failedOrderId) {}
+            public function __construct(private readonly string $failedOrderId)
+            {
+                parent::__construct(app(InventoryLedger::class));
+            }
 
             public function expirePendingOrder(Order $order): ?Order
             {

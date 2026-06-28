@@ -3,13 +3,11 @@
 namespace App\Services;
 
 use App\Enums\CartStatus;
-use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
-use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -22,6 +20,7 @@ class OrderCheckoutService
 {
     public function __construct(
         private readonly InvoiceNumberGenerator $numbers,
+        private readonly InventoryLedger $inventory,
     ) {}
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null): Order
@@ -82,8 +81,7 @@ class OrderCheckoutService
         foreach ($items as $item) {
             $product = $products[$item->product_id];
             OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'subtotal' => $product->price_amount * $item->quantity]);
-            $product->increment('reserved_stock', $item->quantity);
-            InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => $item->quantity, 'notes' => 'Order reservation', 'created_at' => now()]);
+            $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
