@@ -32,6 +32,21 @@ class TelegramBotClient
         $request->post($this->url('sendPhoto'), $payload)->throw();
     }
 
+    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = []): void
+    {
+        $payload = ['chat_id' => $chatId, 'photo' => $photoFileId];
+
+        if ($caption !== null && $caption !== '') {
+            $payload['caption'] = $caption;
+        }
+
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        Http::post($this->url('sendPhoto'), $payload)->throw();
+    }
+
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
         Http::post($this->url('answerCallbackQuery'), array_filter([

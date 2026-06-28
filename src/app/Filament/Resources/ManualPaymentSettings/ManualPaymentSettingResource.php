@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -37,6 +38,12 @@ class ManualPaymentSettingResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
+            Select::make('payment_mode')
+                ->label('Payment mode')
+                ->options(['manual' => 'Manual approval', 'pakasir' => 'Pakasir'])
+                ->default('manual')
+                ->required()
+                ->helperText('Pilih Manual selama Pakasir/KYC belum siap. Bot akan meminta screenshot /payment dan admin approve manual.'),
             TextInput::make('dana_account_name')->label('DANA account name')->maxLength(255),
             TextInput::make('dana_account_number')->label('DANA account number')->maxLength(255),
             FileUpload::make('dana_qr_image_path')->label('DANA QR image')->image()->disk('public')->directory('payments/dana')->visibility('public')->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])->maxSize(2048),
@@ -53,6 +60,7 @@ class ManualPaymentSettingResource extends Resource
     {
         return $table->columns([
             TextColumn::make('id')->sortable(),
+            TextColumn::make('payment_mode')->label('Mode')->badge()->sortable(),
             TextColumn::make('dana_account_name')->label('DANA name')->searchable(),
             TextColumn::make('dana_account_number')->label('DANA number')->searchable(),
             TextColumn::make('admin_username')->searchable(),

@@ -481,6 +481,53 @@ class Phase6TelegramBotTest extends TestCase
             && str_contains($r['text'], 'Order manual baru masuk dashboard'));
     }
 
+    public function test_payment_photo_is_forwarded_to_admin_and_admin_approval_sends_receipt(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postJson('/api/webhook/telegram', $this->callbackUpdate(211, 'cb-manual', 'checkout'), ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postJson('/api/webhook/telegram', [
+            'update_id' => 212,
+            'message' => [
+                'message_id' => 212,
+                'chat' => ['id' => 12345],
+                'from' => ['id' => 12345, 'first_name' => 'Tester', 'username' => 'buyer'],
+                'caption' => '/payment '.$order->invoice_number,
+                'photo' => [['file_id' => 'small-photo', 'width' => 100, 'height' => 100], ['file_id' => 'large-photo', 'width' => 800, 'height' => 800]],
+            ],
+        ], ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && $r['chat_id'] === '999'
+            && $r['photo'] === 'large-photo'
+            && str_contains((string) ($r['caption'] ?? ''), 'Bukti pembayaran masuk'));
+
+        $this->postJson('/api/webhook/telegram', [
+            'update_id' => 213,
+            'callback_query' => [
+                'id' => 'approve-payment',
+                'from' => ['id' => 999, 'first_name' => 'Admin'],
+                'message' => ['chat' => ['id' => 999]],
+                'data' => 'admin:approve-payment:'.$order->id,
+            ],
+        ], ['X-Telegram-Bot-Api-Secret-Token' => 'secret'])->assertOk();
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === 12345
+            && str_contains($r['text'], 'Pembayaran diterima')
+            && str_contains($r['text'], 'Email Account'));
+    }
+
     public function test_receipt_notifier_sends_paid_order_receipt(): void
     {
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);

@@ -15,6 +15,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\TelegramUpdate;
+use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
@@ -28,7 +29,7 @@ use Throwable;
 
 class TelegramUpdateProcessor
 {
-    public function __construct(private TelegramBotClient $bot, private CartService $carts, private OrderCheckoutService $checkout, private PakasirClient $pakasir) {}
+    public function __construct(private TelegramBotClient $bot, private CartService $carts, private OrderCheckoutService $checkout, private PakasirClient $pakasir, private AdminOrderOperations $adminOrders) {}
 
     public function process(TelegramUpdate $update): void
     {
@@ -51,7 +52,7 @@ class TelegramUpdateProcessor
             if ($message = Arr::get($payload, 'message')) {
                 $customer = $this->customer(Arr::get($message, 'from', []));
                 $update->update(['customer_id' => $customer->id]);
-                $this->message($customer, (string) Arr::get($message, 'chat.id'), trim((string) Arr::get($message, 'text', '')));
+                $this->message($customer, (string) Arr::get($message, 'chat.id'), $message);
             } elseif ($callback = Arr::get($payload, 'callback_query')) {
                 $customer = $this->customer(Arr::get($callback, 'from', []));
                 $update->update(['customer_id' => $customer->id]);
@@ -64,8 +65,10 @@ class TelegramUpdateProcessor
         }
     }
 
-    private function message(Customer $customer, string $chatId, string $text): void
+    private function message(Customer $customer, string $chatId, array $message): void
     {
+        $text = trim((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
+
         if ($text === '/start') {
             Cache::forget($this->intentKey($customer));
             $this->sendMainMenu($chatId);
@@ -114,6 +117,12 @@ class TelegramUpdateProcessor
             Cache::forget($this->intentKey($customer));
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($chatId, 'Keranjang aktif dibatalkan.');
+
+            return;
+        }
+        if ($text === '/payment' || str_starts_with($text, '/payment ')) {
+            Cache::forget($this->intentKey($customer));
+            $this->submitManualPaymentProof($customer, $chatId, $message, trim(substr($text, strlen('/payment'))));
 
             return;
         }
@@ -211,6 +220,11 @@ class TelegramUpdateProcessor
 
     private function callback(Customer $customer, string $chatId, string $id, string $data): void
     {
+        if (preg_match('/^admin:approve-payment:([^\s:]+)$/', $data, $matches)) {
+            $this->approveManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
         if ($data === 'katalog' || $data === 'back:categories') {
             $this->bot->answerCallbackQuery($id);
             Cache::forget($this->intentKey($customer));
@@ -276,7 +290,7 @@ class TelegramUpdateProcessor
         if ($data === 'checkout') {
             $this->bot->answerCallbackQuery($id);
             try {
-                $paymentMode = (string) config('services.telegram.payment_mode', 'pakasir');
+                $paymentMode = $this->paymentMode();
                 $order = $paymentMode === 'pakasir'
                     ? $this->checkout->checkout($this->carts->activeCartFor($customer), 'hosted', 'pakasir')
                     : $this->checkout->checkout($this->carts->activeCartFor($customer), 'DANA_QR', 'manual');
@@ -581,7 +595,8 @@ class TelegramUpdateProcessor
         }
 
         $lines[] = '';
-        $lines[] = 'Setelah transfer, kirim bukti pembayaran ke admin untuk diproses.';
+        $lines[] = 'Setelah transfer, kirim screenshot bukti pembayaran sebagai foto dengan caption /payment.';
+        $lines[] = 'Bisa juga ketik /payment setelah mengirim bukti; admin akan cek manual dan produk dikirim setelah disetujui.';
         $lines[] = '';
         $lines[] = $this->adminPurchaseMessage($order);
 
@@ -677,9 +692,131 @@ class TelegramUpdateProcessor
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $lines[] = '';
-        $lines[] = 'Buka dashboard admin, lalu klik Transaksi selesai setelah pembayaran valid.';
+        $lines[] = 'Customer diminta kirim screenshot dengan caption /payment.';
+        $lines[] = 'Kamu juga bisa approve lewat tombol yang muncul saat bukti pembayaran masuk.';
 
         $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines));
+    }
+
+    private function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
+    {
+        $order = $this->manualPaymentOrderForCustomer($customer, $invoice);
+        if (! $order) {
+            $this->bot->sendMessage($chatId, $invoice === ''
+                ? 'Tidak ada pesanan manual pending. Checkout dulu, lalu kirim screenshot bukti pembayaran dengan caption /payment.'
+                : 'Invoice tidak ditemukan atau bukan pesanan manual pending milik kamu. Cek /status atau /riwayat.');
+
+            return;
+        }
+
+        $photoFileId = $this->largestPhotoFileId($message);
+        if (! $photoFileId) {
+            $this->bot->sendMessage($chatId, "Kirim screenshot bukti pembayaran sebagai foto dengan caption /payment.\nKalau punya beberapa order, gunakan caption: /payment {$order->invoice_number}");
+
+            return;
+        }
+
+        $adminTelegramChatId = $this->adminTelegramChatId();
+        if (! $adminTelegramChatId) {
+            $this->bot->sendMessage($chatId, 'Bukti pembayaran diterima, tapi chat admin belum dikonfigurasi. Hubungi admin untuk konfirmasi manual.');
+
+            return;
+        }
+
+        $order->loadMissing(['customer', 'orderItems']);
+        $caption = [
+            '📸 Bukti pembayaran masuk',
+            'Invoice: '.$order->invoice_number,
+            'Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
+            'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            '',
+            'Item:',
+        ];
+        foreach ($order->orderItems as $item) {
+            $caption[] = '- '.$item->product_name.' x '.$item->quantity;
+        }
+        $caption[] = '';
+        $caption[] = 'Jika dana sudah masuk, klik Setujui & Kirim Produk.';
+
+        $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
+            'inline_keyboard' => [[['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id]]],
+        ]);
+
+        $this->bot->sendMessage($chatId, 'Bukti pembayaran sudah dikirim ke admin. Produk akan dikirim otomatis setelah admin menyetujui pembayaran.');
+    }
+
+    private function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
+    {
+        if (! $this->isTelegramAdmin($admin, $chatId)) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Akses admin diperlukan.');
+
+            return;
+        }
+
+        $order = Order::find($orderId);
+        if (! $order) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Order tidak ditemukan.');
+
+            return;
+        }
+
+        if (! $this->adminOrders->canCompleteManualOrder($order)) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Order sudah diproses atau tidak bisa di-approve.');
+
+            return;
+        }
+
+        $completed = $this->adminOrders->completeManualOrder($order);
+        $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran disetujui. Produk dikirim ke pembeli.');
+        $this->bot->sendMessage($chatId, '✅ Pembayaran disetujui untuk '.$completed->invoice_number.'. Bot akan mengirim produk ke pembeli.');
+    }
+
+    private function manualPaymentOrderForCustomer(Customer $customer, string $invoice): ?Order
+    {
+        return $customer->orders()
+            ->where('order_status', OrderStatus::PendingPayment)
+            ->where('payment_status', PaymentStatus::Pending)
+            ->when($invoice !== '', fn ($query) => $query->where('invoice_number', $invoice))
+            ->whereHas('payments', fn ($query) => $query->where('provider', 'manual')->where('status', PaymentStatus::Pending))
+            ->latest()
+            ->first();
+    }
+
+    private function largestPhotoFileId(array $message): ?string
+    {
+        $photos = Arr::get($message, 'photo', []);
+        if (! is_array($photos) || $photos === []) {
+            return null;
+        }
+
+        $photo = collect($photos)->sortByDesc(fn ($photo) => (int) ($photo['file_size'] ?? (($photo['width'] ?? 0) * ($photo['height'] ?? 0))))->first();
+
+        return is_array($photo) ? ($photo['file_id'] ?? null) : null;
+    }
+
+    private function adminTelegramChatId(): ?string
+    {
+        $settings = ManualPaymentSetting::current();
+        $chatId = $settings?->admin_telegram_chat_id ?: config('services.telegram.admin_telegram_chat_id');
+
+        return $chatId ? (string) $chatId : null;
+    }
+
+    private function paymentMode(): string
+    {
+        $settings = ManualPaymentSetting::current();
+        $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
+
+        return $mode === 'pakasir' ? 'pakasir' : 'manual';
+    }
+
+    private function isTelegramAdmin(Customer $customer, string $chatId): bool
+    {
+        $adminUserId = (string) config('services.telegram.admin_user_id');
+        $adminChatId = (string) $this->adminTelegramChatId();
+
+        return ($adminUserId !== '' && (string) $customer->telegram_id === $adminUserId)
+            || ($adminChatId !== '' && $chatId === $adminChatId);
     }
 
     private function adminPurchaseMessage(Order $order): string

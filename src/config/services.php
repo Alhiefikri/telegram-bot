@@ -47,7 +47,7 @@ return [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
         'api_base_url' => env('TELEGRAM_API_BASE_URL', 'https://api.telegram.org'),
-        'payment_mode' => env('TELEGRAM_PAYMENT_MODE', 'pakasir'),
+        'payment_mode' => env('TELEGRAM_PAYMENT_MODE', 'manual'),
         'admin_contact_url' => env('TELEGRAM_ADMIN_CONTACT_URL'),
         'admin_username' => env('TELEGRAM_ADMIN_USERNAME'),
         'admin_telegram_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
