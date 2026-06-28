@@ -12,9 +12,11 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Services\OrderCheckoutService;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -42,9 +44,10 @@ class PakasirWebhookTest extends TestCase
         Queue::fake();
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
-        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+        $payload = $this->payload($payment->merchant_ref, $payment->amount);
 
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
+        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
@@ -54,6 +57,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentEventType::Callback, $event->event_type);
         $this->assertSame($payment->merchant_ref, $event->merchant_ref);
         $this->assertSame('completed', $event->provider_status);
+        $this->assertSame($payload, $event->raw_payload);
         $this->assertNotNull($event->processed_at);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
 
@@ -87,6 +91,35 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(5, PaymentEvent::count());
         $this->assertSame(0, PaymentEvent::whereNotNull('processed_at')->count());
         $this->assertNull(PaymentEvent::where('merchant_ref', 'UNKNOWN')->firstOrFail()->payment_id);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_callback_rejects_nested_transaction_when_top_level_envelope_is_mismatched(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', [
+            'amount' => $payment->amount,
+            'order_id' => 'UNKNOWN',
+            'project' => 'wrong-project',
+            'status' => 'pending',
+            'transaction' => [
+                'amount' => $payment->amount,
+                'order_id' => $payment->merchant_ref,
+                'project' => 'warung-ai',
+                'status' => 'completed',
+            ],
+        ])->assertUnprocessable();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $event = PaymentEvent::firstOrFail();
+        $this->assertNull($event->payment_id);
+        $this->assertSame('UNKNOWN', $event->merchant_ref);
+        $this->assertSame('pending', $event->provider_status);
+        $this->assertNull($event->processed_at);
         Queue::assertNothingPushed();
     }
 
@@ -129,6 +162,9 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
         $event = PaymentEvent::firstOrFail();
         $this->assertSame(PaymentEventType::Reconciliation, $event->event_type);
+        $this->assertSame($payment->merchant_ref, $event->merchant_ref);
+        $this->assertSame('completed', $event->provider_status);
+        $this->assertSame('completed', $event->raw_payload['transaction']['status']);
         $this->assertNotNull($event->processed_at);
     }
 
@@ -227,6 +263,35 @@ class PakasirWebhookTest extends TestCase
             ], 200),
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
+    }
+
+    private function fakeProviderDetail(string $orderId, int $amount, array $overrides = []): void
+    {
+        $this->app->bind(PakasirProviderAdapter::class, fn () => new class($orderId, $amount, $overrides) implements PakasirProviderAdapter
+        {
+            public function __construct(
+                private readonly string $orderId,
+                private readonly int $amount,
+                private readonly array $overrides,
+            ) {}
+
+            public function hostedPaymentUrl(Payment $payment): string
+            {
+                return 'https://fake-pakasir.test/pay/'.$payment->merchant_ref;
+            }
+
+            public function transactionDetail(Payment $payment): array
+            {
+                return [
+                    'transaction' => array_merge([
+                        'project' => 'warung-ai',
+                        'amount' => $this->amount,
+                        'order_id' => $this->orderId,
+                        'status' => 'completed',
+                    ], $this->overrides),
+                ];
+            }
+        });
     }
 
     private function cartWithProduct(int $stock = 10, int $quantity = 1): Cart

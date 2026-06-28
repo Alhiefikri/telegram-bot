@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
+use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -20,6 +22,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(InventoryLedger::class, EloquentInventoryLedger::class);
+        $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
     }
 
     /**

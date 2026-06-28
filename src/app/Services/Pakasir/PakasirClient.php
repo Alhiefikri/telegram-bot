@@ -5,7 +5,7 @@ namespace App\Services\Pakasir;
 use App\Models\Payment;
 use Illuminate\Support\Facades\Http;
 
-class PakasirClient
+class PakasirClient implements PakasirProviderAdapter
 {
     public function hostedPaymentUrl(Payment $payment): string
     {

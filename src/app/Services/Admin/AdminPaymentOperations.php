@@ -8,14 +8,14 @@ use App\Models\PaymentEvent;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Pakasir\PakasirCallbackProcessor;
-use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use InvalidArgumentException;
 
 class AdminPaymentOperations
 {
     public function __construct(
         private readonly AuditLogger $audit,
-        private readonly PakasirClient $pakasirClient,
+        private readonly PakasirProviderAdapter $pakasirClient,
         private readonly PakasirCallbackProcessor $pakasirProcessor,
     ) {}
 

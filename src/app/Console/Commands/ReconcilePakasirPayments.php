@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
-use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use Illuminate\Console\Command;
 
 class ReconcilePakasirPayments extends Command
@@ -14,7 +14,7 @@ class ReconcilePakasirPayments extends Command
 
     protected $description = 'Reconcile pending Pakasir payments from Pakasir transaction detail.';
 
-    public function handle(PakasirClient $client, PakasirCallbackProcessor $processor): int
+    public function handle(PakasirProviderAdapter $client, PakasirCallbackProcessor $processor): int
     {
         $processed = 0;
         $skipped = 0;

@@ -9,7 +9,6 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
@@ -17,14 +16,19 @@ use Throwable;
 
 class PakasirCallbackProcessor
 {
-    public function __construct(private readonly OrderStateMachine $orders, private readonly PakasirClient $client) {}
+    public function __construct(
+        private readonly OrderStateMachine $orders,
+        private readonly PakasirProviderAdapter $client,
+        private readonly PakasirPaymentEventLogger $events,
+    ) {}
 
     public function processCallback(array $payload): PaymentEvent
     {
-        $payment = $this->findPayment($payload);
-        $event = $this->logEvent($payload, $payment);
+        $transaction = PakasirTransaction::fromCallbackPayload($payload);
+        $payment = $this->findPayment($transaction);
+        $event = $this->events->log(PaymentEventType::Callback, $payload, $payment, $transaction);
 
-        $this->validatePayload($payload, $payment);
+        $this->validatePayload($transaction, $payment);
         $this->verifyWithPakasir($payment);
         $this->applyPaid($event);
 
@@ -35,17 +39,14 @@ class PakasirCallbackProcessor
     {
         $this->ensureConfigured();
 
-        $transaction = $this->transactionFromPayload($payload);
-        $eventPayload = is_array($transaction) ? $transaction : $payload;
-        $event = $this->logEvent(PaymentEventType::Reconciliation, $eventPayload, $payment);
+        $transaction = PakasirTransaction::fromPayload($payload);
+        $event = $this->events->log(PaymentEventType::Reconciliation, $payload, $payment, $transaction);
 
         if ($payment->provider !== 'pakasir'
             || $payment->status !== PaymentStatus::Pending
-            || ! is_array($transaction)
-            || Arr::get($transaction, 'project') !== config('services.pakasir.slug')
-            || (int) Arr::get($transaction, 'amount') !== $payment->amount
-            || Arr::get($transaction, 'order_id') !== $payment->merchant_ref
-            || strcasecmp((string) Arr::get($transaction, 'status'), 'completed') !== 0) {
+            || ! $transaction
+            || ! $this->transactionMatchesPayment($transaction, $payment)
+            || ! $transaction->isCompleted()) {
             return $event;
         }
 
@@ -54,7 +55,7 @@ class PakasirCallbackProcessor
         return $event->fresh();
     }
 
-    private function validatePayload(array $payload, ?Payment $payment): void
+    private function validatePayload(?PakasirTransaction $transaction, ?Payment $payment): void
     {
         if (! $payment) {
             throw new UnprocessableEntityHttpException('Unknown Pakasir payment.');
@@ -64,7 +65,7 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir payment is not pending.');
         }
 
-        if ((int) Arr::get($payload, 'amount') !== $payment->amount) {
+        if (! $transaction || $transaction->amount() !== $payment->amount) {
             throw new UnprocessableEntityHttpException('Pakasir amount mismatch.');
         }
 
@@ -73,11 +74,11 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir project is not configured.');
         }
 
-        if (Arr::get($payload, 'project') !== $project) {
+        if ($transaction->project() !== $project) {
             throw new UnprocessableEntityHttpException('Pakasir project mismatch.');
         }
 
-        if (strcasecmp((string) Arr::get($payload, 'status'), 'completed') !== 0) {
+        if (! $transaction->isCompleted()) {
             throw new UnprocessableEntityHttpException('Pakasir status is not completed.');
         }
 
@@ -94,13 +95,11 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir verification failed.');
         }
 
-        $transaction = $this->transactionFromPayload($response);
+        $transaction = PakasirTransaction::fromPayload($response);
 
-        if (! is_array($transaction)
-            || Arr::get($transaction, 'project') !== config('services.pakasir.slug')
-            || (int) Arr::get($transaction, 'amount') !== $payment->amount
-            || Arr::get($transaction, 'order_id') !== $payment->merchant_ref
-            || strcasecmp((string) Arr::get($transaction, 'status'), 'completed') !== 0) {
+        if (! $transaction
+            || ! $this->transactionMatchesPayment($transaction, $payment)
+            || ! $transaction->isCompleted()) {
             throw new UnprocessableEntityHttpException('Pakasir verification mismatch.');
         }
     }
@@ -125,41 +124,19 @@ class PakasirCallbackProcessor
         }, 5);
     }
 
-    private function logEvent(PaymentEventType|array $type, array|Payment|null $payload = null, ?Payment $payment = null): PaymentEvent
-    {
-        if (is_array($type)) {
-            $payment = $payload instanceof Payment ? $payload : $payment;
-            $payload = $type;
-            $type = PaymentEventType::Callback;
-        }
-
-        return PaymentEvent::create([
-            'payment_id' => $payment?->id,
-            'provider' => 'pakasir',
-            'event_type' => $type,
-            'merchant_ref' => Arr::get($payload, 'order_id'),
-            'provider_status' => Arr::get($payload, 'status'),
-            'raw_payload' => $payload,
-            'received_at' => now(),
-        ]);
-    }
-
-    private function findPayment(array $payload): ?Payment
+    private function findPayment(PakasirTransaction $transaction): ?Payment
     {
         return Payment::query()
             ->where('provider', 'pakasir')
-            ->where('merchant_ref', Arr::get($payload, 'order_id'))
+            ->where('merchant_ref', $transaction->orderId())
             ->first();
     }
 
-    private function transactionFromPayload(array $payload): mixed
+    private function transactionMatchesPayment(PakasirTransaction $transaction, Payment $payment): bool
     {
-        $transaction = Arr::get($payload, 'transaction', Arr::get($payload, 'data', $payload));
-        if (is_array($transaction) && isset($transaction['transaction']) && is_array($transaction['transaction'])) {
-            return $transaction['transaction'];
-        }
-
-        return $transaction;
+        return $transaction->project() === config('services.pakasir.slug')
+            && $transaction->amount() === $payment->amount
+            && $transaction->orderId() === $payment->merchant_ref;
     }
 
     private function ensureConfigured(): void

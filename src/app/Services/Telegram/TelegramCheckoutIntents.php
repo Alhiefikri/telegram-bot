@@ -5,7 +5,7 @@ namespace App\Services\Telegram;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Storage;
 
 class TelegramCheckoutIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirClient $pakasir) {}
+    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order, ?Payment $payment): void
     {
