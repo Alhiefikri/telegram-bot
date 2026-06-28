@@ -11,7 +11,6 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use UnitEnum;
 
 class AuditLogResource extends Resource
 {
@@ -19,7 +18,13 @@ class AuditLogResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Operations';
+    protected static ?string $navigationLabel = 'Audit Logs';
+
+    protected static ?string $modelLabel = 'Audit Log';
+
+    protected static ?string $pluralModelLabel = 'Audit Logs';
+
+    protected static ?int $navigationSort = 7;
 
     public static function form(Schema $schema): Schema
     {

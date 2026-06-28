@@ -3,7 +3,11 @@
 namespace App\Filament\Auth\Pages;
 
 use Filament\Auth\Pages\Login as BaseLogin;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Component;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\HtmlString;
 
@@ -26,28 +30,30 @@ class Login extends BaseLogin
 
     public function getTitle(): string|Htmlable
     {
-        return 'Admin sign in';
+        return 'LHIE STORE Admin';
     }
 
     public function getHeading(): string|Htmlable|null
     {
-        return 'Admin sign in';
+        return 'Masuk ke LHIE STORE';
     }
 
     public function getSubheading(): string|Htmlable|null
     {
+        $copy = 'Masuk untuk mengelola pesanan, pembayaran, dan stok store dengan tampilan yang bersih dan cepat.';
+
         if (! $this->shouldPrefillLoginCredentials()) {
-            return parent::getSubheading();
+            return $copy;
         }
 
         return new HtmlString(
-            '<div class="nb-login-note">'
-            .'<div class="nb-login-note__label">Local testing mode</div>'
-            .'<p class="nb-login-note__copy">'
-            .'Credentials are prefilled for a one-click sign in: '
-            .'<span class="nb-login-note__credential">test@example.com</span>'
+            '<div class="lhie-login-note">'
+            .'<div class="lhie-login-note__label">Mode testing lokal</div>'
+            .'<p class="lhie-login-note__copy">'
+            .'<span class="lhie-login-note__intro">Kredensial admin lokal sudah diisi otomatis.</span>'
+            .' <span class="lhie-login-note__credential">test@example.com</span>'
             .' / '
-            .'<span class="nb-login-note__credential">password</span>.'
+            .'<span class="lhie-login-note__credential">password</span>.'
             .'</p>'
             .'</div>'
         );
@@ -75,5 +81,38 @@ class Login extends BaseLogin
         }
 
         return in_array(request()->getHost(), ['localhost', '127.0.0.1', '::1'], true);
+    }
+
+    protected function getEmailFormComponent(): Component
+    {
+        return TextInput::make('email')
+            ->label('Email admin')
+            ->email()
+            ->required()
+            ->autocomplete()
+            ->autofocus();
+    }
+
+    protected function getPasswordFormComponent(): Component
+    {
+        return TextInput::make('password')
+            ->label('Password')
+            ->password()
+            ->revealable(Filament::arePasswordsRevealable())
+            ->autocomplete('current-password')
+            ->required();
+    }
+
+    protected function getRememberFormComponent(): Component
+    {
+        return Checkbox::make('remember')
+            ->label('Ingat sesi login');
+    }
+
+    protected function getAuthenticateFormAction(): Action
+    {
+        return Action::make('authenticate')
+            ->label('Masuk dashboard')
+            ->submit('authenticate');
     }
 }

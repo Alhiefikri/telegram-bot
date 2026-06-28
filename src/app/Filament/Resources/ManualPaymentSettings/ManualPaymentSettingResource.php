@@ -27,13 +27,15 @@ class ManualPaymentSettingResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Settings';
+    protected static string|UnitEnum|null $navigationGroup = null;
 
-    protected static ?string $navigationLabel = 'Payment Settings';
+    protected static ?string $navigationLabel = 'Pengaturan';
 
-    protected static ?string $modelLabel = 'Payment Setting';
+    protected static ?int $navigationSort = 8;
 
-    protected static ?string $pluralModelLabel = 'Payment Settings';
+    protected static ?string $modelLabel = 'Pengaturan Pembayaran';
+
+    protected static ?string $pluralModelLabel = 'Pengaturan Pembayaran';
 
     public static function form(Schema $schema): Schema
     {
