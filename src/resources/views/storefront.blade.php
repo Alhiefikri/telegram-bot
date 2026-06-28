@@ -508,13 +508,13 @@
                 <!-- Search Input Bar -->
                 <div class="max-w-md mx-auto mb-12 relative">
                     <form action="{{ url('/') }}#products" method="GET" class="relative">
-                        <input type="text" name="q" value="{{ request('q') }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="w-full h-11 pl-11 pr-4 rounded-xl border border-zinc-200 bg-white text-xs text-zinc-800 placeholder-zinc-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all shadow-sm">
+                        <input type="text" name="q" value="{{ $search }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="w-full h-11 pl-11 pr-4 rounded-xl border border-zinc-200 bg-white text-xs text-zinc-800 placeholder-zinc-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all shadow-sm">
                         <div class="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                         </div>
-                        @if(request('q'))
+                        @if($search !== '')
                             <a href="{{ url('/') }}#products" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-zinc-450 hover:text-zinc-900 transition-colors">Clear</a>
                         @endif
                     </form>
