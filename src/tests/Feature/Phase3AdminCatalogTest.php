@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Policies\CategoryPolicy;
 use App\Policies\ProductPolicy;
+use App\Services\Audit\AuditContext;
 use App\Services\StockAdjustmentService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -141,13 +142,63 @@ class Phase3AdminCatalogTest extends TestCase
 
     public function test_soft_delete_and_restore_audit_logs(): void
     {
-        $product = Product::factory()->create();
+        $user = User::factory()->create(['role' => UserRole::Admin]);
+        $this->app->instance(AuditContext::class, new class($user) implements AuditContext
+        {
+            public function __construct(private readonly User $user) {}
+
+            public function user(): ?User
+            {
+                return $this->user;
+            }
+
+            public function ip(): ?string
+            {
+                return '203.0.113.10';
+            }
+        });
+
+        $product = Product::factory()->create(['name' => 'Audited Product']);
         $product->delete();
         $product->restore();
 
         $this->assertNotSoftDeleted('products', ['id' => $product->id]);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'product.deleted']);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'product.restored']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.deleted', 'subject_type' => Product::class, 'subject_id' => (string) $product->id, 'user_id' => $user->id, 'ip_address' => '203.0.113.10']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.restored', 'subject_type' => Product::class, 'subject_id' => (string) $product->id, 'user_id' => $user->id, 'ip_address' => '203.0.113.10']);
+
+        $deletedAudit = AuditLog::query()->where('action', 'product.deleted')->firstOrFail();
+        $restoredAudit = AuditLog::query()->where('action', 'product.restored')->firstOrFail();
+
+        $this->assertSame('Audited Product', $deletedAudit->old_values['name']);
+        $this->assertNull($deletedAudit->new_values);
+        $this->assertNull($restoredAudit->old_values);
+        $this->assertSame(['id' => $product->id, 'name' => 'Audited Product'], $restoredAudit->new_values);
+    }
+
+    public function test_product_delete_audit_uses_explicit_audit_context_without_global_fallback(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $this->app->instance(AuditContext::class, new class implements AuditContext
+        {
+            public function user(): ?User
+            {
+                return null;
+            }
+
+            public function ip(): ?string
+            {
+                return null;
+            }
+        });
+
+        $product = Product::factory()->create();
+
+        $product->delete();
+
+        $audit = AuditLog::query()->where('action', 'product.deleted')->firstOrFail();
+
+        $this->assertNull($audit->user_id);
+        $this->assertNull($audit->ip_address);
     }
 
     public function test_product_resource_create_and_edit_do_not_mutate_stock_fields(): void

@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\Product;
+use App\Observers\ProductAuditObserver;
+use App\Services\Audit\AuditContext;
+use App\Services\Audit\HttpAuditContext;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
@@ -22,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(InventoryLedger::class, EloquentInventoryLedger::class);
+        $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
     }
 
@@ -31,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->validateProductionConfiguration();
+
+        Product::observe(ProductAuditObserver::class);
 
         if ((bool) config('app.force_https') && ! in_array(config('app.env'), ['local', 'testing'], true) && ! $this->isLoopbackHttpRequest()) {
             URL::forceScheme('https');

@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Services\AuditLogger;
 use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -44,12 +43,6 @@ class Product extends Model
             ->orderByRaw('CASE WHEN stock > reserved_stock THEN 0 ELSE 1 END')
             ->orderBy('name')
             ->orderBy('id');
-    }
-
-    protected static function booted(): void
-    {
-        static::deleted(fn (Product $product) => app(AuditLogger::class)->log('product.deleted', $product, $product->getOriginal(), null, auth()->user(), request()?->ip()));
-        static::restored(fn (Product $product) => app(AuditLogger::class)->log('product.restored', $product, null, $product->only(['id', 'name']), auth()->user(), request()?->ip()));
     }
 
     public function cartItems()
