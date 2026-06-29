@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "test:browser:admin": "npm run build && playwright test tests/Browser/admin-dashboard-responsive.spec.js"
     },
     "devDependencies": {
         "@playwright/test": "^1.61.1",
