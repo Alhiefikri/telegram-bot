@@ -331,9 +331,143 @@
                     </div>
 
                     <div x-cloak x-show="activeTab === 'tambah'">
-                        <x-admin-dashboard.section-heading eyebrow="Tambah" title="Tambah produk atau penawaran">
-                            Aksi tambah akan dihubungkan ke workflow katalog berikutnya.
+                        <x-admin-dashboard.section-heading eyebrow="Tambah" title="Tambah produk baru">
+                            Buat produk awal dengan harga, kategori, dan ringkasan yang langsung siap tampil setelah stok ditambahkan.
                         </x-admin-dashboard.section-heading>
+
+                        @if ($errors->productCreate->any())
+                            <div class="mt-4 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                                Periksa kembali field yang ditandai.
+                            </div>
+                        @endif
+
+                        <form method="POST" action="{{ route('admin.products.store') }}" class="mt-5 space-y-5">
+                            @csrf
+
+                            <div class="grid min-w-0 gap-4 md:grid-cols-2">
+                                <div class="min-w-0">
+                                    <label for="product-name" class="text-sm font-bold text-brand-navy">Nama produk</label>
+                                    <x-admin-dashboard.input
+                                        id="product-name"
+                                        name="name"
+                                        value="{{ old('name') }}"
+                                        class="mt-2"
+                                        placeholder="Contoh: Canva Pro 1 Bulan"
+                                    />
+
+                                    @error('name', 'productCreate')
+                                        <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <div class="min-w-0">
+                                    <label for="product-price" class="text-sm font-bold text-brand-navy">Harga</label>
+                                    <x-admin-dashboard.input
+                                        id="product-price"
+                                        name="price_amount"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        inputmode="numeric"
+                                        value="{{ old('price_amount') }}"
+                                        class="mt-2"
+                                        placeholder="75000"
+                                    />
+
+                                    @error('price_amount', 'productCreate')
+                                        <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                    @enderror
+                                </div>
+                            </div>
+
+                            <div class="min-w-0">
+                                <label for="product-category" class="text-sm font-bold text-brand-navy">Kategori</label>
+                                <x-admin-dashboard.select id="product-category" name="category_id" class="mt-2">
+                                    <option value="">Tanpa kategori</option>
+                                    @foreach ($categoryOptions as $category)
+                                        <option value="{{ $category['id'] }}" @selected((string) old('category_id') === (string) $category['id'])>
+                                            {{ $category['name'] }}
+                                        </option>
+                                    @endforeach
+                                </x-admin-dashboard.select>
+
+                                @error('category_id', 'productCreate')
+                                    <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                @enderror
+                            </div>
+
+                            <div class="min-w-0">
+                                <label for="product-description" class="text-sm font-bold text-brand-navy">Deskripsi singkat</label>
+                                <x-admin-dashboard.textarea
+                                    id="product-description"
+                                    name="description"
+                                    rows="3"
+                                    value="{{ old('description') }}"
+                                    class="mt-2"
+                                    placeholder="Ringkas manfaat utama produk."
+                                />
+
+                                @error('description', 'productCreate')
+                                    <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                @enderror
+                            </div>
+
+                            <div class="grid min-w-0 gap-3 md:grid-cols-2" x-data="{ featuresOpen: true, specsOpen: true }">
+                                <section class="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <button
+                                        type="button"
+                                        class="flex min-h-11 w-full items-center justify-between gap-3 text-left text-sm font-bold text-brand-navy"
+                                        x-on:click="featuresOpen = ! featuresOpen"
+                                    >
+                                        <span>Fitur utama</span>
+                                        <span class="text-slate-400" x-text="featuresOpen ? '-' : '+'">-</span>
+                                    </button>
+
+                                    <div class="mt-2" x-show="featuresOpen">
+                                        <x-admin-dashboard.textarea
+                                            name="features"
+                                            rows="4"
+                                            value="{{ old('features') }}"
+                                            placeholder="Satu fitur per baris"
+                                        />
+
+                                        @error('features', 'productCreate')
+                                            <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+                                </section>
+
+                                <section class="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <button
+                                        type="button"
+                                        class="flex min-h-11 w-full items-center justify-between gap-3 text-left text-sm font-bold text-brand-navy"
+                                        x-on:click="specsOpen = ! specsOpen"
+                                    >
+                                        <span>Paket/spesifikasi</span>
+                                        <span class="text-slate-400" x-text="specsOpen ? '-' : '+'">-</span>
+                                    </button>
+
+                                    <div class="mt-2" x-show="specsOpen">
+                                        <x-admin-dashboard.textarea
+                                            name="specifications"
+                                            rows="4"
+                                            value="{{ old('specifications') }}"
+                                            placeholder="Satu spesifikasi per baris"
+                                        />
+
+                                        @error('specifications', 'productCreate')
+                                            <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+                                </section>
+                            </div>
+
+                            <div class="sticky bottom-3 -mx-1 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-lg shadow-slate-950/10 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+                                <x-admin-dashboard.button type="submit" class="w-full sm:w-auto">
+                                    Submit Produk
+                                </x-admin-dashboard.button>
+                            </div>
+                        </form>
                     </div>
 
                     <div x-cloak x-show="activeTab === 'withdraw'">

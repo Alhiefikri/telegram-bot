@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\Category;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -86,6 +87,7 @@ final class AdminDashboardData
                 'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
             ],
             'products' => $this->latestProducts(),
+            'categoryOptions' => $this->categoryOptions(),
             'orders' => $this->latestOrders(),
             'statusCounts' => $this->statusCounts(),
             'earnings' => $this->earnings(),
@@ -128,6 +130,20 @@ final class AdminDashboardData
                 'stock_url' => route('admin.products.stock.store', ['product' => $product]),
                 'share_url' => route('storefront.home').'#product-'.$product->id,
                 'created_at' => $product->created_at?->toDateTimeString(),
+            ])
+            ->all();
+    }
+
+    private function categoryOptions(): array
+    {
+        return Category::query()
+            ->select(['id', 'name'])
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Category $category): array => [
+                'id' => $category->id,
+                'name' => $category->name,
             ])
             ->all();
     }

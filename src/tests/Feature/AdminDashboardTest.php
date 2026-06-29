@@ -193,6 +193,86 @@ class AdminDashboardTest extends TestCase
             ->assertDontSee('fi-modal', false);
     }
 
+    public function test_tambah_tab_renders_compact_product_create_form(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        Category::factory()->create(['name' => 'Akun Premium']);
+
+        $this->get('/admin?tab=tambah')
+            ->assertOk()
+            ->assertSee('Tambah produk baru')
+            ->assertSee('Nama produk')
+            ->assertSee('Harga')
+            ->assertSee('Kategori')
+            ->assertSee('Deskripsi singkat')
+            ->assertSee('Fitur utama')
+            ->assertSee('Paket/spesifikasi')
+            ->assertSee('Akun Premium')
+            ->assertSee('Submit Produk')
+            ->assertSee('/admin/products', false)
+            ->assertSee('x-data', false)
+            ->assertSee('min-w-0', false)
+            ->assertDontSee('fi-form', false);
+    }
+
+    public function test_admin_can_create_product_from_tambah_tab(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $category = Category::factory()->create(['name' => 'Tools Premium']);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=tambah')
+            ->post(route('admin.products.store'), [
+                'name' => 'Canva Pro 1 Bulan',
+                'price_amount' => '75000',
+                'category_id' => (string) $category->id,
+                'description' => 'Akses Canva Pro siap pakai.',
+                'features' => "Akun ready\nGaransi login",
+                'specifications' => "Durasi 30 hari\nSupport reset",
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $this->assertDatabaseHas('products', [
+            'category_id' => $category->id,
+            'name' => 'Canva Pro 1 Bulan',
+            'price_amount' => 75000,
+            'currency' => 'IDR',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $product = Product::where('name', 'Canva Pro 1 Bulan')->firstOrFail();
+        $this->assertStringContainsString('Akses Canva Pro siap pakai.', $product->description);
+        $this->assertStringContainsString("Fitur utama:\n- Akun ready\n- Garansi login", $product->description);
+        $this->assertStringContainsString("Paket/spesifikasi:\n- Durasi 30 hari\n- Support reset", $product->description);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'product.created',
+            'subject_id' => (string) $product->id,
+        ]);
+    }
+
+    public function test_tambah_product_submission_validates_required_fields(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $this->from('/admin?tab=tambah')
+            ->post(route('admin.products.store'), [
+                'name' => '',
+                'price_amount' => '',
+                'description' => '',
+            ])
+            ->assertRedirect('/admin?tab=tambah')
+            ->assertSessionHasErrors(['name', 'price_amount', 'description'], null, 'productCreate');
+
+        $this->assertDatabaseCount('products', 0);
+    }
+
     public function test_admin_can_add_product_stock_from_compact_dashboard_modal(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
