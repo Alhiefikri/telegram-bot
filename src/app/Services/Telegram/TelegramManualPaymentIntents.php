@@ -5,14 +5,17 @@ namespace App\Services\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
-use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
 use Illuminate\Support\Arr;
 
 class TelegramManualPaymentIntents
 {
-    public function __construct(private TelegramBotClient $bot, private AdminOrderOperations $adminOrders) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private AdminOrderOperations $adminOrders,
+        private TelegramAdminAccess $adminAccess,
+    ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
     {
@@ -112,18 +115,11 @@ class TelegramManualPaymentIntents
 
     public function adminTelegramChatId(): ?string
     {
-        $settings = ManualPaymentSetting::current();
-        $chatId = $settings?->admin_telegram_chat_id ?: config('services.telegram.admin_telegram_chat_id');
-
-        return $chatId ? (string) $chatId : null;
+        return $this->adminAccess->adminChatId();
     }
 
     public function isTelegramAdmin(Customer $customer, string $chatId): bool
     {
-        $adminUserId = (string) config('services.telegram.admin_user_id');
-        $adminChatId = (string) $this->adminTelegramChatId();
-
-        return ($adminUserId !== '' && (string) $customer->telegram_id === $adminUserId)
-            || ($adminChatId !== '' && $chatId === $adminChatId);
+        return $this->adminAccess->isAdmin($customer, $chatId);
     }
 }

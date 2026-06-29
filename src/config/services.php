@@ -50,6 +50,7 @@ return [
         'payment_mode' => env('TELEGRAM_PAYMENT_MODE', 'manual'),
         'admin_contact_url' => env('TELEGRAM_ADMIN_CONTACT_URL'),
         'admin_username' => env('TELEGRAM_ADMIN_USERNAME'),
+        'admin_user_id' => env('TELEGRAM_ADMIN_USER_ID'),
         'admin_telegram_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
     ],

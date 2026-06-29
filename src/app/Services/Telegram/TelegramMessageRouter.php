@@ -24,7 +24,7 @@ class TelegramMessageRouter
 
         if ($text === '/start') {
             $this->session->forget($customer);
-            $this->menu->sendMainMenu($chatId);
+            $this->menu->sendMainMenu($customer, $chatId);
             $this->catalog->sendCategoryCatalog($chatId);
 
             return;
@@ -39,7 +39,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/menu', '☰ Menu'], true)) {
             $this->session->forget($customer);
-            $this->menu->sendMainMenu($chatId);
+            $this->menu->sendMainMenu($customer, $chatId);
 
             return;
         }

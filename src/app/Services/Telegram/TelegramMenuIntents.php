@@ -6,21 +6,31 @@ use App\Models\Customer;
 
 class TelegramMenuIntents
 {
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess) {}
 
-    public function sendMainMenu(string $chatId): void
+    public function sendMainMenu(Customer $customer, string $chatId): void
     {
-        $this->bot->sendMessage($chatId, "☰ Menu utama\nPilih tombol di bawah supaya lebih cepat belanja.", $this->mainMenuKeyboard());
+        $this->bot->sendMessage($chatId, "☰ Menu utama\nPilih tombol di bawah supaya lebih cepat belanja.", $this->mainMenuKeyboard($customer, $chatId));
     }
 
-    public function mainMenuKeyboard(): array
+    public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null): array
     {
+        $keyboard = [
+            [['text' => '🛍️ Marketplace'], ['text' => '📦 Pesanan']],
+            [['text' => '👤 Akun Saya'], ['text' => '💬 Support']],
+        ];
+
+        if ($customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
+            $keyboard[] = [[
+                'text' => '🛠️ Admin Dashboard',
+                'web_app' => ['url' => route('admin.dashboard')],
+            ]];
+        }
+
+        $keyboard[] = [['text' => '☰ Menu']];
+
         return [
-            'keyboard' => [
-                [['text' => '🛍️ Marketplace'], ['text' => '📦 Pesanan']],
-                [['text' => '👤 Akun Saya'], ['text' => '💬 Support']],
-                [['text' => '☰ Menu']],
-            ],
+            'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'is_persistent' => true,
             'input_field_placeholder' => 'Pilih menu atau ketik /cari produk',
