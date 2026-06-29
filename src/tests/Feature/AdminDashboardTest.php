@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\Admin\AdminDashboardData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Blade;
 use Tests\TestCase;
@@ -57,6 +60,98 @@ class AdminDashboardTest extends TestCase
             ->assertDontSee('fi-sidebar', false);
 
         $this->assertStringNotContainsString('<aside', $response->getContent());
+    }
+
+    public function test_admin_dashboard_data_provider_returns_operational_view_model_without_escrow(): void
+    {
+        $admin = User::factory()->create([
+            'name' => 'Lhie Admin',
+            'role' => UserRole::Owner,
+        ]);
+
+        Product::factory()->create([
+            'name' => 'Produk Lama',
+            'price_amount' => 35000,
+            'stock' => 9,
+            'reserved_stock' => 2,
+            'is_active' => true,
+            'created_at' => now()->subDays(3),
+        ]);
+        Product::factory()->create([
+            'name' => 'Produk Nonaktif',
+            'is_active' => false,
+            'created_at' => now()->subDays(2),
+        ]);
+        Product::factory()->create([
+            'name' => 'Produk Baru',
+            'price_amount' => 50000,
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+            'created_at' => now()->subDay(),
+        ]);
+
+        $processingOrder = Order::factory()->create([
+            'invoice_number' => 'INV-PROCESS',
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 125000,
+            'created_at' => now()->subHours(3),
+        ]);
+        $completedOrder = Order::factory()->create([
+            'invoice_number' => 'INV-DONE',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 80000,
+            'created_at' => now()->subDay(),
+        ]);
+        Order::factory()->create([
+            'order_status' => OrderStatus::Cancelled,
+            'payment_status' => PaymentStatus::Failed,
+            'total_amount' => 30000,
+            'created_at' => now()->subDays(2),
+        ]);
+
+        Payment::factory()->create([
+            'order_id' => $processingOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 125000,
+            'paid_at' => now()->subHours(2),
+        ]);
+        Payment::factory()->create([
+            'order_id' => $completedOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 80000,
+            'paid_at' => now()->subDay(),
+        ]);
+        Payment::factory()->create([
+            'order_id' => $completedOrder->id,
+            'status' => PaymentStatus::Pending,
+            'amount' => 99000,
+            'paid_at' => null,
+        ]);
+
+        $data = app(AdminDashboardData::class)->forAdmin($admin);
+
+        $this->assertSame('Lhie Admin', $data['admin']['name']);
+        $this->assertSame(3, $data['metrics']['product_count']);
+        $this->assertSame(2, $data['metrics']['active_product_count']);
+        $this->assertSame(1, $data['metrics']['orders_to_process']);
+        $this->assertSame(205000, $data['metrics']['gmv_amount']);
+        $this->assertSame(205000, $data['metrics']['read_only_balance_amount']);
+        $this->assertSame(205000, $data['balance']['amount']);
+        $this->assertSame('paid_payments', $data['balance']['source']);
+        $this->assertSame(1, $data['statusCounts']['processing']['count']);
+        $this->assertSame(1, $data['statusCounts']['completed']['count']);
+        $this->assertCount(3, $data['products']);
+        $this->assertSame('Produk Baru', $data['products'][0]['name']);
+        $this->assertSame(3, $data['products'][0]['available_stock']);
+        $this->assertSame('INV-PROCESS', $data['orders'][0]['invoice_number']);
+        $this->assertCount(7, $data['earnings']);
+        $this->assertSame(205000, array_sum(array_column($data['earnings'], 'amount')));
+
+        $encoded = json_encode($data, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
     }
 
     public function test_admin_dashboard_components_render_with_merged_attributes_and_mobile_touch_targets(): void

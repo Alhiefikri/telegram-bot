@@ -1,0 +1,249 @@
+<?php
+
+namespace App\Services\Admin;
+
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Product;
+use App\Models\User;
+use App\Support\Money;
+use Illuminate\Support\Carbon;
+
+final class AdminDashboardData
+{
+    public function forAdmin(User $user): array
+    {
+        $productCount = Product::query()->count();
+        $activeProductCount = Product::query()->where('is_active', true)->count();
+        $ordersToProcess = Order::query()->where('order_status', OrderStatus::Processing)->count();
+        $gmvAmount = (int) Order::query()
+            ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
+            ->sum('total_amount');
+        $readOnlyBalanceAmount = (int) Payment::query()
+            ->where('status', PaymentStatus::Paid)
+            ->sum('amount');
+
+        return [
+            'admin' => [
+                'name' => $user->name ?: 'Admin LHIE',
+                'role' => $user->role?->value ?? 'operator',
+            ],
+            'metrics' => [
+                'read_only_balance_amount' => $readOnlyBalanceAmount,
+                'gmv_amount' => $gmvAmount,
+                'product_count' => $productCount,
+                'active_product_count' => $activeProductCount,
+                'orders_to_process' => $ordersToProcess,
+            ],
+            'balance' => [
+                'label' => 'Saldo estimasi',
+                'amount' => $readOnlyBalanceAmount,
+                'amount_formatted' => Money::idr($readOnlyBalanceAmount),
+                'source' => 'paid_payments',
+            ],
+            'summary' => [
+                [
+                    'key' => 'saldo',
+                    'label' => 'Saldo',
+                    'value' => Money::idr($readOnlyBalanceAmount),
+                    'hint' => 'Estimasi pembayaran paid',
+                    'tone' => 'emerald',
+                ],
+                [
+                    'key' => 'gmv',
+                    'label' => 'GMV',
+                    'value' => Money::idr($gmvAmount),
+                    'hint' => 'Order aktif + selesai',
+                    'tone' => 'blue',
+                ],
+                [
+                    'key' => 'products',
+                    'label' => 'Produk',
+                    'value' => $productCount,
+                    'hint' => 'Total katalog',
+                    'tone' => 'slate',
+                ],
+                [
+                    'key' => 'active_products',
+                    'label' => 'Produk aktif',
+                    'value' => $activeProductCount,
+                    'hint' => 'Tampil di toko',
+                    'tone' => 'emerald',
+                ],
+                [
+                    'key' => 'orders_to_process',
+                    'label' => 'Perlu diproses',
+                    'value' => $ordersToProcess,
+                    'hint' => 'Order dibayar',
+                    'tone' => 'amber',
+                ],
+            ],
+            'storeStatus' => [
+                'label' => $activeProductCount > 0 ? 'Toko aktif' : 'Toko belum aktif',
+                'hint' => $ordersToProcess > 0 ? 'Ada order perlu tindak lanjut' : 'Tidak ada antrean proses',
+                'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
+            ],
+            'products' => $this->latestProducts(),
+            'orders' => $this->latestOrders(),
+            'statusCounts' => $this->statusCounts(),
+            'earnings' => $this->earnings(),
+            'actions' => [
+                'shop' => url('/#products'),
+                'share' => route('storefront.home'),
+            ],
+            'tabs' => [
+                ['id' => 'stats', 'label' => 'Stats'],
+                ['id' => 'produk', 'label' => 'Produk'],
+                ['id' => 'penjualan', 'label' => 'Penjualan'],
+                ['id' => 'tambah', 'label' => 'Tambah'],
+                ['id' => 'withdraw', 'label' => 'Withdraw'],
+                ['id' => 'riwayat', 'label' => 'Riwayat'],
+                ['id' => 'affiliate', 'label' => 'Affiliate'],
+            ],
+        ];
+    }
+
+    private function latestProducts(): array
+    {
+        return Product::query()
+            ->with('category:id,name')
+            ->select(['id', 'category_id', 'name', 'price_amount', 'currency', 'stock', 'reserved_stock', 'is_active', 'created_at'])
+            ->latest()
+            ->limit(5)
+            ->get()
+            ->map(fn (Product $product): array => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'category' => $product->category?->name ?? 'Tanpa kategori',
+                'price' => Money::idr($product->price_amount),
+                'stock' => $product->stock,
+                'reserved_stock' => $product->reserved_stock,
+                'available_stock' => max(0, $product->stock - $product->reserved_stock),
+                'is_active' => $product->is_active,
+                'status_label' => $product->is_active ? 'Aktif' : 'Nonaktif',
+                'created_at' => $product->created_at?->toDateTimeString(),
+            ])
+            ->all();
+    }
+
+    private function latestOrders(): array
+    {
+        return Order::query()
+            ->with('customer:id,first_name,username')
+            ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
+            ->withCount('orderItems')
+            ->latest()
+            ->limit(5)
+            ->get()
+            ->map(fn (Order $order): array => [
+                'id' => $order->id,
+                'invoice_number' => $order->invoice_number,
+                'customer' => $this->customerLabel($order),
+                'order_status' => $order->order_status->value,
+                'order_status_label' => $this->orderStatusLabel($order->order_status),
+                'order_status_tone' => $this->orderStatusTone($order->order_status),
+                'payment_status' => $order->payment_status->value,
+                'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
+                'total' => Money::idr($order->total_amount),
+                'item_count' => $order->order_items_count,
+                'created_at' => $order->created_at?->toDateTimeString(),
+            ])
+            ->all();
+    }
+
+    private function statusCounts(): array
+    {
+        $counts = Order::query()
+            ->selectRaw('order_status, count(*) as aggregate')
+            ->groupBy('order_status')
+            ->pluck('aggregate', 'order_status');
+
+        return collect(OrderStatus::cases())
+            ->mapWithKeys(fn (OrderStatus $status): array => [
+                $status->value => [
+                    'label' => $this->orderStatusLabel($status),
+                    'count' => (int) ($counts[$status->value] ?? 0),
+                    'tone' => $this->orderStatusTone($status),
+                ],
+            ])
+            ->all();
+    }
+
+    private function earnings(): array
+    {
+        $start = now()->startOfDay()->subDays(6);
+        $payments = Payment::query()
+            ->where('status', PaymentStatus::Paid)
+            ->whereNotNull('paid_at')
+            ->where('paid_at', '>=', $start)
+            ->get(['amount', 'paid_at']);
+
+        $amountsByDate = $payments
+            ->groupBy(fn (Payment $payment): string => $payment->paid_at->toDateString())
+            ->map(fn ($payments): int => (int) $payments->sum('amount'));
+        $maxAmount = max(1, (int) $amountsByDate->max());
+
+        return collect(range(0, 6))
+            ->map(function (int $dayOffset) use ($start, $amountsByDate, $maxAmount): array {
+                $date = (clone $start)->addDays($dayOffset);
+                $amount = (int) ($amountsByDate[$date->toDateString()] ?? 0);
+
+                return [
+                    'date' => $date->toDateString(),
+                    'label' => Carbon::parse($date)->format('d M'),
+                    'amount' => $amount,
+                    'amount_formatted' => Money::idr($amount),
+                    'bar_percent' => $amount > 0 ? max(8, (int) round(($amount / $maxAmount) * 100)) : 0,
+                ];
+            })
+            ->all();
+    }
+
+    private function customerLabel(Order $order): string
+    {
+        if (! $order->customer) {
+            return 'Pelanggan';
+        }
+
+        if ($order->customer->first_name && $order->customer->username) {
+            return "{$order->customer->first_name} (@{$order->customer->username})";
+        }
+
+        return $order->customer->first_name ?: ($order->customer->username ? "@{$order->customer->username}" : 'Pelanggan');
+    }
+
+    private function orderStatusLabel(OrderStatus $status): string
+    {
+        return match ($status) {
+            OrderStatus::Draft => 'Draft',
+            OrderStatus::PendingPayment => 'Menunggu bayar',
+            OrderStatus::Processing => 'Diproses',
+            OrderStatus::Completed => 'Selesai',
+            OrderStatus::Cancelled => 'Dibatalkan',
+            OrderStatus::Expired => 'Expired',
+        };
+    }
+
+    private function paymentStatusLabel(PaymentStatus $status): string
+    {
+        return match ($status) {
+            PaymentStatus::Pending => 'Pending',
+            PaymentStatus::Paid => 'Paid',
+            PaymentStatus::Failed => 'Failed',
+            PaymentStatus::Expired => 'Expired',
+            PaymentStatus::Refunded => 'Refunded',
+        };
+    }
+
+    private function orderStatusTone(OrderStatus $status): string
+    {
+        return match ($status) {
+            OrderStatus::Processing => 'amber',
+            OrderStatus::Completed => 'emerald',
+            OrderStatus::Cancelled, OrderStatus::Expired => 'rose',
+            default => 'slate',
+        };
+    }
+}
