@@ -37,11 +37,10 @@ class ExampleTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('storefront-shell', false)
-            ->assertSee('storefront-wave', false)
-            ->assertSee('storefront-grid', false)
             ->assertSee('storefront-hero-card', false)
             ->assertSee('storefront-popular-card', false)
-            ->assertSee('motion-safe:animate-storefront-float', false)
+            ->assertSee('hero-preview-panel', false)
+            ->assertSee('hover-lift', false)
             ->assertSee('motion-safe:animate-storefront-reveal', false)
             ->assertSee('motion-reduce:animate-none', false)
             ->assertDontSee('bg-[#09090b]', false);

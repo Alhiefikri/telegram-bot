@@ -13,7 +13,7 @@ class LowStockProductsWidget extends Widget
 
     protected int|string|array $columnSpan = [
         'default' => 'full',
-        'lg' => 2,
+        'lg' => 8,
     ];
 
     protected function getViewData(): array
@@ -36,6 +36,7 @@ class LowStockProductsWidget extends Widget
                     'reserved_stock' => (int) $product->reserved_stock,
                     'price' => Money::idr($product->price_amount),
                     'status_label' => $this->statusLabel($product),
+                    'tone' => $this->toneForProduct($product),
                     'needs_attention' => (int) $product->stock <= (int) $product->reserved_stock,
                     'url' => ProductResource::getUrl('edit', ['record' => $product]),
                 ];
@@ -54,9 +55,22 @@ class LowStockProductsWidget extends Widget
         }
 
         if ((int) $product->stock <= (int) $product->reserved_stock || (int) $product->stock <= 10) {
-            return 'Low stock';
+            return 'Perlu restok';
         }
 
         return 'Aktif';
+    }
+
+    private function toneForProduct(Product $product): string
+    {
+        if ((int) $product->stock <= 0) {
+            return 'rose';
+        }
+
+        if ((int) $product->stock <= (int) $product->reserved_stock || (int) $product->stock <= 10) {
+            return 'amber';
+        }
+
+        return 'emerald';
     }
 }

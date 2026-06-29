@@ -26,7 +26,7 @@ class ProductsTable
             ->columns([
                 ImageColumn::make('image_path')->disk('public'),
                 TextColumn::make('name')->searchable()->sortable(),
-                TextColumn::make('category.name')->label('Category')->searchable()->sortable(),
+                TextColumn::make('category.name')->label('Kategori')->searchable()->sortable(),
                 TextColumn::make('price_amount')->formatStateUsing(fn ($state) => Money::idr($state))->sortable(),
                 TextColumn::make('currency'),
                 TextColumn::make('stock')->sortable(),
@@ -42,11 +42,11 @@ class ProductsTable
                 EditAction::make(),
                 RestoreAction::make(),
                 Action::make('adjustStock')
-                    ->label('Adjust stock')
+                    ->label('Ubah stok')
                     ->authorize('adjustStock')
                     ->schema([
-                        TextInput::make('delta')->label('Quantity delta')->required()->integer()->notIn([0]),
-                        Textarea::make('notes')->maxLength(1000),
+                        TextInput::make('delta')->label('Selisih jumlah')->required()->integer()->notIn([0])->helperText('Gunakan angka positif untuk tambah, negatif untuk kurangi.'),
+                        Textarea::make('notes')->label('Catatan')->maxLength(1000),
                     ])
                     ->action(fn ($record, array $data, StockAdjustmentService $service) => $service->adjust($record, (int) $data['delta'], $data['notes'] ?? null, auth()->user(), request()->ip())),
             ])

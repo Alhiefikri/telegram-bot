@@ -1,10 +1,13 @@
 <div class="flex items-center gap-3">
-    <div class="grid h-11 w-11 place-items-center rounded-[1rem] bg-gradient-to-br from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_38px_rgba(37,99,235,0.26)] ring-1 ring-white/75">
-        <span class="text-sm font-bold tracking-[0.22em] text-white">L</span>
+    <div class="grid h-8 w-8 place-items-center rounded bg-brand-navy text-white">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
+        </svg>
     </div>
 
-    <div class="leading-tight">
-        <div class="text-[10px] font-bold uppercase tracking-[0.32em] text-sky-600">Admin Store</div>
-        <div class="font-['Space_Grotesk'] text-lg font-bold tracking-[-0.05em] text-slate-900">LHIE STORE</div>
-    </div>
+    <span class="font-display text-base font-bold tracking-tight text-brand-navy">
+        LHIE<span class="text-brand-electric">STORE</span>
+    </span>
+
+    <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-slate-600">Admin</span>
 </div>

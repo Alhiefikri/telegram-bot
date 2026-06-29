@@ -12,23 +12,29 @@ class OrderStatusWidget extends Widget
 
     protected int|string|array $columnSpan = [
         'default' => 'full',
-        'lg' => 1,
+        'lg' => 4,
     ];
 
     protected function getViewData(): array
     {
-        $statuses = collect(OrderStatus::cases())->map(function (OrderStatus $status): array {
+        $totalOrders = Order::query()->count();
+        $total = max($totalOrders, 1);
+
+        $statuses = collect(OrderStatus::cases())->map(function (OrderStatus $status) use ($total): array {
+            $count = Order::query()->where('order_status', $status->value)->count();
+
             return [
                 'value' => $status->value,
                 'label' => $this->labelForStatus($status),
                 'tone' => $this->toneForStatus($status),
-                'count' => Order::query()->where('order_status', $status->value)->count(),
+                'count' => $count,
+                'percentage' => (int) round(($count / $total) * 100),
             ];
         })->values();
 
         return [
             'statuses' => $statuses,
-            'total' => Order::query()->count(),
+            'total' => $totalOrders,
         ];
     }
 

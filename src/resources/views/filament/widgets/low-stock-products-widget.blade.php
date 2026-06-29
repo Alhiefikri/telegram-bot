@@ -1,39 +1,49 @@
 <x-filament-widgets::widget>
-<div class="min-w-0 overflow-hidden rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-    <div class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
-        <div>
-            <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-sky-600">Stok perlu dicek</p>
-            <h2 class="mt-2 font-['Space_Grotesk'] text-xl font-bold tracking-[-0.04em] text-slate-900">Produk dengan stok tipis atau rawan habis</h2>
-        </div>
-    </div>
+<x-lhie.dashboard-card>
+    <x-lhie.section-header
+        eyebrow="Stok perlu dicek"
+        title="Produk perlu dicek"
+        copy="Daftar akun premium atau lisensi digital dengan stok tipis atau perlu pembaruan status."
+    />
 
     <div class="mt-5">
         @if ($isEmpty)
-            <x-filament.widgets.partials.empty-state
-                title="Stok aman"
-                description="Belum ada produk aktif yang masuk daftar pantau stok."
-            />
+            <div class="lhie-empty-state">
+                <div class="lhie-empty-state__icon">
+                    <x-lhie.icon name="stock" class="h-5 w-5" />
+                </div>
+
+                <div class="space-y-1">
+                    <p class="lhie-empty-state__title">Stok aman</p>
+                    <p class="lhie-empty-state__description">Belum ada produk aktif yang masuk daftar pantau stok.</p>
+                </div>
+            </div>
         @else
-            <div class="grid gap-3">
+            <div class="space-y-3">
                 @foreach ($products as $product)
-                    <div class="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                        <div class="flex items-center justify-between gap-4">
-                            <div class="min-w-0">
-                                <p class="truncate font-semibold text-slate-900">{{ $product['name'] }}</p>
-                                <p class="mt-1 break-words text-sm text-slate-500">{{ $product['price'] }} · Reserved: {{ $product['reserved_stock'] }}</p>
-                                <a href="{{ $product['url'] }}" class="mt-3 inline-flex text-xs font-semibold text-sky-700 hover:text-sky-900">Buka produk →</a>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-2xl font-bold tracking-[-0.05em] text-slate-900">{{ $product['stock'] }}</div>
-                                <div class="mt-1 text-xs font-semibold uppercase tracking-[0.18em] {{ $product['needs_attention'] ? 'text-amber-600' : 'text-sky-600' }}">
-                                    {{ $product['status_label'] }}
+                    <article class="lhie-section-panel">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex min-w-0 items-start gap-3">
+                                <div class="lhie-icon-tile" data-tone="{{ $product['tone'] }}">
+                                    <x-lhie.icon name="stock" />
+                                </div>
+
+                                <div class="min-w-0">
+                                    <p class="truncate font-semibold text-slate-900">{{ $product['name'] }}</p>
+                                    <p class="mt-1 break-words text-sm text-slate-600">{{ $product['price'] }} · Tertahan {{ $product['reserved_stock'] }}</p>
+                                    <a href="{{ $product['url'] }}" class="mt-3 inline-flex text-xs font-semibold text-slate-700 hover:text-slate-900">Buka produk →</a>
                                 </div>
                             </div>
+
+                            <div class="text-right">
+                                <div class="text-2xl font-bold tracking-[-0.05em] text-slate-900">{{ $product['stock'] }}</div>
+                                <x-lhie.status-pill class="mt-2" :label="$product['status_label']" :tone="$product['tone']" />
+                            </div>
                         </div>
-                    </div>
+                    </article>
                 @endforeach
             </div>
         @endif
     </div>
-</div>
+</x-lhie.dashboard-card>
 </x-filament-widgets::widget>

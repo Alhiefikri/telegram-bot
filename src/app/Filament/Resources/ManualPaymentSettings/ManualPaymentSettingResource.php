@@ -29,9 +29,9 @@ class ManualPaymentSettingResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = null;
 
-    protected static ?string $navigationLabel = 'Pengaturan';
+    protected static ?string $navigationLabel = 'Link Toko & Pembayaran';
 
-    protected static ?int $navigationSort = 8;
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $modelLabel = 'Pengaturan Pembayaran';
 
@@ -41,20 +41,20 @@ class ManualPaymentSettingResource extends Resource
     {
         return $schema->components([
             Select::make('payment_mode')
-                ->label('Payment mode')
-                ->options(['manual' => 'Manual approval', 'pakasir' => 'Pakasir'])
+                ->label('Mode pembayaran')
+                ->options(['manual' => 'Manual', 'pakasir' => 'Pakasir'])
                 ->default('manual')
                 ->required()
-                ->helperText('Pilih Manual selama Pakasir/KYC belum siap. Bot akan meminta screenshot /payment dan admin approve manual.'),
-            TextInput::make('dana_account_name')->label('DANA account name')->maxLength(255),
-            TextInput::make('dana_account_number')->label('DANA account number')->maxLength(255),
-            FileUpload::make('dana_qr_image_path')->label('DANA QR image')->image()->disk('public')->directory('payments/dana')->visibility('public')->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])->maxSize(2048),
-            TextInput::make('dana_qr_image_url')->label('External DANA QR URL')->url()->maxLength(255),
-            TextInput::make('admin_contact_url')->label('Admin contact URL')->url()->maxLength(255),
-            TextInput::make('admin_username')->label('Admin username')->maxLength(255),
-            TextInput::make('admin_telegram_chat_id')->label('Admin Telegram chat ID')->maxLength(255),
-            Textarea::make('instructions')->columnSpanFull(),
-            Toggle::make('is_active')->default(true),
+                ->helperText('Pilih Manual saat Pakasir belum aktif. Bot akan meminta bukti bayar dan menunggu persetujuan admin.'),
+            TextInput::make('dana_account_name')->label('Nama akun DANA')->maxLength(255),
+            TextInput::make('dana_account_number')->label('Nomor DANA')->maxLength(255),
+            FileUpload::make('dana_qr_image_path')->label('Gambar QR DANA')->image()->disk('public')->directory('payments/dana')->visibility('public')->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])->maxSize(2048),
+            TextInput::make('dana_qr_image_url')->label('URL QR DANA')->url()->maxLength(255),
+            TextInput::make('admin_contact_url')->label('URL kontak admin')->url()->maxLength(255),
+            TextInput::make('admin_username')->label('Username admin')->maxLength(255),
+            TextInput::make('admin_telegram_chat_id')->label('Chat ID Telegram admin')->maxLength(255),
+            Textarea::make('instructions')->label('Catatan pembayaran')->columnSpanFull(),
+            Toggle::make('is_active')->label('Aktifkan pengaturan')->default(true),
         ]);
     }
 
@@ -63,8 +63,8 @@ class ManualPaymentSettingResource extends Resource
         return $table->columns([
             TextColumn::make('id')->sortable(),
             TextColumn::make('payment_mode')->label('Mode')->badge()->sortable(),
-            TextColumn::make('dana_account_name')->label('DANA name')->searchable(),
-            TextColumn::make('dana_account_number')->label('DANA number')->searchable(),
+            TextColumn::make('dana_account_name')->label('Nama DANA')->searchable(),
+            TextColumn::make('dana_account_number')->label('Nomor DANA')->searchable(),
             TextColumn::make('admin_username')->searchable(),
             IconColumn::make('is_active')->boolean()->sortable(),
             TextColumn::make('updated_at')->dateTime()->sortable(),

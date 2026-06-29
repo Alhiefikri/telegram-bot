@@ -2,8 +2,8 @@
 
 namespace App\Filament\Auth\Pages;
 
-use Filament\Auth\Pages\Login as BaseLogin;
 use Filament\Actions\Action;
+use Filament\Auth\Pages\Login as BaseLogin;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\TextInput;
@@ -40,7 +40,7 @@ class Login extends BaseLogin
 
     public function getSubheading(): string|Htmlable|null
     {
-        $copy = 'Masuk untuk mengelola pesanan, pembayaran, dan stok store dengan tampilan yang bersih dan cepat.';
+        $copy = 'Masuk untuk mengelola pesanan, pembayaran, dan stok dari satu tampilan yang tenang dan jelas.';
 
         if (! $this->shouldPrefillLoginCredentials()) {
             return $copy;
@@ -48,9 +48,9 @@ class Login extends BaseLogin
 
         return new HtmlString(
             '<div class="lhie-login-note">'
-            .'<div class="lhie-login-note__label">Mode testing lokal</div>'
+            .'<div class="lhie-login-note__label">Mode uji lokal</div>'
             .'<p class="lhie-login-note__copy">'
-            .'<span class="lhie-login-note__intro">Kredensial admin lokal sudah diisi otomatis.</span>'
+            .'<span class="lhie-login-note__intro">Kredensial admin lokal sudah terisi otomatis.</span>'
             .' <span class="lhie-login-note__credential">test@example.com</span>'
             .' / '
             .'<span class="lhie-login-note__credential">password</span>.'
@@ -86,7 +86,7 @@ class Login extends BaseLogin
     protected function getEmailFormComponent(): Component
     {
         return TextInput::make('email')
-            ->label('Email admin')
+            ->label('Email')
             ->email()
             ->required()
             ->autocomplete()
@@ -96,7 +96,7 @@ class Login extends BaseLogin
     protected function getPasswordFormComponent(): Component
     {
         return TextInput::make('password')
-            ->label('Password')
+            ->label('Sandi')
             ->password()
             ->revealable(Filament::arePasswordsRevealable())
             ->autocomplete('current-password')
@@ -106,13 +106,13 @@ class Login extends BaseLogin
     protected function getRememberFormComponent(): Component
     {
         return Checkbox::make('remember')
-            ->label('Ingat sesi login');
+            ->label('Tetap masuk');
     }
 
     protected function getAuthenticateFormAction(): Action
     {
         return Action::make('authenticate')
-            ->label('Masuk dashboard')
+            ->label('Masuk')
             ->submit('authenticate');
     }
 }

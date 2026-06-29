@@ -1,24 +1,27 @@
 <x-filament-widgets::widget>
-<div class="min-w-0 overflow-hidden rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
-    <div class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
-        <div>
-            <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-sky-600">Status order</p>
-            <h2 class="mt-2 font-['Space_Grotesk'] text-xl font-bold tracking-[-0.04em] text-slate-900">Distribusi status pesanan</h2>
-        </div>
-        <div class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-            Total {{ $total }}
-        </div>
-    </div>
+<x-lhie.dashboard-card>
+    <x-lhie.section-header eyebrow="Status pesanan" title="Metrik status pesanan">
+        <x-slot:aside>
+            <div class="lhie-status-pill" data-tone="slate">
+                Total {{ $total }}
+            </div>
+        </x-slot:aside>
+    </x-lhie.section-header>
 
-    <div class="mt-5 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+    <div class="mt-5 space-y-3">
         @foreach ($statuses as $status)
-            <div class="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                <div class="flex items-center justify-between gap-4">
-                    <x-filament.widgets.partials.status-pill :label="$status['label']" :tone="$status['tone']" />
-                    <div class="text-3xl font-bold tracking-[-0.05em] text-slate-900">{{ $status['count'] }}</div>
+            @php($progressWidth = $status['percentage'].'%')
+            <div class="space-y-1">
+                <div class="flex justify-between gap-3 text-[11px] font-semibold text-brand-navy">
+                    <span class="min-w-0 truncate">{{ $status['label'] }}</span>
+                    <span class="shrink-0 font-mono text-slate-500">{{ $status['count'] }} ({{ $status['percentage'] }}%)</span>
+                </div>
+
+                <div class="lhie-progress-track">
+                    <div class="lhie-progress-fill" data-tone="{{ $status['tone'] }}" @style(['width: '.$progressWidth])></div>
                 </div>
             </div>
         @endforeach
     </div>
-</div>
+</x-lhie.dashboard-card>
 </x-filament-widgets::widget>

@@ -18,6 +18,20 @@ module.exports = {
             },
             fontFamily: {
                 sans: ['Instrument Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                lhie: ['Plus Jakarta Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                display: ['Space Grotesk', 'Plus Jakarta Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            },
+            colors: {
+                brand: {
+                    electric: '#0052FF',
+                    electricDark: '#003ecc',
+                    electricLight: '#F0F5FF',
+                    navy: '#0B0F19',
+                    slateDark: '#1E293B',
+                    muted: '#64748B',
+                    border: '#E2E8F0',
+                    bg: '#F8FAFC',
+                },
             },
             keyframes: {
                 'storefront-float': {

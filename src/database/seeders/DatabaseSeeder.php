@@ -8,6 +8,7 @@ use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 
 class DatabaseSeeder extends Seeder
 {
@@ -32,14 +33,27 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        // Clear existing categories and products for a clean seed matching the mockup
+        // Keep the demo catalog intentionally small and predictable.
+        DB::table('payment_events')->delete();
+        DB::table('payments')->delete();
+        DB::table('inventory_movements')->delete();
+        DB::table('order_items')->delete();
+        DB::table('orders')->delete();
+        DB::table('cart_items')->delete();
+        DB::table('carts')->delete();
         DB::table('products')->delete();
         DB::table('categories')->delete();
 
         $now = now();
+        $chatGptImagePath = 'products/chatgpt-plus-35k.png';
+        $chatGptImageSource = database_path('seeders/assets/products/chatgpt-plus-35k.png');
+
+        if (is_file($chatGptImageSource) && ($chatGptImageContents = file_get_contents($chatGptImageSource)) !== false) {
+            Storage::disk('public')->put($chatGptImagePath, $chatGptImageContents);
+        }
+
         $categories = [
             ['name' => 'AI Premium', 'slug' => 'ai-premium', 'description' => 'Akun AI premium untuk menunjang produktivitas.', 'sort_order' => 10],
-            ['name' => 'Tools Digital', 'slug' => 'tools-digital', 'description' => 'Layanan digital dan cloud storage premium.', 'sort_order' => 20],
         ];
 
         foreach ($categories as $category) {
@@ -56,42 +70,15 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        $categoryIds = DB::table('categories')->whereIn('slug', ['ai-premium', 'tools-digital'])->pluck('id', 'slug');
+        $categoryIds = DB::table('categories')->whereIn('slug', ['ai-premium'])->pluck('id', 'slug');
         $products = [
             [
                 'name' => 'ChatGPT Plus',
-                'description' => 'Akun ChatGPT Plus premium dengan akses GPT-4o, DALL-E 3, dan analisis data tingkat lanjut.',
-                'price_amount' => 49000,
+                'description' => 'Akun ChatGPT Plus premium siap pakai untuk kebutuhan produktivitas, riset, penulisan, dan bantuan kerja harian.',
+                'price_amount' => 35000,
                 'stock' => 128,
                 'category_id' => $categoryIds['ai-premium'] ?? null,
-            ],
-            [
-                'name' => 'Claude Pro',
-                'description' => 'Akun Claude Pro premium dengan akses Claude 3.5 Sonnet, context window lebih besar, dan prioritas akses.',
-                'price_amount' => 59000,
-                'stock' => 96,
-                'category_id' => $categoryIds['ai-premium'] ?? null,
-            ],
-            [
-                'name' => 'Midjourney',
-                'description' => 'Akun Midjourney premium siap pakai untuk pembuatan gambar AI berkualitas tinggi dan ultra-realistis.',
-                'price_amount' => 69000,
-                'stock' => 74,
-                'category_id' => $categoryIds['ai-premium'] ?? null,
-            ],
-            [
-                'name' => 'Google One 2TB',
-                'description' => 'Langganan Google One 2TB untuk penyimpanan cloud Google Drive, Google Photos, dan akses Google Gemini Advanced.',
-                'price_amount' => 39000,
-                'stock' => 112,
-                'category_id' => $categoryIds['tools-digital'] ?? null,
-            ],
-            [
-                'name' => 'Microsoft 365 Personal',
-                'description' => 'Akses Microsoft 365 Personal siap pakai termasuk Word, Excel, PowerPoint, Outlook, dan penyimpanan cloud OneDrive 1TB.',
-                'price_amount' => 65000,
-                'stock' => 58,
-                'category_id' => $categoryIds['tools-digital'] ?? null,
+                'image_path' => $chatGptImagePath,
             ],
         ];
 
@@ -102,7 +89,7 @@ class DatabaseSeeder extends Seeder
                     ...$product,
                     'currency' => 'IDR',
                     'reserved_stock' => 0,
-                    'image_path' => null,
+                    'image_path' => $product['image_path'],
                     'is_active' => true,
                     'deleted_at' => null,
                     'updated_at' => $now,

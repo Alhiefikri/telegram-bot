@@ -25,29 +25,39 @@ class StoreOverviewWidget extends Widget
         return [
             'cards' => [
                 [
-                    'label' => 'Total Pesanan Hari Ini',
+                    'label' => 'Total Order',
                     'value' => Order::query()->whereDate('created_at', $today)->count(),
-                    'tone' => 'blue',
+                    'tone' => 'slate',
+                    'icon' => 'orders',
+                    'note' => 'Pesanan masuk hari ini',
                 ],
                 [
-                    'label' => 'Menunggu Pembayaran',
+                    'label' => 'Menunggu',
                     'value' => Order::query()->where('payment_status', PaymentStatus::Pending->value)->count(),
                     'tone' => 'amber',
+                    'icon' => 'pending',
+                    'note' => 'Perlu dicek di Telegram',
                 ],
                 [
                     'label' => 'Diproses',
                     'value' => Order::query()->where('order_status', OrderStatus::Processing->value)->count(),
-                    'tone' => 'cyan',
+                    'tone' => 'blue',
+                    'icon' => 'processing',
+                    'note' => 'Kredensial sedang diinput',
                 ],
                 [
                     'label' => 'Produk Aktif',
                     'value' => Product::query()->where('is_active', true)->count(),
                     'tone' => 'emerald',
+                    'icon' => 'products',
+                    'note' => 'Katalog siap dibeli',
                 ],
                 [
-                    'label' => 'Pendapatan Hari Ini',
+                    'label' => 'Pendapatan',
                     'value' => Money::idr(Payment::query()->where('status', PaymentStatus::Paid->value)->whereDate('paid_at', $today)->sum('amount')),
-                    'tone' => 'slate',
+                    'tone' => 'emerald',
+                    'icon' => 'revenue',
+                    'note' => 'Tercatat lunas',
                 ],
             ],
         ];

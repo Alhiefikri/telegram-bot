@@ -15,7 +15,7 @@ class RecentOrdersWidget extends Widget
 
     protected int|string|array $columnSpan = [
         'default' => 'full',
-        'lg' => 2,
+        'lg' => 8,
     ];
 
     protected function getViewData(): array
@@ -23,7 +23,7 @@ class RecentOrdersWidget extends Widget
         $orders = Order::query()
             ->with(['customer:id,first_name,username', 'orderItems.product:id,name'])
             ->latest()
-            ->limit(6)
+            ->limit(5)
             ->get()
             ->map(function (Order $order): array {
                 return [
@@ -44,6 +44,7 @@ class RecentOrdersWidget extends Widget
         return [
             'orders' => $orders,
             'isEmpty' => $orders->isEmpty(),
+            'indexUrl' => OrderResource::getUrl('index'),
         ];
     }
 
