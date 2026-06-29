@@ -217,8 +217,9 @@ SH);
         $contents = file_get_contents($script);
         $this->assertStringContainsString('npm --prefix "$APP_DIR" run build', $contents);
         $this->assertStringContainsString('public/build/manifest.json', $contents);
-        $this->assertStringContainsString('/admin/login', $contents);
-        $this->assertStringContainsString('resources/css/filament/admin/theme.css', $contents);
+        $this->assertStringContainsString('resources/css/app.css', $contents);
+        $this->assertStringContainsString('resources/js/app.js', $contents);
+        $this->assertStringNotContainsString('resources/css/filament/admin/theme.css', $contents);
     }
 
     public function test_admin_asset_smoke_workflow_uses_no_production_credentials(): void

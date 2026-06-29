@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Order;
@@ -17,6 +18,7 @@ use App\Services\Admin\AdminDashboardData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 class AdminDashboardTest extends TestCase
@@ -65,6 +67,58 @@ class AdminDashboardTest extends TestCase
             ->assertDontSee('fi-sidebar', false);
 
         $this->assertStringNotContainsString('<aside', $response->getContent());
+    }
+
+    public function test_primary_admin_entry_uses_manual_dashboard_while_filament_resources_remain_reachable(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $dashboardRoute = Route::getRoutes()->getByName('admin.dashboard');
+
+        $this->assertNotNull($dashboardRoute);
+        $this->assertSame(AdminDashboardController::class, $dashboardRoute->getControllerClass());
+        $this->assertSame('admin', $dashboardRoute->uri());
+        $this->assertSame('/admin/products', parse_url(route('filament.admin.resources.products.index'), PHP_URL_PATH));
+        $this->assertSame('/admin/orders', parse_url(route('filament.admin.resources.orders.index'), PHP_URL_PATH));
+
+        $this->get(route('admin.dashboard'))
+            ->assertOk()
+            ->assertSee('Navigasi dashboard')
+            ->assertDontSee('fi-wi-widget', false)
+            ->assertDontSee('filament.widgets', false);
+
+        $this->get(route('filament.admin.resources.products.index'))
+            ->assertOk();
+    }
+
+    public function test_cutover_removes_filament_dashboard_widgets_and_theme_registration(): void
+    {
+        $panelProvider = file_get_contents(app_path('Providers/Filament/AdminPanelProvider.php'));
+        $viteConfig = file_get_contents(base_path('vite.config.js'));
+
+        $this->assertFileDoesNotExist(app_path('Filament/Pages/Dashboard.php'));
+        $this->assertSame([], glob(app_path('Filament/Widgets/*.php')) ?: []);
+        $this->assertStringContainsString('->pages([])', $panelProvider);
+        $this->assertStringNotContainsString('discoverWidgets', $panelProvider);
+        $this->assertStringNotContainsString('->widgets(', $panelProvider);
+        $this->assertStringNotContainsString('viteTheme', $panelProvider);
+        $this->assertStringNotContainsString('resources/css/filament/admin/theme.css', $viteConfig);
+    }
+
+    public function test_cutover_rollback_path_is_documented(): void
+    {
+        $rollbackDoc = base_path('../docs/admin-dashboard-cutover.md');
+
+        $this->assertFileExists($rollbackDoc);
+
+        $contents = file_get_contents($rollbackDoc);
+
+        $this->assertStringContainsString('Rollback', $contents);
+        $this->assertStringContainsString('/admin', $contents);
+        $this->assertStringContainsString('App\\Filament\\Pages\\Dashboard', $contents);
+        $this->assertStringContainsString('resources/css/filament/admin/theme.css', $contents);
     }
 
     public function test_admin_dashboard_data_provider_returns_operational_view_model_without_escrow(): void
