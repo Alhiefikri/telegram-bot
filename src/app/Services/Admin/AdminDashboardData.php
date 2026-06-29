@@ -25,6 +25,7 @@ final class AdminDashboardData
         $readOnlyBalanceAmount = (int) Payment::query()
             ->where('status', PaymentStatus::Paid)
             ->sum('amount');
+        $statusCounts = $this->statusCounts();
 
         return [
             'admin' => [
@@ -89,7 +90,8 @@ final class AdminDashboardData
             'products' => $this->latestProducts(),
             'categoryOptions' => $this->categoryOptions(),
             'orders' => $this->latestOrders(),
-            'statusCounts' => $this->statusCounts(),
+            'salesFilters' => $this->salesFilters($statusCounts),
+            'statusCounts' => $statusCounts,
             'earnings' => $this->earnings(),
             'actions' => [
                 'shop' => url('/#products'),
@@ -151,25 +153,41 @@ final class AdminDashboardData
     private function latestOrders(): array
     {
         return Order::query()
-            ->with('customer:id,first_name,username')
+            ->with([
+                'customer:id,first_name,username',
+                'orderItems:id,order_id,product_name,quantity,subtotal',
+                'payments' => fn ($query) => $query
+                    ->where('status', PaymentStatus::Paid)
+                    ->select(['id', 'order_id', 'amount', 'status']),
+            ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
             ->withCount('orderItems')
             ->latest()
             ->limit(5)
             ->get()
-            ->map(fn (Order $order): array => [
-                'id' => $order->id,
-                'invoice_number' => $order->invoice_number,
-                'customer' => $this->customerLabel($order),
-                'order_status' => $order->order_status->value,
-                'order_status_label' => $this->orderStatusLabel($order->order_status),
-                'order_status_tone' => $this->orderStatusTone($order->order_status),
-                'payment_status' => $order->payment_status->value,
-                'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
-                'total' => Money::idr($order->total_amount),
-                'item_count' => $order->order_items_count,
-                'created_at' => $order->created_at?->toDateTimeString(),
-            ])
+            ->map(function (Order $order): array {
+                $paidAmount = (int) $order->payments->sum('amount');
+
+                return [
+                    'id' => $order->id,
+                    'invoice_number' => $order->invoice_number,
+                    'customer' => $this->customerLabel($order),
+                    'product_name' => $this->orderProductName($order),
+                    'filter_groups' => $this->orderFilterGroups($order->order_status),
+                    'order_status' => $order->order_status->value,
+                    'order_status_label' => $this->orderStatusLabel($order->order_status),
+                    'order_status_tone' => $this->orderStatusTone($order->order_status),
+                    'payment_status' => $order->payment_status->value,
+                    'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
+                    'payment_status_tone' => $this->paymentStatusTone($order->payment_status),
+                    'price' => Money::idr($order->total_amount),
+                    'earning' => Money::idr($paidAmount),
+                    'earning_amount' => $paidAmount,
+                    'item_count' => $order->order_items_count,
+                    'created_at' => $order->created_at?->toDateTimeString(),
+                    'created_at_label' => $order->created_at?->format('d M Y') ?? '-',
+                ];
+            })
             ->all();
     }
 
@@ -189,6 +207,65 @@ final class AdminDashboardData
                 ],
             ])
             ->all();
+    }
+
+    private function salesFilters(array $statusCounts): array
+    {
+        $countFor = fn (OrderStatus ...$statuses): int => collect($statuses)
+            ->sum(fn (OrderStatus $status): int => $statusCounts[$status->value]['count'] ?? 0);
+
+        return [
+            [
+                'key' => 'all',
+                'label' => 'Semua',
+                'count' => $countFor(...OrderStatus::cases()),
+            ],
+            [
+                'key' => 'completed',
+                'label' => 'Selesai',
+                'count' => $countFor(OrderStatus::Completed),
+            ],
+            [
+                'key' => 'issue',
+                'label' => 'Masalah',
+                'count' => $countFor(OrderStatus::Cancelled, OrderStatus::Expired),
+            ],
+            [
+                'key' => 'waiting',
+                'label' => 'Menunggu',
+                'count' => $countFor(OrderStatus::Draft, OrderStatus::PendingPayment),
+            ],
+            [
+                'key' => 'processing',
+                'label' => 'Diproses',
+                'count' => $countFor(OrderStatus::Processing),
+            ],
+        ];
+    }
+
+    private function orderProductName(Order $order): string
+    {
+        $firstItem = $order->orderItems->first();
+
+        if (! $firstItem) {
+            return 'Produk';
+        }
+
+        $remainingItems = max(0, $order->order_items_count - 1);
+
+        return $remainingItems > 0
+            ? "{$firstItem->product_name} + {$remainingItems} produk"
+            : $firstItem->product_name;
+    }
+
+    private function orderFilterGroups(OrderStatus $status): array
+    {
+        return match ($status) {
+            OrderStatus::Completed => ['all', 'completed'],
+            OrderStatus::Cancelled, OrderStatus::Expired => ['all', 'issue'],
+            OrderStatus::Draft, OrderStatus::PendingPayment => ['all', 'waiting'],
+            OrderStatus::Processing => ['all', 'processing'],
+        };
     }
 
     private function earnings(): array
@@ -254,6 +331,16 @@ final class AdminDashboardData
             PaymentStatus::Failed => 'Failed',
             PaymentStatus::Expired => 'Expired',
             PaymentStatus::Refunded => 'Refunded',
+        };
+    }
+
+    private function paymentStatusTone(PaymentStatus $status): string
+    {
+        return match ($status) {
+            PaymentStatus::Paid => 'emerald',
+            PaymentStatus::Failed, PaymentStatus::Expired => 'rose',
+            PaymentStatus::Pending => 'amber',
+            PaymentStatus::Refunded => 'slate',
         };
     }
 

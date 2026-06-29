@@ -109,7 +109,7 @@
             </x-admin-dashboard.card>
 
             <section class="mt-4 grid flex-1 gap-4 lg:grid-cols-[1.25fr_0.75fr]">
-                <x-admin-dashboard.card>
+                <x-admin-dashboard.card class="min-w-0">
                     <div x-show="activeTab === 'stats'">
                         <x-admin-dashboard.section-heading eyebrow="Stats" title="Ringkasan operasional hari ini" class="max-w-2xl">
                             Pantau saldo, GMV, produk aktif, dan order yang perlu diproses dari satu permukaan ringkas.
@@ -302,28 +302,82 @@
                         </div>
                     </div>
 
-                    <div x-cloak x-show="activeTab === 'penjualan'">
+                    <div x-cloak x-show="activeTab === 'penjualan'" x-data="{ salesFilter: 'all' }">
                         <x-admin-dashboard.section-heading eyebrow="Penjualan" title="Order masuk dan diproses">
-                            Order terbaru dengan status order, status pembayaran, dan total transaksi.
+                            Order terbaru dengan status ringkas, pembeli, tanggal, dan earning yang sudah paid.
                         </x-admin-dashboard.section-heading>
 
-                        <div class="mt-5 divide-y divide-slate-100">
+                        <div class="mt-5 overflow-x-auto pb-1" aria-label="Filter penjualan">
+                            <div class="flex min-w-max items-center gap-2">
+                                @foreach ($salesFilters as $filter)
+                                    <button
+                                        type="button"
+                                        x-on:click="salesFilter = @js($filter['key'])"
+                                        x-bind:class="salesFilter === @js($filter['key']) ? 'border-brand-navy bg-brand-navy text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'"
+                                        x-bind:aria-pressed="salesFilter === @js($filter['key'])"
+                                        class="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border px-3 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-brand-electric/25 focus:ring-offset-2"
+                                        data-sales-filter="{{ $filter['key'] }}"
+                                    >
+                                        <span>{{ $filter['label'] }}</span>
+                                        <span
+                                            class="rounded-full px-2 py-0.5 text-[11px]"
+                                            x-bind:class="salesFilter === @js($filter['key']) ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'"
+                                        >
+                                            {{ $filter['count'] }}
+                                        </span>
+                                    </button>
+                                @endforeach
+                            </div>
+                        </div>
+
+                        <div class="mt-4 grid gap-3 lg:grid-cols-2">
                             @forelse ($orders as $order)
-                                <div class="grid gap-3 py-3 md:grid-cols-[1fr_auto] md:items-center">
-                                    <div class="min-w-0">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <p class="font-bold text-brand-navy">{{ $order['invoice_number'] }}</p>
-                                            <x-admin-dashboard.badge :tone="$order['order_status_tone']">{{ $order['order_status_label'] }}</x-admin-dashboard.badge>
-                                            <x-admin-dashboard.badge tone="blue">{{ $order['payment_status_label'] }}</x-admin-dashboard.badge>
+                                <article
+                                    class="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/70"
+                                    data-order-status="{{ $order['order_status'] }}"
+                                    data-order-filter-groups="{{ implode(' ', $order['filter_groups']) }}"
+                                    x-show="salesFilter === 'all' || $el.dataset.orderFilterGroups.split(' ').includes(salesFilter)"
+                                >
+                                    <div class="flex min-w-0 items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <p class="truncate text-sm font-bold text-brand-navy">{{ $order['invoice_number'] }}</p>
+                                            <p class="mt-1 truncate text-sm font-semibold text-slate-700">{{ $order['product_name'] }}</p>
                                         </div>
-                                        <p class="mt-1 truncate text-xs font-medium text-slate-500">
-                                            {{ $order['customer'] }} &middot; {{ $order['item_count'] }} item
-                                        </p>
+
+                                        <x-admin-dashboard.badge :tone="$order['order_status_tone']" dot>
+                                            {{ $order['order_status_label'] }}
+                                        </x-admin-dashboard.badge>
                                     </div>
-                                    <p class="text-sm font-bold text-brand-navy md:text-right">{{ $order['total'] }}</p>
-                                </div>
+
+                                    <dl class="mt-4 grid grid-cols-2 gap-2 text-sm">
+                                        <div class="rounded-lg bg-slate-50 px-3 py-2">
+                                            <dt class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Harga</dt>
+                                            <dd class="mt-1 break-words font-bold text-brand-navy">{{ $order['price'] }}</dd>
+                                        </div>
+                                        <div class="rounded-lg bg-emerald-50 px-3 py-2">
+                                            <dt class="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Earning</dt>
+                                            <dd class="mt-1 break-words font-bold text-brand-navy">{{ $order['earning'] }}</dd>
+                                        </div>
+                                    </dl>
+
+                                    <div class="mt-4 grid gap-3 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-500 sm:grid-cols-2">
+                                        <div class="min-w-0">
+                                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">Pembeli</p>
+                                            <p class="mt-1 truncate text-brand-navy">{{ $order['customer'] }}</p>
+                                        </div>
+                                        <div class="min-w-0 sm:text-right">
+                                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tanggal</p>
+                                            <p class="mt-1 text-brand-navy">{{ $order['created_at_label'] }}</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                                        <x-admin-dashboard.badge :tone="$order['payment_status_tone']">{{ $order['payment_status_label'] }}</x-admin-dashboard.badge>
+                                        <span class="text-xs font-semibold text-slate-500">{{ $order['item_count'] }} item</span>
+                                    </div>
+                                </article>
                             @empty
-                                <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-500">
+                                <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-500 lg:col-span-2">
                                     Belum ada order.
                                 </p>
                             @endforelse
@@ -499,7 +553,7 @@
                     </div>
                 </x-admin-dashboard.card>
 
-                <x-admin-dashboard.card as="section">
+                <x-admin-dashboard.card as="section" class="min-w-0">
                     <x-admin-dashboard.section-heading title="Aksi berikutnya" />
                     <div class="mt-4 space-y-3">
                         <x-admin-dashboard.action-row :href="route('filament.admin.resources.products.index')">
