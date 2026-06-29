@@ -123,6 +123,10 @@ final class AdminDashboardData
                 'available_stock' => max(0, $product->stock - $product->reserved_stock),
                 'is_active' => $product->is_active,
                 'status_label' => $product->is_active ? 'Aktif' : 'Nonaktif',
+                'edit_url' => route('filament.admin.resources.products.edit', ['record' => $product]),
+                'manage_url' => route('filament.admin.resources.products.edit', ['record' => $product]),
+                'stock_url' => route('admin.products.stock.store', ['product' => $product]),
+                'share_url' => route('storefront.home').'#product-'.$product->id,
                 'created_at' => $product->created_at?->toDateTimeString(),
             ])
             ->all();

@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Models\Category;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -152,6 +154,86 @@ class AdminDashboardTest extends TestCase
 
         $encoded = json_encode($data, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
+    }
+
+    public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $category = Category::factory()->create(['name' => 'Akun Premium']);
+        Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Netflix 1 Bulan',
+            'price_amount' => 45000,
+            'stock' => 9,
+            'reserved_stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Katalog siap dikelola')
+            ->assertSee('Netflix 1 Bulan')
+            ->assertSee('Akun Premium')
+            ->assertSeeInOrder(['Stok', '9'])
+            ->assertSeeInOrder(['Tersedia', '7'])
+            ->assertSee('IDR 45.000')
+            ->assertSee('Aktif')
+            ->assertSeeInOrder(['Edit', 'Stok', 'Kelola', 'Share', 'Pause', 'Hapus'])
+            ->assertSee('Tambah Stok')
+            ->assertSee('0 item terdeteksi')
+            ->assertSee('Tempel stok baru, satu item per baris', false)
+            ->assertSee('grid gap-3 sm:grid-cols-2 xl:grid-cols-3', false)
+            ->assertSee('w-full min-w-0', false)
+            ->assertSee('bg-rose-50', false)
+            ->assertDontSee('@js(', false)
+            ->assertDontSee('fi-form', false)
+            ->assertDontSee('fi-modal', false);
+    }
+
+    public function test_admin_can_add_product_stock_from_compact_dashboard_modal(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Canva Pro',
+            'stock' => 2,
+            'reserved_stock' => 1,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "akun-1@example.test\n\nakun-2@example.test\nakun-3@example.test",
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $this->assertSame(5, $product->fresh()->stock);
+        $this->assertDatabaseHas('inventory_movements', [
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Adjustment->value,
+            'quantity' => 3,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'product.stock_adjusted',
+            'subject_id' => (string) $product->id,
+        ]);
+    }
+
+    public function test_stock_modal_submission_requires_at_least_one_non_empty_row(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create(['stock' => 2]);
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "\n  \n",
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['stock_items'], null, 'stockAdjustment');
+
+        $this->assertSame(2, $product->fresh()->stock);
     }
 
     public function test_admin_dashboard_components_render_with_merged_attributes_and_mobile_touch_targets(): void

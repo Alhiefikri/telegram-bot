@@ -23,6 +23,11 @@ class AdminDashboardController extends Controller
 
         abort_unless($user->canAccessPanel($panel), 403);
 
-        return view('admin.dashboard', $dashboardData->forAdmin($user));
+        $viewData = $dashboardData->forAdmin($user);
+        $tabIds = collect($viewData['tabs'])->pluck('id')->all();
+        $requestedTab = (string) $request->query('tab', 'stats');
+        $viewData['activeTab'] = in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats';
+
+        return view('admin.dashboard', $viewData);
     }
 }

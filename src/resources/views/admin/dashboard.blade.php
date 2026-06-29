@@ -7,9 +7,42 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="min-h-full bg-brand-bg font-lhie text-brand-navy antialiased">
+        @php
+            $stockModalProduct = collect($products)->firstWhere('id', (int) old('stock_product_id'));
+        @endphp
+
         <main
             class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-4 sm:px-6 lg:px-8"
-            x-data="{ activeTab: 'stats', copied: false }"
+            x-data="{
+                activeTab: @js($activeTab ?? 'stats'),
+                copied: false,
+                stockModalOpen: @js($errors->stockAdjustment->any()),
+                stockFormAction: @js($stockModalProduct['stock_url'] ?? ''),
+                stockProductId: @js($stockModalProduct['id'] ?? null),
+                stockProductName: @js($stockModalProduct['name'] ?? ''),
+                stockProductStock: @js($stockModalProduct['stock'] ?? 0),
+                stockItems: @js(old('stock_items', '')),
+                stockItemCount() {
+                    return this.stockItems
+                        .split(/\r?\n/)
+                        .map((row) => row.trim())
+                        .filter(Boolean)
+                        .length;
+                },
+                openStockModal(product) {
+                    this.stockFormAction = product.stockUrl;
+                    this.stockProductId = product.id;
+                    this.stockProductName = product.name;
+                    this.stockProductStock = product.stock;
+                    this.stockItems = '';
+                    this.stockModalOpen = true;
+                    this.$nextTick(() => this.$refs.stockItems?.focus());
+                },
+                closeStockModal() {
+                    this.stockModalOpen = false;
+                    this.stockItems = '';
+                },
+            }"
         >
             <x-admin-dashboard.card as="header" padding="compact">
                 <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -122,27 +155,150 @@
                             Produk terbaru, stok tersedia, dan status tampil di toko.
                         </x-admin-dashboard.section-heading>
 
-                        <div class="mt-5 divide-y divide-slate-100">
+                        @if (session('status'))
+                            <div class="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                                {{ session('status') }}
+                            </div>
+                        @endif
+
+                        <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                             @forelse ($products as $product)
-                                <div class="flex items-center justify-between gap-4 py-3">
-                                    <div class="min-w-0">
-                                        <div class="flex flex-wrap items-center gap-2">
+                                @php
+                                    $stockPayload = [
+                                        'id' => $product['id'],
+                                        'name' => $product['name'],
+                                        'stock' => $product['stock'],
+                                        'stockUrl' => $product['stock_url'],
+                                    ];
+                                @endphp
+
+                                <x-admin-dashboard.card as="article" padding="compact" class="w-full min-w-0">
+                                    <div class="flex min-w-0 items-start justify-between gap-3">
+                                        <div class="min-w-0">
                                             <p class="truncate text-sm font-bold text-brand-navy">{{ $product['name'] }}</p>
-                                            <x-admin-dashboard.badge :tone="$product['is_active'] ? 'emerald' : 'slate'">
-                                                {{ $product['status_label'] }}
-                                            </x-admin-dashboard.badge>
+                                            <p class="mt-1 truncate text-xs font-semibold text-slate-500">{{ $product['category'] }}</p>
                                         </div>
-                                        <p class="mt-1 text-xs font-medium text-slate-500">
-                                            {{ $product['category'] }} &middot; Stok tersedia {{ $product['available_stock'] }}
-                                        </p>
+
+                                        <x-admin-dashboard.badge :tone="$product['is_active'] ? 'emerald' : 'slate'">
+                                            {{ $product['status_label'] }}
+                                        </x-admin-dashboard.badge>
                                     </div>
-                                    <p class="shrink-0 text-sm font-bold text-brand-navy">{{ $product['price'] }}</p>
-                                </div>
+
+                                    <div class="mt-4 grid grid-cols-3 gap-2">
+                                        <div class="rounded-lg bg-slate-50 px-3 py-2">
+                                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Stok</p>
+                                            <p class="mt-1 text-sm font-bold text-brand-navy">{{ $product['stock'] }}</p>
+                                        </div>
+                                        <div class="rounded-lg bg-blue-50 px-3 py-2">
+                                            <p class="text-[11px] font-bold uppercase tracking-wide text-blue-700">Tersedia</p>
+                                            <p class="mt-1 text-sm font-bold text-brand-navy">{{ $product['available_stock'] }}</p>
+                                        </div>
+                                        <div class="rounded-lg bg-slate-50 px-3 py-2">
+                                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tahan</p>
+                                            <p class="mt-1 text-sm font-bold text-brand-navy">{{ $product['reserved_stock'] }}</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-4 flex items-center justify-between gap-3">
+                                        <p class="text-sm font-bold text-brand-navy">{{ $product['price'] }}</p>
+                                        <p class="text-xs font-semibold text-slate-500">{{ $product['is_active'] ? 'Tampil di toko' : 'Tidak tampil' }}</p>
+                                    </div>
+
+                                    <div class="mt-4 grid grid-cols-3 gap-2">
+                                        <x-admin-dashboard.button :href="$product['edit_url']" variant="neutral" class="min-h-10 px-2 text-xs">
+                                            Edit
+                                        </x-admin-dashboard.button>
+
+                                        <button
+                                            type="button"
+                                            class="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-brand-electric/20 bg-brand-electricLight px-2 text-xs font-semibold text-brand-electric transition hover:border-brand-electric/30 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-brand-electric/30 focus:ring-offset-2"
+                                            x-on:click="openStockModal(@js($stockPayload))"
+                                        >
+                                            Stok
+                                        </button>
+
+                                        <x-admin-dashboard.button :href="$product['manage_url']" variant="neutral" class="min-h-10 px-2 text-xs">
+                                            Kelola
+                                        </x-admin-dashboard.button>
+
+                                        <button
+                                            type="button"
+                                            class="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-brand-navy transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-2"
+                                            x-on:click="navigator.clipboard?.writeText(@js($product['share_url'])); copied = true; setTimeout(() => copied = false, 1600)"
+                                        >
+                                            Share
+                                        </button>
+
+                                        <x-admin-dashboard.button :href="$product['edit_url']" variant="warning" class="min-h-10 px-2 text-xs">
+                                            Pause
+                                        </x-admin-dashboard.button>
+
+                                        <x-admin-dashboard.button :href="$product['edit_url']" variant="destructive" class="min-h-10 px-2 text-xs">
+                                            Hapus
+                                        </x-admin-dashboard.button>
+                                    </div>
+                                </x-admin-dashboard.card>
                             @empty
-                                <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-500">
+                                <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-500 sm:col-span-2 xl:col-span-3">
                                     Belum ada produk.
                                 </p>
                             @endforelse
+                        </div>
+
+                        <div
+                            x-cloak
+                            x-show="stockModalOpen"
+                            x-transition.opacity
+                            x-on:keydown.escape.window="closeStockModal()"
+                            class="fixed inset-0 z-50 flex items-end bg-slate-950/40 p-3 sm:items-center sm:justify-center"
+                        >
+                            <div class="absolute inset-0" x-on:click="closeStockModal()" aria-hidden="true"></div>
+
+                            <x-admin-dashboard.modal-shell
+                                id="stock-modal"
+                                title="Tambah Stok"
+                                class="relative w-full max-w-lg"
+                            >
+                                <form method="POST" x-bind:action="stockFormAction" class="space-y-4">
+                                    @csrf
+                                    <input type="hidden" name="stock_product_id" x-bind:value="stockProductId">
+
+                                    <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <p class="min-w-0 flex-1 truncate text-sm font-bold text-brand-navy" x-text="stockProductName">Produk</p>
+                                            <x-admin-dashboard.badge tone="blue">
+                                                <span x-text="`${stockItemCount()} item terdeteksi`">0 item terdeteksi</span>
+                                            </x-admin-dashboard.badge>
+                                        </div>
+                                        <p class="mt-1 text-xs font-semibold text-blue-700">
+                                            Stok saat ini <span x-text="stockProductStock">0</span>
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <x-admin-dashboard.textarea
+                                            name="stock_items"
+                                            rows="6"
+                                            placeholder="Tempel stok baru, satu item per baris"
+                                            x-model="stockItems"
+                                            x-ref="stockItems"
+                                        />
+
+                                        @error('stock_items', 'stockAdjustment')
+                                            <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeStockModal()">
+                                            Batal
+                                        </x-admin-dashboard.button>
+                                        <x-admin-dashboard.button type="submit">
+                                            Simpan
+                                        </x-admin-dashboard.button>
+                                    </div>
+                                </form>
+                            </x-admin-dashboard.modal-shell>
                         </div>
                     </div>
 
