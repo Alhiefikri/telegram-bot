@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @layer base {
+    [x-cloak] {
+        display: none !important;
+    }
+
     :root {
         --sf-paper: #fffaf4;
         --sf-surface: #ffffff;
