@@ -18,6 +18,7 @@ final class AdminDashboardData
     {
         $productCount = Product::query()->count();
         $activeProductCount = Product::query()->where('is_active', true)->count();
+        $orderCount = Order::query()->count();
         $ordersToProcess = Order::query()->where('order_status', OrderStatus::Processing)->count();
         $gmvAmount = (int) Order::query()
             ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
@@ -26,6 +27,7 @@ final class AdminDashboardData
             ->where('status', PaymentStatus::Paid)
             ->sum('amount');
         $statusCounts = $this->statusCounts();
+        $storeUrl = route('storefront.home');
 
         return [
             'admin' => [
@@ -37,6 +39,7 @@ final class AdminDashboardData
                 'gmv_amount' => $gmvAmount,
                 'product_count' => $productCount,
                 'active_product_count' => $activeProductCount,
+                'order_count' => $orderCount,
                 'orders_to_process' => $ordersToProcess,
             ],
             'balance' => [
@@ -44,6 +47,41 @@ final class AdminDashboardData
                 'amount' => $readOnlyBalanceAmount,
                 'amount_formatted' => Money::idr($readOnlyBalanceAmount),
                 'source' => 'paid_payments',
+            ],
+            'storeLink' => [
+                'label' => 'Link toko',
+                'url' => $storeUrl,
+                'display' => parse_url($storeUrl, PHP_URL_HOST) ?: $storeUrl,
+            ],
+            'statsCards' => [
+                [
+                    'key' => 'gmv',
+                    'label' => 'GMV',
+                    'value' => Money::idr($gmvAmount),
+                    'hint' => 'Order aktif + selesai',
+                    'tone' => 'blue',
+                ],
+                [
+                    'key' => 'saldo',
+                    'label' => 'Saldo',
+                    'value' => Money::idr($readOnlyBalanceAmount),
+                    'hint' => 'Estimasi pembayaran paid',
+                    'tone' => 'emerald',
+                ],
+                [
+                    'key' => 'orders',
+                    'label' => 'Order',
+                    'value' => $orderCount,
+                    'hint' => 'Total pesanan',
+                    'tone' => 'amber',
+                ],
+                [
+                    'key' => 'active_products',
+                    'label' => 'Produk aktif',
+                    'value' => $activeProductCount,
+                    'hint' => 'Tampil di toko',
+                    'tone' => 'emerald',
+                ],
             ],
             'summary' => [
                 [
@@ -92,10 +130,11 @@ final class AdminDashboardData
             'orders' => $this->latestOrders(),
             'salesFilters' => $this->salesFilters($statusCounts),
             'statusCounts' => $statusCounts,
+            'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
             'actions' => [
                 'shop' => url('/#products'),
-                'share' => route('storefront.home'),
+                'share' => $storeUrl,
             ],
             'tabs' => [
                 ['id' => 'stats', 'label' => 'Stats'],
@@ -206,6 +245,18 @@ final class AdminDashboardData
                     'tone' => $this->orderStatusTone($status),
                 ],
             ])
+            ->all();
+    }
+
+    private function actionableStatusCounts(array $statusCounts): array
+    {
+        return collect([
+            OrderStatus::PendingPayment,
+            OrderStatus::Processing,
+            OrderStatus::Cancelled,
+            OrderStatus::Expired,
+        ])
+            ->mapWithKeys(fn (OrderStatus $status): array => [$status->value => $statusCounts[$status->value]])
             ->all();
     }
 

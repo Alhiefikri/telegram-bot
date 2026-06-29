@@ -16,6 +16,8 @@
             x-data="{
                 activeTab: @js($activeTab ?? 'stats'),
                 copied: false,
+                storeLink: @js($storeLink['url']),
+                copyState: 'Copy',
                 stockModalOpen: @js($errors->stockAdjustment->any()),
                 stockFormAction: @js($stockModalProduct['stock_url'] ?? ''),
                 stockProductId: @js($stockModalProduct['id'] ?? null),
@@ -41,6 +43,40 @@
                 closeStockModal() {
                     this.stockModalOpen = false;
                     this.stockItems = '';
+                },
+                markStoreLinkCopied() {
+                    this.copied = true;
+                    this.copyState = 'Copied';
+                    setTimeout(() => {
+                        this.copied = false;
+                        this.copyState = 'Copy';
+                    }, 1600);
+                },
+                async copyStoreLink() {
+                    try {
+                        if (! navigator.clipboard?.writeText) {
+                            throw new Error('clipboard_unavailable');
+                        }
+
+                        await navigator.clipboard.writeText(this.storeLink);
+                        this.markStoreLinkCopied();
+                    } catch (error) {
+                        window.prompt('Salin link toko', this.storeLink);
+                    }
+                },
+                async shareStore() {
+                    if (navigator.share) {
+                        try {
+                            await navigator.share({ title: 'LHIE STORE', url: this.storeLink });
+                            return;
+                        } catch (error) {
+                            if (error?.name === 'AbortError') {
+                                return;
+                            }
+                        }
+                    }
+
+                    await this.copyStoreLink();
                 },
             }"
         >
@@ -73,7 +109,7 @@
                         <x-admin-dashboard.button
                             type="button"
                             variant="neutral"
-                            x-on:click="navigator.clipboard?.writeText('{{ $actions['share'] }}'); copied = true; setTimeout(() => copied = false, 1600)"
+                            x-on:click="shareStore()"
                         >
                             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <path d="M8.5 12.5 15.5 16M15.5 8 8.5 11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -115,6 +151,35 @@
                             Pantau saldo, GMV, produk aktif, dan order yang perlu diproses dari satu permukaan ringkas.
                         </x-admin-dashboard.section-heading>
 
+                        <section class="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4" aria-label="Link toko">
+                            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                <div class="min-w-0">
+                                    <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ $storeLink['label'] }}</p>
+                                    <p class="mt-1 break-all text-sm font-bold text-brand-navy">{{ $storeLink['url'] }}</p>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                                    <x-admin-dashboard.button type="button" variant="neutral" class="min-h-10 px-3 text-xs" x-on:click="shareStore()">
+                                        Share
+                                    </x-admin-dashboard.button>
+                                    <x-admin-dashboard.button type="button" class="min-h-10 px-3 text-xs" x-on:click="copyStoreLink()">
+                                        <span x-text="copyState">Copy</span>
+                                    </x-admin-dashboard.button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Kartu Stats">
+                            @foreach ($statsCards as $metric)
+                                <x-admin-dashboard.stat-card
+                                    :label="$metric['label']"
+                                    :value="$metric['value']"
+                                    :hint="$metric['hint']"
+                                    :tone="$metric['tone']"
+                                />
+                            @endforeach
+                        </section>
+
                         <div class="mt-5 grid gap-5 xl:grid-cols-[1fr_0.85fr]">
                             <section aria-label="Pendapatan 7 hari">
                                 <div class="flex items-center justify-between gap-3">
@@ -123,12 +188,12 @@
                                 </div>
                                 <div class="mt-3 space-y-3">
                                     @foreach ($earnings as $earning)
-                                        <div class="grid grid-cols-[3.75rem_1fr_7.5rem] items-center gap-3 text-sm">
+                                        <div class="grid grid-cols-[3.25rem_minmax(3rem,1fr)] items-center gap-2 text-sm sm:grid-cols-[3.75rem_1fr_7.5rem] sm:gap-3">
                                             <span class="font-semibold text-slate-500">{{ $earning['label'] }}</span>
                                             <div class="h-2 rounded-full bg-slate-100">
                                                 <div class="h-2 rounded-full bg-brand-electric" style="width: {{ $earning['bar_percent'] }}%"></div>
                                             </div>
-                                            <span class="text-right font-bold text-brand-navy">{{ $earning['amount_formatted'] }}</span>
+                                            <span class="col-span-2 text-right font-bold text-brand-navy sm:col-span-1">{{ $earning['amount_formatted'] }}</span>
                                         </div>
                                     @endforeach
                                 </div>
@@ -137,7 +202,7 @@
                             <section aria-label="Status order">
                                 <h2 class="text-sm font-bold text-brand-navy">Status order</h2>
                                 <div class="mt-3 grid grid-cols-2 gap-2">
-                                    @foreach ($statusCounts as $status)
+                                    @foreach ($actionableStatusCounts as $status)
                                         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                                             <div class="flex items-center justify-between gap-2">
                                                 <span class="truncate text-xs font-bold text-slate-500">{{ $status['label'] }}</span>

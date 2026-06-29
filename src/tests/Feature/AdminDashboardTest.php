@@ -153,13 +153,17 @@ class AdminDashboardTest extends TestCase
         $this->assertSame('Lhie Admin', $data['admin']['name']);
         $this->assertSame(3, $data['metrics']['product_count']);
         $this->assertSame(2, $data['metrics']['active_product_count']);
+        $this->assertSame(3, $data['metrics']['order_count']);
         $this->assertSame(1, $data['metrics']['orders_to_process']);
         $this->assertSame(205000, $data['metrics']['gmv_amount']);
         $this->assertSame(205000, $data['metrics']['read_only_balance_amount']);
         $this->assertSame(205000, $data['balance']['amount']);
         $this->assertSame('paid_payments', $data['balance']['source']);
+        $this->assertSame(route('storefront.home'), $data['storeLink']['url']);
+        $this->assertSame(['gmv', 'saldo', 'orders', 'active_products'], array_column($data['statsCards'], 'key'));
         $this->assertSame(1, $data['statusCounts']['processing']['count']);
         $this->assertSame(1, $data['statusCounts']['completed']['count']);
+        $this->assertSame(['pending_payment', 'processing', 'cancelled', 'expired'], array_keys($data['actionableStatusCounts']));
         $this->assertSame(['Semua', 'Selesai', 'Masalah', 'Menunggu', 'Diproses'], array_column($data['salesFilters'], 'label'));
         $this->assertSame(3, $data['salesFilters'][0]['count']);
         $this->assertSame(1, $data['salesFilters'][1]['count']);
@@ -179,6 +183,61 @@ class AdminDashboardTest extends TestCase
 
         $encoded = json_encode($data, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
+    }
+
+    public function test_stats_tab_renders_store_link_actions_cards_statuses_and_css_earnings(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        Product::factory()->count(2)->create(['is_active' => true]);
+        Product::factory()->create(['is_active' => false]);
+        Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 45000,
+        ]);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 125000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $paidOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 125000,
+            'paid_at' => now(),
+        ]);
+
+        $response = $this->get('/admin?tab=stats')
+            ->assertOk()
+            ->assertSee('Link toko')
+            ->assertSee(route('storefront.home'), false)
+            ->assertSee('Share')
+            ->assertSee('Copy')
+            ->assertSee('copyStoreLink', false)
+            ->assertSee('shareStore', false)
+            ->assertSee('navigator.share', false)
+            ->assertSee('navigator.clipboard', false)
+            ->assertSee('window.prompt', false)
+            ->assertSeeInOrder(['GMV', 'IDR 125.000'])
+            ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
+            ->assertSeeInOrder(['Order', '2'])
+            ->assertSeeInOrder(['Produk aktif', '2'])
+            ->assertSee('Menunggu bayar')
+            ->assertSee('Diproses')
+            ->assertSee('Dibatalkan')
+            ->assertSee('Expired')
+            ->assertSee('style="width:', false)
+            ->assertDontSee('chart.js', false)
+            ->assertDontSee('apexcharts', false)
+            ->assertDontSee('Escrow');
+
+        $content = $response->getContent();
+        $statusSection = substr($content, strpos($content, 'aria-label="Status order"') ?: 0, 2000);
+        $this->assertStringNotContainsString('Draft', $statusSection);
+        $this->assertStringNotContainsString('Selesai', $statusSection);
     }
 
     public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void
