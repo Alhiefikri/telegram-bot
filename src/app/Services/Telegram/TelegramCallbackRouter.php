@@ -104,7 +104,13 @@ class TelegramCallbackRouter
         }
 
         if ($data === 'checkout') {
-            $this->checkout($customer, $chatId, $id);
+            $this->checkout($customer, $chatId, $id, null);
+
+            return;
+        }
+
+        if (preg_match('/^payment:(dana|gopay|shopepay)$/', $data, $matches)) {
+            $this->checkout($customer, $chatId, $id, $matches[1]);
 
             return;
         }
@@ -112,15 +118,15 @@ class TelegramCallbackRouter
         $this->bot->answerCallbackQuery($id, 'Aksi tidak dikenal.');
     }
 
-    private function checkout(Customer $customer, string $chatId, string $id): void
+    private function checkout(Customer $customer, string $chatId, string $id, ?string $manualMethod): void
     {
         $this->bot->answerCallbackQuery($id);
 
         try {
             $paymentMode = $this->checkoutIntents->paymentMode();
-            $order = $paymentMode === 'pakasir'
+            $order = $paymentMode === 'pakasir' && $manualMethod === null
                 ? $this->checkout->checkout($this->carts->activeCartFor($customer), 'hosted', 'pakasir')
-                : $this->checkout->checkout($this->carts->activeCartFor($customer), 'DANA_QR', 'manual');
+                : $this->checkout->checkout($this->carts->activeCartFor($customer), $this->checkoutIntents->manualPaymentMethod($manualMethod), 'manual');
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, 'Checkout gagal. Pastikan keranjang tidak kosong.');
 

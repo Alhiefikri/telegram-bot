@@ -9,8 +9,6 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
-use Illuminate\Filesystem\FilesystemAdapter;
-use Illuminate\Support\Facades\Storage;
 
 class TelegramCheckoutIntents
 {
@@ -18,90 +16,37 @@ class TelegramCheckoutIntents
 
     public function sendPaymentInstructions(string $chatId, Order $order, ?Payment $payment): void
     {
-        $settings = ManualPaymentSetting::current();
-        $danaQrImageUrl = $settings?->dana_qr_image_url ?: config('services.telegram.dana_qr_image_url');
-        $danaQrImagePath = $settings?->dana_qr_image_path;
-        $danaAccountName = $settings?->dana_account_name ?: config('services.telegram.dana_account_name');
-        $danaAccountNumber = $settings?->dana_account_number ?: config('services.telegram.dana_account_number');
-        $adminContactUrl = $settings?->admin_contact_url ?: config('services.telegram.admin_contact_url');
-        $adminUsername = $settings?->admin_username ?: config('services.telegram.admin_username');
-        $adminTelegramChatId = $settings?->admin_telegram_chat_id;
-        $instructions = $settings?->instructions;
-
-        if (! $danaQrImageUrl && $danaQrImagePath) {
-            /** @var FilesystemAdapter $publicDisk */
-            $publicDisk = Storage::disk('public');
-            $danaQrImageUrl = $publicDisk->url($danaQrImagePath);
-        }
+        $method = $this->manualPaymentOption($payment?->method);
+        $supportUsername = ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@');
 
         $lines = [
-            '✅ Checkout berhasil dibuat.',
-            '',
+            '✅ Checkout dibuat',
             'Invoice: '.$order->invoice_number,
             'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            'Bayar via: '.$method['label'],
+            '',
+            'Tujuan transfer:',
+            $method['number'],
+            'A/N '.$method['name'],
         ];
 
-        if ($payment?->merchant_ref) {
-            $lines[] = 'Kode Referensi: '.$payment->merchant_ref;
-        }
-
         if ($order->expires_at) {
-            $lines[] = 'Batas pembayaran: '.$this->formatDate($order->expires_at);
+            $lines[] = 'Batas: '.$this->formatDate($order->expires_at);
         }
 
         $lines[] = '';
-        $lines[] = $instructions ?: 'Silakan bayar manual via DANA dengan nominal sesuai total di atas.';
-
-        if ($danaAccountName || $danaAccountNumber) {
-            $lines[] = '';
-            $lines[] = 'Tujuan DANA:';
-            if ($danaAccountName) {
-                $lines[] = 'Nama: '.$danaAccountName;
-            }
-            if ($danaAccountNumber) {
-                $lines[] = 'Nomor: '.$danaAccountNumber;
-            }
-        }
-
-        if ($danaQrImageUrl) {
-            $lines[] = '';
-            $lines[] = 'QR DANA: '.$danaQrImageUrl;
-        }
-
-        $lines[] = '';
-        $lines[] = 'Detail pembelian untuk admin:';
+        $lines[] = 'Pesanan:';
         foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity.' = Rp '.number_format($item->subtotal, 0, ',', '.');
+            $lines[] = '- '.$item->product_name.' x'.$item->quantity;
         }
 
         $lines[] = '';
-        $lines[] = 'Setelah transfer, kirim screenshot bukti pembayaran sebagai foto dengan caption /payment.';
-        $lines[] = 'Bisa juga ketik /payment setelah mengirim bukti; admin akan cek manual dan produk dikirim setelah disetujui.';
+        $lines[] = 'Setelah bayar, kirim screenshot bukti transfer di bot ini dengan caption:';
+        $lines[] = '/payment';
         $lines[] = '';
-        $lines[] = $this->adminPurchaseMessage($order);
+        $lines[] = 'Bantuan: @'.$supportUsername;
 
-        if ($adminContactUrl || $adminUsername || $adminTelegramChatId) {
-            if ($adminContactUrl) {
-                $lines[] = 'Kontak admin: '.$adminContactUrl;
-            }
-            if ($adminUsername) {
-                $lines[] = 'Username admin: '.$adminUsername;
-            }
-            if ($adminTelegramChatId) {
-                $lines[] = 'Chat ID admin: '.$adminTelegramChatId;
-            }
-        } else {
-            $lines[] = 'Jika membutuhkan bantuan, silakan hubungi admin toko.';
-        }
-
-        $replyMarkup = [];
-        if ($adminContactUrl) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => 'Chat Admin', 'url' => $adminContactUrl]]]];
-        } elseif ($adminUsername) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => 'Chat Admin', 'url' => 'https://t.me/'.ltrim($adminUsername, '@')]]]];
-        }
-
-        $this->bot->sendMessage($chatId, implode("\n", $lines), $replyMarkup);
+        $this->bot->sendMessage($chatId, implode("\n", $lines));
     }
 
     public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
@@ -160,10 +105,13 @@ class TelegramCheckoutIntents
         }
 
         $order->loadMissing(['customer', 'orderItems']);
+        $payment = $order->payments()->latest()->first();
+        $method = $this->manualPaymentOption($payment?->method);
         $lines = [
-            '🧾 Order manual baru masuk dashboard.',
+            '🧾 Checkout manual baru',
             'Invoice: '.$order->invoice_number,
             'Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
+            'Metode: '.$method['label'],
             'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
             '',
             'Item:',
@@ -172,8 +120,7 @@ class TelegramCheckoutIntents
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $lines[] = '';
-        $lines[] = 'Customer diminta kirim screenshot dengan caption /payment.';
-        $lines[] = 'Kamu juga bisa approve lewat tombol yang muncul saat bukti pembayaran masuk.';
+        $lines[] = 'Tunggu bukti /payment, lalu approve dari tombol di foto bukti.';
 
         $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines));
     }
@@ -186,19 +133,28 @@ class TelegramCheckoutIntents
         return $mode === 'pakasir' ? 'pakasir' : 'manual';
     }
 
-    public function adminPurchaseMessage(Order $order): string
+    public function manualPaymentMethod(?string $method): string
     {
-        $order->loadMissing('orderItems');
-        $lines = [
-            'Halo admin, saya ingin konfirmasi pembelian:',
-            'Invoice: '.$order->invoice_number,
-        ];
-        foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
-        }
-        $lines[] = 'Total: Rp '.number_format($order->total_amount, 0, ',', '.');
+        return match ($method) {
+            'gopay' => 'GOPAY',
+            'shopepay' => 'SHOPEEPAY',
+            default => 'DANA',
+        };
+    }
 
-        return implode("\n", $lines);
+    public function manualPaymentOption(?string $method): array
+    {
+        $label = match ($method) {
+            'GOPAY' => 'GOPAY',
+            'SHOPEEPAY' => 'SHOPEEPAY',
+            default => 'DANA',
+        };
+
+        return [
+            'label' => $label,
+            'number' => '082190715067',
+            'name' => 'MOH. ALIF FIKRI',
+        ];
     }
 
     public function formatDate($date): string

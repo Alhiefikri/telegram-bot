@@ -25,7 +25,11 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(2, CartItem::first()->quantity);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'qty:'.$product->id.':2'));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains(json_encode($r->data()), 'Pembayaran'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains(json_encode($r->data()), 'Siap checkout? Pilih pembayaran anda.')
+            && str_contains(json_encode($r->data()), 'payment:dana')
+            && str_contains(json_encode($r->data()), 'payment:gopay')
+            && str_contains(json_encode($r->data()), 'payment:shopepay'));
     }
 
     public function test_manual_non_numeric_quantity_keeps_selected_product_for_retry(): void
@@ -84,17 +88,24 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(17, 'cb3', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(17, 'cb3', 'payment:dana'))->assertOk();
 
         $order = Order::firstOrFail();
-        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'DANA_QR', 'provider_reference' => null]);
+        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'DANA', 'provider_reference' => null]);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '12345'
-            && str_contains($r['text'], 'Halo admin, saya ingin konfirmasi pembelian')
-            && str_contains($r['text'], 'GPT Plus'));
+            && str_contains($r['text'], '✅ Checkout dibuat')
+            && str_contains($r['text'], 'Bayar via: DANA')
+            && str_contains($r['text'], '082190715067')
+            && str_contains($r['text'], 'A/N MOH. ALIF FIKRI')
+            && str_contains($r['text'], '/payment')
+            && str_contains($r['text'], 'Bantuan: @Alhie02')
+            && str_contains($r['text'], 'GPT Plus')
+            && ! str_contains($r['text'], 'Halo admin'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '999'
-            && str_contains($r['text'], 'Order manual baru masuk dashboard')
+            && str_contains($r['text'], 'Checkout manual baru')
+            && str_contains($r['text'], 'Metode: DANA')
             && str_contains($r['text'], $order->invoice_number));
     }
 
@@ -111,22 +122,23 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Premium Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'payment:gopay'))->assertOk();
 
         $order = Order::firstOrFail();
         $this->assertDatabaseHas('payments', [
             'order_id' => $order->id,
             'provider' => 'manual',
-            'method' => 'DANA_QR',
+            'method' => 'GOPAY',
         ]);
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '12345'
-            && str_contains($r['text'], 'caption /payment')
+            && str_contains($r['text'], 'Bayar via: GOPAY')
+            && str_contains($r['text'], 'caption:')
             && str_contains($r['text'], 'Premium Account'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '999'
-            && str_contains($r['text'], 'Order manual baru masuk dashboard'));
+            && str_contains($r['text'], 'Checkout manual baru'));
     }
 
     public function test_checkout_callback_in_pakasir_mode_sends_qr_with_direct_payment_button(): void

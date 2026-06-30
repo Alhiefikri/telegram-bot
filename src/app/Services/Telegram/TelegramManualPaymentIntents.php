@@ -42,11 +42,13 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        $order->loadMissing(['customer', 'orderItems']);
+        $order->loadMissing(['customer', 'orderItems', 'payments']);
+        $payment = $order->payments->first();
         $caption = [
             '📸 Bukti pembayaran masuk',
             'Invoice: '.$order->invoice_number,
             'Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
+            'Metode: '.($payment?->method ?: 'manual'),
             'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
             '',
             'Item:',

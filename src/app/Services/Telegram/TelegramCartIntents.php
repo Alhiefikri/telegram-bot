@@ -23,7 +23,15 @@ class TelegramCartIntents
             $product = Product::findOrFail($productId);
             $cart = $this->carts->activeCartFor($customer);
             $this->carts->addItem($cart, $product, $quantity);
-            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n\nSiap checkout?", ['inline_keyboard' => [[['text' => '💳 Pembayaran', 'callback_data' => 'checkout']]]]);
+            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n\nSiap checkout? Pilih pembayaran anda.", [
+                'inline_keyboard' => [
+                    [
+                        ['text' => 'DANA', 'callback_data' => 'payment:dana'],
+                        ['text' => 'GOPAY', 'callback_data' => 'payment:gopay'],
+                        ['text' => 'SHOPEEPAY', 'callback_data' => 'payment:shopepay'],
+                    ],
+                ],
+            ]);
 
             return true;
         } catch (Throwable) {
