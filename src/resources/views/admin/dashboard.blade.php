@@ -611,6 +611,46 @@
                         </div>
                     </div>
 
+                    <div x-cloak x-show="activeTab === 'broadcast'">
+                        <x-admin-dashboard.section-heading eyebrow="Broadcast" title="Kirim info ke user aktif">
+                            Pesan dikirim lewat bot ke semua user yang pernah mengaktifkan atau chat bot.
+                        </x-admin-dashboard.section-heading>
+
+                        @if ($errors->broadcast->any())
+                            <div class="mt-4 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                                Periksa kembali pesan broadcast.
+                            </div>
+                        @endif
+
+                        <form method="POST" action="{{ route('admin.broadcast.store') }}" class="mt-5 space-y-4">
+                            @csrf
+
+                            <div class="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                                Jangan isi data akun, password, kode OTP, atau secret pembeli di broadcast. Data akun hanya dikirim otomatis ke pembeli setelah pembayaran paid.
+                            </div>
+
+                            <div>
+                                <label for="broadcast-message" class="text-sm font-bold text-brand-navy">Pesan</label>
+                                <x-admin-dashboard.textarea
+                                    id="broadcast-message"
+                                    name="message"
+                                    rows="7"
+                                    value="{{ old('message') }}"
+                                    class="mt-2"
+                                    placeholder="Contoh: Stok Canva Pro sudah ready. Silakan cek /katalog."
+                                />
+
+                                @error('message', 'broadcast')
+                                    <p class="mt-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                                @enderror
+                            </div>
+
+                            <x-admin-dashboard.button type="submit" class="w-full sm:w-auto">
+                                Kirim Broadcast
+                            </x-admin-dashboard.button>
+                        </form>
+                    </div>
+
                     <div x-cloak x-show="activeTab === 'riwayat'">
                         <x-admin-dashboard.section-heading eyebrow="Riwayat" title="Aktivitas toko">
                             Log aktivitas admin dan perubahan penting bisa masuk di sini.

@@ -36,7 +36,7 @@ class TelegramReceiptNotifier
                 return;
             }
 
-            $claimed->loadMissing(['customer', 'orderItems']);
+            $claimed->loadMissing(['customer', 'orderItems.stockItems']);
             if (! $claimed->customer?->telegram_id) {
                 return;
             }
@@ -51,6 +51,15 @@ class TelegramReceiptNotifier
             foreach ($claimed->orderItems as $item) {
                 $lines[] = '- '.$item->product_name.' x '.$item->quantity;
             }
+            $accountLines = $this->accountSecretLines($claimed);
+            if ($accountLines !== []) {
+                $lines[] = '';
+                $lines[] = '🔐 Data akun';
+                $lines[] = '━━━━━━━━━━━━━━';
+                array_push($lines, ...$accountLines);
+                $lines[] = '';
+                $lines[] = 'Jangan bagikan data akun ini ke orang lain. Jika ada kendala login, hubungi /support dengan invoice ini.';
+            }
             $lines[] = '';
             $lines[] = 'Terima kasih. Simpan pesan ini sebagai bukti pembelian.';
 
@@ -63,5 +72,27 @@ class TelegramReceiptNotifier
         } finally {
             $lock->release();
         }
+    }
+
+    private function accountSecretLines(Order $order): array
+    {
+        $lines = [];
+        foreach ($order->orderItems as $item) {
+            if ($item->stockItems->isEmpty()) {
+                continue;
+            }
+
+            $lines[] = $item->product_name;
+            foreach ($item->stockItems->values() as $index => $stockItem) {
+                $lines[] = ($index + 1).'. '.$stockItem->secret;
+            }
+            $lines[] = '';
+        }
+
+        while ($lines !== [] && end($lines) === '') {
+            array_pop($lines);
+        }
+
+        return $lines;
     }
 }

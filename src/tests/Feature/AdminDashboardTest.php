@@ -7,13 +7,16 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Models\AuditLog;
 use App\Models\Category;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -578,6 +581,10 @@ class AdminDashboardTest extends TestCase
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
         $this->assertSame(5, $product->fresh()->stock);
+        $this->assertSame(3, ProductStockItem::where('product_id', $product->id)->count());
+        $this->assertSame('akun-1@example.test', ProductStockItem::where('product_id', $product->id)->orderBy('id')->firstOrFail()->secret);
+        $this->assertStringNotContainsString('akun-1@example.test', (string) InventoryMovement::where('product_id', $product->id)->latest('id')->firstOrFail()->notes);
+        $this->assertStringNotContainsString('akun-1@example.test', (string) json_encode(AuditLog::where('subject_id', (string) $product->id)->latest('id')->firstOrFail()->new_values));
         $this->assertDatabaseHas('inventory_movements', [
             'product_id' => $product->id,
             'type' => InventoryMovementType::Adjustment->value,

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Services\AuditLogger;
+use App\Services\Telegram\TelegramProductNotificationService;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,7 @@ use Illuminate\Validation\Rule;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(Request $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications): RedirectResponse
     {
         $user = $request->user();
 
@@ -77,6 +78,8 @@ class AdminProductCreateController extends Controller
             $user,
             $request->ip(),
         );
+
+        $notifications->notifyProductCreated($product);
 
         return redirect()
             ->route('admin.dashboard', ['tab' => 'produk'])

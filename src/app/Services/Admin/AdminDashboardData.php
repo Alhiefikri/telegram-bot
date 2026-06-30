@@ -144,6 +144,7 @@ final class AdminDashboardData
                 ['id' => 'produk', 'label' => 'Produk'],
                 ['id' => 'penjualan', 'label' => 'Penjualan'],
                 ['id' => 'tambah', 'label' => 'Tambah'],
+                ['id' => 'broadcast', 'label' => 'Broadcast'],
                 ['id' => 'withdraw', 'label' => 'Withdraw'],
                 ['id' => 'riwayat', 'label' => 'Riwayat'],
                 ['id' => 'affiliate', 'label' => 'Affiliate'],

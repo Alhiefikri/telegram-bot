@@ -7,18 +7,28 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
+use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class EloquentInventoryLedger implements InventoryLedger
 {
+    public function __construct(private readonly TelegramProductNotificationService $notifications) {}
+
     /**
      * Callers must hold the product/order locks and wrap the operation in the
      * same transaction as the related order transition.
      */
     public function reserveOrderItem(Order $order, Product $product, int $quantity): void
     {
+        $availableBefore = $product->stock - $product->reserved_stock;
         $product->increment('reserved_stock', $quantity);
+        $product->refresh();
         InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => $quantity, 'notes' => 'Order reservation', 'created_at' => now()]);
+
+        if ($availableBefore > 0 && ($product->stock - $product->reserved_stock) <= 0) {
+            DB::afterCommit(fn () => $this->notifications->notifyOutOfStock($product->fresh()));
+        }
     }
 
     public function hasSaleProof(Collection $items, Collection $movements): bool

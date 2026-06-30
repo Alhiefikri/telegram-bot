@@ -15,6 +15,7 @@ class OrderStateMachine
 {
     public function __construct(
         private readonly InventoryLedger $inventory,
+        private readonly ?ProductCredentialAllocator $credentials = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -132,6 +133,8 @@ class OrderStateMachine
                     throw new InvalidOrderTransition('Release movement proof is missing.');
                 }
 
+                $this->credentials()->release($lockedOrder);
+
                 return $lockedOrder->fresh();
             }
             if ($lockedOrder->order_status !== OrderStatus::PendingPayment) {
@@ -144,6 +147,7 @@ class OrderStateMachine
             $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
             $this->inventory->releaseReservations($lockedOrder, $items, $products, $movements);
+            $this->credentials()->release($lockedOrder);
 
             foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
                 $payment->update(['status' => $paymentStatus]);
@@ -152,5 +156,10 @@ class OrderStateMachine
 
             return $lockedOrder->fresh(['payments']);
         }, 5);
+    }
+
+    private function credentials(): ProductCredentialAllocator
+    {
+        return $this->credentials ?? app(ProductCredentialAllocator::class);
     }
 }

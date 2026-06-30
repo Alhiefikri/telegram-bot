@@ -65,6 +65,11 @@ class Product extends Model
         return $this->hasMany(InventoryMovement::class);
     }
 
+    public function stockItems()
+    {
+        return $this->hasMany(ProductStockItem::class);
+    }
+
     public function auditLogs()
     {
         return $this->hasMany(AuditLog::class, 'subject_id', 'audit_subject_id')->where('subject_type', self::class);

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Products\Pages;
 
 use App\Filament\Resources\Products\ProductResource;
 use App\Services\AuditLogger;
+use App\Services\Telegram\TelegramProductNotificationService;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -30,5 +31,6 @@ class CreateProduct extends CreateRecord
     protected function afterCreate(): void
     {
         app(AuditLogger::class)->log('product.created', $this->record, null, $this->record->only(['category_id', 'name', 'description', 'price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']), auth()->user(), request()->ip());
+        app(TelegramProductNotificationService::class)->notifyProductCreated($this->record);
     }
 }

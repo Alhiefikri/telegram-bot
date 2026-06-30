@@ -25,6 +25,7 @@ class TelegramMenuIntents
                 'text' => '🛠️ Admin Dashboard',
                 'web_app' => ['url' => route('admin.dashboard')],
             ]];
+            $keyboard[] = [['text' => '📣 Broadcast Info']];
         }
 
         $keyboard[] = [['text' => '☰ Menu']];

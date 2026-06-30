@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Services\StockAdjustmentService;
+use App\Services\Telegram\TelegramProductNotificationService;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\Validator;
 
 class AdminProductStockController extends Controller
 {
-    public function __invoke(Request $request, Product $product, StockAdjustmentService $stockAdjustment): RedirectResponse
+    public function __invoke(Request $request, Product $product, StockAdjustmentService $stockAdjustment, TelegramProductNotificationService $notifications): RedirectResponse
     {
         $user = $request->user();
 
@@ -47,9 +48,10 @@ class AdminProductStockController extends Controller
         }
 
         $itemCount = count($stockItems);
-        $notes = "Tambah stok manual dashboard ({$itemCount} item).\n".implode("\n", $stockItems);
+        $notes = "Tambah stok manual dashboard ({$itemCount} item).";
 
-        $stockAdjustment->adjust($product, $itemCount, $notes, $user, $request->ip());
+        $adjusted = $stockAdjustment->adjust($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
+        $notifications->notifyStockAdded($adjusted, $itemCount);
 
         return redirect()
             ->route('admin.dashboard', ['tab' => 'produk'])

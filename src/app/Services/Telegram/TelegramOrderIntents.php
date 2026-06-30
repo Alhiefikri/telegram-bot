@@ -33,7 +33,7 @@ class TelegramOrderIntents
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void
     {
-        $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems', 'payments' => fn ($query) => $query->latest()])->first();
+        $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'payments' => fn ($query) => $query->latest()])->first();
         if (! $order) {
             $this->bot->sendMessage($chatId, 'Pesanan tidak ditemukan. Pastikan nomor invoice benar atau cek /riwayat.');
 
@@ -66,6 +66,12 @@ class TelegramOrderIntents
         if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true) && ($payment?->expired_at || $order->expires_at)) {
             $lines[] = 'Berakhir: '.$this->formatDate($payment?->expired_at ?? $order->expires_at);
         }
+        $accountLines = $this->accountSecretLines($order, $paymentStatus);
+        if ($accountLines !== []) {
+            $lines[] = '';
+            $lines[] = '🔐 Data akun:';
+            array_push($lines, ...$accountLines);
+        }
         $lines[] = '';
         $lines[] = $this->orderInstruction($order, $payment);
 
@@ -87,6 +93,27 @@ class TelegramOrderIntents
         }
 
         return 'Jika membutuhkan bantuan, silakan hubungi admin toko.';
+    }
+
+    private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array
+    {
+        if ($paymentStatus !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($order->orderItems as $item) {
+            if ($item->stockItems->isEmpty()) {
+                continue;
+            }
+
+            $lines[] = $item->product_name;
+            foreach ($item->stockItems->values() as $index => $stockItem) {
+                $lines[] = ($index + 1).'. '.$stockItem->secret;
+            }
+        }
+
+        return $lines;
     }
 
     public function formatDate($date): string

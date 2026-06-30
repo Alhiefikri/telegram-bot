@@ -21,6 +21,7 @@ class OrderCheckoutService
     public function __construct(
         private readonly InvoiceNumberGenerator $numbers,
         private readonly InventoryLedger $inventory,
+        private readonly ProductCredentialAllocator $credentials,
     ) {}
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null): Order
@@ -80,7 +81,8 @@ class OrderCheckoutService
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
-            OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'subtotal' => $product->price_amount * $item->quantity]);
+            $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'subtotal' => $product->price_amount * $item->quantity]);
+            $this->credentials->allocate($orderItem, $product, $item->quantity);
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
 

@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
@@ -59,6 +60,62 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             return true;
         });
         $this->assertSame(1, $receiptCount);
+    }
+
+    public function test_paid_account_order_receipt_contains_only_the_buyers_allocated_secret(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $this->fakeTelegramHttp();
+
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        Customer::factory()->create(['telegram_id' => 54321, 'username' => 'other']);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'stock' => 0, 'reserved_stock' => 0]);
+        app(StockAdjustmentService::class)->adjust($product, 1, 'seed credential', null, null, [
+            'email: buyer@example.test | password: Secret-123',
+        ]);
+
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
+        $this->postTelegramWebhook($this->callbackUpdate(221, 'cb-checkout-secret', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->callbackUpdate(222, 'approve-secret', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === 12345
+            && str_contains((string) $r['text'], 'Pembayaran diterima')
+            && str_contains((string) $r['text'], 'email: buyer@example.test | password: Secret-123'));
+
+        $this->postTelegramWebhook($this->messageUpdate(223, '/order '.$order->invoice_number, ['id' => 54321, 'username' => 'other'], 54321))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '54321'
+            && str_contains((string) $r['text'], 'Pesanan tidak ditemukan'));
+        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '54321'
+            && str_contains((string) ($r['text'] ?? ''), 'Secret-123'));
+        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '999'
+            && str_contains((string) (($r['text'] ?? '').($r['caption'] ?? '')), 'Secret-123'));
+    }
+
+    public function test_admin_can_broadcast_message_from_bot_to_active_users(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111]);
+        Customer::factory()->create(['telegram_id' => 222]);
+
+        $this->postTelegramWebhook($this->messageUpdate(224, '/broadcast Stok Canva ready malam ini.', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        foreach ([111, 222, 999] as $chatId) {
+            Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+                && (string) $r['chat_id'] === (string) $chatId
+                && str_contains((string) $r['text'], 'Stok Canva ready malam ini.'));
+        }
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '999'
+            && str_contains((string) $r['text'], 'Broadcast selesai. Terkirim: 3. Gagal: 0.'));
     }
 
     public function test_non_admin_cannot_approve_manual_payment_callback(): void

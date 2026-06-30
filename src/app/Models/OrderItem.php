@@ -27,4 +27,9 @@ class OrderItem extends Model
     {
         return $this->belongsTo(Product::class);
     }
+
+    public function stockItems()
+    {
+        return $this->hasMany(ProductStockItem::class);
+    }
 }

@@ -16,6 +16,8 @@ class TelegramMessageRouter
         private TelegramCartIntents $cart,
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
+        private TelegramAdminAccess $adminAccess,
+        private TelegramBroadcastService $broadcast,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message): void
@@ -47,6 +49,42 @@ class TelegramMessageRouter
         if (in_array($text, ['/support', '💬 Support'], true)) {
             $this->session->forget($customer);
             $this->menu->sendSupport($chatId);
+
+            return;
+        }
+
+        if ($text === '📣 Broadcast Info') {
+            $this->session->forget($customer);
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
+
+                return;
+            }
+
+            $this->bot->sendMessage($chatId, "Kirim broadcast dengan format:\n/broadcast isi pesan");
+
+            return;
+        }
+
+        if ($text === '/broadcast' || str_starts_with($text, '/broadcast ')) {
+            $this->session->forget($customer);
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
+
+                return;
+            }
+
+            $message = trim(substr($text, strlen('/broadcast')));
+            if ($message === '') {
+                $this->bot->sendMessage($chatId, "Kirim broadcast dengan format:\n/broadcast isi pesan");
+
+                return;
+            }
+
+            $result = $this->broadcast->sendToActiveUsers($message);
+            $this->bot->sendMessage($chatId, $result['skipped']
+                ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
+                : "Broadcast selesai. Terkirim: {$result['sent']}. Gagal: {$result['failed']}.");
 
             return;
         }
