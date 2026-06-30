@@ -57,10 +57,13 @@ class TelegramManualPaymentIntents
             $caption[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $caption[] = '';
-        $caption[] = 'Jika dana sudah masuk, klik Setujui & Kirim Produk.';
+        $caption[] = 'Jika dana sudah masuk, setujui. Kalau belum cocok, tolak agar stok dilepas.';
 
         $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
-            'inline_keyboard' => [[['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id]]],
+            'inline_keyboard' => [[
+                ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
+                ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
+            ]],
         ]);
 
         $this->bot->sendMessage($chatId, 'Bukti pembayaran sudah dikirim ke admin. Produk akan dikirim otomatis setelah admin menyetujui pembayaran.');
@@ -90,6 +93,33 @@ class TelegramManualPaymentIntents
         $completed = $this->adminOrders->completeManualOrder($order);
         $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran disetujui. Produk dikirim ke pembeli.');
         $this->bot->sendMessage($chatId, '✅ Pembayaran disetujui untuk '.$completed->invoice_number.'. Bot akan mengirim produk ke pembeli.');
+    }
+
+    public function rejectManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
+    {
+        if (! $this->isTelegramAdmin($admin, $chatId)) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Akses admin diperlukan.');
+
+            return;
+        }
+
+        $order = Order::find($orderId);
+        if (! $order) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Order tidak ditemukan.');
+
+            return;
+        }
+
+        if (! $this->adminOrders->canCompleteManualOrder($order)) {
+            $this->bot->answerCallbackQuery($callbackQueryId, 'Order sudah diproses atau tidak bisa ditolak.');
+
+            return;
+        }
+
+        $rejected = $this->adminOrders->rejectManualOrder($order);
+        $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran ditolak. Buyer sudah diberi info.');
+        $this->bot->sendMessage($chatId, '❌ Pembayaran ditolak untuk '.$rejected->invoice_number.'. Stok sudah dilepas kembali.');
+        $this->notifyBuyerPaymentRejected($rejected);
     }
 
     public function manualPaymentOrderForCustomer(Customer $customer, string $invoice): ?Order
@@ -123,5 +153,27 @@ class TelegramManualPaymentIntents
     public function isTelegramAdmin(Customer $customer, string $chatId): bool
     {
         return $this->adminAccess->isAdmin($customer, $chatId);
+    }
+
+    private function notifyBuyerPaymentRejected(Order $order): void
+    {
+        $order->loadMissing(['customer', 'orderItems']);
+        if (! $order->customer?->telegram_id) {
+            return;
+        }
+
+        $lines = [
+            'Pembayaran belum bisa kami terima',
+            '',
+            'Invoice: '.$order->invoice_number,
+            'Status: ditolak admin',
+            '',
+            'Kemungkinan nominal, tujuan transfer, atau bukti pembayaran belum sesuai.',
+            'Kalau kamu merasa sudah transfer dengan benar, kirim ulang bukti yang lebih jelas atau hubungi @Alhie02 agar bisa dicek manual.',
+            '',
+            'Pesanan ini sudah dibatalkan, jadi stok tidak tertahan. Kamu bisa checkout ulang kapan saja lewat /katalog.',
+        ];
+
+        $this->bot->sendMessage($order->customer->telegram_id, implode("\n", $lines));
     }
 }

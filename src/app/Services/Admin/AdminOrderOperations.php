@@ -60,6 +60,24 @@ class AdminOrderOperations
         }, 5);
     }
 
+    public function rejectManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
+    {
+        return DB::transaction(function () use ($order, $user, $ip): Order {
+            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $lockedOrder->load('payments');
+
+            if (! $this->canCompleteManualOrder($lockedOrder)) {
+                throw new InvalidArgumentException('Only pending manual orders can be rejected.');
+            }
+
+            $rejectedOrder = $this->orders->cancelPendingOrder($lockedOrder);
+
+            $this->audit->log('order.manual_rejected', $rejectedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Cancelled->value, 'payment_status' => PaymentStatus::Failed->value], $user, $ip);
+
+            return $rejectedOrder->fresh(['payments', 'customer', 'orderItems']);
+        }, 5);
+    }
+
     public function canResendReceipt(Order $order): bool
     {
         $order->loadMissing('customer');

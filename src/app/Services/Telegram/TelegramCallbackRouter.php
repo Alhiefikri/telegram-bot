@@ -33,6 +33,12 @@ class TelegramCallbackRouter
             return;
         }
 
+        if (preg_match('/^admin:reject-payment:([^\s:]+)$/', $data, $matches)) {
+            $this->manualPayments->rejectManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
+
         if ($data === 'katalog' || $data === 'back:categories') {
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
