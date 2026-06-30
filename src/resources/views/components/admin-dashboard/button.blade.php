@@ -5,13 +5,13 @@
 ])
 
 @php
-    $baseClasses = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2';
+    $baseClasses = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-[1rem] border-[3px] border-neo-ink px-4 text-center text-sm font-black uppercase tracking-wide shadow-[4px_4px_0_0_#050505] transition-all duration-150 hover:-translate-y-0.5 hover:shadow-[6px_6px_0_0_#050505] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none focus:outline-none focus:ring-2 focus:ring-[#8758de] focus:ring-offset-2 focus:ring-offset-neo-cream';
     $variantClasses = match ($variant) {
-        'secondary' => 'border border-brand-electric/20 bg-brand-electricLight text-brand-electric hover:border-brand-electric/30 hover:bg-blue-100 focus:ring-brand-electric/30',
-        'neutral' => 'border border-slate-200 bg-white text-brand-navy hover:border-slate-300 hover:bg-slate-50 focus:ring-slate-300',
-        'warning' => 'border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 focus:ring-amber-300',
-        'destructive' => 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 focus:ring-rose-300',
-        default => 'bg-brand-electric text-white shadow-sm shadow-blue-950/10 hover:bg-brand-electricDark focus:ring-brand-electric',
+        'secondary' => 'bg-[#16B4CA] text-white',
+        'neutral' => 'bg-white text-neo-ink',
+        'warning' => 'bg-[#f2da3d] text-neo-ink',
+        'destructive' => 'bg-[#ef4444] text-white',
+        default => 'bg-[#7BD10A] text-neo-ink',
     };
 @endphp
 

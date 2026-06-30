@@ -4,6 +4,15 @@ WORKDIR /app
 COPY src/composer.json src/composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --no-scripts --optimize-autoloader --ignore-platform-req=ext-intl
 
+FROM node:24-alpine AS assets
+
+WORKDIR /app
+COPY src/package.json src/package-lock.json ./
+RUN npm ci
+COPY src/resources ./resources
+COPY src/vite.config.js ./
+RUN npm run build
+
 FROM php:8.4-fpm AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,9 +40,12 @@ WORKDIR /var/www/html
 
 COPY src/ ./
 COPY --from=vendor /app/vendor ./vendor
+COPY --from=assets /app/public/build ./public/build
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-RUN mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache \
+RUN rm -rf public/storage \
+    && ln -s /var/www/html/storage/app/public public/storage \
+    && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache \
     && chown -R laravel:laravel /var/www/html \
     && chmod -R ug+rwX storage bootstrap/cache
 

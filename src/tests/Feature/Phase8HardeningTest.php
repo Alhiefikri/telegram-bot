@@ -63,7 +63,7 @@ class Phase8HardeningTest extends TestCase
 
         (new AppServiceProvider(app()))->boot();
 
-        $this->assertStringStartsWith('http://localhost:8080/', URL::to('/livewire/livewire.min.js'));
+        $this->assertStringStartsWith('http://localhost:8080/', URL::to('/build/assets/app.js'));
     }
 
     public function test_logging_defaults_to_daily_rotation_and_env_example_exposes_defaults(): void
@@ -245,6 +245,16 @@ SH);
         $this->assertStringContainsString('cpus:', $compose);
         $this->assertStringContainsString('mem_limit:', $compose);
         $this->assertStringContainsString('max-size: "10m"', $compose);
+    }
+
+    public function test_docker_image_builds_assets_during_image_build(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+
+        $this->assertStringContainsString('FROM node:', $dockerfile);
+        $this->assertStringContainsString('npm ci', $dockerfile);
+        $this->assertStringContainsString('npm run build', $dockerfile);
+        $this->assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);
     }
 
     private function makeShellWorkspace(string $prefix): string

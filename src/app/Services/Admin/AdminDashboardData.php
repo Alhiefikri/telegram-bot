@@ -143,7 +143,6 @@ final class AdminDashboardData
                 ['id' => 'stats', 'label' => 'Stats'],
                 ['id' => 'produk', 'label' => 'Produk'],
                 ['id' => 'penjualan', 'label' => 'Penjualan'],
-                ['id' => 'tambah', 'label' => 'Tambah'],
                 ['id' => 'broadcast', 'label' => 'Broadcast'],
                 ['id' => 'withdraw', 'label' => 'Withdraw'],
                 ['id' => 'riwayat', 'label' => 'Riwayat'],
@@ -176,27 +175,76 @@ final class AdminDashboardData
     {
         return Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'price_amount', 'currency', 'stock', 'reserved_stock', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'is_active', 'created_at'])
             ->latest()
             ->limit(5)
             ->get()
-            ->map(fn (Product $product): array => [
-                'id' => $product->id,
-                'name' => $product->name,
-                'category' => $product->category?->name ?? 'Tanpa kategori',
-                'price' => Money::idr($product->price_amount),
-                'stock' => $product->stock,
-                'reserved_stock' => $product->reserved_stock,
-                'available_stock' => max(0, $product->stock - $product->reserved_stock),
-                'is_active' => $product->is_active,
-                'status_label' => $product->is_active ? 'Aktif' : 'Nonaktif',
-                'edit_url' => route('filament.admin.resources.products.edit', ['record' => $product]),
-                'manage_url' => route('filament.admin.resources.products.edit', ['record' => $product]),
-                'stock_url' => route('admin.products.stock.store', ['product' => $product]),
-                'share_url' => route('storefront.home').'#product-'.$product->id,
-                'created_at' => $product->created_at?->toDateTimeString(),
-            ])
+            ->map(function (Product $product): array {
+                $descriptionSections = $this->productDescriptionSections($product->description);
+
+                return [
+                    'id' => $product->id,
+                    'category_id' => $product->category_id,
+                    'name' => $product->name,
+                    'description' => $descriptionSections['description'],
+                    'features' => $descriptionSections['features'],
+                    'specifications' => $descriptionSections['specifications'],
+                    'category' => $product->category?->name ?? 'Tanpa kategori',
+                    'price_amount' => $product->price_amount,
+                    'price' => Money::idr($product->price_amount),
+                    'stock' => $product->stock,
+                    'reserved_stock' => $product->reserved_stock,
+                    'available_stock' => max(0, $product->stock - $product->reserved_stock),
+                    'is_active' => $product->is_active,
+                    'status_label' => $product->is_active ? 'Aktif' : 'Nonaktif',
+                    'update_url' => route('admin.products.update', ['product' => $product]),
+                    'delete_url' => route('admin.products.destroy', ['product' => $product]),
+                    'stock_url' => route('admin.products.stock.store', ['product' => $product]),
+                    'share_url' => route('storefront.home').'#product-'.$product->id,
+                    'created_at' => $product->created_at?->toDateTimeString(),
+                ];
+            })
             ->all();
+    }
+
+    /**
+     * @return array{description: string, features: string, specifications: string}
+     */
+    private function productDescriptionSections(?string $description): array
+    {
+        $description = trim((string) $description);
+        $sections = preg_split("/\n{2,}/", $description) ?: [];
+        $base = trim((string) ($sections[0] ?? ''));
+        $features = '';
+        $specifications = '';
+
+        foreach (array_slice($sections, 1) as $section) {
+            $section = trim((string) $section);
+
+            if (str_starts_with($section, 'Fitur utama:')) {
+                $features = $this->descriptionListBody($section, 'Fitur utama:');
+            }
+
+            if (str_starts_with($section, 'Paket/spesifikasi:')) {
+                $specifications = $this->descriptionListBody($section, 'Paket/spesifikasi:');
+            }
+        }
+
+        return [
+            'description' => $base,
+            'features' => $features,
+            'specifications' => $specifications,
+        ];
+    }
+
+    private function descriptionListBody(string $section, string $heading): string
+    {
+        $body = trim(substr($section, strlen($heading)));
+
+        return collect(preg_split('/\R/u', $body) ?: [])
+            ->map(fn (string $row): string => preg_replace('/^- /', '', trim($row)) ?? '')
+            ->filter()
+            ->implode("\n");
     }
 
     private function categoryOptions(): array

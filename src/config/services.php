@@ -52,6 +52,8 @@ return [
         'admin_username' => env('TELEGRAM_ADMIN_USERNAME'),
         'admin_user_id' => env('TELEGRAM_ADMIN_USER_ID'),
         'admin_telegram_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
+        'mini_app_url' => env('TELEGRAM_MINI_APP_URL'),
+        'welcome_banner_url' => env('TELEGRAM_WELCOME_BANNER_URL'),
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
     ],
 

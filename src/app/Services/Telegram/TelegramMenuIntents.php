@@ -8,6 +8,32 @@ class TelegramMenuIntents
 {
     public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess) {}
 
+    public function sendWelcome(Customer $customer, string $chatId): void
+    {
+        $firstName = trim((string) $customer->first_name) ?: 'kak';
+        $caption = implode("\n", [
+            '🌙 Selamat datang, '.$firstName.' 👋',
+            '━━━━━━━━━━━━━━',
+            '🛒 Belanja produk digital langsung dari Telegram.',
+            '💳 Pembayaran otomatis via website/QRIS.',
+            '📦 Cek status dan riwayat pesanan kapan saja.',
+            '🌐 Buka Mini App untuk dashboard mobile.',
+            '',
+            'Pilih menu di bawah untuk mulai.',
+        ]);
+
+        $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId);
+        $bannerUrl = config('services.telegram.welcome_banner_url');
+
+        if (is_string($bannerUrl) && $bannerUrl !== '') {
+            $this->bot->sendPhotoReference($chatId, $bannerUrl, $caption, $replyMarkup);
+
+            return;
+        }
+
+        $this->bot->sendMessage($chatId, $caption, $replyMarkup);
+    }
+
     public function sendMainMenu(Customer $customer, string $chatId): void
     {
         $this->bot->sendMessage($chatId, "☰ Menu utama\nPilih tombol di bawah supaya lebih cepat belanja.", $this->mainMenuKeyboard($customer, $chatId));
@@ -23,7 +49,7 @@ class TelegramMenuIntents
         if ($customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
             $keyboard[] = [[
                 'text' => '🛠️ Admin Dashboard',
-                'web_app' => ['url' => route('admin.dashboard')],
+                'web_app' => ['url' => route('admin.dashboard').'?v='.time()],
             ]];
             $keyboard[] = [['text' => '📣 Broadcast Info']];
         }
@@ -36,6 +62,25 @@ class TelegramMenuIntents
             'is_persistent' => true,
             'input_field_placeholder' => 'Pilih menu atau ketik /cari produk',
         ];
+    }
+
+    private function welcomeInlineKeyboard(Customer $customer, string $chatId): array
+    {
+        $keyboard = [
+            [
+                ['text' => '🛍️ Lihat Katalog', 'callback_data' => 'katalog'],
+                ['text' => '📦 Pesanan', 'callback_data' => 'status'],
+            ],
+        ];
+
+        if ($this->adminAccess->isAdmin($customer, $chatId)) {
+            $keyboard[] = [[
+                'text' => '🌐 Mini App Dashboard',
+                'web_app' => ['url' => route('admin.dashboard').'?v='.time()],
+            ]];
+        }
+
+        return ['inline_keyboard' => $keyboard];
     }
 
     public function sendSupport(string $chatId): void

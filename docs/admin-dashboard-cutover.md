@@ -1,30 +1,29 @@
-# Admin Dashboard Cutover
+# Admin Dashboard Blade-only Cutover
 
-Issue #36 makes `/admin` the primary manual Blade/Alpine admin dashboard. Filament stays installed for deeper CRUD resources such as products, orders, payments, categories, customers, audit logs, and manual payment settings.
+The admin surface is Blade-only. `/admin` is handled by `App\Http\Controllers\Admin\AdminDashboardController`, and `/admin/login` is handled by the pure Laravel session login controller.
 
 ## Current Routing
 
-- `/admin` is handled by `App\Http\Controllers\Admin\AdminDashboardController`.
-- `/admin/products`, `/admin/orders`, and the other Filament resource routes remain registered by `App\Providers\Filament\AdminPanelProvider`.
-- The manual dashboard uses `resources/css/app.css` and `resources/js/app.js`.
+- `/admin` renders the neobrutalist Blade/Alpine dashboard.
+- `/admin/login` renders the Blade login form.
+- `/admin/products`, `/admin/products/{product}`, and `/admin/products/{product}/stock` are Blade dashboard mutation endpoints for create, update, soft-delete, and stock add flows.
+- Payment mode and broadcast mutations stay on the same Blade dashboard.
+- The frontend stack is intentionally small: Blade templates, Alpine.js for modal/state behavior, and Tailwind CSS v4 through the Vite plugin.
 
-## Removed Or Bypassed UI
+## Removed UI And Runtime Surface
 
-- `App\Filament\Pages\Dashboard` is no longer registered or present.
-- Dashboard-only Filament widgets under `App\Filament\Widgets` were removed.
-- Dashboard-only widget Blade views and `x-lhie.*` dashboard helper components were removed.
-- `resources/css/filament/admin/theme.css` is no longer part of the Vite build or Filament panel registration.
+- Filament is not installed as a Composer dependency.
+- No Filament panel provider is registered in `bootstrap/providers.php`.
+- Filament resources, pages, widgets, published views, and published assets were removed.
+- Product create/edit/stock/delete actions stay in dashboard modals or inline Blade forms and return to the `produk` tab.
+- Product cards use compact neobrutalist action buttons with icon labels; desktop can show product cards in two columns while Telegram Mini App width stays one column with fixed bottom navigation.
+
+## Production Build
+
+- `vite.config.js` loads `@tailwindcss/vite`; `resources/css/app.css` owns Tailwind v4 source/theme declarations.
+- The Docker image has a dedicated Node build stage that runs `npm ci` and `npm run build`, then copies `public/build` into the PHP runtime image.
+- Docker validation must not wipe or reseed a persistent Postgres volume. Use config/build checks by default; use disposable volumes for any boot test that requires database setup.
 
 ## Rollback
 
-If the manual dashboard must be rolled back, restore the removed Filament dashboard files from the commit before issue #36, then:
-
-1. Restore `App\Filament\Pages\Dashboard`.
-2. Restore `App\Filament\Widgets` and the matching `resources/views/filament/widgets` views.
-3. Restore `resources/views/components/lhie` if the widgets still use those components.
-4. Restore `resources/css/filament/admin/theme.css`.
-5. Add `->viteTheme('resources/css/filament/admin/theme.css')` back to `App\Providers\Filament\AdminPanelProvider`.
-6. Add the theme entry back to `vite.config.js`.
-7. Remove or rename the manual `Route::get('/admin', AdminDashboardController::class)` route if Filament should own `/admin` again.
-
-Keep the Filament resource discovery in place during rollback so existing CRUD URLs remain stable.
+There is no supported partial rollback that keeps Filament resources beside the Blade dashboard. Reintroducing Filament would be a new migration: add the Composer package, restore a panel provider, restore resources/assets from version control, and decide which routes own `/admin/*` before deploying.

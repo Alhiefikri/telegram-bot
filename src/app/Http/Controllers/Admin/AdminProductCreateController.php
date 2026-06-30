@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
-use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -15,17 +15,15 @@ use Illuminate\Validation\Rule;
 
 class AdminProductCreateController extends Controller
 {
+    use AuthorizesAdminAccess;
+
     public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications): RedirectResponse
     {
-        $user = $request->user();
-
-        if (! $user) {
-            return redirect()->guest(route('filament.admin.auth.login'));
+        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
+            return $redirect;
         }
 
-        $panel = Filament::getPanel('admin');
-
-        abort_unless($user->canAccessPanel($panel), 403);
+        $user = $this->authorizeAdminAccess($request);
 
         Gate::authorize('create', Product::class);
 
@@ -46,7 +44,7 @@ class AdminProductCreateController extends Controller
 
         if ($validator->fails()) {
             return redirect()
-                ->route('admin.dashboard', ['tab' => 'tambah'])
+                ->route('admin.dashboard', ['tab' => 'produk'])
                 ->withErrors($validator, 'productCreate')
                 ->withInput();
         }

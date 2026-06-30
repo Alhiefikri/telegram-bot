@@ -26,8 +26,8 @@ class TelegramMessageRouter
 
         if ($text === '/start') {
             $this->session->forget($customer);
+            $this->menu->sendWelcome($customer, $chatId);
             $this->menu->sendMainMenu($customer, $chatId);
-            $this->catalog->sendCategoryCatalog($chatId);
 
             return;
         }

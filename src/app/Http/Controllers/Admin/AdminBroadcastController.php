@@ -2,26 +2,24 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Services\Telegram\TelegramBroadcastService;
-use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
 class AdminBroadcastController extends Controller
 {
+    use AuthorizesAdminAccess;
+
     public function __invoke(Request $request, TelegramBroadcastService $broadcast): RedirectResponse
     {
-        $user = $request->user();
-
-        if (! $user) {
-            return redirect()->guest(route('filament.admin.auth.login'));
+        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
+            return $redirect;
         }
 
-        $panel = Filament::getPanel('admin');
-
-        abort_unless($user->canAccessPanel($panel), 403);
+        $user = $this->authorizeAdminAccess($request);
 
         $validator = Validator::make($request->all(), [
             'message' => ['required', 'string', 'max:3500'],

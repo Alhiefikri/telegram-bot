@@ -22,6 +22,7 @@ use App\Services\Admin\AdminDashboardData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -35,12 +36,44 @@ class AdminDashboardTest extends TestCase
             ->assertRedirect('/admin/login');
     }
 
-    public function test_user_without_admin_panel_access_is_forbidden(): void
+    public function test_admin_login_rejects_bad_credentials_and_logout_returns_to_login(): void
+    {
+        $admin = User::factory()->create([
+            'email' => 'owner@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Owner,
+        ]);
+
+        $this->post(route('admin.login.store'), [
+            'email' => $admin->email,
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors(['email']);
+
+        $this->post(route('admin.login.store'), [
+            'email' => $admin->email,
+            'password' => 'correct-password',
+        ])->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($admin);
+
+        $this->post(route('admin.logout'))
+            ->assertRedirect(route('admin.login'));
+
+        $this->assertGuest();
+    }
+
+    public function test_user_without_admin_access_is_forbidden(): void
     {
         $this->actingAs(User::factory()->create(['role' => null]));
 
         $this->get('/admin')
             ->assertForbidden();
+
+        $this->post(route('admin.products.store'), [
+            'name' => 'Blocked',
+            'price_amount' => 1000,
+            'description' => 'No access',
+        ])->assertForbidden();
     }
 
     public function test_admin_dashboard_shell_renders_manual_blade_tabs_without_sidebar_or_escrow(): void
@@ -62,9 +95,13 @@ class AdminDashboardTest extends TestCase
             ->assertSee('GMV')
             ->assertSee('Produk')
             ->assertSee('Perlu diproses')
-            ->assertSee('Belanja Produk Lain')
+            ->assertSee('Buka Toko')
             ->assertSee('Bagikan Toko')
-            ->assertSeeInOrder(['Stats', 'Produk', 'Penjualan', 'Tambah', 'Withdraw', 'Riwayat', 'Affiliate'])
+            ->assertSeeInOrder(['Ringkasan', 'Produk', 'Pesanan', 'Tambah'])
+            ->assertSee('desktop-tab-nav', false)
+            ->assertSee('mobile-bottom-nav', false)
+            ->assertSee('md:grid-cols-4', false)
+            ->assertSee('admin-mini-shell', false)
             ->assertSee('overflow-x-auto', false)
             ->assertSee('x-data', false)
             ->assertDontSee('Escrow')
@@ -73,7 +110,7 @@ class AdminDashboardTest extends TestCase
         $this->assertStringNotContainsString('<aside', $response->getContent());
     }
 
-    public function test_primary_admin_entry_uses_manual_dashboard_while_filament_resources_remain_reachable(): void
+    public function test_primary_admin_entry_uses_manual_dashboard_and_no_filament_routes(): void
     {
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
@@ -84,17 +121,15 @@ class AdminDashboardTest extends TestCase
         $this->assertNotNull($dashboardRoute);
         $this->assertSame(AdminDashboardController::class, $dashboardRoute->getControllerClass());
         $this->assertSame('admin', $dashboardRoute->uri());
-        $this->assertSame('/admin/products', parse_url(route('filament.admin.resources.products.index'), PHP_URL_PATH));
-        $this->assertSame('/admin/orders', parse_url(route('filament.admin.resources.orders.index'), PHP_URL_PATH));
+        $this->assertNull(Route::getRoutes()->getByName('filament.admin.resources.products.index'));
+        $this->assertNull(Route::getRoutes()->getByName('filament.admin.resources.orders.index'));
 
         $this->get(route('admin.dashboard'))
             ->assertOk()
             ->assertSee('Navigasi dashboard')
             ->assertDontSee('fi-wi-widget', false)
-            ->assertDontSee('filament.widgets', false);
-
-        $this->get(route('filament.admin.resources.products.index'))
-            ->assertOk();
+            ->assertDontSee('filament.widgets', false)
+            ->assertDontSee('fi-sidebar', false);
     }
 
     public function test_owner_can_toggle_payment_mode_from_manual_dashboard(): void
@@ -176,32 +211,38 @@ class AdminDashboardTest extends TestCase
         ]);
     }
 
-    public function test_cutover_removes_filament_dashboard_widgets_and_theme_registration(): void
+    public function test_cutover_removes_filament_runtime_surface(): void
     {
-        $panelProvider = file_get_contents(app_path('Providers/Filament/AdminPanelProvider.php'));
+        $composer = file_get_contents(base_path('composer.json'));
+        $providers = file_get_contents(base_path('bootstrap/providers.php'));
         $viteConfig = file_get_contents(base_path('vite.config.js'));
+        $package = json_decode(file_get_contents(base_path('package.json')), true, flags: JSON_THROW_ON_ERROR);
+        $appCss = file_get_contents(resource_path('css/app.css'));
 
-        $this->assertFileDoesNotExist(app_path('Filament/Pages/Dashboard.php'));
-        $this->assertSame([], glob(app_path('Filament/Widgets/*.php')) ?: []);
-        $this->assertStringContainsString('->pages([])', $panelProvider);
-        $this->assertStringNotContainsString('discoverWidgets', $panelProvider);
-        $this->assertStringNotContainsString('->widgets(', $panelProvider);
-        $this->assertStringNotContainsString('viteTheme', $panelProvider);
+        $this->assertFileDoesNotExist(app_path('Providers/Filament/AdminPanelProvider.php'));
+        $this->assertDirectoryDoesNotExist(app_path('Filament'));
+        $this->assertDirectoryDoesNotExist(resource_path('views/filament'));
+        $this->assertStringNotContainsString('filament/filament', $composer);
+        $this->assertStringNotContainsString('AdminPanelProvider', $providers);
         $this->assertStringNotContainsString('resources/css/filament/admin/theme.css', $viteConfig);
+        $this->assertArrayHasKey('@tailwindcss/vite', $package['devDependencies']);
+        $this->assertStringStartsWith('^4.', $package['devDependencies']['tailwindcss']);
+        $this->assertStringContainsString('@import "tailwindcss"', $appCss);
+        $this->assertFileDoesNotExist(base_path('tailwind.config.cjs'));
+        $this->assertFileDoesNotExist(base_path('postcss.config.cjs'));
     }
 
-    public function test_cutover_rollback_path_is_documented(): void
+    public function test_cutover_doc_records_blade_only_admin(): void
     {
-        $rollbackDoc = base_path('../docs/admin-dashboard-cutover.md');
+        $cutoverDoc = base_path('../docs/admin-dashboard-cutover.md');
 
-        $this->assertFileExists($rollbackDoc);
+        $this->assertFileExists($cutoverDoc);
 
-        $contents = file_get_contents($rollbackDoc);
+        $contents = file_get_contents($cutoverDoc);
 
-        $this->assertStringContainsString('Rollback', $contents);
+        $this->assertStringContainsString('Blade-only', $contents);
         $this->assertStringContainsString('/admin', $contents);
-        $this->assertStringContainsString('App\\Filament\\Pages\\Dashboard', $contents);
-        $this->assertStringContainsString('resources/css/filament/admin/theme.css', $contents);
+        $this->assertStringNotContainsString('Filament stays installed', $contents);
     }
 
     public function test_admin_dashboard_data_provider_returns_operational_view_model_without_escrow(): void
@@ -354,8 +395,8 @@ class AdminDashboardTest extends TestCase
             ->assertOk()
             ->assertSee('Link toko')
             ->assertSee(route('storefront.home'), false)
-            ->assertSee('Share')
-            ->assertSee('Copy')
+            ->assertSee('Bagikan')
+            ->assertSee('Salin')
             ->assertSee('copyStoreLink', false)
             ->assertSee('shareStore', false)
             ->assertSee('navigator.share', false)
@@ -398,20 +439,19 @@ class AdminDashboardTest extends TestCase
 
         $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Katalog siap dikelola')
+            ->assertSee('Produk Saya')
             ->assertSee('Netflix 1 Bulan')
             ->assertSee('Akun Premium')
             ->assertSeeInOrder(['Stok', '9'])
             ->assertSeeInOrder(['Tersedia', '7'])
             ->assertSee('IDR 45.000')
             ->assertSee('Aktif')
-            ->assertSeeInOrder(['Edit', 'Stok', 'Kelola', 'Share', 'Pause', 'Hapus'])
-            ->assertSee('Tambah Stok')
-            ->assertSee('0 item terdeteksi')
+            ->assertSeeInOrder(['Ubah', 'Stok', 'Salin', 'Hapus'])
+            ->assertSee('Tambah stok')
+            ->assertSee('0 item')
             ->assertSee('Tempel stok baru, satu item per baris', false)
-            ->assertSee('grid gap-3 sm:grid-cols-2 xl:grid-cols-3', false)
-            ->assertSee('w-full min-w-0', false)
-            ->assertSee('bg-rose-50', false)
+            ->assertSee('grid grid-cols-2 gap-2 sm:grid-cols-4', false)
+            ->assertSee('background: #fecaca; color: #dc2626;', false)
             ->assertDontSee('@js(', false)
             ->assertDontSee('fi-form', false)
             ->assertDontSee('fi-modal', false);
@@ -472,7 +512,7 @@ class AdminDashboardTest extends TestCase
             ->assertSee("salesFilter = 'completed'", false)
             ->assertSee('data-order-filter-groups="all completed"', false)
             ->assertSee('data-order-filter-groups="all issue"', false)
-            ->assertSee('grid gap-3 lg:grid-cols-2', false)
+            ->assertSee('grid grid-cols-2 gap-2', false)
             ->assertSee('INV-DONE')
             ->assertSee('ChatGPT Plus 1 Bulan')
             ->assertSee('IDR 75.000')
@@ -485,7 +525,7 @@ class AdminDashboardTest extends TestCase
             ->assertDontSee('<table', false);
     }
 
-    public function test_tambah_tab_renders_compact_product_create_form(): void
+    public function test_product_modal_renders_compact_create_form(): void
     {
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
@@ -493,30 +533,30 @@ class AdminDashboardTest extends TestCase
 
         Category::factory()->create(['name' => 'Akun Premium']);
 
-        $this->get('/admin?tab=tambah')
+        $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Tambah produk baru')
+            ->assertSee('Tambah produk')
             ->assertSee('Nama produk')
             ->assertSee('Harga')
             ->assertSee('Kategori')
             ->assertSee('Deskripsi singkat')
             ->assertSee('Fitur utama')
             ->assertSee('Paket/spesifikasi')
+            ->assertSee('Tampilkan produk di toko')
             ->assertSee('Akun Premium')
-            ->assertSee('Submit Produk')
-            ->assertSee('/admin/products', false)
+            ->assertSee('Submit produk')
             ->assertSee('x-data', false)
             ->assertSee('min-w-0', false)
             ->assertDontSee('fi-form', false);
     }
 
-    public function test_admin_can_create_product_from_tambah_tab(): void
+    public function test_admin_can_create_product_from_dashboard_modal(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $category = Category::factory()->create(['name' => 'Tools Premium']);
 
         $this->actingAs($admin)
-            ->from('/admin?tab=tambah')
+            ->from('/admin?tab=produk')
             ->post(route('admin.products.store'), [
                 'name' => 'Canva Pro 1 Bulan',
                 'price_amount' => '75000',
@@ -549,17 +589,65 @@ class AdminDashboardTest extends TestCase
         ]);
     }
 
-    public function test_tambah_product_submission_validates_required_fields(): void
+    public function test_admin_can_update_and_delete_product_from_dashboard_modal(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $category = Category::factory()->create(['name' => 'Streaming']);
+        $product = Product::factory()->create([
+            'name' => 'Old Name',
+            'category_id' => null,
+            'description' => 'Old description',
+            'price_amount' => 25000,
+            'stock' => 7,
+            'reserved_stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Netflix Premium',
+                'price_amount' => '99000',
+                'category_id' => (string) $category->id,
+                'description' => 'Akses streaming siap pakai.',
+                'features' => "Garansi login\nBisa semua device",
+                'specifications' => 'Durasi 30 hari',
+                'is_active' => '0',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $product->refresh();
+        $this->assertSame('Netflix Premium', $product->name);
+        $this->assertSame($category->id, $product->category_id);
+        $this->assertSame(99000, $product->price_amount);
+        $this->assertFalse($product->is_active);
+        $this->assertSame(7, $product->stock);
+        $this->assertSame(2, $product->reserved_stock);
+        $this->assertStringContainsString("Fitur utama:\n- Garansi login\n- Bisa semua device", $product->description);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'product.updated',
+            'subject_id' => (string) $product->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->delete(route('admin.products.destroy', $product))
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $this->assertSoftDeleted('products', ['id' => $product->id]);
+    }
+
+    public function test_product_modal_submission_validates_required_fields(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
-        $this->from('/admin?tab=tambah')
+        $this->from('/admin?tab=produk')
             ->post(route('admin.products.store'), [
                 'name' => '',
                 'price_amount' => '',
                 'description' => '',
             ])
-            ->assertRedirect('/admin?tab=tambah')
+            ->assertRedirect('/admin?tab=produk')
             ->assertSessionHasErrors(['name', 'price_amount', 'description'], null, 'productCreate');
 
         $this->assertDatabaseCount('products', 0);
@@ -648,12 +736,13 @@ class AdminDashboardTest extends TestCase
         $this->assertStringContainsString('js-modal', $rendered);
         $this->assertStringContainsString('js-heading', $rendered);
         $this->assertStringContainsString('aria-labelledby="confirm-modal-title"', $rendered);
-        $this->assertStringContainsString('min-h-11', $rendered);
-        $this->assertStringContainsString('bg-brand-electric', $rendered);
-        $this->assertStringContainsString('bg-brand-electricLight', $rendered);
-        $this->assertStringContainsString('bg-white', $rendered);
-        $this->assertStringContainsString('bg-amber-50', $rendered);
-        $this->assertStringContainsString('bg-rose-50', $rendered);
+        $this->assertStringContainsString('min-h-12', $rendered);
+        $this->assertStringContainsString('bg-[#7BD10A]', $rendered);
+        $this->assertStringContainsString('bg-[#16B4CA]', $rendered);
+        $this->assertStringContainsString('bg-[#f2da3d]', $rendered);
+        $this->assertStringContainsString('bg-[#ef4444]', $rendered);
+        $this->assertStringContainsString('rounded-[1.25rem]', $rendered);
+        $this->assertStringContainsString('border-[3px]', $rendered);
         $this->assertStringNotContainsString('fi-', $rendered);
     }
 }

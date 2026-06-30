@@ -43,7 +43,7 @@ Arsitektur awal tetap berupa **Laravel monolith modular**, bukan microservices.
 |---|---:|---|
 | PHP | 8.4 | Runtime utama aplikasi. |
 | Laravel | 13.x | Framework backend utama. |
-| FilamentPHP | 5.x direkomendasikan | Filament v4 sudah berstatus previous version. Untuk project baru gunakan v5 kecuali ada alasan teknis khusus. |
+| Admin UI | Laravel Blade + Alpine + Tailwind CSS v4 | Filament tidak dipakai; CRUD admin berjalan di dashboard neobrutalisme. |
 | PostgreSQL | 16+ | Database utama. |
 | Queue | Database driver untuk MVP | Redis boleh ditambahkan saat trafik naik. |
 | Web Server | Nginx atau Caddy | Wajib HTTPS untuk production. |
@@ -51,19 +51,13 @@ Arsitektur awal tetap berupa **Laravel monolith modular**, bukan microservices.
 
 ## Keputusan Revisi
 
-Target admin panel diubah dari:
+Target admin panel diubah dari framework panel eksternal menjadi:
 
 ```text
-FilamentPHP v4
+Laravel Blade + Alpine, tanpa Filament
 ```
 
-menjadi:
-
-```text
-FilamentPHP v5 recommended
-```
-
-Jika implementasi tetap memakai Filament v4, alasan teknisnya harus ditulis eksplisit sebelum coding dimulai.
+Semua CRUD admin yang dibutuhkan MVP harus tetap berada di dashboard Blade neobrutalisme dan tidak mengarahkan user ke panel/sidebar lama.
 
 ---
 
@@ -79,7 +73,7 @@ Aplikasi dibangun sebagai **Laravel monolith modular** dengan pemisahan domain s
 - Payment
 - Inventory
 - Telegram Bot
-- Admin / Filament
+- Admin Blade dashboard
 - Audit & Operations
 
 Monolith dipilih karena lebih cocok untuk VPS 2GB RAM / 2 CPU dan lebih mudah dirawat untuk tahap MVP.
@@ -169,6 +163,7 @@ Opsi ringan:
 - Jangan menjalankan Composer/NPM build berat di VPS runtime production.
 - Composer install sebaiknya dilakukan saat build image.
 - Gunakan `composer install --no-dev --optimize-autoloader` untuk production.
+- NPM asset build admin dijalankan saat build image Docker, bukan saat container production boot.
 - Aktifkan OPcache.
 
 ---
@@ -588,12 +583,12 @@ Processing berat tidak boleh dilakukan langsung di request utama.
 
 ## 13.1 Admin Framework
 
-Admin panel menggunakan FilamentPHP.
+Admin panel menggunakan Laravel Blade + Alpine murni.
 
 Target default:
 
 ```text
-FilamentPHP v5
+Blade-only neobrutalist dashboard
 ```
 
 ## 13.2 Role Minimum
@@ -857,8 +852,8 @@ Urutan implementasi wajib mengikuti fondasi transaksi terlebih dahulu, bukan lan
 
 ## Phase 3 — Admin Catalog
 
-- Filament setup.
-- Product resource.
+- Blade admin setup.
+- Product CRUD modal/dashboard.
 - image upload.
 - stock adjustment.
 - soft delete.
@@ -918,7 +913,7 @@ Urutan implementasi wajib mengikuti fondasi transaksi terlebih dahulu, bukan lan
 
 PRD dianggap siap untuk implementation session baru jika semua poin berikut diterima:
 
-- [x] Target Filament direvisi ke v5 recommended atau alasan v4 ditulis eksplisit.
+- [x] Target admin direvisi ke Blade-only tanpa Filament.
 - [x] `payments` dan `payment_events` masuk data model.
 - [x] `telegram_updates` masuk data model untuk idempotency.
 - [x] `order_status` dan `payment_status` dipisahkan.

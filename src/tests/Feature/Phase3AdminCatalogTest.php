@@ -4,10 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
 use App\Enums\UserRole;
-use App\Filament\Resources\AuditLogs\Pages\ListAuditLogs;
-use App\Filament\Resources\Categories\Pages\CreateCategory;
-use App\Filament\Resources\Products\Pages\CreateProduct;
-use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Models\AuditLog;
 use App\Models\Category;
 use App\Models\InventoryMovement;
@@ -17,27 +13,23 @@ use App\Policies\CategoryPolicy;
 use App\Policies\ProductPolicy;
 use App\Services\Audit\AuditContext;
 use App\Services\StockAdjustmentService;
-use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
-use Livewire\Livewire;
 use Tests\TestCase;
 
 class Phase3AdminCatalogTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_role_cast_and_panel_access(): void
+    public function test_user_role_cast_and_admin_access(): void
     {
-        $panel = Filament::getPanel('admin');
-
         foreach (UserRole::cases() as $role) {
             $user = User::factory()->create(['role' => $role]);
             $this->assertSame($role, $user->fresh()->role);
-            $this->assertTrue($user->canAccessPanel($panel));
+            $this->assertTrue($user->canAccessAdmin());
         }
 
-        $this->assertFalse(User::factory()->create(['role' => null])->canAccessPanel($panel));
+        $this->assertFalse(User::factory()->create(['role' => null])->canAccessAdmin());
     }
 
     public function test_product_policy_by_role(): void
@@ -201,20 +193,18 @@ class Phase3AdminCatalogTest extends TestCase
         $this->assertNull($audit->ip_address);
     }
 
-    public function test_product_resource_create_and_edit_do_not_mutate_stock_fields(): void
+    public function test_blade_product_create_and_edit_do_not_mutate_stock_fields(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
-        Livewire::test(CreateProduct::class)
-            ->set('data.name', 'A')
-            ->set('data.description', 'B')
-            ->set('data.price_amount', 1000)
-            ->set('data.currency', 'IDR')
-            ->set('data.stock', 99)
-            ->set('data.reserved_stock', 50)
-            ->set('data.is_active', true)
-            ->call('create')
-            ->assertHasNoFormErrors();
+        $this->post(route('admin.products.store'), [
+            'name' => 'A',
+            'description' => 'B',
+            'price_amount' => 1000,
+            'stock' => 99,
+            'reserved_stock' => 50,
+            'is_active' => true,
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
         $product = Product::query()->where('name', 'A')->firstOrFail();
         $this->assertSame(0, $product->stock);
@@ -222,35 +212,32 @@ class Phase3AdminCatalogTest extends TestCase
 
         $product->forceFill(['stock' => 10, 'reserved_stock' => 3])->save();
 
-        Livewire::test(EditProduct::class, ['record' => $product->id])
-            ->set('data.name', 'C')
-            ->set('data.description', 'D')
-            ->set('data.price_amount', 2000)
-            ->set('data.currency', 'IDR')
-            ->set('data.stock', 1)
-            ->set('data.reserved_stock', 1)
-            ->set('data.is_active', false)
-            ->call('save')
-            ->assertHasNoFormErrors();
+        $this->patch(route('admin.products.update', $product), [
+            'name' => 'C',
+            'description' => 'D',
+            'price_amount' => 2000,
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => '0',
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
-        $this->assertSame(10, $product->fresh()->stock);
-        $this->assertSame(3, $product->fresh()->reserved_stock);
+        $product->refresh();
+        $this->assertSame('C', $product->name);
+        $this->assertSame(2000, $product->price_amount);
+        $this->assertFalse($product->is_active);
+        $this->assertSame(10, $product->stock);
+        $this->assertSame(3, $product->reserved_stock);
     }
 
-    public function test_category_resource_create_and_product_category_relationship(): void
+    public function test_category_create_and_product_category_relationship(): void
     {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
-
-        Livewire::test(CreateCategory::class)
-            ->set('data.name', 'Streaming')
-            ->set('data.slug', 'streaming-e2e')
-            ->set('data.description', 'Digital')
-            ->set('data.sort_order', 1)
-            ->set('data.is_active', true)
-            ->call('create')
-            ->assertHasNoFormErrors();
-
-        $category = Category::query()->where('slug', 'streaming-e2e')->firstOrFail();
+        $category = Category::query()->create([
+            'name' => 'Streaming',
+            'slug' => 'streaming-e2e',
+            'description' => 'Digital',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
         $product = Product::factory()->create(['category_id' => $category->id]);
 
         $this->assertSame('Streaming', $product->fresh()->category->name);
@@ -277,15 +264,12 @@ class Phase3AdminCatalogTest extends TestCase
             'is_active' => true,
         ]);
 
-        Livewire::test(EditProduct::class, ['record' => $product->id])
-            ->set('data.name', $product->name)
-            ->set('data.description', $product->description)
-            ->set('data.price_amount', 2500)
-            ->set('data.currency', 'IDR')
-            ->set('data.image_path', ['products/new.jpg'])
-            ->set('data.is_active', false)
-            ->call('save')
-            ->assertHasNoFormErrors();
+        $this->patch(route('admin.products.update', $product), [
+            'name' => $product->name,
+            'description' => $product->description,
+            'price_amount' => 2500,
+            'is_active' => '0',
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
         $audit = AuditLog::query()->where('action', 'product.updated')->firstOrFail();
 
@@ -294,7 +278,7 @@ class Phase3AdminCatalogTest extends TestCase
         $this->assertSame('products/old.jpg', $audit->old_values['image_path']);
         $this->assertTrue($audit->old_values['is_active']);
         $this->assertSame(2500, $audit->new_values['price_amount']);
-        $this->assertSame('products/new.jpg', $audit->new_values['image_path']);
+        $this->assertSame('products/old.jpg', $audit->new_values['image_path']);
         $this->assertFalse($audit->new_values['is_active']);
     }
 
@@ -322,16 +306,14 @@ class Phase3AdminCatalogTest extends TestCase
         $this->assertSame($ownerCountBefore + 1, User::query()->where('role', UserRole::Owner)->count());
     }
 
-    public function test_audit_logs_resource_table_renders_json_payloads(): void
+    public function test_audit_logs_cast_json_payloads_for_blade_rendering(): void
     {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
-
         $auditLog = AuditLog::factory()->create([
             'old_values' => ['price_amount' => 1000],
             'new_values' => ['price_amount' => 2500],
         ]);
 
-        Livewire::test(ListAuditLogs::class)
-            ->assertCanSeeTableRecords([$auditLog]);
+        $this->assertSame(1000, $auditLog->fresh()->old_values['price_amount']);
+        $this->assertSame(2500, $auditLog->fresh()->new_values['price_amount']);
     }
 }

@@ -20,6 +20,17 @@ src/node_modules/
 src/storage/*.key
 src/storage/logs/
 src/bootstrap/cache/*.php
+src/\[BOT\] Sedulur Store.html
+src/\[BOT\] Sedulur Store_files/
+src/rewrite.py
+src/rewrite_rounded.py
+src/test_login.py
+src/public/images/
+test-results/
+src/test-results/
+playwright-report/
+src/playwright-report/
+
 
 # Local deepwork session notes
 .slim/deepwork/

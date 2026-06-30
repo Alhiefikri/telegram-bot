@@ -7,25 +7,26 @@ APP_DIR=${APP_DIR:-"$ROOT_DIR/src"}
 MANIFEST_PATH="$APP_DIR/public/build/manifest.json"
 APP_STYLE_ENTRY='resources/css/app.css'
 APP_SCRIPT_ENTRY='resources/js/app.js'
-TAILWIND_CONFIG_PATH="$APP_DIR/tailwind.config.cjs"
+APP_CSS_PATH="$APP_DIR/$APP_STYLE_ENTRY"
 
 printf 'Building Laravel admin assets with npm run build...\n'
 npm --prefix "$APP_DIR" run build
 
-TAILWIND_CONFIG_PATH="$TAILWIND_CONFIG_PATH" node --input-type=module <<'NODE'
+APP_CSS_PATH="$APP_CSS_PATH" node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 
-const configPath = process.env.TAILWIND_CONFIG_PATH;
-const config = readFileSync(configPath, 'utf8');
-const requiredPaths = [
-  './resources/views/**/*.blade.php',
-  './resources/js/**/*.js',
+const cssPath = process.env.APP_CSS_PATH;
+const css = readFileSync(cssPath, 'utf8');
+const requiredSnippets = [
+  '@import "tailwindcss"',
+  '@source "../views"',
+  '@source "../js"',
 ];
 
-const missingPaths = requiredPaths.filter((path) => !config.includes(path));
+const missingSnippets = requiredSnippets.filter((snippet) => !css.includes(snippet));
 
-if (missingPaths.length > 0) {
-  throw new Error(`Tailwind config is missing manual dashboard content paths: ${missingPaths.join(', ')}`);
+if (missingSnippets.length > 0) {
+  throw new Error(`Tailwind v4 CSS entry is missing admin dashboard source declarations: ${missingSnippets.join(', ')}`);
 }
 NODE
 

@@ -5,12 +5,12 @@
 
 <span
     {{ $attributes->class([
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ring-1',
-        'bg-emerald-50 text-emerald-700 ring-emerald-100' => $tone === 'emerald',
-        'bg-amber-50 text-amber-700 ring-amber-100' => $tone === 'amber',
-        'bg-blue-50 text-blue-700 ring-blue-100' => $tone === 'blue',
-        'bg-rose-50 text-rose-700 ring-rose-100' => $tone === 'rose',
-        'bg-slate-100 text-slate-700 ring-slate-200' => ! in_array($tone, ['emerald', 'amber', 'blue', 'rose'], true),
+        'inline-flex items-center gap-1.5 rounded-full border-[3px] border-neo-ink px-2.5 py-0.5 text-[10px] font-black uppercase leading-5 shadow-[2px_2px_0_0_#050505]',
+        'bg-[#7BD10A] text-neo-ink' => $tone === 'emerald',
+        'bg-neo-yellow text-neo-ink' => $tone === 'amber',
+        'bg-[#16B4CA] text-white' => $tone === 'blue',
+        'bg-neo-red text-white' => $tone === 'rose',
+        'bg-white text-neo-ink' => ! in_array($tone, ['emerald', 'amber', 'blue', 'rose'], true),
     ]) }}
 >
     @if ($dot)

@@ -9,9 +9,10 @@
     $supportDestination = $supportHref ?: '#support';
     $stockAvailable = fn ($product) => max(0, (int) $product->stock - (int) $product->reserved_stock);
     $idr = fn ($amount) => 'Rp'.number_format((int) $amount, 0, ',', '.');
+    $publicStorageUrl = fn (?string $path) => $path ? '/storage/'.ltrim($path, '/') : null;
     $categoryAnchor = fn ($category) => 'category-'.($category->slug ?: $category->id);
     $featuredStock = $featuredProduct ? $stockAvailable($featuredProduct) : 0;
-    $featuredImageUrl = $featuredProduct && $featuredProduct->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($featuredProduct->image_path) : null;
+    $featuredImageUrl = $featuredProduct && $featuredProduct->image_path ? $publicStorageUrl($featuredProduct->image_path) : null;
     $categoriesWithProducts = $categories->filter(fn ($category) => $products->contains('category_id', $category->id));
     $featuredCategoryDestination = $featuredProduct && $featuredProduct->category && $categoriesWithProducts->contains('id', $featuredProduct->category_id) ? '#'.$categoryAnchor($featuredProduct->category) : '#products';
     $productsWithoutVisibleCategory = $products->reject(fn ($product) => $product->category_id && $categories->contains('id', $product->category_id));
@@ -366,24 +367,25 @@
 
             <!-- Trust logo infinite marquee strip -->
             <section class="w-full overflow-hidden py-10 bg-slate-50 border-y border-slate-200 relative z-10 my-10">
+                @php
+                    $trustBrands = ['OpenAI', 'Claude', 'Gemini', 'Midjourney', 'Canva', 'Copilot'];
+                @endphp
                 <div class="animate-marquee gap-20 whitespace-nowrap">
                     <!-- First track -->
-                    <div class="flex items-center gap-20 text-slate-400">
-                        <img src="https://cdn.simpleicons.org/openai/666" alt="OpenAI" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/anthropic/666" alt="Anthropic Claude" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/google/666" alt="Google Gemini" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/midjourney/666" alt="Midjourney" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/canva/666" alt="Canva" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/github/666" alt="GitHub Copilot" class="h-5 w-auto opacity-50 hover:opacity-80 transition-opacity" loading="lazy" width="80" height="20">
+                    <div class="flex items-center gap-10 text-slate-500">
+                        @foreach ($trustBrands as $brand)
+                            <span class="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-black uppercase tracking-[0.18em] shadow-sm">
+                                {{ $brand }}
+                            </span>
+                        @endforeach
                     </div>
                     <!-- Duplicate second track for seamless scroll -->
-                    <div class="flex items-center gap-20 text-slate-400" aria-hidden="true">
-                        <img src="https://cdn.simpleicons.org/openai/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/anthropic/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/google/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/midjourney/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/canva/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
-                        <img src="https://cdn.simpleicons.org/github/666" alt="" class="h-5 w-auto opacity-50" loading="lazy" width="80" height="20">
+                    <div class="flex items-center gap-10 text-slate-500" aria-hidden="true">
+                        @foreach ($trustBrands as $brand)
+                            <span class="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-black uppercase tracking-[0.18em] shadow-sm">
+                                {{ $brand }}
+                            </span>
+                        @endforeach
                     </div>
                 </div>
             </section>
@@ -393,7 +395,7 @@
                 @if ($featuredProduct)
                     @php
                         $featuredStock = $stockAvailable($featuredProduct);
-                        $featuredImageUrl = $featuredProduct->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($featuredProduct->image_path) : null;
+                        $featuredImageUrl = $featuredProduct->image_path ? $publicStorageUrl($featuredProduct->image_path) : null;
 
                         // Branded cover theme for featured offer
                         $featuredCover = $getProductCover($featuredProduct->name);
@@ -459,10 +461,10 @@
                                     </div>
 
                                     <div class="flex flex-col gap-2">
-                                        <button onclick="openCheckoutModal({{ $featuredProduct->id }}, '{{ $featuredProduct->name }}', {{ $featuredProduct->price_amount }}, {{ $featuredStock }})"
+                                        <a href="{{ $featuredLink }}"
                                                 class="w-full h-12 bg-[var(--sf-ink)] hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg flex items-center justify-center gap-2 select-none">
                                             Belanja Sekarang
-                                        </button>
+                                        </a>
                                         <!-- Test string anchors -->
                                         <div class="sr-only">
                                             <span>Pilihan hari ini</span>
@@ -545,7 +547,7 @@
                     @forelse ($catalogProducts as $product)
                         @php
                             $stock = $stockAvailable($product);
-                            $imageUrl = $product->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($product->image_path) : null;
+                            $imageUrl = $product->image_path ? $publicStorageUrl($product->image_path) : null;
                             $productMessage = "Halo Admin, saya ingin memesan akun " . $product->name . " di Lhie Store.";
                             $productLink = $supportHref ? $supportHref . (str_contains($supportHref, '?') ? '&' : '?') . 'text=' . urlencode($productMessage) : '#support';
                             $isPopular = $popularProducts->contains('id', $product->id);
@@ -561,9 +563,9 @@
 
                         <div class="product-card reveal-item opacity-0 transform translate-y-8 transition-all duration-500 group cursor-pointer" data-category="{{ $product->category_id ?? 'lainnya' }}"
                              @if($stock > 0)
-                             onclick="openCheckoutModal({{ $product->id }}, '{{ $product->name }}', {{ $product->price_amount }}, {{ $stock }})"
+                             onclick="window.location.href = @js($productLink)"
                              @else
-                             onclick="window.location.href='{{ $productLink }}'"
+                             onclick="window.location.href = @js($productLink)"
                              @endif>
 
                             <div class="h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all duration-300 flex flex-col hover-lift relative">

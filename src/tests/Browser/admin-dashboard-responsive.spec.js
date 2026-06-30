@@ -50,7 +50,8 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await login(page);
 
     await expect(page.getByRole('heading', { name: 'Test User' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Navigasi desktop' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Manual /payment' })).toBeVisible();
@@ -65,13 +66,13 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await login(page);
 
     await expectNoDocumentOverflow(page);
-    await expectHorizontalTabsScrollable(page);
+    await expectBottomNavUsable(page);
     await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
     await expect(page.getByRole('button', { name: 'Manual /payment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Affiliate' }).click();
-    await expect(page.getByRole('heading', { name: 'Kanal affiliate' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Link toko' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
 
     await page.goto(`${baseUrl}/admin?tab=produk`);
     await expect(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' })).toBeVisible();
@@ -120,20 +121,31 @@ async function expectNoDocumentOverflow(page) {
     expect(metrics.bodyScrollWidth, 'body should not overflow horizontally').toBeLessThanOrEqual(metrics.viewportWidth + 1);
 }
 
-async function expectHorizontalTabsScrollable(page) {
+async function expectBottomNavUsable(page) {
     const nav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
+    await expect(nav).toBeVisible();
+    await expect(nav).toHaveCSS('position', 'fixed');
+    await expect(nav.getByText('Ringkasan')).toBeVisible();
+    await expect(nav.getByText('Produk')).toBeVisible();
+    await expect(nav.getByText('Pesanan')).toBeVisible();
+    await expect(nav.getByText('Tambah')).toBeVisible();
+
     const metrics = await nav.evaluate((element) => {
-        element.scrollLeft = element.scrollWidth;
+        const rect = element.getBoundingClientRect();
 
         return {
-            clientWidth: element.clientWidth,
-            scrollLeft: element.scrollLeft,
-            scrollWidth: element.scrollWidth,
+            bottomGap: Math.abs(window.innerHeight - rect.bottom),
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+            viewportWidth: window.innerWidth,
         };
     });
 
-    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
-    expect(metrics.scrollLeft).toBeGreaterThan(0);
+    expect(metrics.bottomGap).toBeLessThanOrEqual(2);
+    expect(metrics.left).toBeGreaterThanOrEqual(0);
+    expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+    expect(metrics.width).toBeGreaterThan(300);
 }
 
 async function expectOneColumn(firstLocator, secondLocator) {
@@ -156,8 +168,7 @@ async function expectPrimaryActionsAtLeast44px(page) {
                 && style.visibility !== 'hidden'
                 && rect.width > 0
                 && rect.height > 0
-                && element.className.includes('bg-brand-electric')
-                && ! element.className.includes('bg-brand-electricLight');
+                && (element.matches('.neo-btn') || element.matches('.product-action-btn'));
         })
         .map((element) => ({
             label: (element.textContent || element.getAttribute('aria-label') || element.href || element.tagName).trim(),
@@ -165,7 +176,7 @@ async function expectPrimaryActionsAtLeast44px(page) {
         }))
         .filter((element) => element.height < 44));
 
-    expect(tooSmall, `primary actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
+    expect(tooSmall, `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
 }
 
 async function expectTouchTargetAtLeast44px(locator) {

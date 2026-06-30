@@ -1,6 +1,59 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@source "../views";
+@source "../js";
+@source "../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views";
+
+@theme {
+    --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-lhie: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Space Grotesk", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+    --color-brand-electric: #0052ff;
+    --color-brand-electric-dark: #003ecc;
+    --color-brand-electric-light: #f0f5ff;
+    --color-brand-navy: #0b0f19;
+    --color-brand-slate-dark: #1e293b;
+    --color-brand-muted: #64748b;
+    --color-brand-border: #e2e8f0;
+    --color-brand-bg: #f8fafc;
+
+    --color-neo-ink: #050505;
+    --color-neo-cream: #fff4bd;
+    --color-neo-paper: #fff9dc;
+    --color-neo-pink: #db3f98;
+    --color-neo-green: #7bd10a;
+    --color-neo-cyan: #16b4ca;
+    --color-neo-yellow: #f2da3d;
+    --color-neo-purple: #8758de;
+    --color-neo-red: #ef4444;
+
+    --animate-storefront-float: storefront-float 7s ease-in-out infinite;
+    --animate-storefront-reveal: storefront-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes storefront-float {
+    0%,
+    100% {
+        transform: translate3d(0, 0, 0) rotate(0deg);
+    }
+
+    50% {
+        transform: translate3d(0, -18px, 0) rotate(1.5deg);
+    }
+}
+
+@keyframes storefront-reveal {
+    from {
+        opacity: 0;
+        transform: translate3d(0, 18px, 0) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+}
 
 @layer base {
     [x-cloak] {
