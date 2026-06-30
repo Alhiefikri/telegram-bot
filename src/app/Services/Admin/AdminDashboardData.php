@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -28,6 +29,7 @@ final class AdminDashboardData
             ->sum('amount');
         $statusCounts = $this->statusCounts();
         $storeUrl = route('storefront.home');
+        $paymentControl = $this->paymentControl($user);
 
         return [
             'admin' => [
@@ -125,6 +127,7 @@ final class AdminDashboardData
                 'hint' => $ordersToProcess > 0 ? 'Ada order perlu tindak lanjut' : 'Tidak ada antrean proses',
                 'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
             ],
+            'paymentControl' => $paymentControl,
             'products' => $this->latestProducts(),
             'categoryOptions' => $this->categoryOptions(),
             'orders' => $this->latestOrders(),
@@ -145,6 +148,26 @@ final class AdminDashboardData
                 ['id' => 'riwayat', 'label' => 'Riwayat'],
                 ['id' => 'affiliate', 'label' => 'Affiliate'],
             ],
+        ];
+    }
+
+    private function paymentControl(User $user): array
+    {
+        $settings = ManualPaymentSetting::current();
+        $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
+        $mode = $mode === 'pakasir' ? 'pakasir' : 'manual';
+
+        return [
+            'mode' => $mode,
+            'is_pakasir_enabled' => $mode === 'pakasir',
+            'label' => $mode === 'pakasir' ? 'Pakasir aktif' : 'Manual aktif',
+            'hint' => $mode === 'pakasir'
+                ? 'Checkout memakai QRIS/hosted Pakasir dan auto-verifikasi.'
+                : 'Checkout meminta bukti /payment dan menunggu approval admin.',
+            'tone' => $mode === 'pakasir' ? 'emerald' : 'amber',
+            'source' => $settings ? 'dashboard_setting' : 'env_default',
+            'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'update_url' => route('admin.payment-mode.update'),
         ];
     }
 

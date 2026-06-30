@@ -12,7 +12,7 @@ Komponen utama:
 
 - **Telegram**: antarmuka utama untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
-- **Pakasir**: gateway aktif untuk hosted-link checkout dengan API-key verification.
+- **Payment mode**: default production sementara memakai pembayaran manual `/payment` selama KYC Pakasir. Pakasir tetap tersedia sebagai hosted-link checkout dengan API-key verification dan bisa diaktifkan dari admin dashboard setelah siap.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
 - **Queue**: memproses pekerjaan background, termasuk pemrosesan update Telegram dan pengiriman receipt.
 - **Scheduler**: menjalankan expiry order pending dan rekonsiliasi pembayaran berkala.
@@ -335,8 +335,8 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
 - [ ] Setting payment manual/admin sudah benar: `DANA_QR_IMAGE_URL`, `DANA_ACCOUNT_NAME`, `DANA_ACCOUNT_NUMBER`, `TELEGRAM_ADMIN_CONTACT_URL`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
-- [ ] `TELEGRAM_PAYMENT_MODE=pakasir` untuk gateway aktif, dan `TELEGRAM_DEFAULT_PAYMENT_METHOD` sesuai kebutuhan.
-- [ ] Credential Pakasir terisi: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`.
+- [ ] `TELEGRAM_PAYMENT_MODE=manual` selama KYC Pakasir; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
+- [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
 - [ ] Queue worker berjalan di Supervisor/systemd/container process manager.

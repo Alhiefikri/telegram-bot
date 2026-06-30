@@ -144,6 +144,12 @@
                 </div>
             </x-admin-dashboard.card>
 
+            @if (session('status'))
+                <div class="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                    {{ session('status') }}
+                </div>
+            @endif
+
             <section class="mt-4 grid flex-1 gap-4 lg:grid-cols-[1.25fr_0.75fr]">
                 <x-admin-dashboard.card class="min-w-0">
                     <div x-show="activeTab === 'stats'">
@@ -628,6 +634,58 @@
                             Cek order
                         </x-admin-dashboard.action-row>
                     </div>
+
+                    <section class="mt-6 border-t border-slate-100 pt-5" aria-label="Mode pembayaran">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Mode pembayaran</p>
+                                <h2 class="mt-1 text-base font-bold text-brand-navy">{{ $paymentControl['label'] }}</h2>
+                            </div>
+                            <x-admin-dashboard.status-badge :tone="$paymentControl['tone']">
+                                {{ $paymentControl['is_pakasir_enabled'] ? 'ON' : 'OFF' }}
+                            </x-admin-dashboard.status-badge>
+                        </div>
+
+                        <p class="mt-3 text-sm font-medium text-slate-600">
+                            {{ $paymentControl['hint'] }}
+                        </p>
+
+                        @error('payment_mode', 'paymentMode')
+                            <p class="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{{ $message }}</p>
+                        @enderror
+
+                        @if ($paymentControl['can_manage'])
+                            <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <form method="POST" action="{{ $paymentControl['update_url'] }}">
+                                    @csrf
+                                    <input type="hidden" name="payment_mode" value="manual">
+                                    <x-admin-dashboard.button
+                                        type="submit"
+                                        variant="{{ $paymentControl['mode'] === 'manual' ? 'warning' : 'neutral' }}"
+                                        class="w-full min-h-10 px-3 text-xs"
+                                    >
+                                        Manual /payment
+                                    </x-admin-dashboard.button>
+                                </form>
+
+                                <form method="POST" action="{{ $paymentControl['update_url'] }}">
+                                    @csrf
+                                    <input type="hidden" name="payment_mode" value="pakasir">
+                                    <x-admin-dashboard.button
+                                        type="submit"
+                                        variant="{{ $paymentControl['mode'] === 'pakasir' ? 'secondary' : 'neutral' }}"
+                                        class="w-full min-h-10 px-3 text-xs"
+                                    >
+                                        Pakasir
+                                    </x-admin-dashboard.button>
+                                </form>
+                            </div>
+                        @else
+                            <p class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                                Hanya owner/admin yang bisa mengubah mode pembayaran.
+                            </p>
+                        @endif
+                    </section>
                 </x-admin-dashboard.card>
             </section>
         </main>

@@ -98,6 +98,37 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], $order->invoice_number));
     }
 
+    public function test_active_manual_dashboard_setting_overrides_pakasir_env_mode(): void
+    {
+        config()->set('services.telegram.payment_mode', 'pakasir');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Premium Account', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'checkout'))->assertOk();
+
+        $order = Order::firstOrFail();
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'DANA_QR',
+        ]);
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '12345'
+            && str_contains($r['text'], 'caption /payment')
+            && str_contains($r['text'], 'Premium Account'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '999'
+            && str_contains($r['text'], 'Order manual baru masuk dashboard'));
+    }
+
     public function test_checkout_callback_in_pakasir_mode_sends_qr_with_direct_payment_button(): void
     {
         config()->set('services.telegram.payment_mode', 'pakasir');

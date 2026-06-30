@@ -24,6 +24,11 @@ enum UserRole: string
         return in_array($this, [self::Owner, self::Admin, self::Finance], true);
     }
 
+    public function canManagePaymentSettings(): bool
+    {
+        return in_array($this, [self::Owner, self::Admin], true);
+    }
+
     public function canResendReceipts(): bool
     {
         return in_array($this, [self::Owner, self::Admin, self::Finance, self::Support], true);

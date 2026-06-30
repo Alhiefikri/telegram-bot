@@ -45,6 +45,66 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && $r['chat_id'] === 12345
             && str_contains($r['text'], 'Pembayaran diterima')
             && str_contains($r['text'], 'Email Account'));
+
+        $this->postTelegramWebhook($this->callbackUpdate(219, 'approve-payment-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $receiptCount = 0;
+        Http::assertSent(function ($r) use (&$receiptCount) {
+            if (str_ends_with($r->url(), '/sendMessage')
+                && $r['chat_id'] === 12345
+                && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima')) {
+                $receiptCount++;
+            }
+
+            return true;
+        });
+        $this->assertSame(1, $receiptCount);
+    }
+
+    public function test_non_admin_cannot_approve_manual_payment_callback(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(214, 'cb-manual', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->callbackUpdate(215, 'fake-approve', 'admin:approve-payment:'.$order->id, ['id' => 555, 'first_name' => 'Mallory'], 555))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'fake-approve'
+            && $r['text'] === 'Akses admin diperlukan.');
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima'));
+    }
+
+    public function test_customer_cannot_submit_payment_proof_for_another_customers_invoice(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $owner = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $attacker = Customer::factory()->create(['telegram_id' => 54321, 'username' => 'mallory']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($owner), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(216, 'cb-manual-owner', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(217, $order->invoice_number, ['id' => $attacker->telegram_id, 'username' => 'mallory'], 54321))->assertOk();
+
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && $r['chat_id'] === '999'
+            && str_contains((string) ($r['caption'] ?? ''), $order->invoice_number));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === '54321'
+            && str_contains($r['text'], 'Invoice tidak ditemukan'));
     }
 
     public function test_receipt_notifier_sends_paid_order_receipt(): void
