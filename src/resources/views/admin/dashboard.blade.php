@@ -336,6 +336,19 @@
     </head>
     <body class="min-h-full font-sans antialiased" style="font-family: 'Plus Jakarta Sans', sans-serif;">
         @php
+            $storeLink = $statsTab['storeLink'];
+            $summary = $statsTab['summary'];
+            $storeStatus = $statsTab['storeStatus'];
+            $actions = $statsTab['actions'];
+            $statsCards = $statsTab['cards'];
+            $actionableStatusCounts = $statsTab['actionableStatusCounts'];
+            $earnings = $statsTab['earnings'];
+            $paymentControl = $statsTab['paymentControl'];
+            $canManageProducts = $productsTab['canManage'];
+            $products = $productsTab['products'];
+            $categoryOptions = $productsTab['categoryOptions'];
+            $salesFilters = $salesTab['filters'];
+            $orders = $salesTab['orders'];
             $stockModalProduct = collect($products)->firstWhere('id', (int) old('stock_product_id'));
             $editingProduct = collect($products)->firstWhere('id', (int) old('product_id'));
             $hasProductErrors = $errors->productCreate->any() || $errors->productUpdate->any();
@@ -344,9 +357,9 @@
                 || $errors->stockAdjustment->any()
                 || $errors->categoryCreate->any()
                 || $errors->stockItemUpdate->any();
-            $productStoreUrl = route('admin.products.store');
+            $productStoreUrl = $productsTab['productStoreUrl'];
             $dashboardState = [
-                'activeTab' => $hasProductTabErrors ? 'produk' : ($activeTab ?? 'stats'),
+                'activeTab' => $hasProductTabErrors ? 'produk' : $navigation['activeTab'],
                 'storeLink' => $storeLink['url'],
                 'productStoreUrl' => $productStoreUrl,
                 'productModalOpen' => $hasProductErrors,

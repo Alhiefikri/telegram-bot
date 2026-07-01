@@ -3,7 +3,7 @@
                             <div class="flex min-w-0 items-start justify-between gap-3">
                                 <div class="min-w-0">
                                     <p class="truncate font-display text-base font-bold" style="color: #050505;">{{ $product['name'] }}</p>
-                                    <span class="neo-badge mt-1" style="background: {{ $product['is_active'] ? '#e8ffd4' : '#f1f5f9' }}; color: {{ $product['is_active'] ? '#166534' : '#64748b' }};">
+                                    <span class="neo-badge mt-1" style="background: {{ $product['status_badge']['background'] }}; color: {{ $product['status_badge']['color'] }};">
                                         {{ $product['status_label'] }}
                                     </span>
                                 </div>
@@ -35,8 +35,8 @@
                             </div>
 
                             {{-- Visibility status --}}
-                            <p class="mt-2 text-[11px] font-semibold" style="color: {{ $product['is_active'] ? '#7BD10A' : '#ef4444' }};">
-                                {{ $product['is_active'] ? '● Tampil di toko' : '○ Tidak tampil' }}
+                            <p class="mt-2 text-[11px] font-semibold" style="color: {{ $product['visibility_color'] }};">
+                                {{ $product['visibility_label'] }}
                             </p>
 
                             @if ($canManageProducts)
@@ -46,7 +46,7 @@
                                     type="button"
                                     class="product-action-btn"
                                     style="background: #d4f6fb; color: #0e7490;"
-                                    x-on:click="openProductEditModal(@js($productPayload))"
+                                    x-on:click="openProductEditModal(@js($product['edit_payload']))"
                                 >
                                     ✏️ Ubah
                                 </button>
@@ -54,7 +54,7 @@
                                     type="button"
                                     class="product-action-btn"
                                     style="background: #7BD10A; color: #166534;"
-                                    x-on:click="openStockModal(@js($stockPayload))"
+                                    x-on:click="openStockModal(@js($product['stock_payload']))"
                                 >
                                     ➕ Stok
                                 </button>
@@ -62,7 +62,7 @@
                                     type="button"
                                     class="product-action-btn"
                                     style="background: #f2da3d; color: #92400e;"
-                                    x-on:click="openManageStockModal(@js($productPayload))"
+                                    x-on:click="openManageStockModal(@js($product['edit_payload']))"
                                 >
                                     📦 Kelola
                                 </button>
@@ -83,7 +83,7 @@
                                         class="product-action-btn w-full"
                                         style="background: #fef9c3; color: #92400e;"
                                     >
-                                        {{ $product['is_active'] ? '⏸ Pause' : '▶ Play' }}
+                                        {{ $product['visibility_action_label'] }}
                                     </button>
                                 </form>
                                 <form method="POST" action="{{ $product['delete_url'] }}" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">

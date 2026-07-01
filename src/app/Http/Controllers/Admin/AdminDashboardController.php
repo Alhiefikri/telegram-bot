@@ -21,10 +21,7 @@ class AdminDashboardController extends Controller
 
         $user = $this->authorizeAdminAccess($request);
 
-        $viewData = $dashboardData->forAdmin($user);
-        $tabIds = collect($viewData['tabs'])->pluck('id')->all();
-        $requestedTab = (string) $request->query('tab', 'stats');
-        $viewData['activeTab'] = in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats';
+        $viewData = $dashboardData->forAdmin($user, (string) $request->query('tab', 'stats'));
 
         return view('admin.dashboard', $viewData);
     }

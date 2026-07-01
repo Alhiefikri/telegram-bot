@@ -16,7 +16,42 @@ use Illuminate\Support\Carbon;
 
 final class AdminDashboardData
 {
-    public function forAdmin(User $user): array
+    /**
+     * @return array{
+     *     admin: array{name: string, role: string},
+     *     metrics: array<string, int>,
+     *     navigation: array{activeTab: string, tabs: list<array{id: string, label: string}>},
+     *     statsTab: array<string, mixed>,
+     *     productsTab: array<string, mixed>,
+     *     salesTab: array<string, mixed>
+     * }
+     */
+    public function forAdmin(User $user, ?string $requestedTab = null): array
+    {
+        $metrics = $this->metrics();
+        $statusCounts = $this->statusCounts();
+        $storeLink = $this->storeLink();
+        $canManageProducts = (bool) $user->role?->canMutateProducts();
+
+        return [
+            'admin' => $this->adminIdentity($user),
+            'metrics' => $metrics,
+            'navigation' => $this->navigation($requestedTab),
+            'statsTab' => $this->statsTab($user, $metrics, $statusCounts, $storeLink),
+            'productsTab' => $this->productsTab($canManageProducts),
+            'salesTab' => $this->salesTab($statusCounts),
+        ];
+    }
+
+    private function adminIdentity(User $user): array
+    {
+        return [
+            'name' => $user->name ?: 'Admin LHIE',
+            'role' => $user->role?->value ?? 'operator',
+        ];
+    }
+
+    private function metrics(): array
     {
         $productCount = Product::query()->count();
         $activeProductCount = Product::query()->where('is_active', true)->count();
@@ -28,129 +63,138 @@ final class AdminDashboardData
         $readOnlyBalanceAmount = (int) Payment::query()
             ->where('status', PaymentStatus::Paid)
             ->sum('amount');
-        $statusCounts = $this->statusCounts();
-        $storeUrl = route('storefront.home');
-        $paymentControl = $this->paymentControl($user);
-        $canManageProducts = (bool) $user->role?->canMutateProducts();
 
         return [
-            'admin' => [
-                'name' => $user->name ?: 'Admin LHIE',
-                'role' => $user->role?->value ?? 'operator',
-            ],
-            'metrics' => [
-                'read_only_balance_amount' => $readOnlyBalanceAmount,
-                'gmv_amount' => $gmvAmount,
-                'product_count' => $productCount,
-                'active_product_count' => $activeProductCount,
-                'order_count' => $orderCount,
-                'orders_to_process' => $ordersToProcess,
-            ],
-            'balance' => [
-                'label' => 'Saldo estimasi',
-                'amount' => $readOnlyBalanceAmount,
-                'amount_formatted' => Money::idr($readOnlyBalanceAmount),
-                'source' => 'paid_payments',
-            ],
-            'storeLink' => [
-                'label' => 'Link toko',
-                'url' => $storeUrl,
-                'display' => parse_url($storeUrl, PHP_URL_HOST) ?: $storeUrl,
-            ],
-            'statsCards' => [
-                [
-                    'key' => 'gmv',
-                    'label' => 'GMV',
-                    'value' => Money::idr($gmvAmount),
-                    'hint' => 'Order aktif + selesai',
-                    'tone' => 'blue',
-                ],
-                [
-                    'key' => 'saldo',
-                    'label' => 'Saldo',
-                    'value' => Money::idr($readOnlyBalanceAmount),
-                    'hint' => 'Estimasi pembayaran paid',
-                    'tone' => 'emerald',
-                ],
-                [
-                    'key' => 'orders',
-                    'label' => 'Order',
-                    'value' => $orderCount,
-                    'hint' => 'Total pesanan',
-                    'tone' => 'amber',
-                ],
-                [
-                    'key' => 'active_products',
-                    'label' => 'Produk aktif',
-                    'value' => $activeProductCount,
-                    'hint' => 'Tampil di toko',
-                    'tone' => 'emerald',
-                ],
-            ],
-            'summary' => [
-                [
-                    'key' => 'saldo',
-                    'label' => 'Saldo',
-                    'value' => Money::idr($readOnlyBalanceAmount),
-                    'hint' => 'Estimasi pembayaran paid',
-                    'tone' => 'emerald',
-                ],
-                [
-                    'key' => 'gmv',
-                    'label' => 'GMV',
-                    'value' => Money::idr($gmvAmount),
-                    'hint' => 'Order aktif + selesai',
-                    'tone' => 'blue',
-                ],
-                [
-                    'key' => 'products',
-                    'label' => 'Produk',
-                    'value' => $productCount,
-                    'hint' => 'Total katalog',
-                    'tone' => 'slate',
-                ],
-                [
-                    'key' => 'active_products',
-                    'label' => 'Produk aktif',
-                    'value' => $activeProductCount,
-                    'hint' => 'Tampil di toko',
-                    'tone' => 'emerald',
-                ],
-                [
-                    'key' => 'orders_to_process',
-                    'label' => 'Perlu diproses',
-                    'value' => $ordersToProcess,
-                    'hint' => 'Order dibayar',
-                    'tone' => 'amber',
-                ],
-            ],
-            'storeStatus' => [
-                'label' => $activeProductCount > 0 ? 'Toko aktif' : 'Toko belum aktif',
-                'hint' => $ordersToProcess > 0 ? 'Ada order perlu tindak lanjut' : 'Tidak ada antrean proses',
-                'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
-            ],
-            'paymentControl' => $paymentControl,
-            'canManageProducts' => $canManageProducts,
-            'products' => $this->latestProducts($canManageProducts),
-            'categoryOptions' => $this->categoryOptions(),
-            'orders' => $this->latestOrders(),
-            'salesFilters' => $this->salesFilters($statusCounts),
+            'read_only_balance_amount' => $readOnlyBalanceAmount,
+            'gmv_amount' => $gmvAmount,
+            'product_count' => $productCount,
+            'active_product_count' => $activeProductCount,
+            'order_count' => $orderCount,
+            'orders_to_process' => $ordersToProcess,
+        ];
+    }
+
+    private function navigation(?string $requestedTab): array
+    {
+        $tabs = [
+            ['id' => 'stats', 'label' => 'Stats'],
+            ['id' => 'produk', 'label' => 'Produk'],
+            ['id' => 'penjualan', 'label' => 'Penjualan'],
+            ['id' => 'broadcast', 'label' => 'Broadcast'],
+            ['id' => 'withdraw', 'label' => 'Withdraw'],
+            ['id' => 'riwayat', 'label' => 'Riwayat'],
+            ['id' => 'affiliate', 'label' => 'Affiliate'],
+        ];
+        $tabIds = array_column($tabs, 'id');
+        $requestedTab = (string) ($requestedTab ?: 'stats');
+
+        return [
+            'activeTab' => in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats',
+            'tabs' => $tabs,
+        ];
+    }
+
+    private function statsTab(User $user, array $metrics, array $statusCounts, array $storeLink): array
+    {
+        return [
+            'balance' => $this->balance($metrics['read_only_balance_amount']),
+            'storeLink' => $storeLink,
+            'cards' => $this->statsCards($metrics),
+            'summary' => $this->summaryCards($metrics),
+            'storeStatus' => $this->storeStatus($metrics),
+            'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
             'actions' => [
                 'shop' => url('/#products'),
-                'share' => $storeUrl,
+                'share' => $storeLink['url'],
             ],
-            'tabs' => [
-                ['id' => 'stats', 'label' => 'Stats'],
-                ['id' => 'produk', 'label' => 'Produk'],
-                ['id' => 'penjualan', 'label' => 'Penjualan'],
-                ['id' => 'broadcast', 'label' => 'Broadcast'],
-                ['id' => 'withdraw', 'label' => 'Withdraw'],
-                ['id' => 'riwayat', 'label' => 'Riwayat'],
-                ['id' => 'affiliate', 'label' => 'Affiliate'],
-            ],
+        ];
+    }
+
+    private function productsTab(bool $canManageProducts): array
+    {
+        return [
+            'canManage' => $canManageProducts,
+            'productStoreUrl' => route('admin.products.store'),
+            'products' => $this->latestProducts($canManageProducts),
+            'categoryOptions' => $this->categoryOptions(),
+        ];
+    }
+
+    private function salesTab(array $statusCounts): array
+    {
+        return [
+            'orders' => $this->latestOrders(),
+            'filters' => $this->salesFilters($statusCounts),
+            'statusCounts' => $statusCounts,
+        ];
+    }
+
+    private function balance(int $readOnlyBalanceAmount): array
+    {
+        return [
+            'label' => 'Saldo estimasi',
+            'amount' => $readOnlyBalanceAmount,
+            'amount_formatted' => Money::idr($readOnlyBalanceAmount),
+            'source' => 'paid_payments',
+        ];
+    }
+
+    private function storeLink(): array
+    {
+        $storeUrl = route('storefront.home');
+
+        return [
+            'label' => 'Link toko',
+            'url' => $storeUrl,
+            'display' => parse_url($storeUrl, PHP_URL_HOST) ?: $storeUrl,
+        ];
+    }
+
+    private function statsCards(array $metrics): array
+    {
+        return [
+            $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
+            $this->metricCard('saldo', 'Saldo', Money::idr($metrics['read_only_balance_amount']), 'Estimasi pembayaran paid', 'emerald'),
+            $this->metricCard('orders', 'Order', $metrics['order_count'], 'Total pesanan', 'amber'),
+            $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
+        ];
+    }
+
+    private function summaryCards(array $metrics): array
+    {
+        return [
+            $this->metricCard('saldo', 'Saldo', Money::idr($metrics['read_only_balance_amount']), 'Estimasi pembayaran paid', 'emerald'),
+            $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
+            $this->metricCard('products', 'Produk', $metrics['product_count'], 'Total katalog', 'slate'),
+            $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
+            $this->metricCard('orders_to_process', 'Perlu diproses', $metrics['orders_to_process'], 'Order dibayar', 'amber'),
+        ];
+    }
+
+    private function metricCard(string $key, string $label, int|string $value, string $hint, string $tone): array
+    {
+        return [
+            'key' => $key,
+            'label' => $label,
+            'value' => $value,
+            'hint' => $hint,
+            'tone' => $tone,
+            'card_class' => $this->toneCardClass($tone),
+        ];
+    }
+
+    private function storeStatus(array $metrics): array
+    {
+        $activeProductCount = $metrics['active_product_count'];
+        $ordersToProcess = $metrics['orders_to_process'];
+
+        return [
+            'label' => $activeProductCount > 0 ? 'Toko aktif' : 'Toko belum aktif',
+            'hint' => $ordersToProcess > 0 ? 'Ada order perlu tindak lanjut' : 'Tidak ada antrean proses',
+            'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
         ];
     }
 
@@ -159,18 +203,24 @@ final class AdminDashboardData
         $settings = ManualPaymentSetting::current();
         $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
         $mode = $mode === 'pakasir' ? 'pakasir' : 'manual';
+        $isPakasirEnabled = $mode === 'pakasir';
 
         return [
             'mode' => $mode,
-            'is_pakasir_enabled' => $mode === 'pakasir',
-            'label' => $mode === 'pakasir' ? 'Pakasir aktif' : 'Manual aktif',
-            'hint' => $mode === 'pakasir'
+            'is_pakasir_enabled' => $isPakasirEnabled,
+            'label' => $isPakasirEnabled ? 'Pakasir aktif' : 'Manual aktif',
+            'hint' => $isPakasirEnabled
                 ? 'Checkout memakai QRIS/hosted Pakasir dan auto-verifikasi.'
                 : 'Checkout meminta bukti /payment dan menunggu approval admin.',
-            'tone' => $mode === 'pakasir' ? 'emerald' : 'amber',
+            'tone' => $isPakasirEnabled ? 'emerald' : 'amber',
             'source' => $settings ? 'dashboard_setting' : 'env_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'update_url' => route('admin.payment-mode.update'),
+            'status_badge' => [
+                'label' => $isPakasirEnabled ? 'AKTIF' : 'NONAKTIF',
+                'background' => $isPakasirEnabled ? '#e8ffd4' : '#fce4f0',
+                'dot' => $isPakasirEnabled ? '#7BD10A' : '#ef4444',
+            ],
         ];
     }
 
@@ -212,6 +262,8 @@ final class AdminDashboardData
                         ])
                         ->all()
                     : [];
+                $stockUrl = route('admin.products.stock.store', ['product' => $product]);
+                $updateUrl = route('admin.products.update', ['product' => $product]);
 
                 return [
                     'id' => $product->id,
@@ -231,15 +283,49 @@ final class AdminDashboardData
                     'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
                     'status_label' => $product->is_active ? 'Aktif' : 'Pause',
-                    'update_url' => route('admin.products.update', ['product' => $product]),
+                    'status_badge' => $this->productStatusBadge($product->is_active),
+                    'visibility_label' => $product->is_active ? '● Tampil di toko' : '○ Tidak tampil',
+                    'visibility_color' => $product->is_active ? '#7BD10A' : '#ef4444',
+                    'visibility_action_label' => $product->is_active ? '⏸ Pause' : '▶ Play',
+                    'update_url' => $updateUrl,
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
-                    'stock_url' => route('admin.products.stock.store', ['product' => $product]),
+                    'stock_url' => $stockUrl,
                     'visibility_url' => route('admin.products.visibility.update', ['product' => $product]),
                     'share_url' => route('storefront.home').'#product-'.$product->id,
                     'created_at' => $product->created_at?->toDateTimeString(),
+                    'stock_payload' => [
+                        'id' => $product->id,
+                        'name' => $product->name,
+                        'stock' => $product->stock,
+                        'stockUrl' => $stockUrl,
+                    ],
+                    'edit_payload' => [
+                        'id' => $product->id,
+                        'name' => $product->name,
+                        'priceAmount' => $product->price_amount,
+                        'categoryId' => $product->category_id,
+                        'description' => $descriptionSections['description'],
+                        'features' => $descriptionSections['features'],
+                        'specifications' => $descriptionSections['specifications'],
+                        'isActive' => $product->is_active,
+                        'updateUrl' => $updateUrl,
+                        'stockUrl' => $stockUrl,
+                        'stock' => $product->stock,
+                        'availableStockItemCount' => $availableStockItemCount,
+                        'stockItemsTruncated' => $availableStockItemCount > count($stockItems),
+                        'stockItems' => $stockItems,
+                    ],
                 ];
             })
             ->all();
+    }
+
+    private function productStatusBadge(bool $isActive): array
+    {
+        return [
+            'background' => $isActive ? '#e8ffd4' : '#f1f5f9',
+            'color' => $isActive ? '#166534' : '#64748b',
+        ];
     }
 
     /**
@@ -313,6 +399,8 @@ final class AdminDashboardData
             ->get()
             ->map(function (Order $order): array {
                 $paidAmount = (int) $order->payments->sum('amount');
+                $orderStatusTone = $this->orderStatusTone($order->order_status);
+                $paymentStatusTone = $this->paymentStatusTone($order->payment_status);
 
                 return [
                     'id' => $order->id,
@@ -322,10 +410,12 @@ final class AdminDashboardData
                     'filter_groups' => $this->orderFilterGroups($order->order_status),
                     'order_status' => $order->order_status->value,
                     'order_status_label' => $this->orderStatusLabel($order->order_status),
-                    'order_status_tone' => $this->orderStatusTone($order->order_status),
+                    'order_status_tone' => $orderStatusTone,
+                    'order_status_badge' => $this->toneBadgeStyle($orderStatusTone),
                     'payment_status' => $order->payment_status->value,
                     'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
-                    'payment_status_tone' => $this->paymentStatusTone($order->payment_status),
+                    'payment_status_tone' => $paymentStatusTone,
+                    'payment_status_badge' => $this->toneBadgeStyle($paymentStatusTone),
                     'price' => Money::idr($order->total_amount),
                     'earning' => Money::idr($paidAmount),
                     'earning_amount' => $paidAmount,
@@ -346,13 +436,22 @@ final class AdminDashboardData
 
         return collect(OrderStatus::cases())
             ->mapWithKeys(fn (OrderStatus $status): array => [
-                $status->value => [
-                    'label' => $this->orderStatusLabel($status),
-                    'count' => (int) ($counts[$status->value] ?? 0),
-                    'tone' => $this->orderStatusTone($status),
-                ],
+                $status->value => $this->statusCount($status, (int) ($counts[$status->value] ?? 0)),
             ])
             ->all();
+    }
+
+    private function statusCount(OrderStatus $status, int $count): array
+    {
+        $tone = $this->orderStatusTone($status);
+
+        return [
+            'label' => $this->orderStatusLabel($status),
+            'count' => $count,
+            'tone' => $tone,
+            'card_class' => $this->toneCardClass($tone),
+            'inline_style' => $tone === 'slate' ? 'background: #fff;' : null,
+        ];
     }
 
     private function actionableStatusCounts(array $statusCounts): array
@@ -509,6 +608,28 @@ final class AdminDashboardData
             OrderStatus::Completed => 'emerald',
             OrderStatus::Cancelled, OrderStatus::Expired => 'rose',
             default => 'slate',
+        };
+    }
+
+    private function toneCardClass(string $tone): string
+    {
+        return match ($tone) {
+            'emerald' => 'stat-card-green',
+            'blue' => 'stat-card-cyan',
+            'amber' => 'stat-card-yellow',
+            'rose' => 'stat-card-pink',
+            default => 'stat-card-purple',
+        };
+    }
+
+    private function toneBadgeStyle(string $tone): array
+    {
+        return match ($tone) {
+            'emerald' => ['background' => '#e8ffd4', 'color' => '#166534'],
+            'amber' => ['background' => '#fef9c3', 'color' => '#92400e'],
+            'blue' => ['background' => '#d4f6fb', 'color' => '#0e7490'],
+            'rose' => ['background' => '#fecaca', 'color' => '#dc2626'],
+            default => ['background' => '#f1f5f9', 'color' => '#64748b'],
         };
     }
 }

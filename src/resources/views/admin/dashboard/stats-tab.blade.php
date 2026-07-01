@@ -41,15 +41,7 @@
                     {{-- Stats cards grid --}}
                     <section class="grid grid-cols-2 gap-3" aria-label="Kartu Stats">
                         @foreach ($statsCards as $metric)
-                            @php
-                                $statStyle = match($metric['tone']) {
-                                    'emerald' => 'stat-card-green',
-                                    'blue' => 'stat-card-cyan',
-                                    'amber' => 'stat-card-yellow',
-                                    default => 'stat-card-purple',
-                                };
-                            @endphp
-                            <div class="{{ $statStyle }} rounded-xl p-3" style="border: 2px solid #050505; box-shadow: 2px 2px 0px #050505;">
+                            <div class="{{ $metric['card_class'] }} rounded-xl p-3" style="border: 2px solid #050505; box-shadow: 2px 2px 0px #050505;">
                                 <p class="font-display text-[10px] font-bold uppercase tracking-wider" style="color: #050505;">{{ $metric['label'] }}</p>
                                 <p class="mt-1 break-words font-display text-xl font-bold" style="color: #050505;">{{ $metric['value'] }}</p>
                                 @if ($metric['hint'])
@@ -64,17 +56,7 @@
                         <h2 class="font-display text-sm font-black uppercase tracking-[0.18em]" style="color: #050505;">📦 Status Pesanan</h2>
                         <div class="mt-3 grid grid-cols-2 gap-2">
                             @foreach ($actionableStatusCounts as $status)
-                                @php
-                                    $statusBg = match($status['tone']) {
-                                        'emerald' => 'stat-card-green',
-                                        'amber' => 'stat-card-yellow',
-                                        'blue' => 'stat-card-cyan',
-                                        'rose' => 'stat-card-pink',
-                                        default => 'background: #fff;',
-                                    };
-                                    $isClass = !str_starts_with($statusBg, 'background');
-                                @endphp
-                                <div class="status-order-card {{ $isClass ? $statusBg : '' }}" @if(!$isClass) style="{{ $statusBg }}" @endif>
+                                <div class="status-order-card {{ $status['card_class'] }}" @if($status['inline_style']) style="{{ $status['inline_style'] }}" @endif>
                                     <p class="truncate font-display text-[10px] font-bold uppercase tracking-wider" style="color: #050505;">{{ $status['label'] }}</p>
                                     <p class="mt-1 font-display text-2xl font-bold" style="color: #050505;">{{ $status['count'] }}</p>
                                 </div>
@@ -107,9 +89,9 @@
                             <p class="font-display text-[10px] font-bold uppercase tracking-wider" style="color: #64748b;">Mode pembayaran</p>
                             <h2 class="mt-1 font-display text-base font-bold" style="color: #050505;">{{ $paymentControl['label'] }}</h2>
                         </div>
-                        <span class="neo-badge" style="background: {{ $paymentControl['is_pakasir_enabled'] ? '#e8ffd4' : '#fce4f0' }}; color: #050505;">
-                            <span class="h-1.5 w-1.5 rounded-full" style="background: {{ $paymentControl['is_pakasir_enabled'] ? '#7BD10A' : '#ef4444' }};"></span>
-                            {{ $paymentControl['is_pakasir_enabled'] ? 'AKTIF' : 'NONAKTIF' }}
+                        <span class="neo-badge" style="background: {{ $paymentControl['status_badge']['background'] }}; color: #050505;">
+                            <span class="h-1.5 w-1.5 rounded-full" style="background: {{ $paymentControl['status_badge']['dot'] }};"></span>
+                            {{ $paymentControl['status_badge']['label'] }}
                         </span>
                     </div>
 

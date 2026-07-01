@@ -29,15 +29,7 @@
                 {{-- 2x2 stat cards grid --}}
                 <section class="relative z-10 mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3" aria-label="Ringkasan toko">
                     @foreach ($summary as $metric)
-                        @php
-                            $cardStyle = match($metric['tone']) {
-                                'emerald' => 'stat-card-green',
-                                'blue' => 'stat-card-cyan',
-                                'amber' => 'stat-card-yellow',
-                                default => 'stat-card-purple',
-                            };
-                        @endphp
-                        <div class="{{ $cardStyle }} rounded-[1rem] p-3 md:p-4" style="border: 3px solid #050505; box-shadow: 3px 3px 0px #050505;">
+                        <div class="{{ $metric['card_class'] }} rounded-[1rem] p-3 md:p-4" style="border: 3px solid #050505; box-shadow: 3px 3px 0px #050505;">
                             <p class="font-display text-[10px] font-black uppercase tracking-[0.18em]" style="color: #050505;">{{ $metric['label'] }}</p>
                             <p class="mt-1 break-words font-display text-lg font-black leading-none" style="color: #050505;">{{ $metric['value'] }}</p>
                             @if ($metric['hint'])

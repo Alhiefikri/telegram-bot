@@ -63,30 +63,6 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                     @forelse ($products as $product)
-                        @php
-                            $stockPayload = [
-                                'id' => $product['id'],
-                                'name' => $product['name'],
-                                'stock' => $product['stock'],
-                                'stockUrl' => $product['stock_url'],
-                            ];
-                            $productPayload = [
-                                'id' => $product['id'],
-                                'name' => $product['name'],
-                                'priceAmount' => $product['price_amount'],
-                                'categoryId' => $product['category_id'],
-                                'description' => $product['description'],
-                                'features' => $product['features'],
-                                'specifications' => $product['specifications'],
-                                'isActive' => $product['is_active'],
-                                'updateUrl' => $product['update_url'],
-                                'stockUrl' => $product['stock_url'],
-                                'stock' => $product['stock'],
-                                'availableStockItemCount' => $product['available_stock_item_count'],
-                                'stockItemsTruncated' => $product['stock_items_truncated'],
-                                'stockItems' => $product['stock_items'],
-                            ];
-                        @endphp
 
                         @include('admin.dashboard.product-card')
                     @empty

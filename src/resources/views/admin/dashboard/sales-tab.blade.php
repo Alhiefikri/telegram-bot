@@ -42,23 +42,7 @@
                                     <p class="truncate text-[10px] font-bold uppercase tracking-wider" style="color: #64748b;">{{ $order['invoice_number'] }}</p>
                                     <p class="mt-1 truncate font-display text-base font-bold" style="color: #050505;">{{ $order['product_name'] }}</p>
                                 </div>
-                                @php
-                                    $orderBadgeBg = match($order['order_status_tone']) {
-                                        'emerald' => '#e8ffd4',
-                                        'amber' => '#fef9c3',
-                                        'blue' => '#d4f6fb',
-                                        'rose' => '#fecaca',
-                                        default => '#f1f5f9',
-                                    };
-                                    $orderBadgeColor = match($order['order_status_tone']) {
-                                        'emerald' => '#166534',
-                                        'amber' => '#92400e',
-                                        'blue' => '#0e7490',
-                                        'rose' => '#dc2626',
-                                        default => '#64748b',
-                                    };
-                                @endphp
-                                <span class="neo-badge" style="background: {{ $orderBadgeBg }}; color: {{ $orderBadgeColor }};">
+                                <span class="neo-badge" style="background: {{ $order['order_status_badge']['background'] }}; color: {{ $order['order_status_badge']['color'] }};">
                                     <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
                                     {{ $order['order_status_label'] }}
                                 </span>
@@ -90,21 +74,7 @@
 
                             {{-- Payment badge + item count --}}
                             <div class="mt-3 flex flex-wrap items-center gap-2">
-                                @php
-                                    $payBadgeBg = match($order['payment_status_tone']) {
-                                        'emerald' => '#e8ffd4',
-                                        'amber' => '#fef9c3',
-                                        'rose' => '#fecaca',
-                                        default => '#f1f5f9',
-                                    };
-                                    $payBadgeColor = match($order['payment_status_tone']) {
-                                        'emerald' => '#166534',
-                                        'amber' => '#92400e',
-                                        'rose' => '#dc2626',
-                                        default => '#64748b',
-                                    };
-                                @endphp
-                                <span class="neo-badge" style="background: {{ $payBadgeBg }}; color: {{ $payBadgeColor }};">
+                                <span class="neo-badge" style="background: {{ $order['payment_status_badge']['background'] }}; color: {{ $order['payment_status_badge']['color'] }};">
                                     {{ $order['payment_status_label'] }}
                                 </span>
                                 <span class="text-xs font-bold" style="color: #64748b;">{{ $order['item_count'] }} item</span>
