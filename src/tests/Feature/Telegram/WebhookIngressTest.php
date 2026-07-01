@@ -55,8 +55,11 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $update = TelegramUpdate::create(['update_id' => 103, 'payload' => $this->messageUpdate(103, '/start'), 'created_at' => now()]);
 
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+        $processedAt = $update->fresh()->processed_at;
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
 
+        $this->assertNotNull($processedAt);
+        $this->assertEquals($processedAt, $update->fresh()->processed_at);
         Http::assertSentCount(2);
     }
 
