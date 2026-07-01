@@ -20,10 +20,21 @@ class TelegramCartIntents
         }
 
         try {
-            $product = Product::findOrFail($productId);
+            $product = Product::query()
+                ->whereKey($productId)
+                ->where('is_active', true)
+                ->firstOrFail();
+
+            if (($product->stock - $product->reserved_stock) < $quantity) {
+                $this->bot->sendMessage($chatId, 'Produk tidak tersedia atau stok tidak cukup.');
+
+                return false;
+            }
+
             $cart = $this->carts->activeCartFor($customer);
             $this->carts->addItem($cart, $product, $quantity);
-            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n\nSiap checkout? Pilih pembayaran anda.", [
+            $subtotal = $product->price_amount * $quantity;
+            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal item: Rp".number_format($subtotal, 0, ',', '.')."\n\nSiap checkout? Pilih pembayaran anda.", [
                 'inline_keyboard' => [
                     [
                         ['text' => 'DANA', 'callback_data' => 'payment:dana'],

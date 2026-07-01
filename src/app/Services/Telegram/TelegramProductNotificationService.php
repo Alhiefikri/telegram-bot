@@ -19,13 +19,17 @@ class TelegramProductNotificationService
             return;
         }
 
+        $availableStock = max(0, $product->stock - $product->reserved_stock);
+
         $this->broadcast->sendToActiveUsers(implode("\n", [
             'Produk baru sudah masuk:',
             '📦 '.$product->name,
-            '💰 Rp '.number_format($product->price_amount, 0, ',', '.'),
+            '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
+            '📦 Stok: '.$availableStock,
             '',
-            'Buka /katalog untuk cek detail dan stok terbaru.',
-        ]), '🆕 Produk Baru');
+            '📝 Deskripsi',
+            $this->descriptionText($product),
+        ]), '🆕 Produk Baru', $this->productReplyMarkup($product, $availableStock));
     }
 
     public function notifyStockAdded(Product $product, int $addedQuantity): void
@@ -36,15 +40,36 @@ class TelegramProductNotificationService
 
         $availableStock = max(0, $product->stock - $product->reserved_stock);
         $this->broadcast->sendToActiveUsers(implode("\n", [
-            'Stok produk bertambah:',
+            'Produk ready dibeli:',
             '📦 '.$product->name,
-            '➕ Masuk '.$addedQuantity.' item',
-            '✅ Tersedia sekarang: '.$availableStock,
+            '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
+            '📦 Stok: '.$availableStock,
             '',
-            'Buka /katalog untuk order sebelum habis.',
-        ]), '✅ Stok Ready');
+            '📝 Deskripsi',
+            $this->descriptionText($product),
+        ]), '✅ Stok Ready', $this->productReplyMarkup($product, $availableStock));
     }
 
+
+    private function productReplyMarkup(Product $product, int $availableStock): array
+    {
+        if ($availableStock < 1) {
+            return [];
+        }
+
+        return [
+            'inline_keyboard' => [[
+                ['text' => '👁️ Lihat', 'callback_data' => 'product:'.$product->id],
+            ]],
+        ];
+    }
+
+    private function descriptionText(Product $product): string
+    {
+        $description = trim((string) $product->description);
+
+        return $description !== '' ? $description : 'Deskripsi produk segera dilengkapi.';
+    }
     public function notifyOutOfStock(Product $product): void
     {
         $adminChatId = $this->adminAccess->adminChatId();

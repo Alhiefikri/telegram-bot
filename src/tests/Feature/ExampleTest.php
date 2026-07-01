@@ -7,6 +7,7 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -122,12 +123,41 @@ class ExampleTest extends TestCase
             ->assertSee('Canva Pro Bulanan')
             ->assertSee('AI Tools')
             ->assertSee('Rp125.000')
+            ->assertSee('Akses desain premium untuk kebutuhan konten harian.')
             ->assertSee('Sisa 5')
             ->assertSee('Gambar produk menyusul')
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
             ->assertDontSee('Produk Dari Kategori Nonaktif')
             ->assertDontSee('Produk Dari Kategori Terhapus');
+    }
+
+    public function test_storefront_product_cards_show_public_details_links_and_hide_stock_item_secrets(): void
+    {
+        config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore');
+        $product = Product::factory()->create([
+            'name' => 'Claude Pro Bulanan',
+            'description' => 'Akses Claude premium untuk kerja harian.',
+            'price_amount' => 175000,
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'claude-user@example.test | password: Secret-333']);
+        Product::factory()->create(['name' => 'Produk Nonaktif Rahasia', 'is_active' => false]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Claude Pro Bulanan')
+            ->assertSee('Rp175.000')
+            ->assertSee('Akses Claude premium untuk kerja harian.')
+            ->assertSee('Sisa 3')
+            ->assertSee('Order Sekarang')
+            ->assertSee('https://t.me/lhiestore?text=', false)
+            ->assertSee('Support Telegram')
+            ->assertDontSee('Produk Nonaktif Rahasia')
+            ->assertDontSee('claude-user@example.test')
+            ->assertDontSee('Secret-333');
     }
 
     public function test_active_categories_render_in_sort_order_while_inactive_and_deleted_stay_hidden(): void

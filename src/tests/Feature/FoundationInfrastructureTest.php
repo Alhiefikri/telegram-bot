@@ -17,6 +17,14 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame('jobs', config('queue.connections.database.table'));
     }
 
+    public function test_supervisor_database_worker_processes_notification_queue(): void
+    {
+        $contents = file_get_contents(base_path('../supervisord.conf'));
+
+        $this->assertStringContainsString('queue:work database', $contents);
+        $this->assertStringContainsString('--queue=notifications,default', $contents);
+    }
+
     public function test_queue_migration_contains_required_tables(): void
     {
         $migration = database_path('migrations/0001_01_01_000002_create_jobs_table.php');

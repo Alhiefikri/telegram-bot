@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
@@ -30,6 +31,7 @@ final class AdminDashboardData
         $statusCounts = $this->statusCounts();
         $storeUrl = route('storefront.home');
         $paymentControl = $this->paymentControl($user);
+        $canManageProducts = (bool) $user->role?->canMutateProducts();
 
         return [
             'admin' => [
@@ -128,7 +130,8 @@ final class AdminDashboardData
                 'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
             ],
             'paymentControl' => $paymentControl,
-            'products' => $this->latestProducts(),
+            'canManageProducts' => $canManageProducts,
+            'products' => $this->latestProducts($canManageProducts),
             'categoryOptions' => $this->categoryOptions(),
             'orders' => $this->latestOrders(),
             'salesFilters' => $this->salesFilters($statusCounts),
@@ -171,16 +174,44 @@ final class AdminDashboardData
         ];
     }
 
-    private function latestProducts(): array
+    private function latestProducts(bool $includeManageableStockItems): array
     {
-        return Product::query()
+        $products = Product::query()
             ->with('category:id,name')
             ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'is_active', 'created_at'])
             ->latest()
             ->limit(5)
-            ->get()
-            ->map(function (Product $product): array {
+            ->get();
+
+        $productIds = $products->pluck('id')->all();
+        $availableStockCounts = $includeManageableStockItems
+            ? ProductStockItem::query()
+                ->whereIn('product_id', $productIds)
+                ->whereNull('order_item_id')
+                ->selectRaw('product_id, count(*) as aggregate')
+                ->groupBy('product_id')
+                ->pluck('aggregate', 'product_id')
+            : collect();
+
+        return $products
+            ->map(function (Product $product) use ($availableStockCounts, $includeManageableStockItems): array {
                 $descriptionSections = $this->productDescriptionSections($product->description);
+                $availableStockItemCount = (int) ($availableStockCounts[$product->id] ?? 0);
+                $stockItems = $includeManageableStockItems
+                    ? ProductStockItem::query()
+                        ->where('product_id', $product->id)
+                        ->whereNull('order_item_id')
+                        ->oldest('id')
+                        ->limit(25)
+                        ->get()
+                        ->map(fn (ProductStockItem $stockItem): array => [
+                            'id' => $stockItem->id,
+                            'secret' => $stockItem->secret,
+                            'update_url' => route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]),
+                            'delete_url' => route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]),
+                        ])
+                        ->all()
+                    : [];
 
                 return [
                     'id' => $product->id,
@@ -195,11 +226,15 @@ final class AdminDashboardData
                     'stock' => $product->stock,
                     'reserved_stock' => $product->reserved_stock,
                     'available_stock' => max(0, $product->stock - $product->reserved_stock),
+                    'available_stock_item_count' => $availableStockItemCount,
+                    'stock_items_truncated' => $availableStockItemCount > count($stockItems),
+                    'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
-                    'status_label' => $product->is_active ? 'Aktif' : 'Nonaktif',
+                    'status_label' => $product->is_active ? 'Aktif' : 'Pause',
                     'update_url' => route('admin.products.update', ['product' => $product]),
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
                     'stock_url' => route('admin.products.stock.store', ['product' => $product]),
+                    'visibility_url' => route('admin.products.visibility.update', ['product' => $product]),
                     'share_url' => route('storefront.home').'#product-'.$product->id,
                     'created_at' => $product->created_at?->toDateTimeString(),
                 ];

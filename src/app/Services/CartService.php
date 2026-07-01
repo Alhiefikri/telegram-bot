@@ -19,7 +19,7 @@ class CartService
         return DB::transaction(function () use ($customer, $expiresAt) {
             Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
 
-            $cart = Cart::where('customer_id', $customer->id)->where('status', CartStatus::Active)->lockForUpdate()->first();
+            $cart = $this->activeCartQuery($customer)->lockForUpdate()->first();
 
             if ($cart && $cart->expires_at && $cart->expires_at->isPast()) {
                 $cart->update(['status' => CartStatus::Expired]);
@@ -27,6 +27,23 @@ class CartService
             }
 
             return $cart ?: Cart::create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => $expiresAt ?: now()->addHours(24)]);
+        }, 5);
+    }
+
+    public function currentActiveCartFor(Customer $customer): ?Cart
+    {
+        return DB::transaction(function () use ($customer) {
+            Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
+
+            $cart = $this->activeCartQuery($customer)->lockForUpdate()->first();
+
+            if ($cart && $cart->expires_at && $cart->expires_at->isPast()) {
+                $cart->update(['status' => CartStatus::Expired]);
+
+                return null;
+            }
+
+            return $cart;
         }, 5);
     }
 
@@ -60,6 +77,11 @@ class CartService
             $lockedCart = $this->lockActiveCart($cart);
             CartItem::where('cart_id', $lockedCart->id)->where('product_id', $product->id)->lockForUpdate()->delete();
         }, 5);
+    }
+
+    private function activeCartQuery(Customer $customer)
+    {
+        return Cart::where('customer_id', $customer->id)->where('status', CartStatus::Active);
     }
 
     private function mutateItem(Cart $cart, Product $product, callable $quantityResolver): CartItem

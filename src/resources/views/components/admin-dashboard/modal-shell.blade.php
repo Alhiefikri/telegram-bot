@@ -1,6 +1,7 @@
 @props([
     'id' => 'admin-dashboard-modal',
     'title',
+    'titleExpression' => null,
     'description' => null,
     'closable' => true,
 ])
@@ -14,15 +15,15 @@
     aria-modal="true"
     aria-labelledby="{{ $titleId }}"
     {{ $attributes->class([
-        'relative rounded-[1.25rem] border-[3px] border-neo-ink bg-white p-5 text-neo-ink shadow-[6px_6px_0_0_#050505]',
+        'relative rounded-[0.65rem] border-[4px] border-neo-ink bg-white p-4 text-neo-ink shadow-[7px_7px_0_0_#050505] sm:p-5',
     ]) }}
 >
     <div class="flex items-start justify-between gap-4 pr-10">
         <div class="min-w-0">
-            <h2 id="{{ $titleId }}" class="font-sans text-xl font-extrabold uppercase text-neo-ink">{{ $title }}</h2>
+            <h2 id="{{ $titleId }}" class="font-sans text-xl font-extrabold uppercase leading-none tracking-tight text-neo-ink sm:text-2xl" @if ($titleExpression) x-text="{{ $titleExpression }}" @endif>{{ $title }}</h2>
 
             @if ($description)
-                <p class="mt-1 text-sm font-bold leading-6 text-neo-ink/60">{{ $description }}</p>
+                <p class="mt-2 text-[11px] font-extrabold uppercase leading-5 tracking-wide text-neo-ink/65">{{ $description }}</p>
             @endif
         </div>
     </div>
@@ -30,7 +31,7 @@
     @if ($closable)
         <button
             type="button"
-            class="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-[0.9rem] border-[3px] border-neo-ink bg-[#fef9c3] text-neo-ink shadow-[3px_3px_0_0_#050505] transition-transform hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px]"
+            class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-[0.35rem] border-[3px] border-neo-ink bg-white text-neo-ink shadow-[3px_3px_0_0_#050505] transition-transform hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px]"
             aria-label="Tutup modal"
             x-on:click="$dispatch('admin-dashboard:close-modal', { modal: '{{ $id }}' })"
         >

@@ -93,35 +93,37 @@
             .neo-input {
                 background: #ffffff;
                 border: 3px solid #050505;
-                border-radius: 16px;
-                padding: 13px 16px;
+                border-radius: 10px;
+                padding: 12px 14px;
                 font-family: 'Plus Jakarta Sans', sans-serif;
-                font-weight: 600;
+                font-weight: 700;
                 font-size: 14px;
                 color: #050505;
                 width: 100%;
-                transition: box-shadow 0.2s, border-color 0.2s;
+                box-shadow: 3px 3px 0px #050505;
+                transition: box-shadow 0.2s, border-color 0.2s, transform 0.15s;
             }
             .neo-input:focus {
                 outline: none;
                 border-color: #8758de;
-                box-shadow: 0 0 0 4px rgba(135,88,222,0.18);
+                box-shadow: 0 0 0 4px rgba(135,88,222,0.18), 3px 3px 0px #050505;
             }
             .neo-input::placeholder {
                 color: #9ca3af;
-                font-weight: 500;
+                font-weight: 600;
             }
 
             .neo-select {
                 background: #ffffff;
                 border: 3px solid #050505;
-                border-radius: 16px;
-                padding: 13px 16px;
+                border-radius: 10px;
+                padding: 12px 14px;
                 font-family: 'Plus Jakarta Sans', sans-serif;
-                font-weight: 600;
+                font-weight: 700;
                 font-size: 14px;
                 color: #050505;
                 width: 100%;
+                box-shadow: 3px 3px 0px #050505;
                 appearance: none;
                 background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23050505' viewBox='0 0 16 16'%3E%3Cpath d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
                 background-repeat: no-repeat;
@@ -131,30 +133,31 @@
             .neo-select:focus {
                 outline: none;
                 border-color: #8758de;
-                box-shadow: 0 0 0 4px rgba(135,88,222,0.18);
+                box-shadow: 0 0 0 4px rgba(135,88,222,0.18), 3px 3px 0px #050505;
             }
 
             .neo-textarea {
                 background: #ffffff;
                 border: 3px solid #050505;
-                border-radius: 16px;
-                padding: 13px 16px;
+                border-radius: 10px;
+                padding: 12px 14px;
                 font-family: 'Plus Jakarta Sans', sans-serif;
-                font-weight: 600;
+                font-weight: 700;
                 font-size: 14px;
                 color: #050505;
                 width: 100%;
                 resize: vertical;
+                box-shadow: 3px 3px 0px #050505;
                 transition: box-shadow 0.2s, border-color 0.2s;
             }
             .neo-textarea:focus {
                 outline: none;
                 border-color: #8758de;
-                box-shadow: 0 0 0 4px rgba(135,88,222,0.18);
+                box-shadow: 0 0 0 4px rgba(135,88,222,0.18), 3px 3px 0px #050505;
             }
             .neo-textarea::placeholder {
                 color: #9ca3af;
-                font-weight: 500;
+                font-weight: 600;
             }
 
             .neo-btn {
@@ -340,7 +343,7 @@
         <main
             class="admin-mini-shell flex min-h-screen flex-col px-3 pb-32 pt-3 sm:px-4 md:px-0 md:pb-10 md:pt-6"
             x-data="{
-                activeTab: @js(($errors->productCreate->any() || $errors->productUpdate->any() || $errors->stockAdjustment->any()) ? 'produk' : ($activeTab ?? 'stats')),
+                activeTab: @js(($errors->productCreate->any() || $errors->productUpdate->any() || $errors->stockAdjustment->any() || $errors->categoryCreate->any() || $errors->stockItemUpdate->any()) ? 'produk' : ($activeTab ?? 'stats')),
                 copied: false,
                 storeLink: @js($storeLink['url']),
                 copyState: 'Salin',
@@ -356,12 +359,21 @@
                 productFeatures: @js(old('features', $editingProduct['features'] ?? '')),
                 productSpecifications: @js(old('specifications', $editingProduct['specifications'] ?? '')),
                 productIsActive: @js((bool) old('is_active', $editingProduct['is_active'] ?? true)),
+                productFeaturesOpen: @js($errors->productCreate->has('features') || $errors->productUpdate->has('features') || trim((string) old('features', $editingProduct['features'] ?? '')) !== ''),
+                productSpecificationsOpen: @js($errors->productCreate->has('specifications') || $errors->productUpdate->has('specifications') || trim((string) old('specifications', $editingProduct['specifications'] ?? '')) !== ''),
                 stockModalOpen: @js($errors->stockAdjustment->any()),
                 stockFormAction: @js($stockModalProduct['stock_url'] ?? ''),
                 stockProductId: @js($stockModalProduct['id'] ?? null),
                 stockProductName: @js($stockModalProduct['name'] ?? ''),
                 stockProductStock: @js($stockModalProduct['stock'] ?? 0),
                 stockItems: @js(old('stock_items', '')),
+                manageStockModalOpen: false,
+                manageStockProductName: '',
+                manageStockProductStock: 0,
+                manageStockItems: [],
+                manageStockAvailableCount: 0,
+                manageStockTruncated: false,
+                manageStockAddPayload: null,
                 stockItemCount() {
                     return this.stockItems
                         .split(/\r?\n/)
@@ -382,6 +394,8 @@
                     this.productFeatures = '';
                     this.productSpecifications = '';
                     this.productIsActive = true;
+                    this.productFeaturesOpen = false;
+                    this.productSpecificationsOpen = false;
                     this.productModalOpen = true;
                     this.$nextTick(() => this.$refs.productName?.focus());
                 },
@@ -398,11 +412,40 @@
                     this.productFeatures = product.features;
                     this.productSpecifications = product.specifications;
                     this.productIsActive = product.isActive;
+                    this.productFeaturesOpen = String(product.features || '').trim().length > 0;
+                    this.productSpecificationsOpen = String(product.specifications || '').trim().length > 0;
                     this.productModalOpen = true;
                     this.$nextTick(() => this.$refs.productName?.focus());
                 },
                 closeProductModal() {
                     this.productModalOpen = false;
+                },
+                openManageStockModal(product) {
+                    this.activeTab = 'produk';
+                    this.manageStockProductName = product.name;
+                    this.manageStockProductStock = product.stock;
+                    this.manageStockItems = (product.stockItems || []).map((item) => ({ ...item, editing: false }));
+                    this.manageStockAvailableCount = product.availableStockItemCount || 0;
+                    this.manageStockTruncated = Boolean(product.stockItemsTruncated);
+                    this.manageStockAddPayload = {
+                        id: product.id,
+                        name: product.name,
+                        stock: product.stock,
+                        stockUrl: product.stockUrl,
+                    };
+                    this.manageStockModalOpen = true;
+                },
+                closeManageStockModal() {
+                    this.manageStockModalOpen = false;
+                    this.manageStockItems = [];
+                    this.manageStockAddPayload = null;
+                },
+                openStockModalFromManage() {
+                    if (this.manageStockAddPayload) {
+                        const product = this.manageStockAddPayload;
+                        this.closeManageStockModal();
+                        this.openStockModal(product);
+                    }
                 },
                 openStockModal(product) {
                     this.activeTab = 'produk';
@@ -453,7 +496,7 @@
                     await this.copyStoreLink();
                 },
             }"
-            x-on:admin-dashboard:close-modal.window="if ($event.detail?.modal === 'stock-modal') closeStockModal(); if ($event.detail?.modal === 'product-modal') closeProductModal()"
+            x-on:admin-dashboard:close-modal.window="if ($event.detail?.modal === 'stock-modal') closeStockModal(); if ($event.detail?.modal === 'product-modal') closeProductModal(); if ($event.detail?.modal === 'manage-stock-modal') closeManageStockModal()"
         >
             {{-- ═══════════════════════════════════════════════════════
                  HEADER CARD — Purple/Magenta Gradient
@@ -572,6 +615,7 @@
                     <span class="text-[11px] font-black uppercase tracking-wide">Pesanan</span>
                 </button>
 
+                @if ($canManageProducts)
                 <button
                     type="button"
                     x-on:click="openProductForm()"
@@ -583,6 +627,7 @@
                     </svg>
                     <span class="text-[11px] font-black uppercase tracking-wide">Tambah</span>
                 </button>
+                @endif
             </nav>
 
             {{-- ═══════════════════════════════════════════════════════
@@ -766,6 +811,7 @@
                         <p class="mt-1 text-xs font-semibold" style="color: #64748b;">Semua kelola produk dan stok tetap di dashboard ini</p>
                     </div>
 
+                    @if ($canManageProducts)
                     <button
                         type="button"
                         class="neo-btn neo-btn-purple shrink-0 text-[11px]"
@@ -773,11 +819,43 @@
                     >
                         ➕ Tambah Produk
                     </button>
+                    @endif
                 </div>
 
                 <div class="rounded-[1.25rem] border-[3px] border-neo-ink bg-[#ede5fa] px-4 py-3 text-sm font-bold text-neo-ink shadow-[4px_4px_0_0_#050505]">
-                    Klik tombol <span class="font-black uppercase">Tambah Produk</span> untuk membuka form di halaman ini. Tombol <span class="font-black uppercase">Stok</span> membuka modal tanpa pindah halaman.
+                    <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
                 </div>
+
+                @if ($canManageProducts)
+                <form method="POST" action="{{ route('admin.categories.store') }}" class="rounded-[1rem] border-[3px] border-neo-ink bg-[#fef9c3] p-4 shadow-[4px_4px_0_0_#050505]">
+                    @csrf
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="font-display text-sm font-black uppercase text-neo-ink">Tambah kategori</p>
+                            <p class="mt-1 text-[11px] font-bold text-neo-ink/60">Buat kategori cepat untuk produk baru.</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1.2fr_auto]">
+                        <div>
+                            <label for="category-name" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Nama</label>
+                            <input id="category-name" name="category_name" value="{{ old('category_name') }}" class="neo-input mt-1.5" placeholder="AI Tools">
+                            @error('category_name', 'categoryCreate')
+                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                            @enderror
+                        </div>
+                        <div>
+                            <label for="category-description" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Deskripsi opsional</label>
+                            <input id="category-description" name="category_description" value="{{ old('category_description') }}" class="neo-input mt-1.5" placeholder="Kategori akun premium">
+                            @error('category_description', 'categoryCreate')
+                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                            @enderror
+                        </div>
+                        <button type="submit" class="neo-btn neo-btn-yellow self-end text-[11px]">
+                            + Kategori
+                        </button>
+                    </div>
+                </form>
+                @endif
 
                 @if (session('status'))
                     <div class="animate-slide-up rounded-xl p-4 text-sm font-bold" style="background: #e8ffd4; border: 2px solid #050505; box-shadow: 3px 3px 0px #050505; color: #050505;">
@@ -804,6 +882,11 @@
                                 'specifications' => $product['specifications'],
                                 'isActive' => $product['is_active'],
                                 'updateUrl' => $product['update_url'],
+                                'stockUrl' => $product['stock_url'],
+                                'stock' => $product['stock'],
+                                'availableStockItemCount' => $product['available_stock_item_count'],
+                                'stockItemsTruncated' => $product['stock_items_truncated'],
+                                'stockItems' => $product['stock_items'],
                             ];
                         @endphp
 
@@ -824,6 +907,9 @@
                             {{-- Price --}}
                             <p class="mt-4 font-display text-2xl font-bold" style="color: #050505;">{{ $product['price'] }}</p>
 
+                            {{-- Short description --}}
+                            <p class="mt-2 break-words text-xs font-bold leading-5" style="color: #64748b;">{{ $product['description'] }}</p>
+
                             {{-- Stock info --}}
                             <div class="mt-3 grid grid-cols-3 gap-2">
                                 <div class="rounded-lg p-2 text-center" style="background: #f1f5f9; border: 1px solid #e2e8f0;">
@@ -835,7 +921,7 @@
                                     <p class="mt-0.5 font-display text-sm font-bold" style="color: #050505;">{{ $product['available_stock'] }}</p>
                                 </div>
                                 <div class="rounded-lg p-2 text-center" style="background: #fef9c3; border: 1px solid #f2da3d;">
-                                    <p class="text-[9px] font-bold uppercase" style="color: #92400e;">Tahan</p>
+                                    <p class="text-[9px] font-bold uppercase" style="color: #92400e;">Dipesan</p>
                                     <p class="mt-0.5 font-display text-sm font-bold" style="color: #050505;">{{ $product['reserved_stock'] }}</p>
                                 </div>
                             </div>
@@ -845,8 +931,9 @@
                                 {{ $product['is_active'] ? '● Tampil di toko' : '○ Tidak tampil' }}
                             </p>
 
+                            @if ($canManageProducts)
                             {{-- Action buttons: in-page only --}}
-                            <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
                                 <button
                                     type="button"
                                     class="product-action-btn"
@@ -858,19 +945,39 @@
                                 <button
                                     type="button"
                                     class="product-action-btn"
-                                    style="background: #e8ffd4; color: #166534;"
+                                    style="background: #7BD10A; color: #166534;"
                                     x-on:click="openStockModal(@js($stockPayload))"
                                 >
-                                    📦 Stok
+                                    ➕ Stok
                                 </button>
                                 <button
                                     type="button"
                                     class="product-action-btn"
-                                    style="background: #e8ffd4; color: #166534;"
+                                    style="background: #f2da3d; color: #92400e;"
+                                    x-on:click="openManageStockModal(@js($productPayload))"
+                                >
+                                    📦 Kelola
+                                </button>
+                                <button
+                                    type="button"
+                                    class="product-action-btn"
+                                    style="background: #8758de; color: #fff;"
                                     x-on:click="navigator.clipboard?.writeText(@js($product['share_url'])); copied = true; setTimeout(() => copied = false, 1600)"
                                 >
-                                    🔗 Salin
+                                    🔗 Share
                                 </button>
+                                <form method="POST" action="{{ $product['visibility_url'] }}">
+                                    @csrf
+                                    @method('PATCH')
+                                    <input type="hidden" name="is_active" value="{{ $product['is_active'] ? 0 : 1 }}">
+                                    <button
+                                        type="submit"
+                                        class="product-action-btn w-full"
+                                        style="background: #fef9c3; color: #92400e;"
+                                    >
+                                        {{ $product['is_active'] ? '⏸ Pause' : '▶ Play' }}
+                                    </button>
+                                </form>
                                 <form method="POST" action="{{ $product['delete_url'] }}" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">
                                     @csrf
                                     @method('DELETE')
@@ -883,6 +990,11 @@
                                     </button>
                                 </form>
                             </div>
+                            @else
+                                <div class="mt-4 rounded-[0.75rem] border-[3px] border-neo-ink bg-[#f1f5f9] p-3 text-xs font-bold text-neo-ink/70">
+                                    Role ini hanya bisa melihat produk. Aksi stok khusus owner/admin.
+                                </div>
+                            @endif
                         </article>
                     @empty
                         <div class="rounded-xl p-6 text-center" style="background: #fff; border: 2px dashed #050505;">
@@ -891,6 +1003,7 @@
                     @endforelse
                 </div>
 
+                @if ($canManageProducts)
                 {{-- ════════════════════════════════════════════
                      STOCK MODAL
                      ════════════════════════════════════════════ --}}
@@ -899,7 +1012,7 @@
                     x-show="stockModalOpen"
                     x-transition.opacity
                     x-on:keydown.escape.window="closeStockModal()"
-                    class="fixed inset-0 z-50 flex items-end p-3 sm:items-center sm:justify-center"
+                    class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
                     style="background: rgba(5,5,5,0.6);"
                 >
                     <div class="absolute inset-0" x-on:click="closeStockModal()" aria-hidden="true"></div>
@@ -907,33 +1020,25 @@
                     <x-admin-dashboard.modal-shell
                         id="stock-modal"
                         title="Tambah stok"
-                        description="Tempel stok baru satu baris per item. Semua tetap di dashboard ini."
-                        class="w-full max-w-lg"
+                        description="1 baris = 1 item"
+                        class="w-full max-w-md bg-[#7BD10A]"
                     >
-                        <form method="POST" x-bind:action="stockFormAction" class="space-y-4">
+                        <form method="POST" x-bind:action="stockFormAction" class="space-y-3">
                             @csrf
                             <input type="hidden" name="stock_product_id" x-bind:value="stockProductId">
 
-                            <div class="rounded-[1rem] border-[3px] border-neo-ink bg-[#d4f6fb] p-4 shadow-[4px_4px_0_0_#050505]">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <p class="min-w-0 flex-1 truncate font-display text-sm font-bold" style="color: #050505;" x-text="stockProductName">Produk</p>
-                                    <span class="neo-badge" style="background: #fff; color: #0e7490;">
-                                        <span x-text="`${stockItemCount()} item terdeteksi`">0 item terdeteksi</span>
-                                    </span>
-                                </div>
-                                <p class="mt-1 text-xs font-semibold" style="color: #64748b;">
-                                    Stok saat ini <span x-text="stockProductStock">0</span>
-                                </p>
+                            <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold uppercase text-neo-ink">
+                                <span class="max-w-[13rem] truncate" x-text="stockProductName">Produk</span>
+                                <span x-text="`${stockItemCount()} item`">0 item</span>
                             </div>
 
                             <div>
-                                <label for="stock-items" class="font-display text-xs font-bold uppercase tracking-wider" style="color: #050505;">Daftar stok</label>
                                 <textarea
                                     id="stock-items"
                                     name="stock_items"
-                                    rows="7"
-                                    placeholder="Tempel stok baru, satu item per baris"
-                                    class="neo-textarea mt-2"
+                                    rows="6"
+                                    placeholder="email@example.com|password&#10;KEY-XXXX-1234"
+                                    class="neo-textarea"
                                     x-model="stockItems"
                                     x-ref="stockItems"
                                 ></textarea>
@@ -943,17 +1048,96 @@
                                 @enderror
                             </div>
 
-                            <div class="grid grid-cols-2 gap-2">
+                            <div class="grid grid-cols-2 gap-2 pt-1">
                                 <button type="button" class="neo-btn neo-btn-white" x-on:click="closeStockModal()">
                                     Batal
                                 </button>
-                                <button type="submit" class="neo-btn neo-btn-green">
-                                    Simpan stok
+                                <button type="submit" class="neo-btn neo-btn-pink">
+                                    ⚡ Simpan
                                 </button>
                             </div>
                         </form>
                     </x-admin-dashboard.modal-shell>
                 </div>
+
+                <div
+                    x-cloak
+                    x-show="manageStockModalOpen"
+                    x-transition.opacity
+                    x-on:keydown.escape.window="closeManageStockModal()"
+                    class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
+                    style="background: rgba(5,5,5,0.6);"
+                >
+                    <div class="absolute inset-0" x-on:click="closeManageStockModal()" aria-hidden="true"></div>
+
+                    <x-admin-dashboard.modal-shell
+                        id="manage-stock-modal"
+                        title="Kelola stok"
+                        description="Akun tersedia, belum dipesan pembeli."
+                        class="max-h-[92vh] w-full max-w-xl overflow-y-auto bg-[#fee648] p-3 sm:p-4"
+                    >
+                        <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold uppercase text-neo-ink">
+                            <span class="max-w-[15rem] truncate" x-text="manageStockProductName">Produk</span>
+                            <span x-text="`${manageStockItems.length} dari ${manageStockAvailableCount} akun`">0 akun</span>
+                        </div>
+
+                        <p x-show="manageStockTruncated" class="mb-2 rounded-[0.45rem] border-[3px] border-neo-ink bg-white p-2 text-[11px] font-bold text-neo-ink shadow-[2px_2px_0_0_#050505]">
+                            25 akun pertama ditampilkan. Hapus/edit yang lama dulu untuk melihat sisanya.
+                        </p>
+
+                        <div class="space-y-2">
+                            <template x-for="(item, index) in manageStockItems" :key="item.id">
+                                <article class="rounded-[0.45rem] border-[3px] border-neo-ink bg-white p-2 shadow-[3px_3px_0_0_#050505]">
+                                    <div class="grid grid-cols-[1fr_auto] gap-2">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-1.5">
+                                                <span class="font-display text-[11px] font-black text-neo-ink" x-text="`#${index + 1}`">#1</span>
+                                                <span class="rounded-[0.35rem] border-2 border-[#93c5fd] bg-[#dbeafe] px-1.5 py-0.5 text-[8px] font-black uppercase text-[#1d4ed8]">Tersedia</span>
+                                            </div>
+                                            <p class="mt-1.5 break-all font-mono text-[10px] font-bold leading-4 text-neo-ink" x-text="item.secret"></p>
+                                        </div>
+                                        <div class="flex flex-col gap-1.5">
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-[0.35rem] border-[3px] border-neo-ink bg-[#16b4ca] text-sm font-black text-white shadow-[2px_2px_0_0_#050505]"
+                                                aria-label="Ubah akun stok"
+                                                x-bind:aria-expanded="item.editing"
+                                                x-on:click="item.editing = ! item.editing"
+                                            >✏️</button>
+                                            <form method="POST" x-bind:action="item.delete_url" x-on:submit="if (! confirm('Hapus akun stok ini?')) $event.preventDefault()">
+                                                @csrf
+                                                <input type="hidden" name="_method" value="DELETE">
+                                                <button
+                                                    type="submit"
+                                                    class="inline-flex h-9 w-9 items-center justify-center rounded-[0.35rem] border-[3px] border-neo-ink bg-[#db3f98] text-sm font-black text-white shadow-[2px_2px_0_0_#050505]"
+                                                    aria-label="Hapus akun stok"
+                                                >🗑️</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    <form method="POST" x-bind:action="item.update_url" class="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]" x-show="item.editing" x-transition>
+                                        @csrf
+                                        <input type="hidden" name="_method" value="PATCH">
+                                        <textarea name="secret" rows="2" class="neo-textarea min-h-16 font-mono text-[11px]" x-model="item.secret"></textarea>
+                                        <div class="grid grid-cols-2 gap-2 sm:grid-cols-1">
+                                            <button type="submit" class="product-action-btn min-h-9 self-start" style="background: #16b4ca; color: #fff;">Simpan</button>
+                                            <button type="button" class="product-action-btn min-h-9 self-start" style="background: #fff; color: #050505;" x-on:click="item.editing = false">Batal</button>
+                                        </div>
+                                    </form>
+                                </article>
+                            </template>
+                        </div>
+
+                        <div x-show="manageStockItems.length === 0" class="rounded-[0.6rem] border-[3px] border-dashed border-neo-ink bg-white p-4 text-center text-sm font-bold text-neo-ink">
+                            Belum ada akun tersedia. Tambahkan stok baru.
+                        </div>
+
+                        <button type="button" class="neo-btn neo-btn-green mt-4 w-full" x-on:click="openStockModalFromManage()">
+                            ➕ Tambah stok baru
+                        </button>
+                    </x-admin-dashboard.modal-shell>
+                </div>
+                @endif
             </div>
 
             {{-- ╔═════════════════════════════════════════════════════╗
@@ -1076,6 +1260,7 @@
                 </div>
             </div>
 
+            @if ($canManageProducts)
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PRODUCT CREATE/EDIT MODAL                         ║
                  ╚═════════════════════════════════════════════════════╝ --}}
@@ -1084,41 +1269,39 @@
                 x-show="productModalOpen"
                 x-transition.opacity
                 x-on:keydown.escape.window="closeProductModal()"
-                class="fixed inset-0 z-50 flex items-end p-3 sm:items-center sm:justify-center"
+                class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
                 style="background: rgba(5,5,5,0.6);"
             >
                 <div class="absolute inset-0" x-on:click="closeProductModal()" aria-hidden="true"></div>
 
                 <x-admin-dashboard.modal-shell
                     id="product-modal"
-                    title="Produk"
-                    description="Tambah atau ubah produk langsung di dashboard ini."
-                    class="max-h-[92vh] w-full max-w-2xl overflow-y-auto"
+                    title="Tambah produk"
+                    title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
+                    description="Nama, harga, kategori, deskripsi."
+                    class="max-h-[92vh] w-full max-w-xl overflow-y-auto"
+                    x-bind:style="{ backgroundColor: productModalMode === 'edit' ? '#fee648' : '#7BD10A' }"
                 >
-                    <div class="mb-4 rounded-[1rem] border-[3px] border-neo-ink bg-[#ede5fa] p-4 shadow-[4px_4px_0_0_#050505]">
-                        <p class="font-display text-sm font-black uppercase tracking-wide text-neo-ink" x-text="productModalMode === 'edit' ? 'Ubah produk' : 'Tambah produk'">Tambah produk</p>
-                        <p class="mt-1 text-xs font-bold text-neo-ink/60" x-text="productModalMode === 'edit' ? 'Stok tidak berubah saat data produk diedit.' : 'Produk baru dibuat aktif dengan stok awal 0.'">Produk baru dibuat aktif dengan stok awal 0.</p>
-                    </div>
-
                     @if ($errors->productCreate->any() || $errors->productUpdate->any())
-                        <div class="mb-4 animate-slide-up rounded-xl p-4 text-sm font-bold text-white" style="background: #ef4444; border: 2px solid #050505; box-shadow: 3px 3px 0px #050505;">
+                        <div class="mb-3 animate-slide-up rounded-[0.6rem] p-3 text-sm font-bold text-white" style="background: #ef4444; border: 3px solid #050505; box-shadow: 3px 3px 0px #050505;">
                             Periksa kembali field produk yang ditandai.
                         </div>
                     @endif
 
-                    <form method="POST" x-bind:action="productFormAction" class="space-y-4">
+                    <form method="POST" x-bind:action="productFormAction" class="space-y-3">
                         @csrf
                         <input type="hidden" x-bind:name="productFormMethod ? '_method' : ''" x-bind:value="productFormMethod">
                         <input type="hidden" name="product_id" x-bind:value="productId">
+                        <input type="hidden" name="is_active" x-bind:value="productIsActive ? 1 : 0">
 
                         <div>
-                            <label for="product-name" class="font-display text-xs font-bold uppercase tracking-wider" style="color: #050505;">Nama produk</label>
+                            <label for="product-name" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Nama produk</label>
                             <input
                                 type="text"
                                 id="product-name"
                                 name="name"
-                                placeholder="Contoh: Canva Pro 1 Bulan"
-                                class="neo-input mt-2"
+                                placeholder="NETFLIX PREMIUM"
+                                class="neo-input mt-1.5"
                                 x-model="productName"
                                 x-ref="productName"
                             >
@@ -1130,9 +1313,9 @@
                             @enderror
                         </div>
 
-                        <div class="grid gap-4 sm:grid-cols-2">
+                        <div class="grid gap-3 sm:grid-cols-2">
                             <div>
-                                <label for="product-price" class="font-display text-xs font-bold uppercase tracking-wider" style="color: #050505;">Harga</label>
+                                <label for="product-price" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Harga (IDR)</label>
                                 <input
                                     type="number"
                                     id="product-price"
@@ -1140,8 +1323,8 @@
                                     min="0"
                                     step="1"
                                     inputmode="numeric"
-                                    placeholder="75000"
-                                    class="neo-input mt-2"
+                                    placeholder="25000"
+                                    class="neo-input mt-1.5"
                                     x-model="productPrice"
                                 >
                                 @error('price_amount', 'productCreate')
@@ -1153,9 +1336,9 @@
                             </div>
 
                             <div>
-                                <label for="product-category" class="font-display text-xs font-bold uppercase tracking-wider" style="color: #050505;">Kategori</label>
-                                <select id="product-category" name="category_id" class="neo-select mt-2" x-model="productCategoryId">
-                                    <option value="">Tanpa kategori</option>
+                                <label for="product-category" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Kategori</label>
+                                <select id="product-category" name="category_id" class="neo-select mt-1.5" x-model="productCategoryId">
+                                    <option value="">— Pilih —</option>
                                     @foreach ($categoryOptions as $category)
                                         <option value="{{ $category['id'] }}">{{ $category['name'] }}</option>
                                     @endforeach
@@ -1169,13 +1352,13 @@
                             </div>
                         </div>
 
-                        <div>
-                            <label for="product-description" class="font-display text-xs font-bold uppercase tracking-wider" style="color: #050505;">Deskripsi singkat</label>
+                        <div class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
+                            <label for="product-description" class="font-display text-sm font-extrabold text-neo-ink">📝 Deskripsi singkat</label>
                             <textarea
                                 id="product-description"
                                 name="description"
                                 rows="3"
-                                placeholder="Ringkas manfaat utama produk."
+                                placeholder="Deskripsi singkat produk (1–3 kalimat)..."
                                 class="neo-textarea mt-2"
                                 x-model="productDescription"
                             ></textarea>
@@ -1187,22 +1370,26 @@
                             @enderror
                         </div>
 
-                        <div class="grid gap-3" x-data="{ featuresOpen: true, specsOpen: true }">
-                            <section class="neo-card">
-                                <button
-                                    type="button"
-                                    class="flex w-full items-center justify-between gap-3 text-left font-display text-xs font-bold uppercase tracking-wider"
-                                    style="color: #050505;"
-                                    x-on:click="featuresOpen = ! featuresOpen"
-                                >
-                                    <span>Fitur utama</span>
-                                    <span class="font-display text-lg font-bold" style="color: #8758de;" x-text="featuresOpen ? '−' : '+'">−</span>
-                                </button>
+                        <div class="grid gap-3">
+                            <section class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="font-display text-sm font-extrabold text-neo-ink">✨ Fitur utama</p>
+                                        <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productFeaturesOpen">Tap “+ tambah” untuk menambah fitur.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="product-action-btn min-h-9 px-2 py-1 text-[10px]"
+                                        style="background: #7BD10A; color: #050505;"
+                                        x-on:click="productFeaturesOpen = ! productFeaturesOpen"
+                                        x-text="productFeaturesOpen ? 'Tutup' : '+ Tambah'"
+                                    >+ Tambah</button>
+                                </div>
 
-                                <div class="mt-3" x-show="featuresOpen">
+                                <div class="mt-3" x-show="productFeaturesOpen" x-transition>
                                     <textarea
                                         name="features"
-                                        rows="4"
+                                        rows="3"
                                         placeholder="Satu fitur per baris"
                                         class="neo-textarea"
                                         x-model="productFeatures"
@@ -1216,21 +1403,25 @@
                                 </div>
                             </section>
 
-                            <section class="rounded-xl p-5" style="background: #d4f6fb; border: 2px solid #050505; box-shadow: 4px 4px 0px #050505;">
-                                <button
-                                    type="button"
-                                    class="flex w-full items-center justify-between gap-3 text-left font-display text-xs font-bold uppercase tracking-wider"
-                                    style="color: #050505;"
-                                    x-on:click="specsOpen = ! specsOpen"
-                                >
-                                    <span>Paket/spesifikasi</span>
-                                    <span class="font-display text-lg font-bold" style="color: #16b4ca;" x-text="specsOpen ? '−' : '+'">−</span>
-                                </button>
+                            <section class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="font-display text-sm font-extrabold text-neo-ink">🌐 Paket / spesifikasi</p>
+                                        <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productSpecificationsOpen">Opsional. Cocok untuk produk multi-tier.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="product-action-btn min-h-9 px-2 py-1 text-[10px]"
+                                        style="background: #16b4ca; color: #050505;"
+                                        x-on:click="productSpecificationsOpen = ! productSpecificationsOpen"
+                                        x-text="productSpecificationsOpen ? 'Tutup' : '+ Paket'"
+                                    >+ Paket</button>
+                                </div>
 
-                                <div class="mt-3" x-show="specsOpen">
+                                <div class="mt-3" x-show="productSpecificationsOpen" x-transition>
                                     <textarea
                                         name="specifications"
-                                        rows="4"
+                                        rows="3"
                                         placeholder="Satu spesifikasi per baris"
                                         class="neo-textarea"
                                         x-model="productSpecifications"
@@ -1245,22 +1436,18 @@
                             </section>
                         </div>
 
-                        <label class="flex items-center justify-between gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-[#fef9c3] p-4 text-sm font-bold text-neo-ink shadow-[4px_4px_0_0_#050505]">
-                            <span>Tampilkan produk di toko</span>
-                            <input type="checkbox" name="is_active" value="1" class="h-6 w-6" x-model="productIsActive">
-                        </label>
-
-                        <div class="grid grid-cols-2 gap-2">
+                        <div class="grid grid-cols-2 gap-2 pt-1">
                             <button type="button" class="neo-btn neo-btn-white" x-on:click="closeProductModal()">
                                 Batal
                             </button>
-                            <button type="submit" class="neo-btn neo-btn-green">
-                                <span x-text="productModalMode === 'edit' ? 'Simpan produk' : 'Submit produk'">Submit produk</span>
+                            <button type="submit" class="neo-btn neo-btn-pink">
+                                <span x-text="productModalMode === 'edit' ? '⚡ Simpan' : '⚡ Submit produk'">⚡ Submit produk</span>
                             </button>
                         </div>
                     </form>
                 </x-admin-dashboard.modal-shell>
             </div>
+            @endif
 
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  BROADCAST TAB (hidden from bottom nav)             ║
@@ -1355,6 +1542,7 @@
                         <span class="text-[10px] font-bold text-current">Pesanan</span>
                     </button>
 
+                    @if ($canManageProducts)
                     {{-- Tambah --}}
                     <button
                         type="button"
@@ -1367,6 +1555,7 @@
                         </svg>
                         <span class="text-[10px] font-bold text-current">Tambah</span>
                     </button>
+                    @endif
                 </div>
             </nav>
         </main>

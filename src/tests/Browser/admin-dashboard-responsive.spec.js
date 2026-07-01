@@ -59,6 +59,10 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
 
     await expectNoDocumentOverflow(page);
     await expectPrimaryActionsAtLeast44px(page);
+
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+    await exerciseProductManagementModals(page);
+    await expectNoDocumentOverflow(page);
 });
 
 test('keeps tabs, cards, and the stock modal usable at Telegram mini app width', async ({ page }) => {
@@ -80,19 +84,29 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
 
     const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
-    await productCard.getByRole('button', { name: 'Stok' }).click();
+    await productCard.getByRole('button', { name: 'Kelola' }).click();
+
+    const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
+    await expect(manageModal).toBeVisible();
+    await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
+    await expect(manageModal.getByRole('textbox')).toBeHidden();
+    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).click();
+    await expect(manageModal.getByRole('textbox')).toBeVisible();
+    await manageModal.getByRole('button', { name: 'Batal' }).click();
+    await expect(manageModal.getByRole('textbox')).toBeHidden();
+    await manageModal.getByRole('button', { name: /Tambah stok baru/ }).click();
 
     const modal = page.getByRole('dialog', { name: 'Tambah Stok' });
     await expect(modal).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Tambah Stok' })).toBeVisible();
-    await expect(page.getByText('0 item terdeteksi')).toBeVisible();
+    await expect(page.getByText('0 item')).toBeVisible();
 
-    await page.getByPlaceholder('Tempel stok baru, satu item per baris').fill('akun-1@example.test\nakun-2@example.test');
-    await expect(page.getByText('2 item terdeteksi')).toBeVisible();
+    await page.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234').fill('akun-1@example.test\nakun-2@example.test');
+    await expect(page.getByText('2 item')).toBeVisible();
 
     await expectElementWithinViewport(page, modal);
     await expectTouchTargetAtLeast44px(page.getByRole('button', { name: 'Batal' }));
-    await expectTouchTargetAtLeast44px(page.getByRole('button', { name: 'Simpan' }));
+    await expectTouchTargetAtLeast44px(page.getByRole('button', { name: /Simpan/ }));
     await expectNoDocumentOverflow(page);
 
     await page.goto(`${baseUrl}/admin?tab=penjualan`);
@@ -108,6 +122,42 @@ async function login(page) {
     await page.locator('input[type="password"]').fill('password');
     await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
     await page.waitForURL(`${baseUrl}/admin`);
+}
+
+async function exerciseProductManagementModals(page) {
+    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
+    await expect(productCard).toBeVisible();
+
+    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
+    await expect(productModal).toBeVisible();
+    await expectElementWithinViewport(page, productModal);
+    await productModal.getByRole('button', { name: 'Tutup modal' }).click();
+    await expect(productModal).toBeHidden();
+
+    await productCard.getByRole('button', { name: /Stok/i }).click();
+    const stockModal = page.getByRole('dialog', { name: 'Tambah Stok' });
+    await expect(stockModal).toBeVisible();
+    await expect(stockModal.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234')).toBeVisible();
+    await stockModal.getByRole('button', { name: 'Batal' }).click();
+    await expect(stockModal).toBeHidden();
+
+    await productCard.getByRole('button', { name: 'Kelola' }).click();
+    const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
+    await expect(manageModal).toBeVisible();
+    await expect(manageModal.getByText('#1')).toBeVisible();
+    await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
+    await expect(manageModal.getByRole('textbox')).toBeHidden();
+    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).click();
+    await expect(manageModal.getByRole('textbox')).toBeVisible();
+    await manageModal.getByRole('button', { name: 'Batal' }).click();
+    await expect(manageModal.getByRole('textbox')).toBeHidden();
+    await manageModal.getByRole('button', { name: /Tambah stok baru/ }).click();
+
+    const reopenedStockModal = page.getByRole('dialog', { name: 'Tambah Stok' });
+    await expect(reopenedStockModal).toBeVisible();
+    await reopenedStockModal.getByRole('button', { name: 'Batal' }).click();
+    await expect(reopenedStockModal).toBeHidden();
 }
 
 async function expectNoDocumentOverflow(page) {
@@ -272,6 +322,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 
 $category = Category::query()->firstOrCreate(
     ['slug' => 'browser-responsive-qa'],
@@ -283,7 +334,7 @@ $category = Category::query()->firstOrCreate(
     ],
 );
 
-Product::factory()->create([
+$productA = Product::factory()->create([
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,
@@ -291,6 +342,7 @@ Product::factory()->create([
     'reserved_stock' => 2,
     'is_active' => true,
 ]);
+ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-a@example.test|pass']);
 
 Product::factory()->create([
     'category_id' => $category->id,

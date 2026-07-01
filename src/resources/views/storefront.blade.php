@@ -559,6 +559,10 @@
                             $originalPrice = $product->price_amount * 1.35;
                             $mockRating = number_format(4.7 + ($product->id % 4) * 0.1, 1);
                             $mockSold = ($product->id * 31 + 4) % 150;
+                            $descriptionSnippet = collect(preg_split('/\R+/', trim((string) $product->description)))
+                                ->map(fn ($line) => trim($line))
+                                ->filter()
+                                ->first() ?: 'Deskripsi produk segera dilengkapi.';
                         @endphp
 
                         <div class="product-card reveal-item opacity-0 transform translate-y-8 transition-all duration-500 group cursor-pointer" data-category="{{ $product->category_id ?? 'lainnya' }}"
@@ -616,6 +620,7 @@
                                 <div class="p-4 flex-grow flex flex-col justify-between space-y-4">
                                     <div>
                                         <h3 class="text-xs font-bold text-slate-900 leading-snug group-hover:text-slate-700 transition-colors duration-300 h-8 overflow-hidden line-clamp-2">{{ $product->name }}</h3>
+                                        <p class="mt-2 text-[10px] leading-4 text-zinc-500 h-8 overflow-hidden line-clamp-2">{{ $descriptionSnippet }}</p>
                                     </div>
 
                                     <div class="pt-2.5 border-t border-zinc-100 flex flex-col space-y-1.5">

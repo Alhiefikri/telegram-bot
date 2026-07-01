@@ -12,7 +12,7 @@ class TelegramBroadcastService
     /**
      * @return array{sent:int, failed:int, skipped:bool}
      */
-    public function sendToActiveUsers(string $message, string $title = '📣 Info dari Admin'): array
+    public function sendToActiveUsers(string $message, string $title = '📣 Info dari Admin', array $replyMarkup = []): array
     {
         if (blank(config('services.telegram.token'))) {
             return ['sent' => 0, 'failed' => 0, 'skipped' => true];
@@ -34,7 +34,7 @@ class TelegramBroadcastService
             ->whereNotNull('telegram_id')
             ->orderBy('id')
             ->select(['id', 'telegram_id'])
-            ->chunkById(100, function ($customers) use (&$sent, &$failed, &$seen, $text): void {
+            ->chunkById(100, function ($customers) use (&$sent, &$failed, &$seen, $text, $replyMarkup): void {
                 foreach ($customers as $customer) {
                     $chatId = (string) $customer->telegram_id;
                     if ($chatId === '' || isset($seen[$chatId])) {
@@ -44,7 +44,7 @@ class TelegramBroadcastService
                     $seen[$chatId] = true;
 
                     try {
-                        $this->bot->sendMessage($chatId, $text);
+                        $this->bot->sendMessage($chatId, $text, $replyMarkup);
                         $sent++;
                     } catch (Throwable $e) {
                         report($e);

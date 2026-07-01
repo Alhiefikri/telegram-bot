@@ -1,13 +1,17 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminBroadcastController;
+use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminLoginController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockController;
+use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
+use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
+use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\StorefrontController;
 use Illuminate\Support\Facades\Route;
 
@@ -21,4 +25,8 @@ Route::post('/admin/logout', [AdminLoginController::class, 'destroy'])->name('ad
 Route::patch('/admin/products/{product}', AdminProductUpdateController::class)->name('admin.products.update');
 Route::delete('/admin/products/{product}', AdminProductDeleteController::class)->name('admin.products.destroy');
 Route::post('/admin/products', AdminProductCreateController::class)->name('admin.products.store');
+Route::patch('/admin/products/{product}/visibility', AdminProductVisibilityController::class)->name('admin.products.visibility.update');
 Route::post('/admin/products/{product}/stock', AdminProductStockController::class)->name('admin.products.stock.store');
+Route::patch('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('admin.products.stock-items.update');
+Route::delete('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('admin.products.stock-items.destroy');
+Route::post('/admin/categories', AdminCategoryCreateController::class)->name('admin.categories.store');
