@@ -26,10 +26,21 @@ src/rewrite.py
 src/rewrite_rounded.py
 src/test_login.py
 src/public/images/
+src/public/build/
 test-results/
 src/test-results/
 playwright-report/
 src/playwright-report/
+.playwright-mcp/
+ngrok.log
+
+# Local review/reference artifacts
+admin-*.png
+storefront-*.png
+reference-warungai-*.png
+local-warungai-*.png
+src/Tutorial_Login_*.pdf
+src/lhie_store_admin_dashboard.html
 
 
 # Local deepwork session notes
