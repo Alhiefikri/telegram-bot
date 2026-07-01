@@ -38,11 +38,11 @@ class EloquentInventoryLedger implements InventoryLedger
 
     public function assertCartProductAvailable(Product $product, int $quantity, int $cartId): void
     {
-        if (! $product->is_active || $product->trashed()) {
+        if (! $product->isPublicVisible()) {
             throw new InvalidCartState('Product is not active.');
         }
 
-        if ($this->availableStock($product) < ($quantity + $this->activeCartQuantityForOtherCarts($product, $cartId))) {
+        if ($product->availableStock() < ($quantity + $this->activeCartQuantityForOtherCarts($product, $cartId))) {
             throw new InsufficientStock('Insufficient available stock.');
         }
     }
@@ -53,10 +53,10 @@ class EloquentInventoryLedger implements InventoryLedger
 
         foreach ($items as $item) {
             $product = $products[$item->product_id] ?? null;
-            if (! $product || ! $product->is_active || $product->trashed()) {
+            if (! $product || ! $product->isPublicVisible()) {
                 throw new InvalidCheckout('Cart contains unavailable product.');
             }
-            if ($this->availableStock($product) < $item->quantity) {
+            if ($product->availableStock() < $item->quantity) {
                 throw new InsufficientStock('Insufficient available stock.');
             }
         }
@@ -174,11 +174,6 @@ class EloquentInventoryLedger implements InventoryLedger
         if (! $reservation || $reservation->quantity !== $item->quantity || $reservation->quantity <= 0) {
             throw new InvalidOrderTransition('Reservation movement proof is missing or mismatched.');
         }
-    }
-
-    private function availableStock(Product $product): int
-    {
-        return $product->stock - $product->reserved_stock;
     }
 
     private function activeCartQuantityForOtherCarts(Product $product, int $cartId): int

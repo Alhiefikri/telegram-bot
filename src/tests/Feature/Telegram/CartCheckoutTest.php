@@ -103,12 +103,16 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $inactive = Product::factory()->create(['is_active' => false, 'stock' => 5, 'reserved_stock' => 0]);
-        $outOfStock = Product::factory()->create(['is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
+        $available = Product::factory()->create(['name' => 'Ready', 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        $outOfStock = Product::factory()->create(['name' => 'Kosong', 'description' => 'Masih bisa dibaca.', 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
 
+        $this->postTelegramWebhook($this->callbackUpdate(14, 'ready-buy', 'buy:'.$available->id))->assertOk();
+        $this->fakeTelegramHttp();
         $this->postTelegramWebhook($this->callbackUpdate(15, 'inactive-product', 'product:'.$inactive->id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(16, 'inactive-buy', 'buy:'.$inactive->id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(17, 'stock-product', 'product:'.$outOfStock->id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(18, 'stock-buy', 'buy:'.$outOfStock->id))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(19, '1'))->assertOk();
 
         $this->assertSame(0, CartItem::count());
         $unavailableAnswers = 0;
@@ -119,7 +123,13 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
             return true;
         });
-        $this->assertSame(4, $unavailableAnswers);
+        $this->assertSame(3, $unavailableAnswers);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Kosong')
+            && str_contains($r['text'], '❌ Stok sedang kosong')
+            && str_contains($r['text'], 'Masih bisa dibaca.')
+            && ! str_contains(json_encode($r->data()), 'buy:'.$outOfStock->id)
+            && ! str_contains(json_encode($r->data()), 'Beli'));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (str_contains((string) ($r['text'] ?? ''), 'Pilih jumlah')
                 || str_contains(json_encode($r->data()), 'payment:dana')
@@ -181,6 +191,23 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(1, Order::count());
         $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
         $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
+    }
+
+    public function test_checkout_revalidates_changed_stock_and_prompts_cart_update(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual_dana');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['name' => 'Berubah', 'stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
+
+        $this->postTelegramWebhook($this->callbackUpdate(1954, 'checkout-changed-stock', 'payment:dana'))->assertOk();
+
+        $this->assertSame(0, Order::count());
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'stoknya berubah/tidak tersedia')
+            && str_contains($r['text'], 'Perbarui keranjang'));
     }
 
     public function test_katalog_clears_selected_product_and_invalid_callback_answers_once(): void

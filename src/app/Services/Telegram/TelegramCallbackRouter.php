@@ -105,24 +105,27 @@ class TelegramCallbackRouter
         }
 
         if (preg_match('/^product:([1-9][0-9]*)$/', $data, $matches)) {
-            $product = Product::whereKey((int) $matches[1])->where('is_active', true)->first();
-            $availableStock = $product ? $product->stock - $product->reserved_stock : 0;
-            if (! $product || $availableStock < 1) {
+            $product = Product::publicVisible()->whereKey((int) $matches[1])->first();
+            $availableStock = $product ? $product->availableStock() : 0;
+            if (! $product) {
+                $this->session->forget($customer);
                 $this->bot->answerCallbackQuery($id, 'Produk tidak tersedia.');
 
                 return;
             }
 
             $this->bot->answerCallbackQuery($id);
+            $this->session->forget($customer);
             $this->catalog->sendStockChoices($chatId, $product, $availableStock);
 
             return;
         }
 
         if (preg_match('/^buy:([1-9][0-9]*)$/', $data, $matches)) {
-            $product = Product::whereKey((int) $matches[1])->where('is_active', true)->first();
-            $availableStock = $product ? $product->stock - $product->reserved_stock : 0;
+            $product = Product::publicVisible()->whereKey((int) $matches[1])->first();
+            $availableStock = $product ? $product->availableStock() : 0;
             if (! $product || $availableStock < 1) {
+                $this->session->forget($customer);
                 $this->bot->answerCallbackQuery($id, 'Produk tidak tersedia.');
 
                 return;
@@ -173,7 +176,7 @@ class TelegramCallbackRouter
                 ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
                 : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod($manualMethod), 'manual');
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
-            $this->bot->sendMessage($chatId, 'Checkout gagal. Pastikan keranjang tidak kosong.');
+            $this->bot->sendMessage($chatId, 'Checkout gagal. Keranjang kosong atau ada produk yang stoknya berubah/tidak tersedia. Perbarui keranjang lalu coba lagi.');
 
             return;
         }

@@ -52,12 +52,14 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['caption'], '[BANNER:'));
     }
 
-    public function test_katalog_lists_active_available_categories_uncategorized_and_empty_state(): void
+    public function test_katalog_lists_active_categories_uncategorized_and_empty_state(): void
     {
         $this->fakeTelegramHttp();
         $category = Category::factory()->create(['name' => 'Streaming']);
+        $unavailableCategory = Category::factory()->create(['name' => 'Preorder']);
         $inactiveCategory = Category::factory()->create(['name' => 'Kategori Mati', 'is_active' => false]);
         Product::factory()->create(['name' => 'Aktif', 'category_id' => $category->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Kosong Aktif', 'category_id' => $unavailableCategory->id, 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
         Product::factory()->create(['name' => 'Produk Kategori Mati', 'category_id' => $inactiveCategory->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Mati', 'is_active' => false]);
@@ -67,6 +69,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Katalog Produk')
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
+            && str_contains(json_encode($r->data()), 'category:'.$unavailableCategory->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized')
             && ! str_contains(json_encode($r->data()), 'Kategori Mati')
             && ! str_contains(json_encode($r->data()), 'Mati'));
@@ -79,7 +82,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Katalog masih kosong')
-            && str_contains($r['text'], 'Produk baru akan tampil'));
+            && str_contains($r['text'], 'produk aktif'));
     }
 
     public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void
@@ -99,7 +102,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $category = Category::factory()->create(['name' => 'Games', 'description' => 'Voucher game']);
         $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'price_amount' => 15000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'akun-diamond@example.test | password: Secret-123']);
-        Product::factory()->create(['name' => 'Diamond Habis', 'category_id' => $category->id, 'stock' => 1, 'reserved_stock' => 1]);
+        $emptyProduct = Product::factory()->create(['name' => 'Diamond Habis', 'category_id' => $category->id, 'stock' => 1, 'reserved_stock' => 1]);
         Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->callbackUpdate(121, 'cat1', 'category:'.$category->id))->assertOk();
@@ -108,14 +111,17 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Games')
             && str_contains($r['text'], '1. ✅ Diamond')
-            && str_contains($r['text'], 'Rp15.000 · 📦 Stok 3')
+            && str_contains($r['text'], '2. ❌ Diamond Habis')
+            && str_contains($r['text'], 'Rp15.000')
+            && ! str_contains($r['text'], 'Stok 3')
+            && ! str_contains($r['text'], 'Stok 0')
             && str_contains($r['text'], 'Voucher MLBB instant.')
-            && ! str_contains($r['text'], 'Diamond Habis')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'akun-diamond@example.test')
             && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat #1'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
+            && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Katalog Produk')
@@ -134,30 +140,33 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], '/cari netflix'));
     }
 
-    public function test_cari_with_matching_keyword_lists_active_available_products(): void
+    public function test_cari_with_matching_keyword_lists_active_products(): void
     {
         $this->fakeTelegramHttp();
         $matching = Product::factory()->create(['name' => 'Netflix Premium', 'description' => 'Akun streaming', 'price_amount' => 25000, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
         ProductStockItem::create(['product_id' => $matching->id, 'secret' => 'netflix@example.test | password: Secret-456']);
         Product::factory()->create(['name' => 'Netflix Inactive', 'is_active' => false, 'stock' => 5, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Netflix Habis', 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
+        $empty = Product::factory()->create(['name' => 'Netflix Habis', 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
         Product::factory()->create(['name' => 'Spotify Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(124, '/cari netflix'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Hasil pencarian: netflix')
-            && str_contains($r['text'], 'Netflix Premium')
-            && str_contains($r['text'], 'Rp25.000 · stok 5')
+            && str_contains($r['text'], '✅ Netflix Premium')
+            && str_contains($r['text'], '❌ Netflix Habis')
+            && str_contains($r['text'], 'Rp25.000')
+            && ! str_contains($r['text'], 'stok 5')
+            && ! str_contains($r['text'], 'stok 0')
             && str_contains($r['text'], 'Akun streaming')
             && ! str_contains($r['text'], 'Netflix Inactive')
-            && ! str_contains($r['text'], 'Netflix Habis')
             && ! str_contains($r['text'], 'Spotify Premium')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'netflix@example.test')
             && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat #1'
-            && str_contains(json_encode($r->data()), 'product:'.$matching->id));
+            && str_contains(json_encode($r->data()), 'product:'.$matching->id)
+            && str_contains(json_encode($r->data()), 'product:'.$empty->id));
     }
 
     public function test_cari_result_can_be_selected_and_continues_existing_product_flow(): void
@@ -228,16 +237,16 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
     }
 
-    public function test_cari_does_not_show_fully_reserved_products(): void
+    public function test_cari_shows_fully_reserved_products_as_unavailable(): void
     {
         $this->fakeTelegramHttp();
-        Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 5]);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 5]);
 
         $this->postTelegramWebhook($this->messageUpdate(131, '/cari netflix'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
-        Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
+            && str_contains($r['text'], '❌ Netflix Premium')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
     public function test_product_ready_notification_has_look_button_and_description(): void

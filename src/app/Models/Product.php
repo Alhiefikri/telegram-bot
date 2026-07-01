@@ -45,6 +45,23 @@ class Product extends Model
             ->orderBy('id');
     }
 
+    public function availableStock(): int
+    {
+        return $this->stock - $this->reserved_stock;
+    }
+
+    public function isAvailable(): bool
+    {
+        return $this->availableStock() > 0;
+    }
+
+    public function isPublicVisible(): bool
+    {
+        return $this->is_active
+            && ! $this->trashed()
+            && ($this->category_id === null || $this->category()->where('is_active', true)->exists());
+    }
+
     public function cartItems()
     {
         return $this->hasMany(CartItem::class);

@@ -548,8 +548,12 @@
                         @php
                             $stock = $stockAvailable($product);
                             $imageUrl = $product->image_path ? $publicStorageUrl($product->image_path) : null;
-                            $productMessage = "Halo Admin, saya ingin memesan akun " . $product->name . " di Lhie Store.";
+                            $isAvailable = $stock > 0;
+                            $productMessage = $isAvailable
+                                ? "Halo Admin, saya ingin memesan akun " . $product->name . " di Lhie Store."
+                                : "Halo Admin, saya ingin tanya ketersediaan akun " . $product->name . " di Lhie Store.";
                             $productLink = $supportHref ? $supportHref . (str_contains($supportHref, '?') ? '&' : '?') . 'text=' . urlencode($productMessage) : '#support';
+                            $cardLink = $isAvailable ? $productLink : '#support';
                             $isPopular = $popularProducts->contains('id', $product->id);
 
                             // Get brand custom style properties
@@ -565,12 +569,7 @@
                                 ->first() ?: 'Deskripsi produk segera dilengkapi.';
                         @endphp
 
-                        <div class="product-card reveal-item opacity-0 transform translate-y-8 transition-all duration-500 group cursor-pointer" data-category="{{ $product->category_id ?? 'lainnya' }}"
-                             @if($stock > 0)
-                             onclick="window.location.href = @js($productLink)"
-                             @else
-                             onclick="window.location.href = @js($productLink)"
-                             @endif>
+                        <div class="product-card reveal-item opacity-0 transform translate-y-8 transition-all duration-500 group cursor-pointer" data-category="{{ $product->category_id ?? 'lainnya' }}" onclick="window.location.href = @js($cardLink)">
 
                             <div class="h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all duration-300 flex flex-col hover-lift relative">
                                 <!-- Dynamic Tech Laser Scanner Line -->
@@ -598,7 +597,7 @@
 
                                     <!-- Discount/Status Badges -->
                                     <div class="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-start">
-                                        @if ($stock > 0)
+                                        @if ($isAvailable)
                                             <span class="px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded {{ $coverTheme['badge_bg'] }} shadow-sm">
                                                 {{ $coverTheme['badge'] }}
                                             </span>
@@ -610,7 +609,7 @@
                                             @endif
                                         @else
                                             <span class="px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded bg-zinc-600 text-white shadow-sm">
-                                                HABIS
+                                                ❌ HABIS
                                             </span>
                                         @endif
                                     </div>
@@ -637,10 +636,10 @@
                                                 <span>{{ $mockRating }}</span>
                                             </span>
 
-                                            @if ($stock > 0)
-                                                <span>{{ $mockSold }} Terjual</span>
+                                            @if ($isAvailable)
+                                                <span>✅ Tersedia</span>
                                             @else
-                                                <span class="text-zinc-400">Stok habis</span>
+                                                <span class="text-zinc-400">❌ Stok habis</span>
                                             @endif
                                         </div>
                                     </div>
@@ -649,11 +648,11 @@
 
                             <!-- Hidden anchors for test suite expectations -->
                             <div class="sr-only">
-                                @if ($stock > 0)
-                                    <span>Ready ({{ $stock }})</span>
+                                @if ($isAvailable)
+                                    <span>✅ Tersedia</span>
                                     <a href="{{ $productLink }}">Order Sekarang</a>
                                 @else
-                                    <span>Stok habis</span>
+                                    <span>❌ Stok habis</span>
                                     <a href="#support">Tanya stok ke support</a>
                                 @endif
                             </div>

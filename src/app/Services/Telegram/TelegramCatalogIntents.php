@@ -13,33 +13,35 @@ class TelegramCatalogIntents
     {
         $categories = Category::query()
             ->where('is_active', true)
-            ->whereHas('products', fn ($q) => $q->where('is_active', true)->whereColumn('stock', '>', 'reserved_stock'))
+            ->whereHas('products', fn ($q) => $q->where('is_active', true))
             ->orderBy('sort_order')->orderBy('name')->get();
-        $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->whereColumn('stock', '>', 'reserved_stock')->exists();
+        $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->exists();
         $keyboard = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->values()->all();
         if ($hasUncategorized) {
             $keyboard[] = [['text' => '📂 Lainnya', 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? "🛍️ Katalog masih kosong.\nProduk baru akan tampil di sini setelah admin menambah stok." : "🛍️ Katalog Produk\n━━━━━━━━━━━━━━\nPilih kategori favorit kamu di bawah.\n\n✨ Produk aktif dan ready stock akan otomatis tampil.", ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $keyboard === [] ? "🛍️ Katalog masih kosong.\nProduk baru akan tampil di sini setelah admin menambah produk aktif." : "🛍️ Katalog Produk\n━━━━━━━━━━━━━━\nPilih kategori favorit kamu di bawah.\n\n✨ Produk aktif akan otomatis tampil.", ['inline_keyboard' => $keyboard]);
     }
 
     public function sendStockChoices(string $chatId, Product $product, int $availableStock): void
     {
-        $keyboard = [
-            [[
+        $keyboard = [];
+        if ($product->isAvailable()) {
+            $keyboard[] = [[
                 'text' => '🧾 Beli (Rp'.number_format($product->price_amount, 0, ',', '.').')',
                 'callback_data' => 'buy:'.$product->id,
-            ]],
-            [[
-                'text' => '⬅️ Kembali ke kategori',
-                'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
-            ]],
-        ];
+            ]];
+        }
+        $keyboard[] = [[
+            'text' => '⬅️ Kembali ke kategori',
+            'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
+        ]];
 
         $lines = [
             '🛍️ '.$product->name,
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
+            $product->isAvailable() ? '✅ Tersedia' : '❌ Stok sedang kosong',
             '📦 Stok: '.$availableStock,
             '━━━━━━━━━━━━━━',
             '📝 Deskripsi',
@@ -72,7 +74,7 @@ class TelegramCatalogIntents
 
     public function sendCategoryProducts(string $chatId, string $categoryId): void
     {
-        $query = Product::where('is_active', true)->whereColumn('stock', '>', 'reserved_stock')->orderBy('id');
+        $query = Product::publicVisible()->orderBy('id');
         $category = null;
         if ($categoryId === 'uncategorized') {
             $query->whereNull('category_id');
@@ -95,8 +97,8 @@ class TelegramCatalogIntents
         }
         $lines[] = '';
         foreach ($products as $i => $product) {
-            $lines[] = ($i + 1).'. ✅ '.$product->name;
-            $lines[] = '   💰 Rp'.number_format($product->price_amount, 0, ',', '.').' · 📦 Stok '.($product->stock - $product->reserved_stock);
+            $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
+            $lines[] = '   💰 Rp'.number_format($product->price_amount, 0, ',', '.');
             $lines[] = '   📝 '.$this->descriptionExcerpt($product);
         }
         $keyboard = $products->values()->map(fn ($product, $i) => [['text' => '👁️ Lihat #'.($i + 1), 'callback_data' => 'product:'.$product->id]])->all();
@@ -110,12 +112,7 @@ class TelegramCatalogIntents
         $limit = 5;
         $like = '%'.addcslashes(strtolower($keyword), '%_\\').'%';
         $products = Product::query()
-            ->where('is_active', true)
-            ->whereColumn('stock', '>', 'reserved_stock')
-            ->where(function ($query) {
-                $query->whereNull('category_id')
-                    ->orWhereHas('category', fn ($category) => $category->where('is_active', true));
-            })
+            ->publicVisible()
             ->where(function ($query) use ($like) {
                 $query->whereRaw('LOWER(name) LIKE ?', [$like])
                     ->orWhereRaw('LOWER(description) LIKE ?', [$like])
@@ -135,8 +132,8 @@ class TelegramCatalogIntents
         $products = $products->take($limit)->values();
         $lines = ['🔎 Hasil pencarian: '.$keyword, ''];
         foreach ($products as $i => $product) {
-            $lines[] = ($i + 1).'. '.$product->name;
-            $lines[] = '   Rp'.number_format($product->price_amount, 0, ',', '.').' · stok '.($product->stock - $product->reserved_stock);
+            $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
+            $lines[] = '   Rp'.number_format($product->price_amount, 0, ',', '.');
             $lines[] = '   '.$this->descriptionExcerpt($product);
         }
         if ($hasMore) {
