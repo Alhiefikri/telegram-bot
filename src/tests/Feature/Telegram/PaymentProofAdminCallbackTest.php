@@ -4,15 +4,20 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\PublishSalesProofPost;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\StockAdjustmentService;
+use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
@@ -63,6 +68,67 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             return true;
         });
         $this->assertSame(1, $receiptCount);
+    }
+
+    public function test_manual_approval_publishes_one_privacy_safe_sales_proof_for_multi_product_order(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $this->fakeTelegramHttp(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 88]])]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'AdamSecret']);
+        $first = Product::factory()->create(['name' => 'Email Account', 'stock' => 5, 'price_amount' => 12000]);
+        $second = Product::factory()->create(['name' => 'Canva Pro', 'stock' => 5, 'price_amount' => 34000]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $first, 1);
+        app(CartService::class)->addItem($cart, $second, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(301, 'cb-manual-proof', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(302, $order->invoice_number, ['username' => 'AdamSecret']))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(303, 'approve-proof', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+        $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
+        $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
+        $this->assertMatchesRegularExpression('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $copy);
+        $this->assertStringContainsString('+ 1 produk lainnya', $copy);
+        $this->assertStringContainsString('Total diproses: #1', $copy);
+        $this->assertStringNotContainsString($order->invoice_number, $copy);
+        $this->assertStringNotContainsString('12000', $copy);
+        $this->assertStringNotContainsString('34000', $copy);
+    }
+
+    public function test_sales_proof_post_failure_is_recorded_and_can_retry_up_to_success(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'RetryBuyer']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Retry Product', 'unit_price' => 12000, 'subtotal' => 12000]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::sequence()
+                ->push(['ok' => false, 'description' => 'temporary channel failure'])
+                ->push(['ok' => true, 'result' => ['message_id' => 99]]),
+        ]);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        $post = SalesProofPost::firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertSame(1, $post->attempts);
+        $this->assertNotNull($post->last_error);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        $post = $post->fresh();
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status);
+        $this->assertSame(2, $post->attempts);
+        $this->assertSame('99', $post->telegram_message_id);
+        $this->assertNull($post->last_error);
+        $this->assertNotNull($post->sent_at);
     }
 
     public function test_paid_account_order_receipt_contains_only_the_buyers_allocated_secret(): void

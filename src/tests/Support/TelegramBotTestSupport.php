@@ -34,9 +34,9 @@ abstract class TelegramBotTestSupport extends TestCase
     protected function fakeTelegramHttp(array $extraFakes = []): void
     {
         Http::preventStrayRequests();
-        Http::fake(array_merge([
+        Http::fake(array_merge($extraFakes, [
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
-        ], $extraFakes));
+        ]));
     }
 
     protected function postTelegramWebhook(array $payload, string $secret = 'secret'): TestResponse

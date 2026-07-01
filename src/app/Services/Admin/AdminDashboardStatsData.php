@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
+use App\Models\SalesProofPost;
 use App\Models\User;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
@@ -53,6 +54,7 @@ final class AdminDashboardStatsData
             $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
             $this->metricCard('saldo', 'Saldo', Money::idr($metrics['read_only_balance_amount']), 'Estimasi pembayaran paid', 'emerald'),
             $this->metricCard('orders', 'Order', $metrics['order_count'], 'Total pesanan', 'amber'),
+            $this->metricCard('sales_proof_posts', 'Proof post', SalesProofPost::query()->where('status', SalesProofPost::STATUS_SENT)->count(), 'Terkirim ke channel', 'emerald'),
             $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
         ];
     }

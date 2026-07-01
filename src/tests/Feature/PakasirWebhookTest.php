@@ -7,6 +7,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -15,8 +16,11 @@ use App\Models\InventoryMovement;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Telegram\SalesProofPostFormatter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -60,6 +64,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame($payload, $event->raw_payload);
         $this->assertNotNull($event->processed_at);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
 
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
 
@@ -67,6 +72,33 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(2, PaymentEvent::count());
         $this->assertSame(1, PaymentEvent::whereNotNull('processed_at')->count());
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
+    }
+
+    public function test_sales_proof_post_is_sent_once_and_privacy_safe_for_pakasir_paid_order(): void
+    {
+        config()->set('queue.default', 'sync');
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        Http::fake([
+            'https://app.pakasir.com/api/transactiondetail*' => Http::response(['transaction' => ['status' => 'completed', 'amount' => 50000, 'order_id' => '*']]),
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]),
+        ]);
+        config()->set('services.telegram.token', 'bot-token');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order->customer()->update(['username' => 'AdamBuyer']);
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
+
+        $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
+        $this->assertSame('77', SalesProofPost::firstOrFail()->telegram_message_id);
+        $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
+        $this->assertStringContainsString('Ad***', $copy);
+        $this->assertStringNotContainsString($order->invoice_number, $copy);
+        $this->assertStringNotContainsString((string) $order->total_amount, $copy);
     }
 
     public function test_wrong_amount_wrong_project_unknown_order_api_mismatch_and_api_failure_fail_closed(): void

@@ -208,7 +208,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertFalse($data['statsTab']['paymentControl']['is_pakasir_enabled']);
         $this->assertSame('NONAKTIF', $data['statsTab']['paymentControl']['status_badge']['label']);
         $this->assertTrue($data['statsTab']['paymentControl']['can_manage']);
-        $this->assertSame(['gmv', 'saldo', 'orders', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
+        $this->assertSame(['gmv', 'saldo', 'orders', 'sales_proof_posts', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
         $this->assertContainsOnly('string', array_column($data['statsTab']['cards'], 'card_class'));
         $this->assertSame(1, $data['statsTab']['statusCounts']['processing']['count']);
         $this->assertSame(1, $data['statsTab']['statusCounts']['completed']['count']);

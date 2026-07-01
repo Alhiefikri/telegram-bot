@@ -41,6 +41,11 @@ class Order extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function salesProofPost()
+    {
+        return $this->hasOne(SalesProofPost::class);
+    }
+
     public function inventoryMovements()
     {
         return $this->hasMany(InventoryMovement::class);

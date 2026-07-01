@@ -5,8 +5,10 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\PublishSalesProofPost;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\SalesProofPost;
 use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine
@@ -40,6 +42,9 @@ class OrderStateMachine
 
             $lockedPayment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
             $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+
+            SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
+            PublishSalesProofPost::dispatch($order->id)->onQueue('notifications')->afterCommit();
 
             return $order->fresh(['payments']);
         }, 5);
