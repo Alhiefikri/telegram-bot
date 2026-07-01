@@ -264,7 +264,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentStatus::Expired, $order->payments()->firstOrFail()->fresh()->status);
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && $request['chat_id'] === '12345'
-            && str_contains($request['text'], '⏳ Transaksi Kedaluwarsa')
+            && str_contains($request['text'], '⏳ Order kedaluwarsa')
             && str_contains($request['text'], $order->invoice_number)
             && str_contains($request['text'], 'Ready API KEY')
             && str_contains($request['text'], 'Rp7.000'));

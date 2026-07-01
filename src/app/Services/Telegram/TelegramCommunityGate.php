@@ -96,11 +96,11 @@ class TelegramCommunityGate
         $url = $setting->channel_link ?: ($setting->channel_username ? 'https://t.me/'.ltrim($setting->channel_username, '@') : null);
         $keyboard = [[]];
         if ($url) {
-            $keyboard[0][] = ['text' => 'Join channel', 'url' => $url];
+            $keyboard[0][] = ['text' => '📢 Join Channel', 'url' => $url];
         }
-        $keyboard[0][] = ['text' => 'Saya sudah join', 'callback_data' => self::VERIFY_CALLBACK];
+        $keyboard[0][] = ['text' => '✅ Saya Sudah Join', 'callback_data' => self::VERIFY_CALLBACK];
 
-        $message = $this->bot->sendMessage($chatId, "Gabung dulu ke Store Channel untuk lanjut belanja.\nSetelah join, tekan tombol Saya sudah join.", [
+        $message = $this->bot->sendMessage($chatId, "🔒 Join channel dulu ya\n━━━━━━━━━━━━━━\nBiar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu gabung ke Store Channel dulu.\n\nKalau sudah join, tekan tombol “Saya sudah join”.", [
             'inline_keyboard' => $keyboard,
         ]);
 

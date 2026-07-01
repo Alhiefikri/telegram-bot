@@ -95,7 +95,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
         $this->assertMatchesRegularExpression('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $copy);
         $this->assertStringContainsString('+ 1 produk lainnya', $copy);
-        $this->assertStringContainsString('Total diproses: #1', $copy);
+        $this->assertStringContainsString('Total order sukses: #1', $copy);
         $this->assertStringNotContainsString($order->invoice_number, $copy);
         $this->assertStringNotContainsString('12000', $copy);
         $this->assertStringNotContainsString('34000', $copy);
@@ -184,7 +184,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
-            && str_contains((string) $r['text'], 'Broadcast selesai. Terkirim: 3. Gagal: 0.'));
+            && str_contains((string) $r['text'], "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: 3\nGagal: 0"));
     }
 
     public function test_non_admin_cannot_approve_manual_payment_callback(): void
@@ -208,6 +208,18 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && $r['text'] === 'Akses admin diperlukan.');
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima'));
+    }
+
+    public function test_admin_approve_callback_with_invalid_order_id_answers_not_found(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(216, 'bad-approve', 'admin:approve-payment:not-a-uuid', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'bad-approve'
+            && $r['text'] === 'Order tidak ditemukan.');
     }
 
     public function test_admin_can_reject_manual_payment_callback_and_buyer_gets_human_message(): void
@@ -238,10 +250,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
             && $r['callback_query_id'] === 'reject-payment'
-            && $r['text'] === 'Pembayaran ditolak. Buyer sudah diberi info.');
+            && $r['text'] === 'Pembayaran ditolak. Pembeli sudah diberi info.');
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === 12345
-            && str_contains($r['text'], 'Pembayaran belum bisa kami terima')
+            && str_contains($r['text'], 'Pembayaran belum bisa diterima')
             && str_contains($r['text'], $order->invoice_number)
             && str_contains($r['text'], 'kirim ulang bukti')
             && str_contains($r['text'], '@Alhie02'));

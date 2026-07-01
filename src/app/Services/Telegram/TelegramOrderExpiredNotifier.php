@@ -21,14 +21,15 @@ class TelegramOrderExpiredNotifier
         }
 
         $lines = [
-            '⏳ Transaksi Kedaluwarsa',
+            '⏳ Order kedaluwarsa',
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
             '📦 Produk: '.$order->orderItems->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))->join(', '),
-            '💰 Total : Rp'.number_format($order->total_amount, 0, ',', '.'),
+            '💰 Total: Rp'.number_format($order->total_amount, 0, ',', '.'),
             '',
-            'Pembayaran tidak diselesaikan tepat waktu.',
-            'Order dibatalkan otomatis. Kamu bisa order ulang kapan saja.',
+            'Pembayaran tidak selesai sampai batas waktu, jadi order dibatalkan otomatis.',
+            '',
+            'Tenang, kamu masih bisa order ulang kapan aja.',
         ];
 
         $this->bot->sendMessage((string) $order->customer->telegram_id, implode("\n", $lines), [

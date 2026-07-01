@@ -33,7 +33,7 @@ class TelegramCallbackRouter
             if ($this->communityGate->verify($customer, $chatId)) {
                 $this->bot->answerCallbackQuery($id);
             } else {
-                $this->bot->answerCallbackQuery($id, 'Kamu belum terdeteksi sebagai member channel.');
+                $this->bot->answerCallbackQuery($id, 'Kamu belum terdeteksi join channel nih.');
             }
 
             return;
@@ -53,7 +53,7 @@ class TelegramCallbackRouter
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
             $this->session->forget($customer);
-            $this->bot->answerCallbackQuery($id, 'Gabung Store Channel dulu untuk lanjut belanja.');
+            $this->bot->answerCallbackQuery($id, 'Join Store Channel dulu ya biar bisa lanjut belanja.');
 
             return;
         }
@@ -83,7 +83,7 @@ class TelegramCallbackRouter
         if ($data === 'status') {
             $this->bot->answerCallbackQuery($id);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? '📦 Status pesanan '.$order->invoice_number.': '.$order->order_status->value.' / '.$order->payment_status->value : 'Belum ada pesanan.');
+            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}" : 'Belum ada pesanan nih.');
 
             return;
         }
@@ -99,7 +99,7 @@ class TelegramCallbackRouter
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, 'Keranjang aktif dibatalkan.');
+            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /katalog ya.");
 
             return;
         }
@@ -109,7 +109,7 @@ class TelegramCallbackRouter
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
                 $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, 'Produk tidak tersedia.');
+                $this->bot->answerCallbackQuery($id, 'Produk ini belum bisa dibeli sekarang.');
 
                 return;
             }
@@ -126,7 +126,7 @@ class TelegramCallbackRouter
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product || $availableStock < 1) {
                 $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, 'Produk tidak tersedia.');
+                $this->bot->answerCallbackQuery($id, 'Produk ini belum bisa dibeli sekarang.');
 
                 return;
             }
@@ -158,7 +158,7 @@ class TelegramCallbackRouter
             return;
         }
 
-        $this->bot->answerCallbackQuery($id, 'Aksi tidak dikenal.');
+        $this->bot->answerCallbackQuery($id, 'Aksi ini belum dikenali.');
     }
 
     private function checkout(Customer $customer, string $chatId, string $id, ?string $manualMethod): void
@@ -176,7 +176,7 @@ class TelegramCallbackRouter
                 ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
                 : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod($manualMethod), 'manual');
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
-            $this->bot->sendMessage($chatId, 'Checkout gagal. Keranjang kosong atau ada produk yang stoknya berubah/tidak tersedia. Perbarui keranjang lalu coba lagi.');
+            $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka katalog lagi dan pilih produk ulang ya.");
 
             return;
         }

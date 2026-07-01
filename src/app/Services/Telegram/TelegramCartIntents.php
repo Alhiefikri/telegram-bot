@@ -15,7 +15,7 @@ class TelegramCartIntents
     public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity): bool
     {
         if ($quantity < 1) {
-            $this->bot->sendMessage($chatId, 'Jumlah tidak valid.');
+            $this->bot->sendMessage($chatId, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.');
 
             return false;
         }
@@ -29,7 +29,7 @@ class TelegramCartIntents
                 ->firstOrFail();
 
             if (($product->stock - $product->reserved_stock) < $quantity) {
-                $this->bot->sendMessage($chatId, 'Produk tidak tersedia atau stok tidak cukup.');
+                $this->bot->sendMessage($chatId, 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.');
 
                 return false;
             }
@@ -41,12 +41,12 @@ class TelegramCartIntents
             }
 
             $subtotal = $product->price_amount * $quantity;
-            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal item: Rp".number_format($subtotal, 0, ',', '.')."\n\nSiap checkout? Pilih pembayaran anda.", [
+            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Pilih metode pembayaran di bawah.", [
                 'inline_keyboard' => [
                     [
-                        ['text' => 'DANA', 'callback_data' => 'payment:dana'],
-                        ['text' => 'GOPAY', 'callback_data' => 'payment:gopay'],
-                        ['text' => 'SHOPEEPAY', 'callback_data' => 'payment:shopepay'],
+                        ['text' => '💙 DANA', 'callback_data' => 'payment:dana'],
+                        ['text' => '💚 GOPAY', 'callback_data' => 'payment:gopay'],
+                        ['text' => '🧡 SHOPEEPAY', 'callback_data' => 'payment:shopepay'],
                     ],
                 ],
             ]);
@@ -54,7 +54,7 @@ class TelegramCartIntents
             return true;
         } catch (Throwable) {
             $this->deleteFreshEmptyCart($cart);
-            $this->bot->sendMessage($chatId, 'Produk tidak tersedia atau stok tidak cukup.');
+            $this->bot->sendMessage($chatId, 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.');
 
             return false;
         }

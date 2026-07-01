@@ -29,12 +29,12 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, CartItem::count());
-        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung dulu ke Store Channel'));
+        $this->assertSame(1, $this->sentCount('/sendMessage', 'Join channel dulu ya'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/getChatMember')
             && $r['chat_id'] === '-100123'
             && $r['user_id'] === 12345);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data()), 'Saya sudah join')
+            && str_contains(json_encode($r->data()), 'Saya Sudah Join')
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
@@ -112,7 +112,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && $r['chat_id'] === '12345'
             && $r['message_id'] === 77);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Selamat datang, Ayu'));
+            && str_contains($r['text'] ?? '', 'Halo Ayu, welcome ke LHIE STORE'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'Menu utama'));
     }
@@ -133,7 +133,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(0, TelegramCommunityGatePrompt::count());
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Selamat datang, Ayu'));
+            && str_contains($r['text'] ?? '', 'Halo Ayu, welcome ke LHIE STORE'));
     }
 
     public function test_leaving_channel_blocks_later_store_flow_again(): void
@@ -153,7 +153,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Gabung dulu ke Store Channel'));
+            && str_contains($r['text'] ?? '', 'Join channel dulu ya'));
     }
 
     private function fakeGateHttp(string $status, bool $isMember = false): void

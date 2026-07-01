@@ -12,14 +12,16 @@ class TelegramMenuIntents
     {
         $firstName = trim((string) $customer->first_name) ?: 'kak';
         $caption = implode("\n", [
-            '🌙 Selamat datang, '.$firstName.' 👋',
+            '🌙 Halo '.$firstName.', welcome ke LHIE STORE 👋',
             '━━━━━━━━━━━━━━',
-            '🛒 Belanja produk digital langsung dari Telegram.',
-            '💳 Pembayaran otomatis via website/QRIS.',
-            '📦 Cek status dan riwayat pesanan kapan saja.',
-            '🌐 Buka Mini App untuk dashboard mobile.',
+            'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
             '',
-            'Pilih menu di bawah untuk mulai.',
+            '🛍️ Pilih produk',
+            '💳 Bayar via QRIS / transfer',
+            '📦 Cek pesanan kapan aja',
+            '⚡ Akun dikirim otomatis setelah pembayaran beres',
+            '',
+            'Mau mulai dari mana nih?',
         ]);
 
         $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId);
@@ -36,7 +38,7 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId): void
     {
-        $this->bot->sendMessage($chatId, "☰ Menu utama\nPilih tombol di bawah supaya lebih cepat belanja.", $this->mainMenuKeyboard($customer, $chatId));
+        $this->bot->sendMessage($chatId, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", $this->mainMenuKeyboard($customer, $chatId));
     }
 
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null): array
@@ -60,7 +62,7 @@ class TelegramMenuIntents
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'is_persistent' => true,
-            'input_field_placeholder' => 'Pilih menu atau ketik /cari produk',
+            'input_field_placeholder' => 'Pilih menu atau ketik /cari nama produk',
         ];
     }
 
@@ -68,8 +70,8 @@ class TelegramMenuIntents
     {
         $keyboard = [
             [
-                ['text' => '🛍️ Lihat Katalog', 'callback_data' => 'katalog'],
-                ['text' => '📦 Pesanan', 'callback_data' => 'status'],
+                ['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog'],
+                ['text' => '📦 Cek Pesanan', 'callback_data' => 'status'],
             ],
         ];
 
@@ -94,7 +96,7 @@ class TelegramMenuIntents
             $replyMarkup = ['inline_keyboard' => [[['text' => '💬 Chat Admin', 'url' => 'https://t.me/'.ltrim((string) $adminUsername, '@')]]]];
         }
 
-        $this->bot->sendMessage($chatId, "💬 Support\nButuh bantuan order atau pembayaran? Hubungi admin, atau kirim detail invoice kamu di sini.", $replyMarkup);
+        $this->bot->sendMessage($chatId, "💬 Support\n━━━━━━━━━━━━━━\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", $replyMarkup);
     }
 
     public function sendAccountSummary(Customer $customer, string $chatId): void
@@ -103,6 +105,7 @@ class TelegramMenuIntents
         $latestOrder = $customer->orders()->latest()->first();
         $lines = [
             '👤 Akun Saya',
+            '━━━━━━━━━━━━━━',
             'Nama: '.($customer->first_name ?: '-'),
             'Username: @'.($customer->username ?: '-'),
             'Total pesanan: '.$ordersCount,
@@ -110,6 +113,8 @@ class TelegramMenuIntents
         if ($latestOrder) {
             $lines[] = 'Pesanan terakhir: '.$latestOrder->invoice_number.' · '.$latestOrder->payment_status->value;
         }
+        $lines[] = '';
+        $lines[] = 'Mau cek pesanan kamu?';
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => '📦 Lihat Pesanan', 'callback_data' => 'status']]]]);
     }

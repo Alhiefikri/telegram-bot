@@ -264,7 +264,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     {
         $count = 0;
         Http::assertSent(function ($request) use (&$count): bool {
-            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Siap checkout? Pilih pembayaran anda.')) {
+            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Sudah cocok? Pilih metode pembayaran di bawah.')) {
                 $count++;
             }
 
@@ -277,7 +277,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     {
         $count = 0;
         Http::assertSent(function ($request) use (&$count): bool {
-            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Produk tidak tersedia atau stok tidak cukup.')) {
+            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.')) {
                 $count++;
             }
 

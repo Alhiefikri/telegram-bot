@@ -20,8 +20,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Selamat datang, Ali')
-            && str_contains($r['text'], 'Belanja produk digital langsung dari Telegram')
+            && str_contains($r['text'], 'Halo Ali, welcome ke LHIE STORE')
+            && str_contains($r['text'], 'Tempat belanja produk digital')
             && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'katalog'
             && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'status'
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
@@ -46,8 +46,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && $r['photo'] === 'banner-file-id'
-            && str_contains($r['caption'], 'Selamat datang, Ayu')
-            && str_contains($r['caption'], 'Belanja produk digital langsung dari Telegram')
+            && str_contains($r['caption'], 'Halo Ayu, welcome ke LHIE STORE')
+            && str_contains($r['caption'], 'Tempat belanja produk digital')
             && ! str_contains($r['caption'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['caption'], '[BANNER:'));
     }
@@ -82,7 +82,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Katalog masih kosong')
-            && str_contains($r['text'], 'produk aktif'));
+            && str_contains($r['text'], 'admin belum menambahkan produk aktif'));
     }
 
     public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void
@@ -119,7 +119,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'akun-diamond@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat #1'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip #1'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories'));
@@ -136,7 +136,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(123, '/cari'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Ketik /cari')
+            && str_contains($r['text'], 'Mau cari produk apa?')
             && str_contains($r['text'], '/cari netflix'));
     }
 
@@ -164,7 +164,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'netflix@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat #1'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip #1'
             && str_contains(json_encode($r->data()), 'product:'.$matching->id)
             && str_contains(json_encode($r->data()), 'product:'.$empty->id));
     }
@@ -181,9 +181,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Canva Pro')
-            && str_contains($r['text'], '📝 Deskripsi')
+            && str_contains($r['text'], '📝 Detail produk')
             && str_contains($r['text'], 'Desain premium siap pakai.')
-            && str_contains(json_encode($r->data()), 'Beli (Rp25.000)')
+            && str_contains(json_encode($r->data()), 'Beli Sekarang - Rp25.000')
             && str_contains(json_encode($r->data()), 'buy:'.$product->id));
     }
 
@@ -195,8 +195,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(127, '/cari zoom'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'tidak ditemukan')
-            && str_contains($r['text'], '/katalog')
+            && str_contains($r['text'], 'belum ketemu')
+            && str_contains($r['text'], 'buka katalog')
             && str_contains(json_encode($r->data()), 'katalog'));
     }
 
@@ -208,7 +208,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(128, '/cari netflix'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
+            && str_contains(json_encode($r->data()), 'belum ketemu'));
         Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
     }
 
@@ -233,7 +233,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(130, '/cari netflix'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data()), 'tidak ditemukan'));
+            && str_contains(json_encode($r->data()), 'belum ketemu'));
         Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
     }
 
@@ -273,7 +273,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'chatgpt@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip Produk'
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -312,7 +312,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'canva@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip Produk'
             && str_contains(json_encode($r->data()), 'product:'.$ready->id));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Claude Pro Reserved'));

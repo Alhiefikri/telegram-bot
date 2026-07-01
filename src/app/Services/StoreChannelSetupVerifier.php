@@ -25,7 +25,7 @@ class StoreChannelSetupVerifier
             }
 
             $chatId = (string) data_get($chat, 'result.id', $target);
-            $message = $this->telegram->sendMessage($chatId, '✅ Test channel LHIE STORE berhasil. Fitur belum otomatis diaktifkan.');
+            $message = $this->telegram->sendMessage($chatId, "✅ Test channel LHIE STORE berhasil.\n\nChannel sudah bisa menerima pesan test. Fitur belum otomatis diaktifkan.");
             if (data_get($message, 'ok') !== true || ! data_get($message, 'result.message_id')) {
                 return ['success' => false, 'chat_id' => $chatId, 'message_id' => null, 'error' => 'Bot cannot post to channel: Telegram tidak mengembalikan message ID.'];
             }

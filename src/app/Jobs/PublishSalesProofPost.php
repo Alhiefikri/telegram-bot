@@ -72,7 +72,7 @@ class PublishSalesProofPost implements ShouldQueue
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
             $successfulPostNumber = SalesProofPost::query()->where('status', SalesProofPost::STATUS_SENT)->count() + 1;
             $response = $bot->sendMessage($chatId, $formatter->format($order, $successfulPostNumber), [
-                'inline_keyboard' => [[['text' => '🛒 Belanja sekarang', 'url' => 'https://t.me/lhiestore_bot?start=from_channel']]],
+                'inline_keyboard' => [[['text' => '🛒 Belanja Sekarang', 'url' => 'https://t.me/lhiestore_bot?start=from_channel']]],
             ]);
             $messageId = data_get($response, 'result.message_id');
             if (data_get($response, 'ok') !== true || ! $messageId) {

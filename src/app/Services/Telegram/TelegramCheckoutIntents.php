@@ -20,10 +20,11 @@ class TelegramCheckoutIntents
         $supportUsername = ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@');
 
         $lines = [
-            '✅ Checkout dibuat',
-            'Invoice: '.$order->invoice_number,
-            'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
-            'Bayar via: '.$method['label'],
+            '✅ Checkout berhasil dibuat',
+            '━━━━━━━━━━━━━━',
+            '🧾 Invoice: '.$order->invoice_number,
+            '💰 Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            '💳 Bayar via: '.$method['label'],
             '',
             'Tujuan transfer:',
             $method['number'],
@@ -31,20 +32,23 @@ class TelegramCheckoutIntents
         ];
 
         if ($order->expires_at) {
-            $lines[] = 'Batas: '.$this->formatDate($order->expires_at);
+            $lines[] = '';
+            $lines[] = '⏳ Batas bayar:';
+            $lines[] = $this->formatDate($order->expires_at);
         }
 
         $lines[] = '';
-        $lines[] = 'Pesanan:';
+        $lines[] = 'Pesanan kamu:';
         foreach ($order->orderItems as $item) {
             $lines[] = '- '.$item->product_name.' x'.$item->quantity;
         }
 
         $lines[] = '';
-        $lines[] = 'Setelah bayar, kirim screenshot bukti transfer di bot ini dengan caption:';
+        $lines[] = 'Setelah transfer, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:';
+        $lines[] = '';
         $lines[] = '/payment';
         $lines[] = '';
-        $lines[] = 'Bantuan: @'.$supportUsername;
+        $lines[] = 'Kalau butuh bantuan, hubungi @'.$supportUsername.'.';
 
         $this->bot->sendMessage($chatId, implode("\n", $lines));
     }
@@ -56,25 +60,29 @@ class TelegramCheckoutIntents
 
         $lines = [
             '🧾 Invoice: '.$order->invoice_number,
+            '━━━━━━━━━━━━━━',
             '📦 Produk: '.$this->orderItemsSummary($order),
             '🔢 Jumlah: '.$order->orderItems->sum('quantity'),
-            '💰 Total : Rp'.number_format($order->total_amount, 0, ',', '.').' ⚠️ wajib SAMA PERSIS',
+            '💰 Total: Rp'.number_format($order->total_amount, 0, ',', '.'),
+            '',
+            '⚠️ Bayar dengan nominal yang SAMA PERSIS ya.',
         ];
 
         if ($order->expires_at) {
-            $lines[] = '⏳ Order kadaluarsa pukul '.$this->formatDate($order->expires_at).'.';
+            $lines[] = '⏳ Order aktif sampai: '.$this->formatDate($order->expires_at);
         }
 
         $lines[] = '';
-        $lines[] = '📲 Scan QRIS atau tap 💳 Bayar Melalui Website (Direct) untuk halaman pembayaran.';
-        $lines[] = '✅ Pembayaran otomatis terverifikasi — produk langsung dikirim setelah pembayaran berhasil.';
+        $lines[] = '📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.';
+        $lines[] = '';
+        $lines[] = '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
 
         $this->bot->sendPhoto(
             $chatId,
             $this->qrPng($paymentUrl),
             'pakasir-'.$payment->merchant_ref.'.png',
             implode("\n", $lines),
-            ['inline_keyboard' => [[['text' => '💳 Bayar Melalui Website (Direct)', 'url' => $paymentUrl]]]],
+            ['inline_keyboard' => [[['text' => '💳 Bayar via Website', 'url' => $paymentUrl]]]],
         );
     }
 
@@ -109,6 +117,7 @@ class TelegramCheckoutIntents
         $method = $this->manualPaymentOption($payment?->method);
         $lines = [
             '🧾 Checkout manual baru',
+            '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
             'Metode: '.$method['label'],
@@ -120,7 +129,8 @@ class TelegramCheckoutIntents
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $lines[] = '';
-        $lines[] = 'Tunggu bukti /payment, lalu approve dari tombol di foto bukti.';
+        $lines[] = 'Tunggu bukti pembayaran dengan caption /payment.';
+        $lines[] = 'Setelah bukti masuk, approve dari tombol di foto bukti.';
 
         $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines));
     }

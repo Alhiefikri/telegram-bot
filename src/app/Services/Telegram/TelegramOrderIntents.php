@@ -16,16 +16,16 @@ class TelegramOrderIntents
     {
         $orders = $customer->orders()->latest()->limit(5)->get();
         if ($orders->isEmpty()) {
-            $this->bot->sendMessage($chatId, 'Belum ada riwayat pesanan. Yuk mulai belanja lewat /katalog.', ['inline_keyboard' => [[['text' => 'Lihat Katalog', 'callback_data' => 'katalog']]]]);
+            $this->bot->sendMessage($chatId, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk cek katalog dulu, siapa tahu ada produk yang cocok.", ['inline_keyboard' => [[['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog']]]]);
 
             return;
         }
 
-        $lines = ['📦 Riwayat Pesanan Terakhir', 'Tekan Detail untuk melihat isi pesanan.'];
+        $lines = ['📦 Riwayat Pesanan Terakhir', '━━━━━━━━━━━━━━', 'Tekan Detail untuk lihat isi pesanan.'];
         $keyboard = [];
         foreach ($orders as $i => $order) {
             $lines[] = ($i + 1).'. '.$order->invoice_number.' · '.$order->order_status->value.' / '.$order->payment_status->value.' · Rp '.number_format($order->total_amount, 0, ',', '.').' · '.$this->formatShortDate($order->created_at);
-            $keyboard[] = [['text' => 'Detail '.$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
+            $keyboard[] = [['text' => '🧾 Detail '.$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -35,7 +35,7 @@ class TelegramOrderIntents
     {
         $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'payments' => fn ($query) => $query->latest()])->first();
         if (! $order) {
-            $this->bot->sendMessage($chatId, 'Pesanan tidak ditemukan. Pastikan nomor invoice benar atau cek /riwayat.');
+            $this->bot->sendMessage($chatId, "Pesanan tidak ditemukan.\n\nCoba cek nomor invoice-nya lagi, atau lihat daftar pesanan kamu di /riwayat.");
 
             return;
         }
@@ -44,6 +44,7 @@ class TelegramOrderIntents
         $paymentStatus = $payment?->status ?? $order->payment_status;
         $lines = [
             '🧾 Detail Pesanan',
+            '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Status: '.$order->order_status->value.' / '.$paymentStatus->value,
             'Dibuat: '.$this->formatDate($order->created_at),
@@ -83,16 +84,16 @@ class TelegramOrderIntents
         $orderStatus = $order->order_status;
         $paymentStatus = $payment?->status ?? $order->payment_status;
         if ($orderStatus === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) {
-            return 'Status masih pending. Selesaikan pembayaran atau cek status berkala.';
+            return 'Order masih menunggu pembayaran. Selesaikan pembayaran sebelum batas waktu ya.';
         }
         if (in_array($orderStatus, [OrderStatus::Processing, OrderStatus::Completed], true) || $paymentStatus === PaymentStatus::Paid) {
-            return 'Pembayaran diterima. Pesanan sedang/selesai diproses. Bukti transaksi akan dikirim jika tersedia.';
+            return 'Pembayaran sudah diterima. Pesanan sedang atau sudah selesai diproses.';
         }
         if (in_array($orderStatus, [OrderStatus::Expired, OrderStatus::Cancelled], true) || in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true)) {
-            return 'Pesanan tidak aktif. Silakan checkout ulang lewat /katalog.';
+            return 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /katalog.';
         }
 
-        return 'Jika membutuhkan bantuan, silakan hubungi admin toko.';
+        return 'Kalau butuh bantuan, hubungi admin toko lewat /support.';
     }
 
     private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array

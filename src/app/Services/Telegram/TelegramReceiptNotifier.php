@@ -58,10 +58,17 @@ class TelegramReceiptNotifier
                 $lines[] = '━━━━━━━━━━━━━━';
                 array_push($lines, ...$accountLines);
                 $lines[] = '';
-                $lines[] = 'Jangan bagikan data akun ini ke orang lain. Jika ada kendala login, hubungi /support dengan invoice ini.';
+                $lines[] = '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.';
+                $lines[] = '';
+                $lines[] = 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.';
+                $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
+            } else {
+                $lines[] = '';
+                $lines[] = 'Pesanan kamu sudah tercatat. Simpan pesan ini sebagai bukti pembelian.';
+                $lines[] = '';
+                $lines[] = 'Kalau butuh bantuan, hubungi /support dan sertakan invoice ini.';
+                $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
             }
-            $lines[] = '';
-            $lines[] = 'Terima kasih. Simpan pesan ini sebagai bukti pembelian.';
 
             $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines));
             $receiptSentAt = Order::whereKey($claimed->id);

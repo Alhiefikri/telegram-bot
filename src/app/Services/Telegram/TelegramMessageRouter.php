@@ -68,7 +68,7 @@ class TelegramMessageRouter
                 return;
             }
 
-            $this->bot->sendMessage($chatId, "Kirim broadcast dengan format:\n/broadcast isi pesan");
+            $this->bot->sendMessage($chatId, "📣 Broadcast Info\n━━━━━━━━━━━━━━\nKirim pesan broadcast dengan format:\n\n/broadcast isi pesan\n\nContoh:\n/broadcast Stok Netflix sudah ready lagi.");
 
             return;
         }
@@ -83,7 +83,7 @@ class TelegramMessageRouter
 
             $message = trim(substr($text, strlen('/broadcast')));
             if ($message === '') {
-                $this->bot->sendMessage($chatId, "Kirim broadcast dengan format:\n/broadcast isi pesan");
+                $this->bot->sendMessage($chatId, "Isi broadcast-nya belum ada.\n\nGunakan format:\n/broadcast isi pesan");
 
                 return;
             }
@@ -91,7 +91,7 @@ class TelegramMessageRouter
             $result = $this->broadcast->sendToActiveUsers($message);
             $this->bot->sendMessage($chatId, $result['skipped']
                 ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
-                : "Broadcast selesai. Terkirim: {$result['sent']}. Gagal: {$result['failed']}.");
+                : "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: {$result['sent']}\nGagal: {$result['failed']}");
 
             return;
         }
@@ -107,7 +107,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $keyword = trim(substr($text, strlen('/cari')));
             if ($keyword === '') {
-                $this->bot->sendMessage($chatId, "Ketik /cari diikuti kata kunci produk.\nContoh: /cari netflix");
+                $this->bot->sendMessage($chatId, "Mau cari produk apa?\n\nKetik seperti ini:\n/cari netflix\n\nBisa pakai nama produk, kategori, atau kata kunci lain.");
 
                 return;
             }
@@ -120,7 +120,7 @@ class TelegramMessageRouter
         if ($text === '/batal') {
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, 'Keranjang aktif dibatalkan.');
+            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /katalog ya.");
 
             return;
         }
@@ -135,7 +135,7 @@ class TelegramMessageRouter
         if (in_array($text, ['/status', '/pesanan', '📦 Pesanan'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? 'Status pesanan '.$order->invoice_number.': '.$order->order_status->value.' / '.$order->payment_status->value."\nLihat riwayat: /riwayat atau detail: /order {$order->invoice_number}" : 'Belum ada pesanan. Buka /katalog untuk mulai belanja.');
+            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}" : "Belum ada pesanan nih.\n\nBuka /katalog dulu untuk mulai belanja 🛍️");
 
             return;
         }
@@ -151,7 +151,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $invoice = trim(substr($text, strlen('/order')));
             if ($invoice === '') {
-                $this->bot->sendMessage($chatId, "Ketik /order diikuti nomor invoice.\nContoh: /order INV-12345678");
+                $this->bot->sendMessage($chatId, "Ketik nomor invoice setelah command ya.\n\nContoh:\n/order INV-12345678");
 
                 return;
             }
@@ -168,13 +168,13 @@ class TelegramMessageRouter
             }
 
             if (! ctype_digit($text)) {
-                $this->bot->sendMessage($chatId, 'Jumlah tidak valid. Ketik angka sesuai stok yang tersedia.');
+                $this->bot->sendMessage($chatId, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.');
             }
 
             return;
         }
 
         $this->session->forget($customer);
-        $this->bot->sendMessage($chatId, 'Perintah tidak dikenal. Ketik /katalog.');
+        $this->bot->sendMessage($chatId, "Aku belum paham perintah itu 😅\n\nCoba buka /katalog untuk belanja, atau /support kalau butuh bantuan.");
     }
 }

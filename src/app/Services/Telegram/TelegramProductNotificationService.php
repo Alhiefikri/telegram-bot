@@ -22,7 +22,7 @@ class TelegramProductNotificationService
         $availableStock = max(0, $product->stock - $product->reserved_stock);
 
         $this->broadcast->sendToActiveUsers(implode("\n", [
-            'Produk baru sudah masuk:',
+            'Produk baru sudah masuk nih 👀',
             '📦 '.$product->name,
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
             '📦 Stok: '.$availableStock,
@@ -44,7 +44,7 @@ class TelegramProductNotificationService
             return;
         }
         $this->broadcast->sendToActiveUsers(implode("\n", [
-            'Produk ready dibeli:',
+            'Stok sudah ready lagi 🔥',
             '📦 '.$product->name,
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
             '📦 Stok: '.$availableStock,
@@ -62,7 +62,7 @@ class TelegramProductNotificationService
 
         return [
             'inline_keyboard' => [[
-                ['text' => '👁️ Lihat', 'callback_data' => 'product:'.$product->id],
+                ['text' => '👀 Intip Produk', 'callback_data' => 'product:'.$product->id],
             ]],
         ];
     }
@@ -71,7 +71,7 @@ class TelegramProductNotificationService
     {
         $description = trim((string) $product->description);
 
-        return $description !== '' ? $description : 'Deskripsi produk segera dilengkapi.';
+        return $description !== '' ? $description : 'Deskripsi produk belum ditambahkan.';
     }
 
     public function notifyOutOfStock(Product $product): void
@@ -86,9 +86,10 @@ class TelegramProductNotificationService
                 '⚠️ Stok habis',
                 '━━━━━━━━━━━━━━',
                 '📦 '.$product->name,
-                'Stok tersedia sekarang 0.',
                 '',
-                'Tambahkan stok dari dashboard agar produk tampil lagi di katalog.',
+                'Stok produk ini sekarang 0.',
+                '',
+                'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.',
             ]));
         } catch (Throwable $e) {
             report($e);

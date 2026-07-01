@@ -35,14 +35,14 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(CartStatus::Active, $cartItem->cart->status);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], '📝 Deskripsi')
+            && str_contains($r['text'], '📝 Detail produk')
             && str_contains($r['text'], 'Kopi premium siap kirim.')
             && str_contains($r['text'], 'Harga: Rp25.000')
             && str_contains($r['text'], 'Stok: 5')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'kopi@example.test')
-            && str_contains(json_encode($r->data()), 'Beli (Rp25.000)')
+            && str_contains(json_encode($r->data()), 'Beli Sekarang - Rp25.000')
             && str_contains(json_encode($r->data()), 'buy:'.$product->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -54,8 +54,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], '🛒 Masuk keranjang')
             && str_contains($r['text'], 'Kopi')
             && str_contains($r['text'], 'Jumlah: 2')
-            && str_contains($r['text'], 'Subtotal item: Rp50.000')
-            && str_contains(json_encode($r->data()), 'Siap checkout? Pilih pembayaran anda.')
+            && str_contains($r['text'], 'Subtotal: Rp50.000')
+            && str_contains(json_encode($r->data()), 'Sudah cocok? Pilih metode pembayaran di bawah.')
             && str_contains(json_encode($r->data()), 'payment:dana')
             && str_contains(json_encode($r->data()), 'payment:gopay')
             && str_contains(json_encode($r->data()), 'payment:shopepay'));
@@ -96,7 +96,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(1, CartItem::count());
         $this->assertSame(2, CartItem::first()->quantity);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Jumlah tidak valid. Ketik angka sesuai stok yang tersedia.'));
+            && str_contains($r['text'], 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.'));
     }
 
     public function test_unavailable_product_and_buy_callbacks_do_not_mutate_cart_or_show_payment(): void
@@ -117,7 +117,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(0, CartItem::count());
         $unavailableAnswers = 0;
         Http::assertSent(function ($r) use (&$unavailableAnswers) {
-            if (str_ends_with($r->url(), '/answerCallbackQuery') && ($r['text'] ?? '') === 'Produk tidak tersedia.') {
+            if (str_ends_with($r->url(), '/answerCallbackQuery') && ($r['text'] ?? '') === 'Produk ini belum bisa dibeli sekarang.') {
                 $unavailableAnswers++;
             }
 
@@ -126,7 +126,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(3, $unavailableAnswers);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Kosong')
-            && str_contains($r['text'], '❌ Stok sedang kosong')
+            && str_contains($r['text'], '❌ Status: Stok kosong')
             && str_contains($r['text'], 'Masih bisa dibaca.')
             && ! str_contains(json_encode($r->data()), 'buy:'.$outOfStock->id)
             && ! str_contains(json_encode($r->data()), 'Beli'));
@@ -206,8 +206,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
         $this->assertSame(0, Order::count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'stoknya berubah/tidak tersedia')
-            && str_contains($r['text'], 'Perbarui keranjang'));
+            && str_contains($r['text'], 'stok berubah')
+            && str_contains($r['text'], 'pilih produk ulang'));
     }
 
     public function test_katalog_clears_selected_product_and_invalid_callback_answers_once(): void
@@ -248,7 +248,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(CartStatus::Abandoned, $customer->carts()->firstOrFail()->status);
         $this->assertSame(0, $customer->carts()->where('status', CartStatus::Active)->count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Keranjang aktif dibatalkan.'));
+            && str_contains($r['text'], 'Keranjang aktif sudah dibatalkan.'));
     }
 
     public function test_checkout_callback_creates_manual_order_sends_payment_instructions_and_notifies_admin(): void
@@ -266,12 +266,12 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'DANA', 'provider_reference' => null]);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '12345'
-            && str_contains($r['text'], '✅ Checkout dibuat')
+            && str_contains($r['text'], '✅ Checkout berhasil dibuat')
             && str_contains($r['text'], 'Bayar via: DANA')
             && str_contains($r['text'], '082190715067')
             && str_contains($r['text'], 'A/N MOH. ALIF FIKRI')
             && str_contains($r['text'], '/payment')
-            && str_contains($r['text'], 'Bantuan: @Alhie02')
+            && str_contains($r['text'], 'Kalau butuh bantuan, hubungi @Alhie02.')
             && str_contains($r['text'], 'GPT Plus')
             && ! str_contains($r['text'], 'Halo admin'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -336,4 +336,22 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Order manual baru masuk dashboard'));
     }
+    public function test_expired_callback_answer_does_not_block_callback_business_action(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/answerCallbackQuery' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: query is too old and response timeout expired or query ID is invalid',
+            ], 400),
+        ]);
+        $product = Product::factory()->create(['name' => 'Callback Safe', 'stock' => 2, 'reserved_stock' => 0, 'is_active' => true]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(9401, 'expired-callback', 'buy:'.$product->id))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Pilih jumlah')
+            && str_contains($r['text'], 'Callback Safe')
+            && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
+    }
+
 }

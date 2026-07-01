@@ -51,8 +51,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(202, '/riwayat'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Belum ada riwayat')
-            && str_contains($r['text'], '/katalog'));
+            && str_contains($r['text'], 'Riwayat masih kosong')
+            && str_contains($r['text'], 'Yuk cek katalog dulu'));
     }
 
     public function test_riwayat_hides_other_customer_orders(): void
@@ -76,7 +76,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(204, '/order'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Ketik /order')
+            && str_contains($r['text'], 'Ketik nomor invoice')
             && str_contains($r['text'], 'INV-'));
     }
 
@@ -122,7 +122,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'INV-CB')
-            && str_contains($r['text'], 'Pembayaran diterima'));
+            && str_contains($r['text'], 'Pembayaran sudah diterima'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Pesanan tidak ditemukan')
             && ! str_contains($r['text'], 'INV-OTHER-CB'));

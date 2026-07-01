@@ -23,7 +23,7 @@ class TelegramBroadcastService
             '━━━━━━━━━━━━━━',
             trim($message),
             '',
-            'Balas /support jika butuh bantuan.',
+            'Butuh bantuan? Balas /support ya.',
         ]);
 
         $sent = 0;

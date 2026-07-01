@@ -18,8 +18,9 @@ class SalesProofPostFormatter
         return "✅ Pesanan berhasil diproses\n\n"
             .'Buyer: '.$this->maskBuyer($order)."\n"
             .'Produk: '.$primary.$other."\n\n"
-            .'Total diproses: #'.$successfulPostNumber."\n\n"
-            .'Mau produk digital juga? Klik tombol di bawah 👇';
+            .'Total order sukses: #'.$successfulPostNumber."\n\n"
+            ."Mau produk digital juga?\n"
+            .'Gas belanja lewat tombol di bawah 👇';
     }
 
     private function nextSuccessfulPostNumber(Order $order): int
