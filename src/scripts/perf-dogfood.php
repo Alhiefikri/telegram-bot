@@ -15,7 +15,9 @@ use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -33,11 +35,15 @@ final class PerfTraceCollector
     /** @var array<string, array<int, array<string, mixed>>> */
     public array $http = [];
 
+    /** @var array<string, array<int, array<string, mixed>>> */
+    public array $dogfood = [];
+
     public function begin(string $scenario): void
     {
         $this->current = $scenario;
         $this->db[$scenario] ??= [];
         $this->http[$scenario] ??= [];
+        $this->dogfood[$scenario] ??= [];
     }
 
     public function end(): void
@@ -66,6 +72,18 @@ final class PerfTraceCollector
             'ms' => $ms,
             'status' => $status,
             'error' => $error,
+        ];
+    }
+
+    public function recordDogfoodLog(string $message, array $context): void
+    {
+        if ($this->current === null || ! str_starts_with($message, 'dogfood.')) {
+            return;
+        }
+
+        $this->dogfood[$this->current][] = [
+            'event' => $message,
+            'context' => $context,
         ];
     }
 }
@@ -131,9 +149,14 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
 $collector = new PerfTraceCollector;
 $app->singleton(PerfTraceCollector::class, fn () => $collector);
 $app->bind(TelegramBotClient::class, fn () => new MeasuredTelegramBotClient($collector));
+config()->set('services.dogfood_timing.enabled', true);
 
 DB::listen(function ($query) use ($collector): void {
     $collector->recordDb($query->sql, (float) $query->time);
+});
+
+Event::listen(MessageLogged::class, function (MessageLogged $event) use ($collector): void {
+    $collector->recordDogfoodLog($event->message, $event->context);
 });
 
 $startedAt = date(DATE_ATOM);
@@ -335,6 +358,7 @@ $runScenario = function (string $feature, string $scenario, string $input, int $
         $key = $feature.' / '.$scenario.' / '.$label;
         $dbEvents = $collector->db[$key] ?? [];
         $httpEvents = $collector->http[$key] ?? [];
+        $dogfoodEvents = $collector->dogfood[$key] ?? [];
         $collector->end();
 
         return [
@@ -349,6 +373,7 @@ $runScenario = function (string $feature, string $scenario, string $input, int $
             'http_ms' => round(array_sum(array_column($httpEvents, 'ms')), 3),
             'http_slowest_ms' => round(max(array_column($httpEvents, 'ms') ?: [0]), 3),
             'http_events' => $httpEvents,
+            'dogfood_events' => $dogfoodEvents,
             'memory_before_bytes' => $memoryBefore,
             'memory_after_bytes' => $memoryAfter,
             'memory_delta_bytes' => $memoryAfter - $memoryBefore,
@@ -496,6 +521,83 @@ $results[] = [
     ]],
 ];
 
+$manualCheckoutQrReport = null;
+foreach ($results as $result) {
+    if ($result['feature'] !== 'checkout manual' || $result['scenario'] !== 'happy path file/media QR send') {
+        continue;
+    }
+
+    $runs = [];
+    foreach ($result['runs_detail'] as $run) {
+        $steps = [];
+        $queueWaitMs = null;
+        $workerProcessingMs = null;
+
+        foreach ($run['dogfood_events'] ?? [] as $event) {
+            $context = $event['context'] ?? [];
+            if (($event['event'] ?? '') === 'dogfood.telegram.checkout_step') {
+                $steps[(string) ($context['step'] ?? 'unknown')] = [
+                    'duration_ms' => $context['duration_ms'] ?? null,
+                    'db_query_count' => $context['db_query_count'] ?? null,
+                    'db_query_total_ms' => $context['db_query_total_ms'] ?? null,
+                    'db_query_slowest_ms' => $context['db_query_slowest_ms'] ?? null,
+                    'status' => $context['status'] ?? null,
+                ];
+            }
+
+            if (($event['event'] ?? '') === 'dogfood.telegram.job_picked_up') {
+                $queueWaitMs = $context['queue_wait_ms'] ?? null;
+            }
+
+            if (($event['event'] ?? '') === 'dogfood.telegram.handler_finished') {
+                $workerProcessingMs = $context['handler_duration_ms'] ?? null;
+            }
+        }
+
+        $dominantCandidates = [
+            'queue_wait' => $queueWaitMs,
+            'worker_processing' => $workerProcessingMs,
+            'order_checkout' => $steps['order_checkout']['duration_ms'] ?? null,
+            'manual_qr_file_read' => $steps['manual_qr_file_read']['duration_ms'] ?? null,
+            'manual_customer_send_photo' => $steps['manual_customer_send_photo']['duration_ms'] ?? null,
+            'manual_admin_send_message' => $steps['manual_admin_send_message']['duration_ms'] ?? null,
+        ];
+
+        $dominantStep = null;
+        $dominantMs = -1;
+        foreach ($dominantCandidates as $step => $durationMs) {
+            if ($durationMs === null) {
+                continue;
+            }
+
+            $durationMs = (float) $durationMs;
+            if ($durationMs > $dominantMs) {
+                $dominantMs = $durationMs;
+                $dominantStep = $step;
+            }
+        }
+
+        $runs[] = [
+            'label' => $run['label'],
+            'total_ms' => $run['ms'],
+            'queue_wait_ms' => $queueWaitMs,
+            'worker_processing_ms' => $workerProcessingMs,
+            'dominant_step' => $dominantStep,
+            'dominant_step_ms' => $dominantStep === null ? null : $dominantMs,
+            'dominant_candidates' => $dominantCandidates,
+            'steps' => $steps,
+        ];
+    }
+
+    $manualCheckoutQrReport = [
+        'scenario' => $result['feature'].' / '.$result['scenario'],
+        'interpretation' => 'Compare queue_wait_ms, worker_processing_ms, order_checkout, manual_qr_file_read, manual_customer_send_photo, manual_admin_send_message, and the wrapper steps before optimizing.',
+        'runs' => $runs,
+    ];
+
+    break;
+}
+
 $output = [
     'started_at' => $startedAt,
     'finished_at' => date(DATE_ATOM),
@@ -512,6 +614,7 @@ $output = [
     ],
     'product_id' => $product->id,
     'category_id' => $category->id,
+    'manual_checkout_qr_report' => $manualCheckoutQrReport,
     'results' => $results,
 ];
 

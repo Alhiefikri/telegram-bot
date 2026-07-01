@@ -192,6 +192,7 @@ POSTGRES_PASSWORD=dogfood_password \
 APP_KEY=base64:replace-with-generated-key \
 TELEGRAM_BOT_TOKEN=dogfood-token \
 TELEGRAM_WEBHOOK_SECRET=dogfood-secret \
+DOGFOOD_TIMING_ENABLED=true \
 WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood up -d --build
 
@@ -206,9 +207,15 @@ PLAYWRIGHT_ADMIN_EMAIL=owner@example.test \
 PLAYWRIGHT_ADMIN_PASSWORD='replace-with-password' \
 PLAYWRIGHT_TELEGRAM_WEBHOOK_SECRET='replace-with-secret' \
 npm run test:browser:docker
+
+POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
+docker compose -p telegram-bot-dogfood exec app \
+php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
 
 The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
+
+The perf dogfood JSON includes `manual_checkout_qr_report`, which breaks the manual QR checkout into queue wait, worker processing, order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage` timings. Use the dominant step from that report before making any checkout optimization.
 
 ### 5.1 Webhook Telegram
 

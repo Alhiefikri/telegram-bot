@@ -10,6 +10,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Support\DogfoodTiming;
 
 class TelegramCallbackRouter
 {
@@ -166,9 +167,14 @@ class TelegramCallbackRouter
             }
 
             $paymentMode = $this->checkoutIntents->paymentMode();
-            $order = $paymentMode === 'pakasir'
+            $order = DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                'step' => 'order_checkout',
+                'payment_mode' => $paymentMode,
+                'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
+                'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
+            ], fn () => $paymentMode === 'pakasir'
                 ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
-                : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual');
+                : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual'));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka katalog lagi dan pilih produk ulang ya.");
 
@@ -179,8 +185,19 @@ class TelegramCallbackRouter
         if ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);
         } else {
-            $this->checkoutIntents->sendPaymentInstructions($chatId, $order);
-            $this->checkoutIntents->notifyAdminAboutManualOrder($order);
+            DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                'step' => 'manual_payment_instructions',
+                'payment_mode' => 'manual',
+                'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
+                'order_correlation_id' => DogfoodTiming::correlation($order->id),
+            ], fn () => $this->checkoutIntents->sendPaymentInstructions($chatId, $order));
+
+            DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                'step' => 'manual_admin_notification',
+                'payment_mode' => 'manual',
+                'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
+                'order_correlation_id' => DogfoodTiming::correlation($order->id),
+            ], fn () => $this->checkoutIntents->notifyAdminAboutManualOrder($order));
         }
     }
 }

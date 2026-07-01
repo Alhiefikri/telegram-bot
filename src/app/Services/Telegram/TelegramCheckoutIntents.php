@@ -6,6 +6,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Support\DogfoodTiming;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
@@ -50,17 +51,30 @@ class TelegramCheckoutIntents
         $lines[] = '';
         $lines[] = 'Kalau kesusahan, chat admin @'.$supportUsername.'.';
 
-        $qrPath = public_path('qr-lhie.jpg');
-        if (! is_readable($qrPath)) {
-            throw new \RuntimeException('Manual QR image is not readable: '.$qrPath);
-        }
+        $qrContents = DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => 'manual_qr_file_read',
+            'payment_mode' => 'manual',
+            'order_correlation_id' => DogfoodTiming::correlation($order->id),
+        ], function (): string {
+            $qrPath = public_path('qr-lhie.jpg');
+            if (! is_readable($qrPath)) {
+                throw new \RuntimeException('Manual QR image is not readable: '.$qrPath);
+            }
 
-        $qrContents = file_get_contents($qrPath);
-        if ($qrContents === false) {
-            throw new \RuntimeException('Manual QR image could not be read: '.$qrPath);
-        }
+            $qrContents = file_get_contents($qrPath);
+            if ($qrContents === false) {
+                throw new \RuntimeException('Manual QR image could not be read: '.$qrPath);
+            }
 
-        $this->bot->sendPhoto($chatId, $qrContents, 'qr-lhie.jpg', implode("\n", $lines));
+            return $qrContents;
+        });
+
+        DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => 'manual_customer_send_photo',
+            'payment_mode' => 'manual',
+            'order_correlation_id' => DogfoodTiming::correlation($order->id),
+            'qr_image_bytes' => strlen($qrContents),
+        ], fn () => $this->bot->sendPhoto($chatId, $qrContents, 'qr-lhie.jpg', implode("\n", $lines)));
     }
 
     public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
@@ -140,7 +154,11 @@ class TelegramCheckoutIntents
         $lines[] = 'Tunggu bukti pembayaran dengan caption /payment.';
         $lines[] = 'Approve hanya jika pembayaran QR manual masuk, nama QR LHIE STORE benar, dan nominal sama persis.';
 
-        $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines));
+        DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => 'manual_admin_send_message',
+            'payment_mode' => 'manual',
+            'order_correlation_id' => DogfoodTiming::correlation($order->id),
+        ], fn () => $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines)));
     }
 
     public function paymentMode(): string

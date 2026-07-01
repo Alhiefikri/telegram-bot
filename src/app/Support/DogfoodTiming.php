@@ -10,6 +10,8 @@ class DogfoodTiming
 {
     private static array $queries = ['count' => 0, 'total_ms' => 0.0, 'slowest_ms' => 0.0];
 
+    private static array $queryTimes = [];
+
     public static function enabled(): bool
     {
         return (bool) config('services.dogfood_timing.enabled', false);
@@ -52,11 +54,13 @@ class DogfoodTiming
         self::$queries['count']++;
         self::$queries['total_ms'] += (float) $query->time;
         self::$queries['slowest_ms'] = max(self::$queries['slowest_ms'], (float) $query->time);
+        self::$queryTimes[] = (float) $query->time;
     }
 
     public static function resetQueries(): void
     {
         self::$queries = ['count' => 0, 'total_ms' => 0.0, 'slowest_ms' => 0.0];
+        self::$queryTimes = [];
     }
 
     public static function queryStats(): array
@@ -66,6 +70,43 @@ class DogfoodTiming
             'db_query_total_ms' => round(self::$queries['total_ms'], 2),
             'db_query_slowest_ms' => round(self::$queries['slowest_ms'], 2),
         ];
+    }
+
+    public static function querySnapshot(): array
+    {
+        return self::$queries + ['index' => count(self::$queryTimes)];
+    }
+
+    public static function queryDelta(array $before): array
+    {
+        $queryTimes = array_slice(self::$queryTimes, (int) ($before['index'] ?? 0));
+
+        return [
+            'db_query_count' => count($queryTimes),
+            'db_query_total_ms' => round(array_sum($queryTimes), 2),
+            'db_query_slowest_ms' => round(max($queryTimes ?: [0]), 2),
+        ];
+    }
+
+    public static function time(string $event, array $context, callable $callback): mixed
+    {
+        $startedAt = self::now();
+        $querySnapshot = self::querySnapshot();
+        $status = 'ok';
+
+        try {
+            return $callback();
+        } catch (\Throwable $e) {
+            $status = 'error';
+            $context['exception'] = $e::class;
+
+            throw $e;
+        } finally {
+            self::log($event, $context + self::queryDelta($querySnapshot) + [
+                'status' => $status,
+                'duration_ms' => self::elapsedMs($startedAt),
+            ]);
+        }
     }
 
     public static function log(string $event, array $context): void

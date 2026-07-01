@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\Support\TelegramBotTestSupport;
 
 class CartCheckoutTest extends TelegramBotTestSupport
@@ -279,6 +280,36 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], $order->invoice_number));
     }
 
+    public function test_manual_checkout_dogfood_timing_reports_each_qr_step(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.dogfood_timing.enabled', true);
+        $logs = [];
+        Log::shouldReceive('info')->zeroOrMoreTimes()->withArgs(function (string $event, array $context = []) use (&$logs) {
+            $logs[] = [$event, $context];
+
+            return true;
+        });
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(172, 'cb-manual-timing', 'checkout'))->assertOk();
+
+        foreach ([
+            'order_checkout',
+            'manual_payment_instructions',
+            'manual_qr_file_read',
+            'manual_customer_send_photo',
+            'manual_admin_notification',
+            'manual_admin_send_message',
+        ] as $step) {
+            $this->assertManualCheckoutTimingStepWasLogged($logs, $step);
+        }
+    }
+
     public function test_active_manual_dashboard_setting_overrides_pakasir_env_mode(): void
     {
         config()->set('services.telegram.payment_mode', 'pakasir');
@@ -332,6 +363,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Order manual baru masuk dashboard'));
     }
+
     public function test_expired_callback_answer_does_not_block_callback_business_action(): void
     {
         $this->fakeTelegramHttp([
@@ -350,4 +382,20 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
     }
 
+    private function assertManualCheckoutTimingStepWasLogged(array $logs, string $step): void
+    {
+        foreach ($logs as [$event, $context]) {
+            if ($event === 'dogfood.telegram.checkout_step' && ($context['step'] ?? null) === $step) {
+                $this->assertSame('manual', $context['payment_mode']);
+                $this->assertSame('ok', $context['status']);
+                $this->assertArrayHasKey('duration_ms', $context);
+                $this->assertArrayHasKey('db_query_count', $context);
+                $this->assertArrayHasKey('db_query_total_ms', $context);
+
+                return;
+            }
+        }
+
+        $this->fail("Expected dogfood manual checkout timing step [{$step}] was not logged.");
+    }
 }
