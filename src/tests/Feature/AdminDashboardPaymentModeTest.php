@@ -1,0 +1,93 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\UserRole;
+use App\Models\ManualPaymentSetting;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class AdminDashboardPaymentModeTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_owner_can_toggle_payment_mode_from_manual_dashboard(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Mode pembayaran')
+            ->assertSee('Pakasir aktif')
+            ->assertSee('Manual /payment')
+            ->assertDontSee('Pakasir dimatikan sementara');
+
+        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'id' => $setting->id,
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'payment_mode.updated',
+            'subject_type' => ManualPaymentSetting::class,
+            'subject_id' => (string) $setting->id,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Manual aktif')
+            ->assertSee('Checkout meminta bukti /payment');
+    }
+
+    public function test_payment_mode_toggle_creates_active_setting_when_none_exists(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Admin,
+        ]));
+
+        $this->assertSame(0, ManualPaymentSetting::query()->count());
+
+        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
+
+    public function test_non_manager_role_cannot_toggle_payment_mode(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Finance,
+        ]));
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Hanya owner/admin yang bisa mengubah mode pembayaran.');
+
+        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('manual_payment_settings', [
+            'payment_mode' => 'pakasir',
+        ]);
+    }
+}

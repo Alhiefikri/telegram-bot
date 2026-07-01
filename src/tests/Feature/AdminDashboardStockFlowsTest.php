@@ -1,0 +1,282 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\InventoryMovementType;
+use App\Enums\UserRole;
+use App\Models\AuditLog;
+use App\Models\Category;
+use App\Models\InventoryMovement;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\Product;
+use App\Models\ProductStockItem;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class AdminDashboardStockFlowsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $category = Category::factory()->create(['name' => 'Akun Premium']);
+        $product = Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Netflix 1 Bulan',
+            'price_amount' => 45000,
+            'stock' => 9,
+            'reserved_stock' => 2,
+            'is_active' => true,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'available@example.test|pass']);
+        $claimedOrder = Order::factory()->create();
+        $claimedOrderItem = OrderItem::factory()->create(['order_id' => $claimedOrder->id, 'product_id' => $product->id]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $claimedOrderItem->id, 'secret' => 'claimed@example.test|pass']);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Produk Saya')
+            ->assertSee('Netflix 1 Bulan')
+            ->assertSee('Akun Premium')
+            ->assertSeeInOrder(['Stok', '9'])
+            ->assertSeeInOrder(['Tersedia', '7'])
+            ->assertSeeInOrder(['Dipesan', '2'])
+            ->assertSee('IDR 45.000')
+            ->assertSee('Aktif')
+            ->assertSeeInOrder(['Ubah', 'Stok', 'Kelola', 'Share', 'Pause', 'Hapus'])
+            ->assertSee('Tambah kategori')
+            ->assertSee('Kelola stok')
+            ->assertSee('available@example.test|pass')
+            ->assertDontSee('claimed@example.test|pass')
+            ->assertSee('email@example.com|password', false)
+            ->assertSee('background: #fecaca; color: #dc2626;', false)
+            ->assertDontSee('@js(', false)
+            ->assertDontSee('fi-form', false)
+            ->assertDontSee('fi-modal', false);
+    }
+
+    public function test_support_dashboard_does_not_receive_stock_item_secrets_or_management_urls(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Support,
+        ]));
+
+        $category = Category::factory()->create(['name' => 'Akun Premium']);
+        $product = Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Spotify Premium',
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $stockItem = ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'support-must-not-see@example.test|pass',
+        ]);
+
+        $response = $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Spotify Premium')
+            ->assertSee('Role ini hanya bisa melihat produk')
+            ->assertDontSee('Tambah kategori')
+            ->assertDontSee('Kelola stok');
+
+        $content = $response->getContent();
+
+        $this->assertStringNotContainsString('support-must-not-see@example.test|pass', $content);
+        $this->assertStringNotContainsString(route('admin.products.stock-items.update', [$product, $stockItem]), $content);
+        $this->assertStringNotContainsString(route('admin.products.stock-items.destroy', [$product, $stockItem]), $content);
+    }
+
+    public function test_admin_can_add_product_stock_from_compact_dashboard_modal(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Canva Pro',
+            'stock' => 2,
+            'reserved_stock' => 1,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "akun-1@example.test|pass1\n\nakun-2@example.test|pass2\nakun-3@example.test|pass3",
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertSessionHas('status', 'Stok Canva Pro bertambah 3 item.');
+
+        $product->refresh();
+        $this->assertSame(5, $product->stock);
+        $this->assertSame(1, $product->reserved_stock);
+        $this->assertSame(3, ProductStockItem::where('product_id', $product->id)->count());
+        $this->assertSame(
+            ['akun-1@example.test|pass1', 'akun-2@example.test|pass2', 'akun-3@example.test|pass3'],
+            ProductStockItem::where('product_id', $product->id)->orderBy('id')->pluck('secret')->all(),
+        );
+        $this->assertStringNotContainsString('akun-1@example.test', (string) InventoryMovement::where('product_id', $product->id)->latest('id')->firstOrFail()->notes);
+        $this->assertStringNotContainsString('akun-1@example.test', (string) json_encode(AuditLog::where('subject_id', (string) $product->id)->latest('id')->firstOrFail()->new_values));
+        $this->assertDatabaseHas('inventory_movements', [
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Adjustment->value,
+            'quantity' => 3,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'product.stock_adjusted',
+            'subject_id' => (string) $product->id,
+        ]);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSeeInOrder(['Canva Pro', 'Stok', '5'])
+            ->assertSeeInOrder(['Canva Pro', 'Tersedia', '4'])
+            ->assertSeeInOrder(['Canva Pro', 'Dipesan', '1']);
+    }
+
+    public function test_stock_modal_submission_requires_at_least_one_non_empty_row(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create(['stock' => 2]);
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "\n  \n",
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['stock_items'], null, 'stockAdjustment');
+
+        $this->assertSame(2, $product->fresh()->stock);
+    }
+
+    public function test_invalid_stock_submission_reopens_stock_modal_for_route_product_without_hidden_product_id(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create([
+            'name' => 'Stock Modal Product',
+            'stock' => 2,
+        ]);
+
+        $this->followingRedirects()
+            ->from('/admin?tab=stats')
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "\n  \n",
+            ])
+            ->assertOk()
+            ->assertSee('\u0022activeTab\u0022:\u0022produk\u0022', false)
+            ->assertSee('\u0022stockModalOpen\u0022:true', false)
+            ->assertSee('\u0022stockProductId\u0022:'.$product->id, false)
+            ->assertSee('\u0022stockProductName\u0022:\u0022Stock Modal Product\u0022', false)
+            ->assertSee('Isi minimal satu baris stok.');
+
+        $this->assertSame(2, $product->fresh()->stock);
+    }
+
+    public function test_admin_can_edit_available_stock_item_without_changing_counts(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'old@example.test|pass']);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.stock-items.update', [$product, $stockItem]), [
+                'secret' => 'new@example.test|pass',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $this->assertSame('new@example.test|pass', $stockItem->fresh()->secret);
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertDatabaseCount('inventory_movements', 0);
+
+        $audit = AuditLog::where('action', 'product_stock_item.updated')->firstOrFail();
+        $this->assertStringNotContainsString('old@example.test', (string) json_encode($audit->old_values));
+        $this->assertStringNotContainsString('new@example.test', (string) json_encode($audit->new_values));
+    }
+
+    public function test_admin_can_delete_available_stock_item_with_atomic_count_update(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'delete-me@example.test|pass']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'keep-me@example.test|pass']);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->delete(route('admin.products.stock-items.destroy', [$product, $stockItem]))
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertSessionHas('status', 'Satu stok '.$product->name.' dihapus.');
+
+        $this->assertDatabaseMissing('product_stock_items', ['id' => $stockItem->id]);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertDatabaseHas('inventory_movements', [
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Adjustment->value,
+            'quantity' => -1,
+        ]);
+
+        $audit = AuditLog::where('action', 'product_stock_item.deleted')->firstOrFail();
+        $this->assertStringNotContainsString('delete-me@example.test', (string) json_encode($audit->old_values));
+        $this->assertStringNotContainsString('delete-me@example.test', (string) json_encode($audit->new_values));
+
+        $dashboard = $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('keep-me@example.test|pass')
+            ->assertSeeInOrder([$product->name, 'Stok', '1']);
+
+        $this->assertStringNotContainsString('delete-me@example.test|pass', $dashboard->getContent());
+    }
+
+    public function test_stock_item_management_rejects_claimed_and_cross_product_rows(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 1]);
+        $otherProduct = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $order = Order::factory()->create();
+        $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id]);
+        $claimedItem = ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $orderItem->id, 'secret' => 'claimed@example.test|pass']);
+        $crossProductItem = ProductStockItem::create(['product_id' => $otherProduct->id, 'secret' => 'other@example.test|pass']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.stock-items.update', [$product, $claimedItem]), [
+                'secret' => 'changed@example.test|pass',
+            ])
+            ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->delete(route('admin.products.stock-items.destroy', [$product, $claimedItem]))
+            ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->delete(route('admin.products.stock-items.destroy', [$product, $crossProductItem]))
+            ->assertNotFound();
+
+        $this->assertSame('claimed@example.test|pass', $claimedItem->fresh()->secret);
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertSame(1, $otherProduct->fresh()->stock);
+    }
+
+    public function test_stock_item_delete_preserves_reserved_stock_invariant(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 1]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'blocked@example.test|pass']);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->delete(route('admin.products.stock-items.destroy', [$product, $stockItem]))
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['stock_item']);
+
+        $this->assertDatabaseHas('product_stock_items', ['id' => $stockItem->id]);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+    }
+}
