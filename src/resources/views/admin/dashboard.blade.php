@@ -338,165 +338,52 @@
         @php
             $stockModalProduct = collect($products)->firstWhere('id', (int) old('stock_product_id'));
             $editingProduct = collect($products)->firstWhere('id', (int) old('product_id'));
+            $hasProductErrors = $errors->productCreate->any() || $errors->productUpdate->any();
+            $hasProductUpdateErrors = $errors->productUpdate->any();
+            $hasProductTabErrors = $hasProductErrors
+                || $errors->stockAdjustment->any()
+                || $errors->categoryCreate->any()
+                || $errors->stockItemUpdate->any();
+            $productStoreUrl = route('admin.products.store');
+            $dashboardState = [
+                'activeTab' => $hasProductTabErrors ? 'produk' : ($activeTab ?? 'stats'),
+                'storeLink' => $storeLink['url'],
+                'productStoreUrl' => $productStoreUrl,
+                'productModalOpen' => $hasProductErrors,
+                'productForm' => [
+                    'productModalMode' => $hasProductUpdateErrors ? 'edit' : 'create',
+                    'productFormAction' => $hasProductUpdateErrors ? ($editingProduct['update_url'] ?? $productStoreUrl) : $productStoreUrl,
+                    'productFormMethod' => $hasProductUpdateErrors ? 'PATCH' : '',
+                    'productId' => old('product_id', $editingProduct['id'] ?? null),
+                    'productName' => old('name', $editingProduct['name'] ?? ''),
+                    'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
+                    'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
+                    'productDescription' => old('description', $editingProduct['description'] ?? ''),
+                    'productFeatures' => old('features', $editingProduct['features'] ?? ''),
+                    'productSpecifications' => old('specifications', $editingProduct['specifications'] ?? ''),
+                    'productIsActive' => (bool) old('is_active', $editingProduct['is_active'] ?? true),
+                    'productFeaturesOpen' => $errors->productCreate->has('features')
+                        || $errors->productUpdate->has('features')
+                        || trim((string) old('features', $editingProduct['features'] ?? '')) !== '',
+                    'productSpecificationsOpen' => $errors->productCreate->has('specifications')
+                        || $errors->productUpdate->has('specifications')
+                        || trim((string) old('specifications', $editingProduct['specifications'] ?? '')) !== '',
+                ],
+                'stockModalOpen' => $errors->stockAdjustment->any(),
+                'stockForm' => [
+                    'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
+                    'stockProductId' => $stockModalProduct['id'] ?? null,
+                    'stockProductName' => $stockModalProduct['name'] ?? '',
+                    'stockProductStock' => $stockModalProduct['stock'] ?? 0,
+                    'stockItems' => old('stock_items', ''),
+                ],
+            ];
         @endphp
 
         <main
             class="admin-mini-shell flex min-h-screen flex-col px-3 pb-32 pt-3 sm:px-4 md:px-0 md:pb-10 md:pt-6"
-            x-data="{
-                activeTab: @js(($errors->productCreate->any() || $errors->productUpdate->any() || $errors->stockAdjustment->any() || $errors->categoryCreate->any() || $errors->stockItemUpdate->any()) ? 'produk' : ($activeTab ?? 'stats')),
-                copied: false,
-                storeLink: @js($storeLink['url']),
-                copyState: 'Salin',
-                productModalOpen: @js($errors->productCreate->any() || $errors->productUpdate->any()),
-                productModalMode: @js($errors->productUpdate->any() ? 'edit' : 'create'),
-                productFormAction: @js($errors->productUpdate->any() ? ($editingProduct['update_url'] ?? route('admin.products.store')) : route('admin.products.store')),
-                productFormMethod: @js($errors->productUpdate->any() ? 'PATCH' : ''),
-                productId: @js(old('product_id', $editingProduct['id'] ?? null)),
-                productName: @js(old('name', $editingProduct['name'] ?? '')),
-                productPrice: @js(old('price_amount', $editingProduct['price_amount'] ?? '')),
-                productCategoryId: @js(old('category_id', $editingProduct['category_id'] ?? '')),
-                productDescription: @js(old('description', $editingProduct['description'] ?? '')),
-                productFeatures: @js(old('features', $editingProduct['features'] ?? '')),
-                productSpecifications: @js(old('specifications', $editingProduct['specifications'] ?? '')),
-                productIsActive: @js((bool) old('is_active', $editingProduct['is_active'] ?? true)),
-                productFeaturesOpen: @js($errors->productCreate->has('features') || $errors->productUpdate->has('features') || trim((string) old('features', $editingProduct['features'] ?? '')) !== ''),
-                productSpecificationsOpen: @js($errors->productCreate->has('specifications') || $errors->productUpdate->has('specifications') || trim((string) old('specifications', $editingProduct['specifications'] ?? '')) !== ''),
-                stockModalOpen: @js($errors->stockAdjustment->any()),
-                stockFormAction: @js($stockModalProduct['stock_url'] ?? ''),
-                stockProductId: @js($stockModalProduct['id'] ?? null),
-                stockProductName: @js($stockModalProduct['name'] ?? ''),
-                stockProductStock: @js($stockModalProduct['stock'] ?? 0),
-                stockItems: @js(old('stock_items', '')),
-                manageStockModalOpen: false,
-                manageStockProductName: '',
-                manageStockProductStock: 0,
-                manageStockItems: [],
-                manageStockAvailableCount: 0,
-                manageStockTruncated: false,
-                manageStockAddPayload: null,
-                stockItemCount() {
-                    return this.stockItems
-                        .split(/\r?\n/)
-                        .map((row) => row.trim())
-                        .filter(Boolean)
-                        .length;
-                },
-                openProductForm() {
-                    this.activeTab = 'produk';
-                    this.productModalMode = 'create';
-                    this.productFormAction = @js(route('admin.products.store'));
-                    this.productFormMethod = '';
-                    this.productId = null;
-                    this.productName = '';
-                    this.productPrice = '';
-                    this.productCategoryId = '';
-                    this.productDescription = '';
-                    this.productFeatures = '';
-                    this.productSpecifications = '';
-                    this.productIsActive = true;
-                    this.productFeaturesOpen = false;
-                    this.productSpecificationsOpen = false;
-                    this.productModalOpen = true;
-                    this.$nextTick(() => this.$refs.productName?.focus());
-                },
-                openProductEditModal(product) {
-                    this.activeTab = 'produk';
-                    this.productModalMode = 'edit';
-                    this.productFormAction = product.updateUrl;
-                    this.productFormMethod = 'PATCH';
-                    this.productId = product.id;
-                    this.productName = product.name;
-                    this.productPrice = product.priceAmount;
-                    this.productCategoryId = product.categoryId ?? '';
-                    this.productDescription = product.description;
-                    this.productFeatures = product.features;
-                    this.productSpecifications = product.specifications;
-                    this.productIsActive = product.isActive;
-                    this.productFeaturesOpen = String(product.features || '').trim().length > 0;
-                    this.productSpecificationsOpen = String(product.specifications || '').trim().length > 0;
-                    this.productModalOpen = true;
-                    this.$nextTick(() => this.$refs.productName?.focus());
-                },
-                closeProductModal() {
-                    this.productModalOpen = false;
-                },
-                openManageStockModal(product) {
-                    this.activeTab = 'produk';
-                    this.manageStockProductName = product.name;
-                    this.manageStockProductStock = product.stock;
-                    this.manageStockItems = (product.stockItems || []).map((item) => ({ ...item, editing: false }));
-                    this.manageStockAvailableCount = product.availableStockItemCount || 0;
-                    this.manageStockTruncated = Boolean(product.stockItemsTruncated);
-                    this.manageStockAddPayload = {
-                        id: product.id,
-                        name: product.name,
-                        stock: product.stock,
-                        stockUrl: product.stockUrl,
-                    };
-                    this.manageStockModalOpen = true;
-                },
-                closeManageStockModal() {
-                    this.manageStockModalOpen = false;
-                    this.manageStockItems = [];
-                    this.manageStockAddPayload = null;
-                },
-                openStockModalFromManage() {
-                    if (this.manageStockAddPayload) {
-                        const product = this.manageStockAddPayload;
-                        this.closeManageStockModal();
-                        this.openStockModal(product);
-                    }
-                },
-                openStockModal(product) {
-                    this.activeTab = 'produk';
-                    this.stockFormAction = product.stockUrl;
-                    this.stockProductId = product.id;
-                    this.stockProductName = product.name;
-                    this.stockProductStock = product.stock;
-                    this.stockItems = '';
-                    this.stockModalOpen = true;
-                    this.$nextTick(() => this.$refs.stockItems?.focus());
-                },
-                closeStockModal() {
-                    this.stockModalOpen = false;
-                    this.stockItems = '';
-                },
-                markStoreLinkCopied() {
-                    this.copied = true;
-                    this.copyState = 'Tersalin';
-                    setTimeout(() => {
-                        this.copied = false;
-                        this.copyState = 'Salin';
-                    }, 1600);
-                },
-                async copyStoreLink() {
-                    try {
-                        if (! navigator.clipboard?.writeText) {
-                            throw new Error('clipboard_unavailable');
-                        }
-
-                        await navigator.clipboard.writeText(this.storeLink);
-                        this.markStoreLinkCopied();
-                    } catch (error) {
-                        window.prompt('Salin link toko', this.storeLink);
-                    }
-                },
-                async shareStore() {
-                    if (navigator.share) {
-                        try {
-                            await navigator.share({ title: 'LHIE STORE', url: this.storeLink });
-                            return;
-                        } catch (error) {
-                            if (error?.name === 'AbortError') {
-                                return;
-                            }
-                        }
-                    }
-
-                    await this.copyStoreLink();
-                },
-            }"
-            x-on:admin-dashboard:close-modal.window="if ($event.detail?.modal === 'stock-modal') closeStockModal(); if ($event.detail?.modal === 'product-modal') closeProductModal(); if ($event.detail?.modal === 'manage-stock-modal') closeManageStockModal()"
+            x-data="adminDashboard(@js($dashboardState))"
+            x-on:admin-dashboard:close-modal.window="handleCloseModal($event)"
         >
             @include('admin.dashboard.header')
             @include('admin.dashboard.desktop-navigation')

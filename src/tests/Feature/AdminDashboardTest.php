@@ -441,11 +441,12 @@ class AdminDashboardTest extends TestCase
             ->assertSee(route('storefront.home'), false)
             ->assertSee('Bagikan')
             ->assertSee('Salin')
+            ->assertSee('adminDashboard', false)
             ->assertSee('copyStoreLink', false)
             ->assertSee('shareStore', false)
-            ->assertSee('navigator.share', false)
-            ->assertSee('navigator.clipboard', false)
-            ->assertSee('window.prompt', false)
+            ->assertDontSee('navigator.share', false)
+            ->assertDontSee('navigator.clipboard', false)
+            ->assertDontSee('window.prompt', false)
             ->assertSeeInOrder(['GMV', 'IDR 125.000'])
             ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
             ->assertSeeInOrder(['Order', '2'])
@@ -778,8 +779,8 @@ class AdminDashboardTest extends TestCase
                 'description' => '',
             ])
             ->assertOk()
-            ->assertSee('productModalOpen: true', false)
-            ->assertSee("productModalMode: 'create'", false)
+            ->assertSee('\u0022productModalOpen\u0022:true', false)
+            ->assertSee('\u0022productModalMode\u0022:\u0022create\u0022', false)
             ->assertSee('Periksa kembali field produk yang ditandai.');
     }
 
@@ -1045,7 +1046,7 @@ class AdminDashboardTest extends TestCase
             ->post(route('admin.categories.store'), ['category_name' => str_repeat('A', 121)])
             ->assertOk()
             ->assertSee('Nama kategori maksimal 120 karakter.')
-            ->assertSee('productModalOpen: false', false)
+            ->assertSee('\u0022productModalOpen\u0022:false', false)
             ->assertDontSee('Periksa kembali field produk yang ditandai.');
     }
 
@@ -1088,8 +1089,8 @@ class AdminDashboardTest extends TestCase
                 'product_id' => (string) $product->id,
             ])
             ->assertOk()
-            ->assertSee('productModalOpen: true', false)
-            ->assertSee("productModalMode: 'edit'", false)
+            ->assertSee('\u0022productModalOpen\u0022:true', false)
+            ->assertSee('\u0022productModalMode\u0022:\u0022edit\u0022', false)
             ->assertSee('Periksa kembali field produk yang ditandai.');
     }
 

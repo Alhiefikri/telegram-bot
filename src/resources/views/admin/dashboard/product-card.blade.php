@@ -70,7 +70,7 @@
                                     type="button"
                                     class="product-action-btn"
                                     style="background: #8758de; color: #fff;"
-                                    x-on:click="navigator.clipboard?.writeText(@js($product['share_url'])); copied = true; setTimeout(() => copied = false, 1600)"
+                                    x-on:click="copyProductShareLink(@js($product['share_url']))"
                                 >
                                     🔗 Share
                                 </button>

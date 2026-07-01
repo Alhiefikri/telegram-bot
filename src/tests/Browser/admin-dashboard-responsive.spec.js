@@ -47,6 +47,7 @@ test.afterAll(async () => {
 
 test('renders the compact admin dashboard at desktop width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
+    await installClipboardProbe(page);
     await login(page);
 
     await expect(page.getByRole('heading', { name: 'Test User' })).toBeVisible();
@@ -56,6 +57,7 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Manual /payment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
+    await expectStoreLinkCopyAndShare(page);
 
     await expectNoDocumentOverflow(page);
     await expectPrimaryActionsAtLeast44px(page);
@@ -122,6 +124,39 @@ async function login(page) {
     await page.locator('input[type="password"]').fill('password');
     await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
     await page.waitForURL(`${baseUrl}/admin`);
+}
+
+async function installClipboardProbe(page) {
+    await page.addInitScript(() => {
+        window.__copiedText = null;
+
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                async writeText(text) {
+                    window.__copiedText = text;
+                },
+            },
+        });
+
+        Object.defineProperty(navigator, 'share', {
+            configurable: true,
+            value: undefined,
+        });
+    });
+}
+
+async function expectStoreLinkCopyAndShare(page) {
+    const storeLink = page.getByRole('region', { name: 'Link toko' });
+    const visibleStoreUrl = (await storeLink.locator('p').nth(1).innerText()).trim();
+
+    await storeLink.getByRole('button', { name: 'Salin' }).click();
+    await expect(storeLink.getByRole('button', { name: 'Tersalin' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe(visibleStoreUrl);
+
+    await page.getByRole('button', { name: 'Bagikan Toko' }).click();
+    await expect(page.locator('header').getByRole('button', { name: 'Tersalin' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe(visibleStoreUrl);
 }
 
 async function exerciseProductManagementModals(page) {
