@@ -25,6 +25,7 @@
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
+            $storeChannel = $storeChannelTab;
         @endphp
 
         <main
@@ -44,6 +45,7 @@
             @include('admin.dashboard.sales-tab')
             @include('admin.dashboard.product-modal')
             @include('admin.dashboard.broadcast-tab')
+            @include('admin.dashboard.store-channel-tab')
             @include('admin.dashboard.mobile-navigation')
         </main>
     </body>

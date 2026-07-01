@@ -6,14 +6,19 @@ use Illuminate\Support\Facades\Http;
 
 class TelegramBotClient
 {
-    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): void
+    public function getChat(int|string $chatId): array
+    {
+        return Http::post($this->url('getChat'), ['chat_id' => $chatId])->throw()->json();
+    }
+
+    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
     {
         $payload = ['chat_id' => $chatId, 'text' => $text];
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        Http::post($this->url('sendMessage'), $payload)->throw();
+        return Http::post($this->url('sendMessage'), $payload)->throw()->json();
     }
 
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = []): void

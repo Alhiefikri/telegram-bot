@@ -12,6 +12,8 @@ use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
+use App\Http\Controllers\Admin\AdminStoreChannelController;
+use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\StorefrontController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +25,8 @@ Route::post('/admin/logout', [AdminLoginController::class, 'destroy'])->name('ad
 Route::middleware('admin.access')->group(function (): void {
     Route::get('/admin', AdminDashboardController::class)->name('admin.dashboard');
     Route::post('/admin/payment-mode', AdminPaymentModeController::class)->name('admin.payment-mode.update');
+    Route::post('/admin/store-channel', AdminStoreChannelController::class)->name('admin.store-channel.update');
+    Route::post('/admin/store-channel/test', AdminStoreChannelTestController::class)->name('admin.store-channel.test');
     Route::post('/admin/broadcast', AdminBroadcastController::class)->name('admin.broadcast.store');
     Route::patch('/admin/products/{product}', AdminProductUpdateController::class)->name('admin.products.update');
     Route::delete('/admin/products/{product}', AdminProductDeleteController::class)->name('admin.products.destroy');

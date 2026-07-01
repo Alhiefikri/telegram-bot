@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\StoreChannelSetting;
 use App\Models\User;
 
 final class AdminDashboardData
@@ -43,6 +44,7 @@ final class AdminDashboardData
             'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
             'productsTab' => $this->productsData->forProducts($canManageProducts),
             'salesTab' => $this->salesData->forSales($statusCounts),
+            'storeChannelTab' => $this->storeChannelTab($user),
         ];
     }
 
@@ -84,6 +86,7 @@ final class AdminDashboardData
             ['id' => 'produk', 'label' => 'Produk'],
             ['id' => 'penjualan', 'label' => 'Penjualan'],
             ['id' => 'broadcast', 'label' => 'Broadcast'],
+            ['id' => 'telegram-channel', 'label' => 'Telegram Channel'],
             ['id' => 'withdraw', 'label' => 'Withdraw'],
             ['id' => 'riwayat', 'label' => 'Riwayat'],
             ['id' => 'affiliate', 'label' => 'Affiliate'],
@@ -94,6 +97,31 @@ final class AdminDashboardData
         return [
             'activeTab' => in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats',
             'tabs' => $tabs,
+        ];
+    }
+
+    private function storeChannelTab(User $user): array
+    {
+        $setting = StoreChannelSetting::current();
+        $configured = (bool) ($setting->channel_username || $setting->channel_link);
+        $ready = $configured && $setting->telegram_chat_id && $setting->last_test_success === true;
+        $status = match (true) {
+            ! $configured => ['label' => 'Not configured', 'hint' => 'Isi username/link channel lalu jalankan Test Channel.', 'tone' => 'slate'],
+            $ready => ['label' => 'Ready', 'hint' => 'Bot dapat mengakses dan mengirim pesan ke channel.', 'tone' => 'emerald'],
+            $setting->last_test_success === null => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
+            $setting->last_test_success === false && str_contains(strtolower((string) $setting->last_test_error), 'cannot post') => ['label' => 'Bot cannot post', 'hint' => $setting->last_test_error ?: 'Pastikan bot menjadi admin channel dan boleh mengirim pesan.', 'tone' => 'rose'],
+            $setting->last_test_success === false && str_contains(strtolower((string) $setting->last_test_error), 'cannot access') => ['label' => 'Bot cannot access', 'hint' => $setting->last_test_error ?: 'Pastikan bot sudah ditambahkan ke channel.', 'tone' => 'rose'],
+            $setting->last_test_success === false => ['label' => 'Test failed', 'hint' => $setting->last_test_error ?: 'Periksa akses bot ke channel.', 'tone' => 'rose'],
+            default => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
+        };
+
+        return [
+            'setting' => $setting,
+            'status' => $status,
+            'ready' => $ready,
+            'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'update_url' => route('admin.store-channel.update'),
+            'test_url' => route('admin.store-channel.test'),
         ];
     }
 

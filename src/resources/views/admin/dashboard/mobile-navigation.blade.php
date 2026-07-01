@@ -46,6 +46,19 @@
                         <span class="text-[10px] font-bold text-current">Pesanan</span>
                     </button>
 
+                    {{-- Telegram Channel --}}
+                    <button
+                        type="button"
+                        x-on:click="activeTab = 'telegram-channel'"
+                        class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
+                        :class="activeTab === 'telegram-channel' ? 'bottom-nav-active' : ''"
+                    >
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z" />
+                        </svg>
+                        <span class="text-[10px] font-bold text-current">Channel</span>
+                    </button>
+
                     @if ($canManageProducts)
                     {{-- Tambah --}}
                     <button
