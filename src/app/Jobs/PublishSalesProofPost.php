@@ -7,6 +7,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBotClient;
+use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,7 +24,7 @@ class PublishSalesProofPost implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public readonly string $orderId, public readonly bool $manualRetry = false) {}
+    public function __construct(public readonly string $orderId, public readonly bool $manualRetry = false, public ?string $jobEnqueuedAt = null) {}
 
     public function backoff(): array
     {
@@ -32,17 +33,37 @@ class PublishSalesProofPost implements ShouldQueue
 
     public function handle(TelegramBotClient $bot, SalesProofPostFormatter $formatter): void
     {
+        $startedAt = DogfoodTiming::now();
+        $memoryBefore = memory_get_usage(true);
+        DogfoodTiming::resetQueries();
+        DogfoodTiming::log('dogfood.telegram.sales_proof_job_picked_up', [
+            'correlation_id' => DogfoodTiming::correlation($this->orderId),
+            'job_enqueued_at' => $this->jobEnqueuedAt,
+            'job_picked_up_at' => now()->toISOString(),
+            'queue_wait_ms' => DogfoodTiming::queueWaitMs($this->jobEnqueuedAt),
+        ]);
+
         $publishLock = Cache::lock('sales-proof-posts:publish', 60);
-        if (! $publishLock->get()) {
-            $this->release(5);
-
-            return;
-        }
-
+        $lockAcquired = false;
         try {
+            $lockAcquired = $publishLock->get();
+            if (! $lockAcquired) {
+                $this->release(5);
+
+                return;
+            }
+
             $this->publish($bot, $formatter);
         } finally {
-            $publishLock->release();
+            if ($lockAcquired) {
+                $publishLock->release();
+            }
+            DogfoodTiming::log('dogfood.telegram.sales_proof_job_finished', DogfoodTiming::queryStats() + [
+                'correlation_id' => DogfoodTiming::correlation($this->orderId),
+                'handler_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+                'memory_before_bytes' => $memoryBefore,
+                'memory_after_bytes' => memory_get_usage(true),
+            ]);
         }
     }
 

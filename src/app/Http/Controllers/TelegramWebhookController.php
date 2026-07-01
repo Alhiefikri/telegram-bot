@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
+use App\Support\DogfoodTiming;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,7 @@ class TelegramWebhookController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
+        $startedAt = DogfoodTiming::now();
         $secret = (string) config('services.telegram.webhook_secret');
         if ($secret === '' && ! app()->environment(['local', 'testing'])) {
             return response()->json(['message' => 'Telegram webhook secret is not configured.'], 500);
@@ -30,10 +32,24 @@ class TelegramWebhookController extends Controller
 
         try {
             $update = TelegramUpdate::create(['update_id' => (int) $validated['update_id'], 'payload' => $payload, 'created_at' => now()]);
-            ProcessTelegramUpdate::dispatch($update->id);
+            $jobEnqueuedAt = now();
+            ProcessTelegramUpdate::dispatch($update->id, $jobEnqueuedAt->toISOString());
+            $duplicate = false;
         } catch (UniqueConstraintViolationException) {
             // Duplicate Telegram update: already stored/processing/processed.
+            $update = null;
+            $jobEnqueuedAt = null;
+            $duplicate = true;
         }
+
+        DogfoodTiming::log('dogfood.telegram.webhook_ack', [
+            'update_id' => (int) $validated['update_id'],
+            'telegram_update_id' => $update?->id,
+            'correlation_id' => DogfoodTiming::correlation($validated['update_id']),
+            'ack_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            'job_enqueued_at' => $jobEnqueuedAt?->toISOString(),
+            'duplicate' => $duplicate,
+        ]);
 
         return response()->json(['ok' => true]);
     }

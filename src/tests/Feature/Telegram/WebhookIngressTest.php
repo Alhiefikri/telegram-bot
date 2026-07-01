@@ -7,6 +7,7 @@ use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\Support\TelegramBotTestSupport;
 
 class WebhookIngressTest extends TelegramBotTestSupport
@@ -70,5 +71,68 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(120, '/start'))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(121, '/start'))->assertTooManyRequests();
+    }
+
+    public function test_dogfood_timing_is_disabled_by_default(): void
+    {
+        Log::spy();
+        Bus::fake();
+
+        $this->postTelegramWebhook($this->messageUpdate(130, '/start'))->assertOk();
+
+        Log::shouldNotHaveReceived('info');
+    }
+
+    public function test_enabled_dogfood_timing_logs_safe_webhook_job_and_outbound_context(): void
+    {
+        config()->set('services.dogfood_timing.enabled', true);
+        $logs = [];
+        Log::shouldReceive('info')->zeroOrMoreTimes()->withArgs(function (string $event, array $context = []) use (&$logs) {
+            $logs[] = [$event, $context];
+
+            return true;
+        });
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(131, '/start', from: ['id' => 987654], chatId: 123456))->assertOk();
+
+        $this->assertLog($logs, 'dogfood.telegram.webhook_ack', fn (array $context) => $context['update_id'] === 131
+            && array_key_exists('ack_duration_ms', $context)
+            && array_key_exists('job_enqueued_at', $context)
+            && $context['duplicate'] === false
+        );
+        $this->assertLog($logs, 'dogfood.telegram.job_picked_up', fn (array $context) => array_key_exists('job_picked_up_at', $context)
+            && array_key_exists('job_enqueued_at', $context)
+        );
+        $this->assertLog($logs, 'dogfood.telegram.handler_finished', fn (array $context) => array_key_exists('handler_duration_ms', $context)
+            && array_key_exists('db_query_count', $context)
+            && array_key_exists('memory_before_bytes', $context)
+            && array_key_exists('memory_after_bytes', $context)
+        );
+        $this->assertLog($logs, 'dogfood.outbound_http', fn (array $context) => $context['provider'] === 'telegram'
+            && $context['operation'] === 'sendMessage'
+            && array_key_exists('status', $context)
+            && array_key_exists('duration_ms', $context)
+        );
+
+        $joined = json_encode($logs, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('123456', $joined);
+        $this->assertStringNotContainsString('987654', $joined);
+        $this->assertStringNotContainsString('bot-token', $joined);
+        $this->assertStringNotContainsString('pakasir-key', $joined);
+        $this->assertStringNotContainsString('/start', $joined);
+    }
+
+    private function assertLog(array $logs, string $event, callable $predicate): void
+    {
+        foreach ($logs as [$loggedEvent, $context]) {
+            if ($loggedEvent === $event && $predicate($context)) {
+                $this->assertTrue(true);
+
+                return;
+            }
+        }
+
+        $this->fail("Expected log [{$event}] was not emitted with matching context.");
     }
 }

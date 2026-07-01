@@ -12,9 +12,11 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Support\DogfoodTiming;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -41,6 +43,8 @@ class AppServiceProvider extends ServiceProvider
         $this->validateProductionConfiguration();
 
         Product::observe(ProductAuditObserver::class);
+
+        DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
 
         if ((bool) config('app.force_https') && ! in_array(config('app.env'), ['local', 'testing'], true) && ! $this->isLoopbackHttpRequest()) {
             URL::forceScheme('https');

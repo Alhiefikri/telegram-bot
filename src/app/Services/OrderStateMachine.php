@@ -44,7 +44,7 @@ class OrderStateMachine
             $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
 
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
-            PublishSalesProofPost::dispatch($order->id)->onQueue('notifications')->afterCommit();
+            PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
 
             return $order->fresh(['payments']);
         }, 5);

@@ -3,6 +3,8 @@
 namespace App\Services\Pakasir;
 
 use App\Models\Payment;
+use App\Support\DogfoodTiming;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 
 class PakasirClient implements PakasirProviderAdapter
@@ -31,16 +33,39 @@ class PakasirClient implements PakasirProviderAdapter
 
     public function transactionDetail(Payment $payment): array
     {
-        return Http::get($this->baseUrl().'/api/transactiondetail', [
+        return $this->timed('transactionDetail', fn () => Http::get($this->baseUrl().'/api/transactiondetail', [
             'project' => config('services.pakasir.slug'),
             'amount' => $payment->amount,
             'order_id' => $payment->merchant_ref,
             'api_key' => config('services.pakasir.api_key'),
-        ])->throw()->json();
+        ])->throw()->json());
     }
 
     private function baseUrl(): string
     {
         return rtrim((string) config('services.pakasir.base_url', 'https://app.pakasir.com'), '/');
+    }
+
+    private function timed(string $operation, callable $callback): mixed
+    {
+        $startedAt = DogfoodTiming::now();
+        $status = null;
+
+        try {
+            $result = $callback();
+            $status = is_object($result) && method_exists($result, 'status') ? $result->status() : 200;
+
+            return $result;
+        } catch (RequestException $e) {
+            $status = $e->response?->status();
+            throw $e;
+        } finally {
+            DogfoodTiming::log('dogfood.outbound_http', [
+                'provider' => 'pakasir',
+                'operation' => $operation,
+                'status' => $status,
+                'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            ]);
+        }
     }
 }

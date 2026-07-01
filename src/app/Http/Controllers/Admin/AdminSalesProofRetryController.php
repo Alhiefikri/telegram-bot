@@ -22,7 +22,7 @@ class AdminSalesProofRetryController extends Controller
             return redirect()->route('admin.dashboard', ['tab' => 'penjualan'])->with('status', 'Sales Proof Post tidak dalam status gagal. Retry tidak dijalankan.');
         }
 
-        PublishSalesProofPost::dispatch($order->id, true)->onQueue('notifications')->afterCommit();
+        PublishSalesProofPost::dispatch($order->id, true, now()->toISOString())->onQueue('notifications')->afterCommit();
 
         $auditLogger->log('sales_proof.retry_requested', $post, ['status' => $post->status, 'attempts' => $post->attempts], ['order_id' => $order->id], $user, $request->ip());
 

@@ -10,15 +10,12 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
-use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramBotClient;
-use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -121,6 +118,7 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
         try {
             $result = $call();
             $this->collector->recordHttp($method, $url, (hrtime(true) - $start) / 1_000_000, null, null);
+
             return $result;
         } catch (Throwable $e) {
             $status = method_exists($e, 'response') ? $e->response?->status() : null;
@@ -130,7 +128,7 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
     }
 }
 
-$collector = new PerfTraceCollector();
+$collector = new PerfTraceCollector;
 $app->singleton(PerfTraceCollector::class, fn () => $collector);
 $app->bind(TelegramBotClient::class, fn () => new MeasuredTelegramBotClient($collector));
 
@@ -209,11 +207,13 @@ $nextUpdateId = (int) max((int) (TelegramUpdate::query()->max('update_id') ?? 0)
 
 $nextId = function () use (&$nextUpdateId): int {
     $nextUpdateId++;
+
     return $nextUpdateId;
 };
 
 $messagePayload = function (string $text, ?int $chatId = null, ?int $fromId = null, array $extraMessage = []) use ($nextId, $adminChatId, $adminUserId): array {
     $id = $nextId();
+
     return [
         'update_id' => $id,
         'message' => array_replace_recursive([
@@ -228,6 +228,7 @@ $messagePayload = function (string $text, ?int $chatId = null, ?int $fromId = nu
 
 $photoPayload = function (string $caption, string $photoFileId = 'AgACAgUAAxkBAAIBperfDogfoodPhoto') use ($nextId, $adminChatId, $adminUserId): array {
     $id = $nextId();
+
     return [
         'update_id' => $id,
         'message' => [
@@ -246,6 +247,7 @@ $photoPayload = function (string $caption, string $photoFileId = 'AgACAgUAAxkBAA
 
 $callbackPayload = function (string $data, ?string $callbackId = null) use ($nextId, $adminChatId, $adminUserId): array {
     $id = $nextId();
+
     return [
         'update_id' => $id,
         'callback_query' => [
@@ -269,6 +271,7 @@ $makeActiveCart = function (int $quantity = 1) use ($adminUserId, $product): voi
 
 $latestManualOrderInvoice = function () use ($adminUserId): string {
     $customer = Customer::query()->where('telegram_id', (int) $adminUserId)->first();
+
     return (string) Order::query()
         ->where('customer_id', $customer?->id)
         ->where('payment_status', 'pending')
@@ -276,13 +279,18 @@ $latestManualOrderInvoice = function () use ($adminUserId): string {
         ->value('invoice_number');
 };
 
-$processPayload = function (array $payload): void {
+$processPayload = function (array $payload) use ($app): void {
     $update = TelegramUpdate::query()->create([
         'update_id' => (int) $payload['update_id'],
         'payload' => $payload,
         'created_at' => now(),
     ]);
-    (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+
+    ProcessTelegramUpdate::dispatch($update->id, now()->toISOString());
+    $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--once' => true,
+        '--stop-when-empty' => true,
+    ]);
 };
 
 $httpWebhook = function (array $payload, ?string $overrideSecret = null) use ($app, $secret): array {
@@ -292,13 +300,20 @@ $httpWebhook = function (array $payload, ?string $overrideSecret = null) use ($a
         'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN' => $overrideSecret ?? $secret,
     ], json_encode($payload, JSON_THROW_ON_ERROR));
     $response = $app->make(HttpKernel::class)->handle($request);
+
     return ['status' => $response->getStatusCode(), 'body' => $response->getContent()];
+};
+
+$drainDefaultQueue = function () use ($app): void {
+    $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--stop-when-empty' => true,
+    ]);
 };
 
 $results = [];
 
 $runScenario = function (string $feature, string $scenario, string $input, int $warmRuns, Closure $action) use (&$results, $collector): void {
-    $runOne = function (string $label) use ($feature, $scenario, $input, $action, $collector): array {
+    $runOne = function (string $label) use ($feature, $scenario, $action, $collector): array {
         $collector->begin($feature.' / '.$scenario.' / '.$label);
         $memoryBefore = memory_get_usage(true);
         $peakBefore = memory_get_peak_usage(true);
@@ -367,10 +382,13 @@ $duplicatePayload = $messagePayload('/start');
 $runScenario('Telegram webhook intake', 'duplicate update repeated usage', 'same update_id twice', 2, function () use ($httpWebhook, $duplicatePayload) {
     $first = $httpWebhook($duplicatePayload);
     $second = $httpWebhook($duplicatePayload);
+
     return ['status' => $first['status'].'/'.$second['status']];
 });
 $runScenario('Telegram webhook intake', 'invalid secret error path', '/start with bad secret', 2, fn () => $httpWebhook($messagePayload('/start'), 'bad-secret'));
 $runScenario('Telegram webhook intake', 'unsupported update error path', 'edited_message only', 2, fn () => $httpWebhook(['update_id' => random_int(9100000, 9900000), 'edited_message' => []]));
+
+$drainDefaultQueue();
 
 $commandScenarios = [
     ['/start', 'happy path', fn () => $messagePayload('/start')],

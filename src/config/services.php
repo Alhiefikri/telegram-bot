@@ -57,4 +57,8 @@ return [
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
     ],
 
+    'dogfood_timing' => [
+        'enabled' => env('DOGFOOD_TIMING_ENABLED', false),
+    ],
+
 ];

@@ -52,7 +52,7 @@ class AdminOrderOperations
 
             $paidOrder->update(['order_status' => OrderStatus::Completed]);
 
-            SendTelegramReceipt::dispatch($paidOrder->getKey())->onQueue('notifications')->afterCommit();
+            SendTelegramReceipt::dispatch($paidOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
 
             $this->audit->log('order.manual_completed', $paidOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
 
@@ -93,7 +93,7 @@ class AdminOrderOperations
             throw new InvalidArgumentException('Receipt can only be resent for paid orders with a Telegram customer.');
         }
 
-        SendTelegramReceipt::dispatch($order->getKey(), force: true)->onQueue('notifications');
+        SendTelegramReceipt::dispatch($order->getKey(), true, now()->toISOString())->onQueue('notifications');
 
         $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
     }
