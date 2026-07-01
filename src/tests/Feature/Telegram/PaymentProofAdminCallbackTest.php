@@ -40,8 +40,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->paymentPhotoUpdate(212, $order->invoice_number, ['username' => 'buyer']))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
-            && $r['chat_id'] === '999'
-            && $r['photo'] === 'large-photo'
+            && ($r['chat_id'] ?? null) === '999'
+            && ($r['photo'] ?? null) === 'large-photo'
             && str_contains((string) ($r['caption'] ?? ''), 'Bukti pembayaran masuk')
             && str_contains(json_encode($r->data()), 'admin:approve-payment:'.$order->id)
             && str_contains(json_encode($r->data()), 'admin:reject-payment:'.$order->id));
@@ -233,7 +233,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(StockAdjustmentService::class)->adjust($product, 1, 'credential', null, null, ['buyer@example.test | pass']);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product->fresh(), 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(231, 'cb-manual', 'payment:dana'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(231, 'cb-manual', 'checkout'))->assertOk();
         $order = Order::firstOrFail();
         $orderItem = $order->orderItems()->firstOrFail();
         $this->assertSame(1, $product->fresh()->reserved_stock);
@@ -271,7 +271,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(234, 'cb-manual', 'payment:dana'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(234, 'cb-manual', 'checkout'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->callbackUpdate(235, 'fake-reject', 'admin:reject-payment:'.$order->id, ['id' => 555, 'first_name' => 'Mallory'], 555))->assertOk();
@@ -299,7 +299,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->paymentPhotoUpdate(217, $order->invoice_number, ['id' => $attacker->telegram_id, 'username' => 'mallory'], 54321))->assertOk();
 
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
-            && $r['chat_id'] === '999'
+            && ($r['chat_id'] ?? null) === '999'
             && str_contains((string) ($r['caption'] ?? ''), $order->invoice_number));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '54321'

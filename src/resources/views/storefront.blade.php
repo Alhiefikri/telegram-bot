@@ -882,10 +882,9 @@
             <div class="mx-auto mt-16 max-w-5xl px-6 flex flex-col md:flex-row justify-between items-center border-t border-zinc-100 pt-8 text-xs text-zinc-400">
                 <p>&copy; {{ now()->year }} {{ $copy['footer']['copyright_suffix'] }}</p>
                 <div class="flex gap-4 mt-4 md:mt-0 items-center">
+                    <span>QR Manual</span>
                     <span>QRIS</span>
-                    <span>DANA</span>
-                    <span>OVO</span>
-                    <span>BCA</span>
+                    <span>Pakasir</span>
                 </div>
             </div>
         </footer>

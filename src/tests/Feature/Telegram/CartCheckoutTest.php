@@ -55,10 +55,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Kopi')
             && str_contains($r['text'], 'Jumlah: 2')
             && str_contains($r['text'], 'Subtotal: Rp50.000')
-            && str_contains(json_encode($r->data()), 'Sudah cocok? Pilih metode pembayaran di bawah.')
-            && str_contains(json_encode($r->data()), 'payment:dana')
-            && str_contains(json_encode($r->data()), 'payment:gopay')
-            && str_contains(json_encode($r->data()), 'payment:shopepay'));
+            && str_contains(json_encode($r->data()), 'Sudah cocok? Lanjutkan checkout di bawah.')
+            && str_contains(json_encode($r->data()), 'checkout')
+            && str_contains(json_encode($r->data()), 'Bayar QR Manual')
+            && ! str_contains(json_encode($r->data()), 'payment:'));
     }
 
     public function test_buy_quantity_choices_are_capped_and_stock_one_only_offers_one_choice(): void
@@ -132,9 +132,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($r->data()), 'Beli'));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (str_contains((string) ($r['text'] ?? ''), 'Pilih jumlah')
-                || str_contains(json_encode($r->data()), 'payment:dana')
-                || str_contains(json_encode($r->data()), 'payment:gopay')
-                || str_contains(json_encode($r->data()), 'payment:shopepay')));
+                || str_contains(json_encode($r->data()), 'payment:')));
     }
 
     public function test_quantity_callback_tampering_does_not_create_empty_carts(): void
@@ -195,14 +193,14 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_checkout_revalidates_changed_stock_and_prompts_cart_update(): void
     {
-        config()->set('services.telegram.payment_mode', 'manual_dana');
+        config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $product = Product::factory()->create(['name' => 'Berubah', 'stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
 
-        $this->postTelegramWebhook($this->callbackUpdate(1954, 'checkout-changed-stock', 'payment:dana'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1954, 'checkout-changed-stock', 'checkout'))->assertOk();
 
         $this->assertSame(0, Order::count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -253,31 +251,31 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_checkout_callback_creates_manual_order_sends_payment_instructions_and_notifies_admin(): void
     {
-        config()->set('services.telegram.payment_mode', 'manual_dana');
+        config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['admin_contact_url' => 'https://t.me/adminsedulur', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(17, 'cb3', 'payment:dana'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(17, 'cb3', 'checkout'))->assertOk();
 
         $order = Order::firstOrFail();
-        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'DANA', 'provider_reference' => null]);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === '12345'
-            && str_contains($r['text'], '✅ Checkout berhasil dibuat')
-            && str_contains($r['text'], 'Bayar via: DANA')
-            && str_contains($r['text'], '082190715067')
-            && str_contains($r['text'], 'A/N MOH. ALIF FIKRI')
-            && str_contains($r['text'], '/payment')
-            && str_contains($r['text'], 'Kalau butuh bantuan, hubungi @Alhie02.')
-            && str_contains($r['text'], 'GPT Plus')
-            && ! str_contains($r['text'], 'Halo admin'));
+        $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'QR_MANUAL', 'provider_reference' => null]);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), '12345')
+            && str_contains($r->body(), '✅ Checkout berhasil dibuat')
+            && str_contains($r->body(), 'Bayar via: QR Manual')
+            && str_contains($r->body(), 'Nama QR: LHIE STORE')
+            && str_contains($r->body(), 'Nominal wajib sama persis')
+            && str_contains($r->body(), '/payment')
+            && str_contains($r->body(), 'Kalau kesusahan, chat admin @Alhie02.')
+            && str_contains($r->body(), 'GPT Plus')
+            && ! str_contains($r->body(), 'Halo admin'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Checkout manual baru')
-            && str_contains($r['text'], 'Metode: DANA')
+            && str_contains($r['text'], 'Metode: QR Manual')
             && str_contains($r['text'], $order->invoice_number));
     }
 
@@ -294,20 +292,18 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Premium Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'payment:gopay'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'checkout'))->assertOk();
 
         $order = Order::firstOrFail();
         $this->assertDatabaseHas('payments', [
             'order_id' => $order->id,
             'provider' => 'manual',
-            'method' => 'GOPAY',
+            'method' => 'QR_MANUAL',
         ]);
-        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === '12345'
-            && str_contains($r['text'], 'Bayar via: GOPAY')
-            && str_contains($r['text'], 'caption:')
-            && str_contains($r['text'], 'Premium Account'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), '12345')
+            && str_contains($r->body(), 'Bayar via: QR Manual')
+            && str_contains($r->body(), 'Premium Account'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === '999'
             && str_contains($r['text'], 'Checkout manual baru'));

@@ -59,7 +59,7 @@ class TelegramManualPaymentIntents
             $caption[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $caption[] = '';
-        $caption[] = 'Cek mutasi dulu. Kalau dana sudah masuk dan nominal sesuai, setujui.';
+        $caption[] = 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
         $caption[] = 'Kalau belum cocok, tolak agar stok balik lagi.';
 
         $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
@@ -172,10 +172,10 @@ class TelegramManualPaymentIntents
             '📌 Status: Ditolak admin',
             '',
             'Kemungkinan penyebab:',
-            '• Nominal transfer belum sesuai',
-            '• Tujuan transfer berbeda',
+            '• Nominal pembayaran belum sama persis',
+            '• Nama QR tujuan bukan LHIE STORE',
             '• Bukti pembayaran kurang jelas',
-            '• Dana belum masuk saat dicek',
+            '• Pembayaran belum masuk saat dicek',
             '',
             'Pesanan ini sudah dibatalkan, jadi stok tidak tertahan.',
             '',

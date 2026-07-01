@@ -104,10 +104,10 @@ final class AdminDashboardStatsData
         return [
             'mode' => $mode,
             'is_pakasir_enabled' => $isPakasirEnabled,
-            'label' => $isPakasirEnabled ? 'Pakasir aktif' : 'Manual aktif',
+            'label' => $isPakasirEnabled ? 'Pakasir aktif' : 'QR Manual aktif',
             'hint' => $isPakasirEnabled
                 ? 'Checkout memakai QRIS/hosted Pakasir dan auto-verifikasi.'
-                : 'Checkout meminta bukti /payment dan menunggu approval admin.',
+                : 'Checkout memakai QR manual LHIE STORE, bukti /payment, dan approval admin.',
             'tone' => $isPakasirEnabled ? 'emerald' : 'amber',
             'source' => $settings ? 'dashboard_setting' : 'env_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),

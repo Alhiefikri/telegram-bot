@@ -55,7 +55,7 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Manual /payment' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Manual /payment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
     await expectStoreLinkCopyAndShare(page);
 
@@ -74,7 +74,7 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
     await expectBottomNavUsable(page);
     await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
-    await expect(page.getByRole('button', { name: 'Manual /payment' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Manual /payment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
 
     await expect(page.getByRole('region', { name: 'Link toko' })).toBeVisible();

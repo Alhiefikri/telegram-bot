@@ -67,7 +67,7 @@ class AdminPaymentModeController extends Controller
 
         $label = $mode === 'pakasir'
             ? 'Pakasir diaktifkan. Checkout baru akan memakai QRIS/hosted Pakasir.'
-            : 'Pakasir dimatikan sementara. Checkout baru akan memakai manual /payment dan approval admin.';
+            : 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.';
 
         return redirect()
             ->route('admin.dashboard', ['tab' => 'stats'])

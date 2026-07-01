@@ -147,13 +147,7 @@ class TelegramCallbackRouter
         }
 
         if ($data === 'checkout') {
-            $this->checkout($customer, $chatId, $id, null);
-
-            return;
-        }
-
-        if (preg_match('/^payment:(dana|gopay|shopepay)$/', $data, $matches)) {
-            $this->checkout($customer, $chatId, $id, $matches[1]);
+            $this->checkout($customer, $chatId, $id);
 
             return;
         }
@@ -161,7 +155,7 @@ class TelegramCallbackRouter
         $this->bot->answerCallbackQuery($id, 'Aksi ini belum dikenali.');
     }
 
-    private function checkout(Customer $customer, string $chatId, string $id, ?string $manualMethod): void
+    private function checkout(Customer $customer, string $chatId, string $id): void
     {
         $this->bot->answerCallbackQuery($id);
 
@@ -172,9 +166,9 @@ class TelegramCallbackRouter
             }
 
             $paymentMode = $this->checkoutIntents->paymentMode();
-            $order = $paymentMode === 'pakasir' && $manualMethod === null
+            $order = $paymentMode === 'pakasir'
                 ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
-                : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod($manualMethod), 'manual');
+                : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual');
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka katalog lagi dan pilih produk ulang ya.");
 
@@ -185,7 +179,7 @@ class TelegramCallbackRouter
         if ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);
         } else {
-            $this->checkoutIntents->sendPaymentInstructions($chatId, $order, $payment);
+            $this->checkoutIntents->sendPaymentInstructions($chatId, $order);
             $this->checkoutIntents->notifyAdminAboutManualOrder($order);
         }
     }

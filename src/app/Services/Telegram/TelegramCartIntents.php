@@ -41,12 +41,10 @@ class TelegramCartIntents
             }
 
             $subtotal = $product->price_amount * $quantity;
-            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Pilih metode pembayaran di bawah.", [
+            $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", [
                 'inline_keyboard' => [
                     [
-                        ['text' => '💙 DANA', 'callback_data' => 'payment:dana'],
-                        ['text' => '💚 GOPAY', 'callback_data' => 'payment:gopay'],
-                        ['text' => '🧡 SHOPEEPAY', 'callback_data' => 'payment:shopepay'],
+                        ['text' => '💳 Bayar QR Manual', 'callback_data' => 'checkout'],
                     ],
                 ],
             ]);

@@ -14,21 +14,25 @@ class TelegramCheckoutIntents
 {
     public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir) {}
 
-    public function sendPaymentInstructions(string $chatId, Order $order, ?Payment $payment): void
+    public function sendPaymentInstructions(string $chatId, Order $order): void
     {
-        $method = $this->manualPaymentOption($payment?->method);
+        $order->loadMissing('orderItems');
+        $method = $this->manualPaymentOption();
         $supportUsername = ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@');
+        $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
 
         $lines = [
             '✅ Checkout berhasil dibuat',
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
-            '💰 Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            '💰 Total: '.$formattedTotal,
             '💳 Bayar via: '.$method['label'],
             '',
-            'Tujuan transfer:',
-            $method['number'],
-            'A/N '.$method['name'],
+            '📲 Scan QR manual di atas.',
+            '',
+            'Sebelum bayar, pastikan:',
+            '• Nama QR: '.$method['name'],
+            '• Nominal wajib sama persis: '.$formattedTotal,
         ];
 
         if ($order->expires_at) {
@@ -38,19 +42,25 @@ class TelegramCheckoutIntents
         }
 
         $lines[] = '';
-        $lines[] = 'Pesanan kamu:';
-        foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x'.$item->quantity;
-        }
-
+        $lines[] = '📦 Pesanan: '.$this->orderItemsSummary($order);
         $lines[] = '';
-        $lines[] = 'Setelah transfer, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:';
+        $lines[] = 'Setelah bayar, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:';
         $lines[] = '';
         $lines[] = '/payment';
         $lines[] = '';
-        $lines[] = 'Kalau butuh bantuan, hubungi @'.$supportUsername.'.';
+        $lines[] = 'Kalau kesusahan, chat admin @'.$supportUsername.'.';
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines));
+        $qrPath = public_path('qr-lhie.jpg');
+        if (! is_readable($qrPath)) {
+            throw new \RuntimeException('Manual QR image is not readable: '.$qrPath);
+        }
+
+        $qrContents = file_get_contents($qrPath);
+        if ($qrContents === false) {
+            throw new \RuntimeException('Manual QR image could not be read: '.$qrPath);
+        }
+
+        $this->bot->sendPhoto($chatId, $qrContents, 'qr-lhie.jpg', implode("\n", $lines));
     }
 
     public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
@@ -113,8 +123,7 @@ class TelegramCheckoutIntents
         }
 
         $order->loadMissing(['customer', 'orderItems']);
-        $payment = $order->payments()->latest()->first();
-        $method = $this->manualPaymentOption($payment?->method);
+        $method = $this->manualPaymentOption();
         $lines = [
             '🧾 Checkout manual baru',
             '━━━━━━━━━━━━━━',
@@ -128,9 +137,8 @@ class TelegramCheckoutIntents
         foreach ($order->orderItems as $item) {
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
-        $lines[] = '';
         $lines[] = 'Tunggu bukti pembayaran dengan caption /payment.';
-        $lines[] = 'Setelah bukti masuk, approve dari tombol di foto bukti.';
+        $lines[] = 'Approve hanya jika pembayaran QR manual masuk, nama QR LHIE STORE benar, dan nominal sama persis.';
 
         $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines));
     }
@@ -143,27 +151,16 @@ class TelegramCheckoutIntents
         return $mode === 'pakasir' ? 'pakasir' : 'manual';
     }
 
-    public function manualPaymentMethod(?string $method): string
+    public function manualPaymentMethod(): string
     {
-        return match ($method) {
-            'gopay' => 'GOPAY',
-            'shopepay' => 'SHOPEEPAY',
-            default => 'DANA',
-        };
+        return 'QR_MANUAL';
     }
 
-    public function manualPaymentOption(?string $method): array
+    public function manualPaymentOption(): array
     {
-        $label = match ($method) {
-            'GOPAY' => 'GOPAY',
-            'SHOPEEPAY' => 'SHOPEEPAY',
-            default => 'DANA',
-        };
-
         return [
-            'label' => $label,
-            'number' => '082190715067',
-            'name' => 'MOH. ALIF FIKRI',
+            'label' => 'QR Manual',
+            'name' => 'LHIE STORE',
         ];
     }
 

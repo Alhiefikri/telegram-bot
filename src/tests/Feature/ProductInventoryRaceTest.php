@@ -264,7 +264,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     {
         $count = 0;
         Http::assertSent(function ($request) use (&$count): bool {
-            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Sudah cocok? Pilih metode pembayaran di bawah.')) {
+            if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Sudah cocok? Lanjutkan checkout di bawah.')) {
                 $count++;
             }
 

@@ -113,7 +113,7 @@
                                     class="product-action-btn w-full text-xs {{ $paymentControl['mode'] === 'manual' ? 'neo-btn-yellow' : '' }}"
                                     style="{{ $paymentControl['mode'] !== 'manual' ? 'background: #fff;' : '' }}"
                                 >
-                                    Manual /payment
+                                    QR Manual /payment
                                 </button>
                             </form>
 

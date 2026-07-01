@@ -116,13 +116,13 @@ class PakasirGatewayTest extends TestCase
     public function test_manual_checkout_remains_local_and_does_not_call_pakasir(): void
     {
         Http::fake();
-        config(['services.telegram.payment_mode' => 'manual_dana']);
+        config(['services.telegram.payment_mode' => 'manual']);
 
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'DANA_QR', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'QR_MANUAL', 'manual');
         $payment = $order->payments()->firstOrFail();
 
         $this->assertSame('manual', $payment->provider);
-        $this->assertSame('DANA_QR', $payment->method);
+        $this->assertSame('QR_MANUAL', $payment->method);
         $this->assertNull($payment->provider_reference);
         Http::assertNothingSent();
     }

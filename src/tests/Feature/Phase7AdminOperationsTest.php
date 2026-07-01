@@ -156,7 +156,7 @@ class Phase7AdminOperationsTest extends TestCase
         $product = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 2);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'DANA_QR', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
 
         $completed = app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
 
@@ -221,8 +221,6 @@ class Phase7AdminOperationsTest extends TestCase
     public function test_manual_payment_setting_create_persists_record(): void
     {
         ManualPaymentSetting::query()->create([
-            'dana_account_name' => 'E2E Dana Repro',
-            'dana_account_number' => '081234567891',
             'admin_contact_url' => 'https://t.me/e2e_repro',
             'admin_username' => 'e2e_repro',
             'instructions' => 'Payment setting create repro',
@@ -230,7 +228,6 @@ class Phase7AdminOperationsTest extends TestCase
         ]);
 
         $this->assertDatabaseHas('manual_payment_settings', [
-            'dana_account_name' => 'E2E Dana Repro',
             'admin_contact_url' => 'https://t.me/e2e_repro',
         ]);
         $this->assertSame(1, ManualPaymentSetting::query()->count());

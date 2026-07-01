@@ -105,7 +105,7 @@ Pada jalur manual:
 
 1. Customer checkout dari Telegram.
 2. Sistem membuat order dan payment provider `manual`, status `pending`.
-3. Bot mengirim instruksi pembayaran manual, termasuk invoice, total, batas pembayaran, informasi DANA/admin jika tersedia, dan detail item.
+3. Bot mengirim QR manual LHIE STORE beserta invoice, total, batas pembayaran, detail item, dan instruksi kirim bukti foto dengan caption `/payment`.
 4. Admin memvalidasi pembayaran di luar sistem, misalnya dari bukti transfer customer.
 5. Admin menjalankan operasi “complete manual order” dari dashboard/admin operation.
 6. Sistem menandai payment sebagai `paid`, mengurangi stok dari reservasi menjadi penjualan, mengubah order menjadi `completed`, lalu mengirim receipt lewat queue.
@@ -143,7 +143,7 @@ Kemampuan admin yang terlihat di codebase:
 - melihat dan mengelola data order/payment melalui admin panel;
 - menyelesaikan manual order setelah pembayaran diverifikasi;
 - mengirim ulang receipt untuk order paid yang memiliki customer Telegram;
-- mengelola setting pembayaran manual seperti instruksi, data DANA, QR, dan kontak admin;
+- mengelola setting pembayaran manual seperti instruksi QR manual, kontak admin, dan mode Pakasir;
 - mencatat audit log untuk operasi penting admin.
 
 Alur operasional umum:
@@ -363,7 +363,7 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_WEBHOOK_SECRET` terisi dan sama dengan secret webhook Telegram.
 - [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
-- [ ] Setting payment manual/admin sudah benar: `DANA_QR_IMAGE_URL`, `DANA_ACCOUNT_NAME`, `DANA_ACCOUNT_NUMBER`, `TELEGRAM_ADMIN_CONTACT_URL`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
+- [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
 - [ ] `TELEGRAM_PAYMENT_MODE=manual` selama KYC Pakasir; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
 - [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
