@@ -16,6 +16,8 @@ use Illuminate\Support\Carbon;
 
 final class AdminDashboardData
 {
+    public function __construct(private readonly ProductDescriptionSectionProtocol $descriptionSections) {}
+
     /**
      * @return array{
      *     admin: array{name: string, role: string},
@@ -245,7 +247,7 @@ final class AdminDashboardData
 
         return $products
             ->map(function (Product $product) use ($availableStockCounts, $includeManageableStockItems): array {
-                $descriptionSections = $this->productDescriptionSections($product->description);
+                $descriptionSections = $this->descriptionSections->decode($product->description);
                 $availableStockItemCount = (int) ($availableStockCounts[$product->id] ?? 0);
                 $stockItems = $includeManageableStockItems
                     ? ProductStockItem::query()
@@ -326,46 +328,6 @@ final class AdminDashboardData
             'background' => $isActive ? '#e8ffd4' : '#f1f5f9',
             'color' => $isActive ? '#166534' : '#64748b',
         ];
-    }
-
-    /**
-     * @return array{description: string, features: string, specifications: string}
-     */
-    private function productDescriptionSections(?string $description): array
-    {
-        $description = trim((string) $description);
-        $sections = preg_split("/\n{2,}/", $description) ?: [];
-        $base = trim((string) ($sections[0] ?? ''));
-        $features = '';
-        $specifications = '';
-
-        foreach (array_slice($sections, 1) as $section) {
-            $section = trim((string) $section);
-
-            if (str_starts_with($section, 'Fitur utama:')) {
-                $features = $this->descriptionListBody($section, 'Fitur utama:');
-            }
-
-            if (str_starts_with($section, 'Paket/spesifikasi:')) {
-                $specifications = $this->descriptionListBody($section, 'Paket/spesifikasi:');
-            }
-        }
-
-        return [
-            'description' => $base,
-            'features' => $features,
-            'specifications' => $specifications,
-        ];
-    }
-
-    private function descriptionListBody(string $section, string $heading): string
-    {
-        $body = trim(substr($section, strlen($heading)));
-
-        return collect(preg_split('/\R/u', $body) ?: [])
-            ->map(fn (string $row): string => preg_replace('/^- /', '', trim($row)) ?? '')
-            ->filter()
-            ->implode("\n");
     }
 
     private function categoryOptions(): array

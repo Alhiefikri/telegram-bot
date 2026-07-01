@@ -311,6 +311,7 @@ class AdminDashboardTest extends TestCase
         ]);
         Product::factory()->create([
             'name' => 'Produk Baru',
+            'description' => "Produk baru siap kirim.\n\nFitur utama:\n- Bonus setup\n- Garansi login\n\nPaket/spesifikasi:\n- Durasi 30 hari",
             'price_amount' => 50000,
             'stock' => 4,
             'reserved_stock' => 1,
@@ -402,6 +403,9 @@ class AdminDashboardTest extends TestCase
         $this->assertSame(3, $data['productsTab']['products'][0]['available_stock']);
         $this->assertSame('Aktif', $data['productsTab']['products'][0]['status_label']);
         $this->assertSame('Produk Baru', $data['productsTab']['products'][0]['edit_payload']['name']);
+        $this->assertSame('Produk baru siap kirim.', $data['productsTab']['products'][0]['edit_payload']['description']);
+        $this->assertSame("Bonus setup\nGaransi login", $data['productsTab']['products'][0]['edit_payload']['features']);
+        $this->assertSame('Durasi 30 hari', $data['productsTab']['products'][0]['edit_payload']['specifications']);
         $this->assertSame('INV-PROCESS', $data['salesTab']['orders'][0]['invoice_number']);
         $this->assertSame('Netflix Premium', $data['salesTab']['orders'][0]['product_name']);
         $this->assertSame(['all', 'processing'], $data['salesTab']['orders'][0]['filter_groups']);

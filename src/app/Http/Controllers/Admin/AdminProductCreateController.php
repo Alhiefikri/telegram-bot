@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Http\RedirectResponse;
@@ -17,7 +18,7 @@ class AdminProductCreateController extends Controller
 {
     use AuthorizesAdminAccess;
 
-    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications): RedirectResponse
+    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions): RedirectResponse
     {
         if ($redirect = $this->redirectGuestToAdminLogin($request)) {
             return $redirect;
@@ -54,7 +55,7 @@ class AdminProductCreateController extends Controller
         $product = new Product([
             'category_id' => $validated['category_id'] ?? null,
             'name' => $validated['name'],
-            'description' => $this->descriptionFromSections(
+            'description' => $descriptions->encode(
                 $validated['description'],
                 $validated['features'] ?? '',
                 $validated['specifications'] ?? '',
@@ -82,34 +83,5 @@ class AdminProductCreateController extends Controller
         return redirect()
             ->route('admin.dashboard', ['tab' => 'produk'])
             ->with('status', "Produk {$product->name} berhasil dibuat. Tambahkan stok saat item sudah siap.");
-    }
-
-    private function descriptionFromSections(string $description, string $features, string $specifications): string
-    {
-        $sections = [trim($description)];
-
-        $featureRows = $this->lines($features);
-        if ($featureRows !== []) {
-            $sections[] = "Fitur utama:\n- ".implode("\n- ", $featureRows);
-        }
-
-        $specificationRows = $this->lines($specifications);
-        if ($specificationRows !== []) {
-            $sections[] = "Paket/spesifikasi:\n- ".implode("\n- ", $specificationRows);
-        }
-
-        return implode("\n\n", $sections);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function lines(string $value): array
-    {
-        return collect(preg_split('/\R/u', $value) ?: [])
-            ->map(fn (string $row): string => trim($row))
-            ->filter()
-            ->values()
-            ->all();
     }
 }
