@@ -18,6 +18,7 @@ class TelegramMessageRouter
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramAdminAccess $adminAccess,
         private TelegramBroadcastService $broadcast,
+        private TelegramCommunityGate $communityGate,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message): void
@@ -28,6 +29,12 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $this->menu->sendWelcome($customer, $chatId);
             $this->menu->sendMainMenu($customer, $chatId);
+
+            return;
+        }
+
+        if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+            $this->session->forget($customer);
 
             return;
         }

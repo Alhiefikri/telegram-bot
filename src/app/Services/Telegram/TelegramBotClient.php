@@ -11,6 +11,11 @@ class TelegramBotClient
         return Http::post($this->url('getChat'), ['chat_id' => $chatId])->throw()->json();
     }
 
+    public function getChatMember(int|string $chatId, int|string $userId): array
+    {
+        return Http::post($this->url('getChatMember'), ['chat_id' => $chatId, 'user_id' => $userId])->throw()->json();
+    }
+
     public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
     {
         $payload = ['chat_id' => $chatId, 'text' => $text];
@@ -59,6 +64,11 @@ class TelegramBotClient
             'text' => $text,
             'show_alert' => $text !== null,
         ], fn ($value) => $value !== null))->throw();
+    }
+
+    public function deleteMessage(int|string $chatId, int|string $messageId): void
+    {
+        Http::post($this->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw();
     }
 
     private function url(string $method): string

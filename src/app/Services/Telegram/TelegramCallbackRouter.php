@@ -23,10 +23,22 @@ class TelegramCallbackRouter
         private TelegramOrderIntents $orders,
         private TelegramCheckoutIntents $checkoutIntents,
         private TelegramManualPaymentIntents $manualPayments,
+        private TelegramCommunityGate $communityGate,
     ) {}
 
     public function route(Customer $customer, string $chatId, string $id, string $data): void
     {
+        if ($data === TelegramCommunityGate::VERIFY_CALLBACK) {
+            $this->session->forget($customer);
+            if ($this->communityGate->verify($customer, $chatId)) {
+                $this->bot->answerCallbackQuery($id);
+            } else {
+                $this->bot->answerCallbackQuery($id, 'Kamu belum terdeteksi sebagai member channel.');
+            }
+
+            return;
+        }
+
         if (preg_match('/^admin:approve-payment:([^\s:]+)$/', $data, $matches)) {
             $this->manualPayments->approveManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
 
@@ -35,6 +47,13 @@ class TelegramCallbackRouter
 
         if (preg_match('/^admin:reject-payment:([^\s:]+)$/', $data, $matches)) {
             $this->manualPayments->rejectManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
+
+        if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+            $this->session->forget($customer);
+            $this->bot->answerCallbackQuery($id, 'Gabung Store Channel dulu untuk lanjut belanja.');
 
             return;
         }
