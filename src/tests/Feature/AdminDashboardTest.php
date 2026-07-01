@@ -794,6 +794,44 @@ class AdminDashboardTest extends TestCase
             ->assertSee('Periksa kembali field produk yang ditandai.');
     }
 
+    public function test_invalid_product_update_reopens_edit_modal_with_submitted_state(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create([
+            'name' => 'Original Product',
+            'description' => 'Original description',
+            'price_amount' => 25000,
+            'is_active' => true,
+        ]);
+
+        $this->followingRedirects()
+            ->from('/admin?tab=stats')
+            ->patch(route('admin.products.update', $product), [
+                'name' => '',
+                'price_amount' => '99000',
+                'description' => 'Submitted description',
+                'features' => "Submitted feature\nSecond feature",
+                'specifications' => 'Submitted package',
+                'is_active' => '0',
+            ])
+            ->assertOk()
+            ->assertSee('\u0022activeTab\u0022:\u0022produk\u0022', false)
+            ->assertSee('\u0022productModalOpen\u0022:true', false)
+            ->assertSee('\u0022productModalMode\u0022:\u0022edit\u0022', false)
+            ->assertSee('\u0022productFormMethod\u0022:\u0022PATCH\u0022', false)
+            ->assertSee('\u0022productId\u0022:'.$product->id, false)
+            ->assertSee('\u0022productPrice\u0022:\u002299000\u0022', false)
+            ->assertSee('Submitted description')
+            ->assertSee('Submitted feature')
+            ->assertSee('Submitted package')
+            ->assertSee('Periksa kembali field produk yang ditandai.');
+
+        $product->refresh();
+        $this->assertSame('Original Product', $product->name);
+        $this->assertSame(25000, $product->price_amount);
+        $this->assertTrue($product->is_active);
+    }
+
     public function test_admin_can_add_product_stock_from_compact_dashboard_modal(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -849,6 +887,29 @@ class AdminDashboardTest extends TestCase
             ])
             ->assertRedirect('/admin?tab=produk')
             ->assertSessionHasErrors(['stock_items'], null, 'stockAdjustment');
+
+        $this->assertSame(2, $product->fresh()->stock);
+    }
+
+    public function test_invalid_stock_submission_reopens_stock_modal_for_route_product_without_hidden_product_id(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create([
+            'name' => 'Stock Modal Product',
+            'stock' => 2,
+        ]);
+
+        $this->followingRedirects()
+            ->from('/admin?tab=stats')
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => "\n  \n",
+            ])
+            ->assertOk()
+            ->assertSee('\u0022activeTab\u0022:\u0022produk\u0022', false)
+            ->assertSee('\u0022stockModalOpen\u0022:true', false)
+            ->assertSee('\u0022stockProductId\u0022:'.$product->id, false)
+            ->assertSee('\u0022stockProductName\u0022:\u0022Stock Modal Product\u0022', false)
+            ->assertSee('Isi minimal satu baris stok.');
 
         $this->assertSame(2, $product->fresh()->stock);
     }

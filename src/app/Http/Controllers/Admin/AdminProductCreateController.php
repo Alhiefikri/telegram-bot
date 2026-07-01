@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -18,7 +19,7 @@ class AdminProductCreateController extends Controller
 {
     use AuthorizesAdminAccess;
 
-    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions): RedirectResponse
+    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         if ($redirect = $this->redirectGuestToAdminLogin($request)) {
             return $redirect;
@@ -44,10 +45,7 @@ class AdminProductCreateController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return redirect()
-                ->route('admin.dashboard', ['tab' => 'produk'])
-                ->withErrors($validator, 'productCreate')
-                ->withInput();
+            return $forms->productCreateValidationErrors($validator);
         }
 
         $validated = $validator->validated();
@@ -80,8 +78,6 @@ class AdminProductCreateController extends Controller
 
         $notifications->notifyProductCreated($product);
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'produk'])
-            ->with('status', "Produk {$product->name} berhasil dibuat. Tambahkan stok saat item sudah siap.");
+        return $forms->productCreated($product->name);
     }
 }

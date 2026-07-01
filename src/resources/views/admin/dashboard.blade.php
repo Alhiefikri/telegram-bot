@@ -349,48 +349,6 @@
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
-            $stockModalProduct = collect($products)->firstWhere('id', (int) old('stock_product_id'));
-            $editingProduct = collect($products)->firstWhere('id', (int) old('product_id'));
-            $hasProductErrors = $errors->productCreate->any() || $errors->productUpdate->any();
-            $hasProductUpdateErrors = $errors->productUpdate->any();
-            $hasProductTabErrors = $hasProductErrors
-                || $errors->stockAdjustment->any()
-                || $errors->categoryCreate->any()
-                || $errors->stockItemUpdate->any();
-            $productStoreUrl = $productsTab['productStoreUrl'];
-            $dashboardState = [
-                'activeTab' => $hasProductTabErrors ? 'produk' : $navigation['activeTab'],
-                'storeLink' => $storeLink['url'],
-                'productStoreUrl' => $productStoreUrl,
-                'productModalOpen' => $hasProductErrors,
-                'productForm' => [
-                    'productModalMode' => $hasProductUpdateErrors ? 'edit' : 'create',
-                    'productFormAction' => $hasProductUpdateErrors ? ($editingProduct['update_url'] ?? $productStoreUrl) : $productStoreUrl,
-                    'productFormMethod' => $hasProductUpdateErrors ? 'PATCH' : '',
-                    'productId' => old('product_id', $editingProduct['id'] ?? null),
-                    'productName' => old('name', $editingProduct['name'] ?? ''),
-                    'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
-                    'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
-                    'productDescription' => old('description', $editingProduct['description'] ?? ''),
-                    'productFeatures' => old('features', $editingProduct['features'] ?? ''),
-                    'productSpecifications' => old('specifications', $editingProduct['specifications'] ?? ''),
-                    'productIsActive' => (bool) old('is_active', $editingProduct['is_active'] ?? true),
-                    'productFeaturesOpen' => $errors->productCreate->has('features')
-                        || $errors->productUpdate->has('features')
-                        || trim((string) old('features', $editingProduct['features'] ?? '')) !== '',
-                    'productSpecificationsOpen' => $errors->productCreate->has('specifications')
-                        || $errors->productUpdate->has('specifications')
-                        || trim((string) old('specifications', $editingProduct['specifications'] ?? '')) !== '',
-                ],
-                'stockModalOpen' => $errors->stockAdjustment->any(),
-                'stockForm' => [
-                    'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
-                    'stockProductId' => $stockModalProduct['id'] ?? null,
-                    'stockProductName' => $stockModalProduct['name'] ?? '',
-                    'stockProductStock' => $stockModalProduct['stock'] ?? 0,
-                    'stockItems' => old('stock_items', ''),
-                ],
-            ];
         @endphp
 
         <main

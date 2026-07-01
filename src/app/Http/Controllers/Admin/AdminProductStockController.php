@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Http\RedirectResponse;
@@ -16,7 +17,7 @@ class AdminProductStockController extends Controller
 {
     use AuthorizesAdminAccess;
 
-    public function __invoke(Request $request, Product $product, StockAdjustmentService $stockAdjustment, TelegramProductNotificationService $notifications): RedirectResponse
+    public function __invoke(Request $request, Product $product, StockAdjustmentService $stockAdjustment, TelegramProductNotificationService $notifications, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         if ($redirect = $this->redirectGuestToAdminLogin($request)) {
             return $redirect;
@@ -34,13 +35,13 @@ class AdminProductStockController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return $this->redirectBackWithStockErrors($request, $validator->errors()->toArray());
+            return $forms->stockValidationErrors($request, $product, $validator->errors()->toArray());
         }
 
         $stockItems = $this->stockItems((string) $validator->validated()['stock_items']);
 
         if ($stockItems === []) {
-            return $this->redirectBackWithStockErrors($request, [
+            return $forms->stockValidationErrors($request, $product, [
                 'stock_items' => ['Isi minimal satu baris stok.'],
             ]);
         }
@@ -51,9 +52,7 @@ class AdminProductStockController extends Controller
         $adjusted = $stockAdjustment->adjust($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
         $notifications->notifyStockAdded($adjusted, $itemCount);
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'produk'])
-            ->with('status', "Stok {$product->name} bertambah {$itemCount} item.");
+        return $forms->stockAdded($product->name, $itemCount);
     }
 
     /**
@@ -66,16 +65,5 @@ class AdminProductStockController extends Controller
             ->filter()
             ->values()
             ->all();
-    }
-
-    /**
-     * @param  array<string, list<string>>  $errors
-     */
-    private function redirectBackWithStockErrors(Request $request, array $errors): RedirectResponse
-    {
-        return redirect()
-            ->back()
-            ->withErrors($errors, 'stockAdjustment')
-            ->withInput($request->only(['stock_items', 'stock_product_id']));
     }
 }

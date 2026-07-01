@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -17,7 +18,7 @@ class AdminProductUpdateController extends Controller
 {
     use AuthorizesAdminAccess;
 
-    public function __invoke(Request $request, Product $product, AuditLogger $auditLogger, ProductDescriptionSectionProtocol $descriptions): RedirectResponse
+    public function __invoke(Request $request, Product $product, AuditLogger $auditLogger, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         if ($redirect = $this->redirectGuestToAdminLogin($request)) {
             return $redirect;
@@ -44,10 +45,7 @@ class AdminProductUpdateController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return redirect()
-                ->route('admin.dashboard', ['tab' => 'produk'])
-                ->withErrors($validator, 'productUpdate')
-                ->withInput($request->except(['_token', '_method']) + ['product_id' => $product->id]);
+            return $forms->productUpdateValidationErrors($request, $validator, $product);
         }
 
         $validated = $validator->validated();
@@ -78,8 +76,6 @@ class AdminProductUpdateController extends Controller
             $request->ip(),
         );
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'produk'])
-            ->with('status', "Produk {$product->name} berhasil diperbarui.");
+        return $forms->productUpdated($product->name);
     }
 }
