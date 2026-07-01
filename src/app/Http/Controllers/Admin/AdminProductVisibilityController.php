@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Services\AuditLogger;
@@ -13,15 +12,9 @@ use Illuminate\Support\Facades\Validator;
 
 class AdminProductVisibilityController extends Controller
 {
-    use AuthorizesAdminAccess;
-
     public function __invoke(Request $request, Product $product, AuditLogger $auditLogger): RedirectResponse
     {
-        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
-            return $redirect;
-        }
-
-        $user = $this->authorizeAdminAccess($request);
+        $user = $request->attributes->get('adminUser');
 
         Gate::authorize('update', $product);
 

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Services\Admin\AdminDashboardData;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
@@ -13,15 +12,9 @@ use Illuminate\View\View;
 
 class AdminDashboardController extends Controller
 {
-    use AuthorizesAdminAccess;
-
     public function __invoke(Request $request, AdminDashboardData $dashboardData, AdminProductDashboardFormProtocol $forms): View|RedirectResponse
     {
-        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
-            return $redirect;
-        }
-
-        $user = $this->authorizeAdminAccess($request);
+        $user = $request->attributes->get('adminUser');
 
         $viewData = $dashboardData->forAdmin($user, (string) $request->query('tab', 'stats'));
         $viewData['dashboardState'] = $forms->dashboardState(

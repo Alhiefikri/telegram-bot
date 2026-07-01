@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -15,15 +14,9 @@ use Illuminate\Support\Facades\Validator;
 
 class AdminProductStockItemUpdateController extends Controller
 {
-    use AuthorizesAdminAccess;
-
     public function __invoke(Request $request, Product $product, ProductStockItem $stockItem, ProductStockItemManager $stockItemManager, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
-        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
-            return $redirect;
-        }
-
-        $user = $this->authorizeAdminAccess($request);
+        $user = $request->attributes->get('adminUser');
 
         Gate::authorize('adjustStock', $product);
 

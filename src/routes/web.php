@@ -16,17 +16,20 @@ use App\Http\Controllers\StorefrontController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
-Route::get('/admin', AdminDashboardController::class)->name('admin.dashboard');
-Route::post('/admin/payment-mode', AdminPaymentModeController::class)->name('admin.payment-mode.update');
-Route::post('/admin/broadcast', AdminBroadcastController::class)->name('admin.broadcast.store');
 Route::get('/admin/login', [AdminLoginController::class, 'create'])->name('admin.login');
 Route::post('/admin/login', [AdminLoginController::class, 'store'])->name('admin.login.store');
 Route::post('/admin/logout', [AdminLoginController::class, 'destroy'])->name('admin.logout');
-Route::patch('/admin/products/{product}', AdminProductUpdateController::class)->name('admin.products.update');
-Route::delete('/admin/products/{product}', AdminProductDeleteController::class)->name('admin.products.destroy');
-Route::post('/admin/products', AdminProductCreateController::class)->name('admin.products.store');
-Route::patch('/admin/products/{product}/visibility', AdminProductVisibilityController::class)->name('admin.products.visibility.update');
-Route::post('/admin/products/{product}/stock', AdminProductStockController::class)->name('admin.products.stock.store');
-Route::patch('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('admin.products.stock-items.update');
-Route::delete('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('admin.products.stock-items.destroy');
-Route::post('/admin/categories', AdminCategoryCreateController::class)->name('admin.categories.store');
+
+Route::middleware('admin.access')->group(function (): void {
+    Route::get('/admin', AdminDashboardController::class)->name('admin.dashboard');
+    Route::post('/admin/payment-mode', AdminPaymentModeController::class)->name('admin.payment-mode.update');
+    Route::post('/admin/broadcast', AdminBroadcastController::class)->name('admin.broadcast.store');
+    Route::patch('/admin/products/{product}', AdminProductUpdateController::class)->name('admin.products.update');
+    Route::delete('/admin/products/{product}', AdminProductDeleteController::class)->name('admin.products.destroy');
+    Route::post('/admin/products', AdminProductCreateController::class)->name('admin.products.store');
+    Route::patch('/admin/products/{product}/visibility', AdminProductVisibilityController::class)->name('admin.products.visibility.update');
+    Route::post('/admin/products/{product}/stock', AdminProductStockController::class)->name('admin.products.stock.store');
+    Route::patch('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('admin.products.stock-items.update');
+    Route::delete('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('admin.products.stock-items.destroy');
+    Route::post('/admin/categories', AdminCategoryCreateController::class)->name('admin.categories.store');
+});

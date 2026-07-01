@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Services\Telegram\TelegramBroadcastService;
 use Illuminate\Http\RedirectResponse;
@@ -11,15 +10,9 @@ use Illuminate\Support\Facades\Validator;
 
 class AdminBroadcastController extends Controller
 {
-    use AuthorizesAdminAccess;
-
     public function __invoke(Request $request, TelegramBroadcastService $broadcast): RedirectResponse
     {
-        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
-            return $redirect;
-        }
-
-        $user = $this->authorizeAdminAccess($request);
+        $user = $request->attributes->get('adminUser');
 
         $validator = Validator::make($request->all(), [
             'message' => ['required', 'string', 'max:3500'],

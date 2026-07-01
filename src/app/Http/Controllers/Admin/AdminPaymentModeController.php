@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Admin\Concerns\AuthorizesAdminAccess;
 use App\Http\Controllers\Controller;
 use App\Models\ManualPaymentSetting;
 use App\Services\AuditLogger;
@@ -14,15 +13,9 @@ use Illuminate\Validation\Rule;
 
 class AdminPaymentModeController extends Controller
 {
-    use AuthorizesAdminAccess;
-
     public function __invoke(Request $request, AuditLogger $auditLogger): RedirectResponse
     {
-        if ($redirect = $this->redirectGuestToAdminLogin($request)) {
-            return $redirect;
-        }
-
-        $user = $this->authorizeAdminAccess($request);
+        $user = $request->attributes->get('adminUser');
         abort_unless((bool) $user->role?->canManagePaymentSettings(), 403);
 
         $validator = Validator::make($request->all(), [

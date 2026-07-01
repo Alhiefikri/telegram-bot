@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Models\Product;
 use App\Observers\ProductAuditObserver;
+use App\Services\Admin\AdminAccessAuthorizer;
+use App\Services\Admin\AdminAccessAuthorizerInterface;
 use App\Services\Audit\AuditContext;
 use App\Services\Audit\HttpAuditContext;
 use App\Services\EloquentInventoryLedger;
@@ -27,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(InventoryLedger::class, EloquentInventoryLedger::class);
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
+        $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
     }
 
