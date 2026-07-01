@@ -41,6 +41,7 @@ WORKDIR /var/www/html
 COPY src/ ./
 COPY --from=vendor /app/vendor ./vendor
 COPY --from=assets /app/public/build ./public/build
+COPY --from=assets /app/public/build /opt/lhiestore-public-build
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint-laravel
 

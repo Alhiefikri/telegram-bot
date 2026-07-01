@@ -3,6 +3,8 @@
 namespace App\Services\Telegram;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Log;
 
 class TelegramBotClient
 {
@@ -59,11 +61,19 @@ class TelegramBotClient
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
-        Http::post($this->url('answerCallbackQuery'), array_filter([
-            'callback_query_id' => $callbackQueryId,
-            'text' => $text,
-            'show_alert' => $text !== null,
-        ], fn ($value) => $value !== null))->throw();
+        try {
+            Http::post($this->url('answerCallbackQuery'), array_filter([
+                'callback_query_id' => $callbackQueryId,
+                'text' => $text,
+                'show_alert' => $text !== null,
+            ], fn ($value) => $value !== null))->throw();
+        } catch (RequestException $e) {
+            Log::warning('telegram.answer_callback_query_failed', [
+                'callback_query_id' => $callbackQueryId,
+                'status' => $e->response?->status(),
+                'description' => data_get($e->response?->json(), 'description'),
+            ]);
+        }
     }
 
     public function deleteMessage(int|string $chatId, int|string $messageId): void
