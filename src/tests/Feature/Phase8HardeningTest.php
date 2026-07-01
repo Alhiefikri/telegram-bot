@@ -257,6 +257,20 @@ SH);
         $this->assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);
     }
 
+    public function test_docker_startup_runs_migrations_before_supervisor_by_default(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $envExample = file_get_contents(base_path('../.env.example'));
+
+        $this->assertStringContainsString('ENTRYPOINT ["/usr/local/bin/docker-entrypoint-laravel"]', $dockerfile);
+        $this->assertStringContainsString('php artisan migrate --force', $entrypoint);
+        $this->assertStringContainsString('exec "$@"', $entrypoint);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE=true', $envExample);
+    }
+
     private function makeShellWorkspace(string $prefix): string
     {
         $directory = sys_get_temp_dir().'/telegram-bot-'.$prefix.'-'.bin2hex(random_bytes(8));

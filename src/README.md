@@ -181,6 +181,35 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam sta
 
 ## 5. Operational Guide
 
+### 5.0 Docker startup and dogfood smoke checks
+
+The production Docker image runs pending Laravel migrations before Supervisor starts PHP-FPM and the queue worker. This keeps first boot from failing healthchecks because tables such as `cache` or `jobs` do not exist yet. Set `APP_AUTO_MIGRATE=false` if an environment requires manual migration orchestration.
+
+Production-like local dogfooding should target Docker/Nginx/PostgreSQL, not `php artisan serve` with SQLite:
+
+```bash
+POSTGRES_PASSWORD=dogfood_password \
+APP_KEY=base64:replace-with-generated-key \
+TELEGRAM_BOT_TOKEN=dogfood-token \
+TELEGRAM_WEBHOOK_SECRET=dogfood-secret \
+WEB_PORT=18080 \
+docker compose -p telegram-bot-dogfood up -d --build
+
+BASE_URL=http://127.0.0.1:18080 ./scripts/smoke-production.sh
+
+POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
+docker compose -p telegram-bot-dogfood exec app \
+php artisan admin:bootstrap-owner owner@example.test
+
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:18080 \
+PLAYWRIGHT_ADMIN_EMAIL=owner@example.test \
+PLAYWRIGHT_ADMIN_PASSWORD='replace-with-password' \
+PLAYWRIGHT_TELEGRAM_WEBHOOK_SECRET='replace-with-secret' \
+npm run test:browser:docker
+```
+
+The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
+
 ### 5.1 Webhook Telegram
 
 Endpoint aplikasi:

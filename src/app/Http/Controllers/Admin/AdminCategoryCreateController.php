@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,7 @@ use Illuminate\Support\Str;
 
 class AdminCategoryCreateController extends Controller
 {
-    public function __invoke(Request $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(Request $request, AuditLogger $auditLogger, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -29,10 +30,7 @@ class AdminCategoryCreateController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return redirect()
-                ->back()
-                ->withErrors($validator, 'categoryCreate')
-                ->withInput($request->only(['category_name', 'category_description']));
+            return $forms->categoryCreateValidationErrors($request, $validator);
         }
 
         $validated = $validator->validated();
@@ -54,9 +52,7 @@ class AdminCategoryCreateController extends Controller
             $request->ip(),
         );
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'produk'])
-            ->with('status', "Kategori {$category->name} berhasil dibuat.");
+        return $forms->categoryCreated($category->name);
     }
 
     private function uniqueSlug(string $name): string
