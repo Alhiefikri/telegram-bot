@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
+use App\Models\SalesProofPost;
 use App\Support\Money;
 
 final class AdminDashboardSalesData
@@ -13,16 +14,16 @@ final class AdminDashboardSalesData
      * @param  array<string, mixed>  $statusCounts
      * @return array<string, mixed>
      */
-    public function forSales(array $statusCounts): array
+    public function forSales(array $statusCounts, bool $canRetrySalesProof = false): array
     {
         return [
-            'orders' => $this->latestOrders(),
+            'orders' => $this->latestOrders($canRetrySalesProof),
             'filters' => $this->salesFilters($statusCounts),
             'statusCounts' => $statusCounts,
         ];
     }
 
-    private function latestOrders(): array
+    private function latestOrders(bool $canRetrySalesProof): array
     {
         return Order::query()
             ->with([
@@ -31,13 +32,14 @@ final class AdminDashboardSalesData
                 'payments' => fn ($query) => $query
                     ->where('status', PaymentStatus::Paid)
                     ->select(['id', 'order_id', 'amount', 'status']),
+                'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
             ->withCount('orderItems')
             ->latest()
             ->limit(5)
             ->get()
-            ->map(function (Order $order): array {
+            ->map(function (Order $order) use ($canRetrySalesProof): array {
                 $paidAmount = (int) $order->payments->sum('amount');
                 $orderStatusTone = $this->orderStatusTone($order->order_status);
                 $paymentStatusTone = $this->paymentStatusTone($order->payment_status);
@@ -45,6 +47,7 @@ final class AdminDashboardSalesData
                 return [
                     'id' => $order->id,
                     'invoice_number' => $order->invoice_number,
+                    'detail_url' => route('admin.orders.show', $order),
                     'customer' => $this->customerLabel($order),
                     'product_name' => $this->orderProductName($order),
                     'filter_groups' => $this->orderFilterGroups($order->order_status),
@@ -60,6 +63,7 @@ final class AdminDashboardSalesData
                     'earning' => Money::idr($paidAmount),
                     'earning_amount' => $paidAmount,
                     'item_count' => $order->order_items_count,
+                    'sales_proof' => $this->salesProofState($order, $canRetrySalesProof),
                     'created_at' => $order->created_at?->toDateTimeString(),
                     'created_at_label' => $order->created_at?->format('d M Y') ?? '-',
                 ];
@@ -137,6 +141,49 @@ final class AdminDashboardSalesData
         }
 
         return $order->customer->first_name ?: ($order->customer->username ? "@{$order->customer->username}" : 'Pelanggan');
+    }
+
+    public function salesProofState(Order $order, bool $canRetrySalesProof = false): array
+    {
+        $post = $order->salesProofPost;
+        if (! $post) {
+            return [
+                'status' => 'none',
+                'label' => 'Belum ada post',
+                'tone' => 'slate',
+                'badge' => $this->toneBadgeStyle('slate'),
+                'message_id' => null,
+                'last_error' => null,
+                'attempts' => 0,
+                'can_retry' => false,
+                'retry_url' => null,
+            ];
+        }
+
+        $tone = match ($post->status) {
+            SalesProofPost::STATUS_SENT => 'emerald',
+            SalesProofPost::STATUS_FAILED => 'rose',
+            SalesProofPost::STATUS_PENDING, SalesProofPost::STATUS_SENDING => 'amber',
+            default => 'slate',
+        };
+
+        return [
+            'status' => $post->status,
+            'label' => match ($post->status) {
+                SalesProofPost::STATUS_PENDING => 'Pending',
+                SalesProofPost::STATUS_SENDING => 'Sending',
+                SalesProofPost::STATUS_SENT => 'Sent',
+                SalesProofPost::STATUS_FAILED => 'Failed',
+                default => ucfirst((string) $post->status),
+            },
+            'tone' => $tone,
+            'badge' => $this->toneBadgeStyle($tone),
+            'message_id' => $post->telegram_message_id,
+            'last_error' => $post->last_error,
+            'attempts' => $post->attempts,
+            'can_retry' => $canRetrySalesProof && $post->status === SalesProofPost::STATUS_FAILED,
+            'retry_url' => route('admin.orders.sales-proof.retry', $order),
+        ];
     }
 
     private function orderStatusLabel(OrderStatus $status): string

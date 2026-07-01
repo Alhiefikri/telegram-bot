@@ -9,8 +9,11 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
@@ -84,5 +87,81 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('Masalah')
             ->assertDontSee('Escrow')
             ->assertDontSee('<table', false);
+    }
+
+    public function test_penjualan_tab_shows_sales_proof_status_references_errors_and_retry_action(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $sentOrder = Order::factory()->create(['invoice_number' => 'INV-SENT', 'created_at' => now()]);
+        OrderItem::factory()->create(['order_id' => $sentOrder->id, 'product_name' => 'Sent Product']);
+        SalesProofPost::create(['order_id' => $sentOrder->id, 'status' => SalesProofPost::STATUS_SENT, 'attempts' => 1, 'telegram_message_id' => '777']);
+
+        $failedOrder = Order::factory()->create(['invoice_number' => 'INV-FAILED', 'created_at' => now()->subMinute()]);
+        OrderItem::factory()->create(['order_id' => $failedOrder->id, 'product_name' => 'Failed Product']);
+        SalesProofPost::create(['order_id' => $failedOrder->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'channel cannot post']);
+
+        $pendingOrder = Order::factory()->create(['invoice_number' => 'INV-PENDING', 'created_at' => now()->subMinutes(2)]);
+        OrderItem::factory()->create(['order_id' => $pendingOrder->id, 'product_name' => 'Pending Product']);
+        SalesProofPost::create(['order_id' => $pendingOrder->id, 'status' => SalesProofPost::STATUS_PENDING]);
+
+        $noPostOrder = Order::factory()->create(['invoice_number' => 'INV-NOPOST', 'created_at' => now()->subMinutes(3)]);
+        OrderItem::factory()->create(['order_id' => $noPostOrder->id, 'product_name' => 'No Post Product']);
+
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee('Sales Proof Post')
+            ->assertSee('Belum ada post')
+            ->assertSee('Pending')
+            ->assertSee('Sent')
+            ->assertSee('Telegram message ID: 777')
+            ->assertSee('Failed')
+            ->assertSee('Error: channel cannot post')
+            ->assertSee('Retry Sales Proof Post')
+            ->assertSee('Detail order')
+            ->assertSee(route('admin.orders.sales-proof.retry', $failedOrder), false);
+
+        $this->get(route('admin.orders.show', $failedOrder))
+            ->assertOk()
+            ->assertSee('Detail Order')
+            ->assertSee('INV-FAILED')
+            ->assertSee('Sales Proof Post')
+            ->assertSee('Failed')
+            ->assertSee('Error: channel cannot post')
+            ->assertSee('Retry Sales Proof Post')
+            ->assertSee(route('admin.orders.sales-proof.retry', $failedOrder), false);
+    }
+
+    public function test_sales_proof_manual_retry_uses_publisher_path_without_changing_order_state(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 919]])]);
+
+        $customer = Customer::factory()->create(['username' => 'RetryAdmin']);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-RETRY',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Retry Product', 'unit_price' => 12000, 'subtotal' => 12000]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
+
+        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect(route('admin.dashboard', ['tab' => 'penjualan']));
+
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status);
+        $this->assertSame(4, $post->attempts);
+        $this->assertSame('919', $post->telegram_message_id);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+
+        $this->post(route('admin.orders.sales-proof.retry', $order))->assertSessionHas('status', 'Sales Proof Post tidak dalam status gagal. Retry tidak dijalankan.');
+        $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
     }
 }

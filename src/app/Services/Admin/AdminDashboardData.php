@@ -43,7 +43,7 @@ final class AdminDashboardData
             'navigation' => $this->navigation($requestedTab),
             'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
             'productsTab' => $this->productsData->forProducts($canManageProducts),
-            'salesTab' => $this->salesData->forSales($statusCounts),
+            'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings()),
             'storeChannelTab' => $this->storeChannelTab($user),
         ];
     }

@@ -78,6 +78,39 @@
                                     {{ $order['payment_status_label'] }}
                                 </span>
                                 <span class="text-xs font-bold" style="color: #64748b;">{{ $order['item_count'] }} item</span>
+                                <a href="{{ $order['detail_url'] }}" class="text-xs font-bold underline" style="color: #050505;">Detail order</a>
+                            </div>
+                            {{-- Sales Proof status + retry --}}
+                            @php($proof = $order['sales_proof'])
+                            <div class="mt-3 rounded-lg p-3" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <p class="text-[9px] font-bold uppercase" style="color: #64748b;">Sales Proof Post</p>
+                                        <p class="mt-1 text-xs font-bold" style="color: #050505;">{{ $proof['label'] }}</p>
+                                    </div>
+                                    <span class="neo-badge" style="background: {{ $proof['badge']['background'] }}; color: {{ $proof['badge']['color'] }};">
+                                        {{ $proof['status'] }}
+                                    </span>
+                                </div>
+
+                                @if ($proof['message_id'])
+                                    <p class="mt-2 break-words text-xs font-semibold" style="color: #334155;">Telegram message ID: {{ $proof['message_id'] }}</p>
+                                @endif
+
+                                @if ($proof['last_error'])
+                                    <p class="mt-2 break-words text-xs font-semibold" style="color: #dc2626;">Error: {{ $proof['last_error'] }}</p>
+                                @endif
+
+                                @if ($proof['status'] !== 'none')
+                                    <p class="mt-2 text-[10px] font-bold uppercase" style="color: #64748b;">Attempts: {{ $proof['attempts'] }}</p>
+                                @endif
+
+                                @if ($proof['can_retry'])
+                                    <form method="POST" action="{{ $proof['retry_url'] }}" class="mt-3">
+                                        @csrf
+                                        <button type="submit" class="neo-btn neo-btn-secondary w-full justify-center text-xs">Retry Sales Proof Post</button>
+                                    </form>
+                                @endif
                             </div>
                         </article>
                     @empty

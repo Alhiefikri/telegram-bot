@@ -23,7 +23,7 @@ class PublishSalesProofPost implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public readonly string $orderId) {}
+    public function __construct(public readonly string $orderId, public readonly bool $manualRetry = false) {}
 
     public function backoff(): array
     {
@@ -56,7 +56,7 @@ class PublishSalesProofPost implements ShouldQueue
 
         $post = DB::transaction(function (): ?SalesProofPost {
             $post = SalesProofPost::query()->where('order_id', $this->orderId)->lockForUpdate()->first();
-            if (! $post || $post->status === SalesProofPost::STATUS_SENT || $post->attempts >= 3) {
+            if (! $post || $post->status === SalesProofPost::STATUS_SENT || (! $this->manualRetry && $post->attempts >= 3)) {
                 return null;
             }
             $post->update(['status' => SalesProofPost::STATUS_SENDING, 'attempts' => $post->attempts + 1, 'last_error' => null]);
