@@ -240,7 +240,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($r) => str_contains(json_encode($r->data()), 'product:'));
     }
 
-
     public function test_product_ready_notification_has_look_button_and_description(): void
     {
         $this->fakeTelegramHttp();
@@ -269,7 +268,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
-    public function test_product_created_notification_and_zero_stock_notification_are_buyer_safe(): void
+    public function test_product_created_notification_is_buyer_safe_and_zero_stock_ready_notification_is_not_sent(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 778]);
@@ -306,17 +305,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'canva@example.test')
             && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👁️ Lihat'
             && str_contains(json_encode($r->data()), 'product:'.$ready->id));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Claude Pro Reserved')
-            && str_contains($r['text'], '💰 Harga: Rp45.000')
-            && str_contains($r['text'], '📦 Stok: 0')
-            && str_contains($r['text'], 'Akun akan ready lagi segera.')
-            && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
-            && ! str_contains($r['text'], '[BANNER:')
-            && ! str_contains($r['text'], 'claude@example.test')
-            && ! str_contains(json_encode($r->data()), '👁️ Lihat')
-            && ! str_contains(json_encode($r->data()), 'product:'.$reserved->id));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Claude Pro Reserved'));
     }
+
     public function test_cari_can_match_active_category_name(): void
     {
         $this->fakeTelegramHttp();

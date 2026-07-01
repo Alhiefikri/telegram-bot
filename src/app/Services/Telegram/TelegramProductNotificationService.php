@@ -34,11 +34,15 @@ class TelegramProductNotificationService
 
     public function notifyStockAdded(Product $product, int $addedQuantity): void
     {
-        if (! $product->is_active || $addedQuantity < 1) {
+        $product = $product->fresh();
+        if (! $product || ! $product->is_active || $addedQuantity < 1) {
             return;
         }
 
-        $availableStock = max(0, $product->stock - $product->reserved_stock);
+        $availableStock = $product->stock - $product->reserved_stock;
+        if ($availableStock < 1) {
+            return;
+        }
         $this->broadcast->sendToActiveUsers(implode("\n", [
             'Produk ready dibeli:',
             '📦 '.$product->name,
@@ -49,7 +53,6 @@ class TelegramProductNotificationService
             $this->descriptionText($product),
         ]), '✅ Stok Ready', $this->productReplyMarkup($product, $availableStock));
     }
-
 
     private function productReplyMarkup(Product $product, int $availableStock): array
     {
@@ -70,6 +73,7 @@ class TelegramProductNotificationService
 
         return $description !== '' ? $description : 'Deskripsi produk segera dilengkapi.';
     }
+
     public function notifyOutOfStock(Product $product): void
     {
         $adminChatId = $this->adminAccess->adminChatId();

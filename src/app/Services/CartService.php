@@ -75,6 +75,7 @@ class CartService
     {
         DB::transaction(function () use ($cart, $product) {
             $lockedCart = $this->lockActiveCart($cart);
+            Product::withTrashed()->whereKey($product->id)->lockForUpdate()->firstOrFail();
             CartItem::where('cart_id', $lockedCart->id)->where('product_id', $product->id)->lockForUpdate()->delete();
         }, 5);
     }
@@ -92,10 +93,23 @@ class CartService
             $item = CartItem::where('cart_id', $lockedCart->id)->where('product_id', $product->id)->lockForUpdate()->first();
             $quantity = $quantityResolver($item);
 
-            $this->assertProductAvailable($lockedProduct, $quantity);
+            $this->assertProductAvailable($lockedProduct, $quantity, $this->activeCartQuantityForOtherCarts($lockedProduct, $lockedCart));
 
             return CartItem::updateOrCreate(['cart_id' => $lockedCart->id, 'product_id' => $lockedProduct->id], ['quantity' => $quantity]);
         }, 5);
+    }
+
+    private function activeCartQuantityForOtherCarts(Product $product, Cart $cart): int
+    {
+        return (int) CartItem::query()
+            ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
+            ->where('cart_items.product_id', $product->id)
+            ->where('cart_items.cart_id', '<>', $cart->id)
+            ->where('carts.status', CartStatus::Active->value)
+            ->where(fn ($query) => $query
+                ->whereNull('carts.expires_at')
+                ->orWhere('carts.expires_at', '>', now()))
+            ->sum('cart_items.quantity');
     }
 
     private function lockActiveCart(Cart $cart): Cart
@@ -112,13 +126,13 @@ class CartService
         return $lockedCart;
     }
 
-    private function assertProductAvailable(Product $product, int $quantity): void
+    private function assertProductAvailable(Product $product, int $quantity, int $otherActiveCartQuantity = 0): void
     {
         if (! $product->is_active || $product->trashed()) {
             throw new InvalidCartState('Product is not active.');
         }
 
-        if (($product->stock - $product->reserved_stock) < $quantity) {
+        if (($product->stock - $product->reserved_stock) < ($quantity + $otherActiveCartQuantity)) {
             throw new InsufficientStock('Insufficient available stock.');
         }
     }

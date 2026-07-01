@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
@@ -19,6 +20,8 @@ class TelegramCartIntents
             return false;
         }
 
+        $cart = null;
+
         try {
             $product = Product::query()
                 ->whereKey($productId)
@@ -32,7 +35,11 @@ class TelegramCartIntents
             }
 
             $cart = $this->carts->activeCartFor($customer);
-            $this->carts->addItem($cart, $product, $quantity);
+            $cartItem = $this->carts->setItemQuantity($cart, $product, $quantity);
+            if ($cartItem && ! $cartItem->wasRecentlyCreated && ! $cartItem->wasChanged('quantity')) {
+                return true;
+            }
+
             $subtotal = $product->price_amount * $quantity;
             $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal item: Rp".number_format($subtotal, 0, ',', '.')."\n\nSiap checkout? Pilih pembayaran anda.", [
                 'inline_keyboard' => [
@@ -46,9 +53,17 @@ class TelegramCartIntents
 
             return true;
         } catch (Throwable) {
+            $this->deleteFreshEmptyCart($cart);
             $this->bot->sendMessage($chatId, 'Produk tidak tersedia atau stok tidak cukup.');
 
             return false;
+        }
+    }
+
+    private function deleteFreshEmptyCart(?Cart $cart): void
+    {
+        if ($cart?->wasRecentlyCreated && ! $cart->cartItems()->exists()) {
+            $cart->delete();
         }
     }
 }

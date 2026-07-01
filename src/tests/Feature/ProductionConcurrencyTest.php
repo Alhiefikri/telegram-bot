@@ -8,18 +8,25 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
+use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\ProductStockItemManager;
+use App\Services\StockAdjustmentService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
@@ -61,6 +68,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->requireConcurrencyLane();
 
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'only-secret']);
         $firstCart = $this->cartForProduct($product);
         $secondCart = $this->cartForProduct($product);
 
@@ -83,8 +91,52 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(1, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
+        $this->assertSame(0, ProductStockItem::where('product_id', $product->id)->whereNull('order_item_id')->count());
         $this->assertSame(0, PaymentEvent::count());
         $this->assertNull($order->telegram_receipt_sent_at);
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_cart_quantity_holds_last_stock_once(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cart-secret']);
+        $first = Customer::factory()->create();
+        $second = Customer::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($first->id)), Product::findOrFail($product->id), 1)?->id,
+            fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($second->id)), Product::findOrFail($product->id), 1)?->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([InsufficientStock::class], $this->failedResultClasses($results));
+        $this->assertSame(1, $this->activeCartQuantityFor($product));
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_cart_quantity_two_plus_one_never_exceeds_stock_two(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cart-secret-a']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cart-secret-b']);
+        $first = Customer::factory()->create();
+        $second = Customer::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($first->id)), Product::findOrFail($product->id), 2)?->id,
+            fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($second->id)), Product::findOrFail($product->id), 1)?->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([InsufficientStock::class], $this->failedResultClasses($results));
+        $this->assertLessThanOrEqual(2, $this->activeCartQuantityFor($product));
+        $this->assertManagedInventoryInvariants($product);
     }
 
     public function test_concurrent_duplicate_paid_callbacks_create_one_sale_and_one_receipt(): void
@@ -203,6 +255,144 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         $this->assertNull($order->telegram_receipt_sent_at);
+    }
+
+    public function test_concurrent_admin_add_stock_preserves_all_submitted_rows(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $user = User::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(StockAdjustmentService::class)->adjust(Product::findOrFail($product->id), 2, 'first add', User::findOrFail($user->id), '127.0.0.1', ['a-1', 'a-2'])->id,
+            fn () => app(StockAdjustmentService::class)->adjust(Product::findOrFail($product->id), 2, 'second add', User::findOrFail($user->id), '127.0.0.1', ['b-1', 'b-2'])->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $product->refresh();
+        $this->assertSame(4, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(4, ProductStockItem::where('product_id', $product->id)->whereNull('order_item_id')->count());
+        $this->assertSame(4, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Adjustment)->sum('quantity'));
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_admin_delete_different_stock_items_decrements_once_per_item(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $first = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'delete-a']);
+        $second = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'delete-b']);
+        $user = User::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($first->id), User::findOrFail($user->id), '127.0.0.1')->id,
+            fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($second->id), User::findOrFail($user->id), '127.0.0.1')->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $product->refresh();
+        $this->assertSame(0, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(0, ProductStockItem::where('product_id', $product->id)->count());
+        $this->assertSame(-2, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Adjustment)->sum('quantity'));
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_admin_delete_same_stock_item_decrements_once(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $item = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'delete-once']);
+        $user = User::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), User::findOrFail($user->id), '127.0.0.1')->id,
+            fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), User::findOrFail($user->id), '127.0.0.1')->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([ModelNotFoundException::class], $this->failedResultClasses($results));
+        $product->refresh();
+        $this->assertSame(0, $product->stock);
+        $this->assertSame(0, ProductStockItem::where('product_id', $product->id)->count());
+        $this->assertSame(1, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Adjustment)->count());
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_checkout_claim_racing_admin_delete_has_single_winning_mutation(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $item = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'race-secret']);
+        $cart = $this->cartForProduct($product);
+        $user = User::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), 'manual', 'manual')->id,
+            fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), User::findOrFail($user->id), '127.0.0.1')->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertContains($this->failedResultClasses($results)[0] ?? null, [InsufficientStock::class, ModelNotFoundException::class]);
+        $product->refresh();
+        $this->assertGreaterThanOrEqual(0, $product->stock);
+        $this->assertGreaterThanOrEqual(0, $product->reserved_stock);
+        $this->assertGreaterThanOrEqual($product->reserved_stock, $product->stock);
+        $this->assertSame(1, InventoryMovement::where('product_id', $product->id)->whereIn('type', [InventoryMovementType::Reservation, InventoryMovementType::Adjustment])->count());
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_checkout_claim_racing_admin_edit_serializes_secret(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $item = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'old-secret']);
+        $cart = $this->cartForProduct($product);
+        $user = User::factory()->create();
+
+        $this->runConcurrently([
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), 'manual', 'manual')->id,
+            fn () => app(ProductStockItemManager::class)->updateAvailableSecret(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), 'new-secret', User::findOrFail($user->id), '127.0.0.1')->id,
+        ]);
+
+        $product->refresh();
+        $claimed = ProductStockItem::where('product_id', $product->id)->firstOrFail();
+        $this->assertSame(1, $product->stock);
+        $this->assertSame(1, $product->reserved_stock);
+        $this->assertNotNull($claimed->order_item_id);
+        $this->assertContains($claimed->secret, ['old-secret', 'new-secret']);
+        $this->assertSame(1, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Reservation)->count());
+        $this->assertLessThanOrEqual(1, AuditLog::where('action', 'product_stock_item.updated')->where('subject_id', (string) $item->id)->count());
+        $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_order_release_racing_admin_stock_add_preserves_stock_items(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $order = $this->credentialReadyOrder(stock: 1, quantity: 1, expiresAt: now()->addHour());
+        $product = Product::firstOrFail();
+        $user = User::factory()->create();
+
+        $results = $this->runConcurrently([
+            fn () => app(OrderStateMachine::class)->cancelPendingOrder(Order::findOrFail($order->id))->id,
+            fn () => app(StockAdjustmentService::class)->adjust(Product::findOrFail($product->id), 1, 'release race add', User::findOrFail($user->id), '127.0.0.1', ['new-secret'])->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $product->refresh();
+        $this->assertSame(2, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(2, ProductStockItem::where('product_id', $product->id)->whereNull('order_item_id')->count());
+        $this->assertSame(0, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
+        $this->assertSame(1, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Release)->count());
+        $this->assertManagedInventoryInvariants($product);
     }
 
     private function requireConcurrencyLane(): void
@@ -347,6 +537,47 @@ class ProductionConcurrencyTest extends TestCase
         return $classes;
     }
 
+    private function activeCartQuantityFor(Product $product): int
+    {
+        return (int) CartItem::query()
+            ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
+            ->where('cart_items.product_id', $product->id)
+            ->where('carts.status', CartStatus::Active->value)
+            ->where(fn ($query) => $query
+                ->whereNull('carts.expires_at')
+                ->orWhere('carts.expires_at', '>', now()))
+            ->sum('cart_items.quantity');
+    }
+
+    private function assertManagedInventoryInvariants(Product $product): void
+    {
+        $product = $product->fresh();
+        $this->assertNotNull($product);
+        $availableStock = $product->stock - $product->reserved_stock;
+
+        $this->assertGreaterThanOrEqual(0, $product->stock);
+        $this->assertGreaterThanOrEqual(0, $product->reserved_stock);
+        $this->assertGreaterThanOrEqual($product->reserved_stock, $product->stock);
+        $this->assertSame($availableStock, $product->stock - $product->reserved_stock);
+
+        $stockItems = ProductStockItem::where('product_id', $product->id)->get();
+        $unclaimed = $stockItems->whereNull('order_item_id');
+        $claimed = $stockItems->whereNotNull('order_item_id');
+
+        $this->assertSame($availableStock, $unclaimed->count());
+        $this->assertSame($product->reserved_stock, $claimed->count());
+        foreach ($claimed as $item) {
+            $this->assertNotNull($item->order_item_id);
+            $this->assertTrue(OrderItem::whereKey($item->order_item_id)->exists());
+        }
+        foreach ($unclaimed as $item) {
+            $this->assertNull($item->order_item_id);
+        }
+
+        $claimedSecrets = $claimed->pluck('secret')->all();
+        $this->assertSame(count($claimedSecrets), count(array_unique($claimedSecrets)));
+    }
+
     private function cartForProduct(Product $product, int $quantity = 1): Cart
     {
         $customer = Customer::factory()->create(['telegram_id' => fake()->unique()->numberBetween(100000, 999999999)]);
@@ -354,6 +585,17 @@ class ProductionConcurrencyTest extends TestCase
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
 
         return $cart;
+    }
+
+    private function credentialReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
+    {
+        $product = Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        for ($i = 1; $i <= $stock; $i++) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => 'secret-'.$i]);
+        }
+        $cart = $this->cartForProduct($product, $quantity);
+
+        return app(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual', $expiresAt);
     }
 
     private function manualReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
