@@ -5,13 +5,11 @@ namespace App\Services;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Models\Product;
 use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -64,16 +62,7 @@ class OrderCheckoutService
             throw new InvalidCheckout('Cart is empty.');
         }
 
-        $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-        foreach ($items as $item) {
-            $product = $products[$item->product_id] ?? null;
-            if (! $product || ! $product->is_active || $product->trashed()) {
-                throw new InvalidCheckout('Cart contains unavailable product.');
-            }
-            if (($product->stock - $product->reserved_stock) < $item->quantity) {
-                throw new InsufficientStock('Insufficient available stock.');
-            }
-        }
+        $products = $this->inventory->lockedCheckoutProducts($items);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => 'IDR', 'expires_at' => $expiresAt]);

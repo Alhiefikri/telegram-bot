@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\CartStatus;
-use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -14,6 +13,8 @@ use Illuminate\Support\Facades\DB;
 
 class CartService
 {
+    public function __construct(private readonly InventoryLedger $inventory) {}
+
     public function activeCartFor(Customer $customer, ?CarbonInterface $expiresAt = null): Cart
     {
         return DB::transaction(function () use ($customer, $expiresAt) {
@@ -93,23 +94,10 @@ class CartService
             $item = CartItem::where('cart_id', $lockedCart->id)->where('product_id', $product->id)->lockForUpdate()->first();
             $quantity = $quantityResolver($item);
 
-            $this->assertProductAvailable($lockedProduct, $quantity, $this->activeCartQuantityForOtherCarts($lockedProduct, $lockedCart));
+            $this->inventory->assertCartProductAvailable($lockedProduct, $quantity, $lockedCart->id);
 
             return CartItem::updateOrCreate(['cart_id' => $lockedCart->id, 'product_id' => $lockedProduct->id], ['quantity' => $quantity]);
         }, 5);
-    }
-
-    private function activeCartQuantityForOtherCarts(Product $product, Cart $cart): int
-    {
-        return (int) CartItem::query()
-            ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
-            ->where('cart_items.product_id', $product->id)
-            ->where('cart_items.cart_id', '<>', $cart->id)
-            ->where('carts.status', CartStatus::Active->value)
-            ->where(fn ($query) => $query
-                ->whereNull('carts.expires_at')
-                ->orWhere('carts.expires_at', '>', now()))
-            ->sum('cart_items.quantity');
     }
 
     private function lockActiveCart(Cart $cart): Cart
@@ -126,14 +114,4 @@ class CartService
         return $lockedCart;
     }
 
-    private function assertProductAvailable(Product $product, int $quantity, int $otherActiveCartQuantity = 0): void
-    {
-        if (! $product->is_active || $product->trashed()) {
-            throw new InvalidCartState('Product is not active.');
-        }
-
-        if (($product->stock - $product->reserved_stock) < ($quantity + $otherActiveCartQuantity)) {
-            throw new InsufficientStock('Insufficient available stock.');
-        }
-    }
 }

@@ -10,6 +10,20 @@ interface InventoryLedger
 {
     public function reserveOrderItem(Order $order, Product $product, int $quantity): void;
 
+    public function assertCartProductAvailable(Product $product, int $quantity, int $cartId): void;
+
+    public function lockedCheckoutProducts(Collection $items): Collection;
+
+    public function orderInventoryState(Order $order): array;
+
+    public function hasSaleProofForOrder(Order $order): bool;
+
+    public function hasReleaseProofForOrder(Order $order): bool;
+
+    public function recordOrderSales(Order $order): void;
+
+    public function releaseOrderReservations(Order $order): void;
+
     public function hasSaleProof(Collection $items, Collection $movements): bool;
 
     public function hasReleaseProof(Collection $items, Collection $movements): bool;

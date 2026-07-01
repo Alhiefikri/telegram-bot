@@ -2,8 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
+use App\Exceptions\InsufficientStock;
+use App\Exceptions\InvalidCartState;
+use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Models\CartItem;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
@@ -29,6 +34,69 @@ class EloquentInventoryLedger implements InventoryLedger
         if ($availableBefore > 0 && ($product->stock - $product->reserved_stock) <= 0) {
             DB::afterCommit(fn () => $this->notifications->notifyOutOfStock($product->fresh()));
         }
+    }
+
+    public function assertCartProductAvailable(Product $product, int $quantity, int $cartId): void
+    {
+        if (! $product->is_active || $product->trashed()) {
+            throw new InvalidCartState('Product is not active.');
+        }
+
+        if ($this->availableStock($product) < ($quantity + $this->activeCartQuantityForOtherCarts($product, $cartId))) {
+            throw new InsufficientStock('Insufficient available stock.');
+        }
+    }
+
+    public function lockedCheckoutProducts(Collection $items): Collection
+    {
+        $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+
+        foreach ($items as $item) {
+            $product = $products[$item->product_id] ?? null;
+            if (! $product || ! $product->is_active || $product->trashed()) {
+                throw new InvalidCheckout('Cart contains unavailable product.');
+            }
+            if ($this->availableStock($product) < $item->quantity) {
+                throw new InsufficientStock('Insufficient available stock.');
+            }
+        }
+
+        return $products;
+    }
+
+    public function orderInventoryState(Order $order): array
+    {
+        $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
+        $movements = InventoryMovement::where('order_id', $order->id)->lockForUpdate()->get();
+        $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+
+        return [$items, $movements, $products];
+    }
+
+    public function hasSaleProofForOrder(Order $order): bool
+    {
+        [$items, $movements] = $this->orderInventoryState($order);
+
+        return $this->hasSaleProof($items, $movements);
+    }
+
+    public function hasReleaseProofForOrder(Order $order): bool
+    {
+        [$items, $movements] = $this->orderInventoryState($order);
+
+        return $this->hasReleaseProof($items, $movements);
+    }
+
+    public function recordOrderSales(Order $order): void
+    {
+        [$items, $movements, $products] = $this->orderInventoryState($order);
+        $this->recordSales($order, $items, $products, $movements);
+    }
+
+    public function releaseOrderReservations(Order $order): void
+    {
+        [$items, $movements, $products] = $this->orderInventoryState($order);
+        $this->releaseReservations($order, $items, $products, $movements);
     }
 
     public function hasSaleProof(Collection $items, Collection $movements): bool
@@ -106,5 +174,23 @@ class EloquentInventoryLedger implements InventoryLedger
         if (! $reservation || $reservation->quantity !== $item->quantity || $reservation->quantity <= 0) {
             throw new InvalidOrderTransition('Reservation movement proof is missing or mismatched.');
         }
+    }
+
+    private function availableStock(Product $product): int
+    {
+        return $product->stock - $product->reserved_stock;
+    }
+
+    private function activeCartQuantityForOtherCarts(Product $product, int $cartId): int
+    {
+        return (int) CartItem::query()
+            ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
+            ->where('cart_items.product_id', $product->id)
+            ->where('cart_items.cart_id', '<>', $cartId)
+            ->where('carts.status', CartStatus::Active->value)
+            ->where(fn ($query) => $query
+                ->whereNull('carts.expires_at')
+                ->orWhere('carts.expires_at', '>', now()))
+            ->sum('cart_items.quantity');
     }
 }

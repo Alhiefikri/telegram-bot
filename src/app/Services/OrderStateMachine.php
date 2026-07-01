@@ -5,10 +5,8 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
-use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine
@@ -30,11 +28,7 @@ class OrderStateMachine
                 return $this->markLatePaymentPaid($lockedPayment, $order);
             }
 
-            $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
-            $movements = InventoryMovement::where('order_id', $order->id)->lockForUpdate()->get();
-            $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-
-            if ($lockedPayment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProof($items, $movements)) {
+            if ($lockedPayment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProofForOrder($order)) {
                 return $order->fresh();
             }
 
@@ -42,7 +36,7 @@ class OrderStateMachine
                 throw new InvalidOrderTransition('Payment cannot be marked paid from current state.');
             }
 
-            $this->inventory->recordSales($order, $items, $products, $movements);
+            $this->inventory->recordOrderSales($order);
 
             $lockedPayment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
             $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
@@ -125,11 +119,8 @@ class OrderStateMachine
             $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
             $payments = Payment::where('order_id', $lockedOrder->id)->orderBy('id')->lockForUpdate()->get();
 
-            $items = $lockedOrder->orderItems()->orderBy('product_id')->lockForUpdate()->get();
-            $movements = InventoryMovement::where('order_id', $lockedOrder->id)->lockForUpdate()->get();
-
             if ($lockedOrder->order_status === $orderStatus) {
-                if (! $this->inventory->hasReleaseProof($items, $movements)) {
+                if (! $this->inventory->hasReleaseProofForOrder($lockedOrder)) {
                     throw new InvalidOrderTransition('Release movement proof is missing.');
                 }
 
@@ -144,9 +135,7 @@ class OrderStateMachine
                 return null;
             }
 
-            $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-
-            $this->inventory->releaseReservations($lockedOrder, $items, $products, $movements);
+            $this->inventory->releaseOrderReservations($lockedOrder);
             $this->credentials()->release($lockedOrder);
 
             foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
