@@ -33,7 +33,7 @@ class TelegramWebhookController extends Controller
         try {
             $update = TelegramUpdate::create(['update_id' => (int) $validated['update_id'], 'payload' => $payload, 'created_at' => now()]);
             $jobEnqueuedAt = now();
-            ProcessTelegramUpdate::dispatch($update->id, $jobEnqueuedAt->toISOString());
+            $this->dispatchProcessor($update->id, $jobEnqueuedAt->toISOString());
             $duplicate = false;
         } catch (UniqueConstraintViolationException) {
             // Duplicate Telegram update: already stored/processing/processed.
@@ -52,5 +52,16 @@ class TelegramWebhookController extends Controller
         ]);
 
         return response()->json(['ok' => true]);
+    }
+
+    private function dispatchProcessor(int $telegramUpdateId, string $jobEnqueuedAt): void
+    {
+        if (app()->environment('testing')) {
+            ProcessTelegramUpdate::dispatch($telegramUpdateId, $jobEnqueuedAt);
+
+            return;
+        }
+
+        app()->terminating(static fn () => ProcessTelegramUpdate::dispatch($telegramUpdateId, $jobEnqueuedAt));
     }
 }
