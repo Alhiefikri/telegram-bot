@@ -23,6 +23,8 @@ class DogfoodExternalFixtures
         'admin_password' => 'DOGFOOD_ADMIN_PASSWORD',
         'telegram_photo_file_id' => 'DOGFOOD_TELEGRAM_PHOTO_FILE_ID',
         'store_channel_chat_id' => 'DOGFOOD_STORE_CHANNEL_CHAT_ID',
+        'store_channel_username' => 'DOGFOOD_STORE_CHANNEL_USERNAME',
+        'store_channel_link' => 'DOGFOOD_STORE_CHANNEL_LINK',
         'store_channel_member_user_id' => 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID',
         'store_channel_non_member_user_id' => 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID',
         'telegram_callback_query_id' => 'DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID',
@@ -57,8 +59,8 @@ class DogfoodExternalFixtures
     {
         return match ($scenario) {
             self::MANUAL_PAYMENT_PROOF => $this->missing(['telegram_photo_file_id']),
-            self::STORE_CHANNEL_MEMBER_GATE => $this->missing(['store_channel_chat_id', 'store_channel_member_user_id', 'store_channel_non_member_user_id']),
-            self::STORE_CHANNEL_SEND, self::SALES_PROOF_POST => $this->missing(['store_channel_chat_id']),
+            self::STORE_CHANNEL_MEMBER_GATE => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link', 'store_channel_member_user_id', 'store_channel_non_member_user_id']),
+            self::STORE_CHANNEL_SEND, self::SALES_PROOF_POST => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link']),
             self::PAKASIR_RECONCILIATION => $this->missing(['pakasir_pending_order_id', 'pakasir_pending_amount', 'pakasir_slug_configured', 'pakasir_api_key_configured']),
             self::CALLBACK_ANSWER => $this->missing(['telegram_callback_query_id']),
             self::ADMIN_AUTHENTICATED_SESSION => $this->missing(['admin_email', 'admin_password']),

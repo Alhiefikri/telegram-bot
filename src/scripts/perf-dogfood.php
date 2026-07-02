@@ -17,6 +17,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramUpdate;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Support\AdminDogfoodHttpRunner;
 use App\Support\DogfoodExternalFixtures;
@@ -157,7 +158,11 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
 
 $collector = new PerfTraceCollector;
 $app->singleton(PerfTraceCollector::class, fn () => $collector);
-$app->bind(TelegramBotClient::class, fn () => new MeasuredTelegramBotClient($collector));
+$fakeTelegramOutbound = (bool) config('services.dogfood_timing.fake_telegram_outbound');
+$runMode = $fakeTelegramOutbound ? 'synthetic' : 'real-external';
+$app->bind(TelegramBotClient::class, fn () => $fakeTelegramOutbound
+    ? new FakeTelegramBotClient
+    : new MeasuredTelegramBotClient($collector));
 config()->set('logging.default', 'stderr');
 config()->set('logging.channels.stack.channels', ['stderr']);
 Log::setDefaultDriver('stderr');
@@ -717,7 +722,7 @@ $runFixtureScenario(DogfoodExternalFixtures::CALLBACK_ANSWER, 'Telegram callback
 $runScenario('scheduled job orders:expire-pending', 'artisan command', 'orders:expire-pending', 1, function () use ($app) {
     return ['status' => $app->make(ConsoleKernel::class)->call('orders:expire-pending')];
 });
-$runScenario('scheduled job pakasir:reconcile', 'artisan command error or empty path', 'pakasir:reconcile --chunk=5', 1, function () use ($app) {
+$runFixtureScenario(DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'scheduled job pakasir:reconcile', 'artisan command against real pending fixture', 'pakasir:reconcile --chunk=5', 1, function () use ($app) {
     return ['status' => $app->make(ConsoleKernel::class)->call('pakasir:reconcile', ['--chunk' => 5])];
 });
 $runScenario('health check', 'artisan command', 'ops:health --db --queue-schema', 1, function () use ($app) {
@@ -750,6 +755,41 @@ $results[] = [
         'memory_delta_bytes' => memory_get_usage(true) - $burstMemoryBefore,
         'errors' => $burstErrors,
     ]],
+];
+
+$queueDepth = null;
+$failedJobsCount = null;
+if (Schema::hasTable('jobs')) {
+    $queueDepth = DB::table('jobs')->count();
+}
+if (Schema::hasTable('failed_jobs')) {
+    $failedJobsCount = DB::table('failed_jobs')->count();
+}
+
+$results[] = [
+    'feature' => 'queue integrity',
+    'scenario' => 'final jobs queue depth',
+    'input' => 'jobs table count',
+    'runs' => 1,
+    'cold_ms' => null,
+    'warm_avg_ms' => null,
+    'slowest_ms' => null,
+    'result' => $queueDepth === 0 ? 'ok' : 'error',
+    'queue_depth' => $queueDepth,
+    'runs_detail' => [],
+];
+
+$results[] = [
+    'feature' => 'queue integrity',
+    'scenario' => 'ops:check-failed-jobs --max=0',
+    'input' => 'failed_jobs table count',
+    'runs' => 1,
+    'cold_ms' => null,
+    'warm_avg_ms' => null,
+    'slowest_ms' => null,
+    'result' => $failedJobsCount === 0 ? 'ok' : 'error',
+    'failed_jobs' => $failedJobsCount,
+    'runs_detail' => [],
 ];
 
 $manualCheckoutQrReport = null;
@@ -868,9 +908,27 @@ foreach ($results as $result) {
     }
 }
 
+$blockedScenarios = array_values(array_map(
+    fn (array $result): array => [
+        'feature' => $result['feature'],
+        'scenario' => $result['scenario'],
+        'blocked_reason' => $result['blocked_reason'] ?? null,
+        'required_fixtures' => $result['required_fixtures'] ?? [],
+    ],
+    array_filter($results, fn (array $result): bool => ($result['result'] ?? null) === 'blocked'),
+));
+
 $output = [
     'started_at' => $startedAt,
     'finished_at' => date(DATE_ATOM),
+    'run_mode' => [
+        'mode' => $runMode,
+        'synthetic' => $fakeTelegramOutbound,
+        'fake_telegram_outbound' => $fakeTelegramOutbound,
+        'description' => $fakeTelegramOutbound
+            ? 'Synthetic run: Telegram outbound is handled by FakeTelegramBotClient; real external fixture scenarios are blocked when fixtures are absent.'
+            : 'Real-external run: Telegram outbound uses the configured Telegram Bot API; real fixture scenarios are blocked when fixtures are absent.',
+    ],
     'environment' => [
         'php' => PHP_VERSION,
         'laravel' => app()->version(),
@@ -883,6 +941,12 @@ $output = [
         'admin_user_configured' => $adminUserId !== '',
     ],
     'external_fixtures' => $fixtures->summary(),
+    'blocked_scenarios' => $blockedScenarios,
+    'final_queue_state' => [
+        'jobs_depth' => $queueDepth,
+        'failed_jobs' => $failedJobsCount,
+        'passes_ops_check_failed_jobs_max_0' => $failedJobsCount === 0,
+    ],
     'product_id' => $product->id,
     'category_id' => $category->id,
     'manual_checkout_qr_report' => $manualCheckoutQrReport,

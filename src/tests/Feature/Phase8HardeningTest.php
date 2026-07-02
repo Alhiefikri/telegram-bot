@@ -93,6 +93,12 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString("config()->set('logging.default', 'stderr')", $perfScript);
         $this->assertStringContainsString("Log::setDefaultDriver('stderr')", $perfScript);
         $this->assertStringContainsString("config()->set('services.dogfood_timing.log_channel', 'stderr')", $perfScript);
+        $this->assertStringContainsString('$fakeTelegramOutbound = (bool) config', $perfScript);
+        $this->assertStringContainsString('new FakeTelegramBotClient', $perfScript);
+        $this->assertStringContainsString("'run_mode' => [", $perfScript);
+        $this->assertStringContainsString("'blocked_scenarios' => \$blockedScenarios", $perfScript);
+        $this->assertStringContainsString("'final_queue_state' => [", $perfScript);
+        $this->assertStringContainsString("DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'scheduled job pakasir:reconcile'", $perfScript);
         $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 

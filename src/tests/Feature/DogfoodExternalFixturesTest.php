@@ -36,6 +36,10 @@ class DogfoodExternalFixturesTest extends TestCase
             $fixtures->missingFor(DogfoodExternalFixtures::PAKASIR_RECONCILIATION),
         );
         $this->assertSame(
+            ['DOGFOOD_STORE_CHANNEL_CHAT_ID', 'DOGFOOD_STORE_CHANNEL_USERNAME', 'DOGFOOD_STORE_CHANNEL_LINK', 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID', 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID'],
+            $fixtures->missingFor(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE),
+        );
+        $this->assertSame(
             ['DOGFOOD_ADMIN_EMAIL', 'DOGFOOD_ADMIN_PASSWORD'],
             $fixtures->missingFor(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION),
         );

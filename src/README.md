@@ -202,6 +202,7 @@ TELEGRAM_BOT_TOKEN=dogfood-token \
 TELEGRAM_WEBHOOK_SECRET=dogfood-secret \
 DOGFOOD_TIMING_ENABLED=true \
 DOGFOOD_TIMING_LOG_CHANNEL=stderr \
+DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true \
 WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood up -d --build
 
@@ -222,11 +223,16 @@ POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood exec --user laravel \
   -e DOGFOOD_ADMIN_EMAIL=owner@example.test \
   -e DOGFOOD_ADMIN_PASSWORD='replace-with-password' \
+  -e DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true \
   app \
 php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
 
-External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` instead of using fake Telegram or Pakasir data.
+Use `./scripts/benchmark-production.sh` as the default repeatable synthetic Docker release gate. It owns its fixtures, starts the Docker/Nginx/PostgreSQL/Supervisor topology, uses fake Telegram outbound by default, enforces budgets, and fails on non-zero final queue depth or failed jobs.
+
+Use `php scripts/perf-dogfood.php` when you need the broader scenario matrix and per-scenario timing JSON. With `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`, the broad harness runs in `synthetic` mode: Telegram outbound goes through `FakeTelegramBotClient`, and fixture-dependent real-external scenarios are reported under `blocked_scenarios` when their fixtures are absent. With fake outbound disabled, the harness runs in `real-external` mode and only real disposable Telegram, Store Channel, callback, photo, and Pakasir fixtures should be supplied.
+
+External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` before queue work starts instead of using fake Telegram or Pakasir data. Its JSON output includes `run_mode`, `blocked_scenarios`, and `final_queue_state`; after a synthetic run, `final_queue_state.jobs_depth` should be `0` and `final_queue_state.passes_ops_check_failed_jobs_max_0` should be `true`.
 
 Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for production-like Docker runs, and the broad perf script should be executed with `docker compose exec --user laravel app`. The perf script also forces its own Laravel logger to `stderr`. This keeps benchmark instrumentation in Docker logs instead of writing additional timing records to `storage/logs`, so a CLI timing run cannot make PHP-FPM or the Supervisor queue worker lose write access to Laravel's file logs.
 

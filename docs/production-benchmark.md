@@ -72,6 +72,8 @@ The benchmark does not fake inbound webhook validation. It still posts JSON upda
 
 Pakasir reconciliation is run as an operational command. With the default manual payment mode and no Pakasir fixtures, it measures the empty/safe command path. Real Pakasir transaction-detail benchmarking still requires the external fixtures documented in `src/README.md` and should use `src/scripts/perf-dogfood.php` for those fixture-specific claims.
 
+Use this benchmark as the default synthetic Docker release gate. Use `src/scripts/perf-dogfood.php` for the broader dogfood scenario matrix: with `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` it reports `run_mode.mode=synthetic`, uses fake Telegram outbound, blocks absent real-external fixtures, and includes `final_queue_state` for `jobs` depth and failed-job checks. With fake outbound disabled, that script is a real-external harness and should only be run with disposable real Telegram, Store Channel, callback, photo, and Pakasir fixtures.
+
 ## Budgets
 
 Defaults:
