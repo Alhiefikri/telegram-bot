@@ -22,13 +22,13 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v='));
     }
 
-    public function test_allowed_admin_chat_receives_admin_dashboard_button(): void
+    public function test_configured_admin_direct_chat_receives_admin_dashboard_button(): void
     {
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin?source=telegram');
         $this->fakeTelegramHttp();
 
-        $this->postTelegramWebhook($this->messageUpdate(302, '/menu', ['id' => 111], 999))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(302, '/menu', ['id' => 999], 999))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'Menu utama')

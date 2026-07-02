@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -10,6 +11,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AdminDashboardAccessTest extends TestCase
@@ -76,6 +78,20 @@ class AdminDashboardAccessTest extends TestCase
         ])->assertSessionHasErrors(['email']);
 
         $this->assertGuest();
+    }
+
+    public function test_support_admin_cannot_send_broadcasts(): void
+    {
+        Http::fake();
+        Customer::factory()->create(['telegram_id' => 111]);
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Support]))
+            ->post(route('admin.broadcast.store'), [
+                'message' => 'Support should not broadcast',
+            ])
+            ->assertForbidden();
+
+        Http::assertNothingSent();
     }
 
     public function test_production_csrf_middleware_rejects_admin_mutation_without_token(): void

@@ -17,6 +17,8 @@ class AdminBroadcastController extends Controller
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
 
+        abort_unless((bool) $user->role?->canBroadcast(), 403);
+
         $validator = Validator::make($request->all(), [
             'message' => ['required', 'string', 'max:3500'],
         ], [

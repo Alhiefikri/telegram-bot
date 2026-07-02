@@ -210,6 +210,32 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima'));
     }
 
+    public function test_non_admin_group_member_cannot_approve_manual_payment_from_admin_chat(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '-100123', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(236, 'cb-manual-group', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(237, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(238, 'fake-group-approve', 'admin:approve-payment:'.$order->id, ['id' => 555, 'first_name' => 'Mallory'], -100123))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'fake-group-approve'
+            && $r['text'] === 'Akses admin diperlukan.');
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === 12345
+            && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima'));
+    }
+
     public function test_admin_approve_callback_with_invalid_order_id_answers_not_found(): void
     {
         config()->set('services.telegram.admin_user_id', '999');

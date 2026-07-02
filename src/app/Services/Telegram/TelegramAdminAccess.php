@@ -12,8 +12,13 @@ class TelegramAdminAccess
         $adminUserId = $this->adminUserId();
         $adminChatId = $this->adminChatId();
 
-        return ($adminUserId !== '' && (string) $customer->telegram_id === $adminUserId)
-            || ($adminChatId !== '' && $chatId === $adminChatId);
+        if ($adminUserId !== '' && (string) $customer->telegram_id === $adminUserId) {
+            return true;
+        }
+
+        return $adminChatId !== ''
+            && $chatId === $adminChatId
+            && (string) $customer->telegram_id === $adminChatId;
     }
 
     public function adminChatId(): ?string
