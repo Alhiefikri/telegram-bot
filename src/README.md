@@ -295,6 +295,8 @@ Checklist operasional:
 - monitor tabel/job failed jobs;
 - pastikan queue `notifications` ikut diproses karena receipt dikirim melalui queue tersebut.
 
+Production-like Docker currently runs one Supervisor-managed queue worker for `notifications,default`. Before increasing worker count or changing queue topology, run the dogfood benchmark from clean dogfood volumes and compare queue wait, worker handler time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs, so the run 1 burst backlog did not reproduce after harness noise was removed. Treat real Telegram outbound latency and manual checkout media/message sends as the first bottleneck unless a newer clean benchmark shows queue wait regressing.
+
 Contoh command umum Laravel:
 
 ```bash
@@ -523,6 +525,7 @@ Kemungkinan penyebab:
 - worker hanya memproses queue tertentu dan melewatkan queue penting;
 - database queue table belum tersedia;
 - timeout atau koneksi eksternal bermasalah.
+- real Telegram/Pakasir outbound lambat dan memperpanjang durasi handler, walaupun queue wait masih rendah.
 
 Langkah cek:
 
@@ -531,6 +534,7 @@ Langkah cek:
 - cek proses Supervisor/systemd/container;
 - cek tabel `jobs` dan `failed_jobs`;
 - cek log exception job;
+- bila sedang mendiagnosis burst latency, jalankan dogfood benchmark bersih dan bandingkan `queue_wait_ms`, `worker_processing_ms`, `dogfood.outbound_http`, failed jobs, dan memory sebelum menambah worker atau memisah queue;
 - restart worker setelah deploy/config change sesuai prosedur Laravel.
 
 ### Admin operation tidak tercatat

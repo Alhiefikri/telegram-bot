@@ -116,6 +116,17 @@ Run 2 interpretation:
 - Manual checkout duration reproduced at roughly 4.37-4.87 s, with customer `sendPhoto` plus admin `sendMessage` as the main cost.
 - Admin mutation scenarios are now measurable through authenticated form/session flow and did not hit CSRF errors.
 
+## Issue 65 Queue Wait Decision
+
+Issue #65 asked whether burst queue wait was caused by one worker plus real Telegram outbound latency. Run 2 does not support changing worker count or queue topology yet:
+
+- the run used a single Supervisor queue worker, matching production-like Docker;
+- queue wait stayed low at 17.865 ms average, 27 ms p95, and 43 ms max;
+- failed jobs stayed at zero;
+- handler duration and manual checkout duration were still dominated by real Telegram outbound calls.
+
+Keep the one-worker Docker default until a clean benchmark reproduces sustained queue wait. If latency work continues, prioritize Telegram outbound and manual checkout send-path measurement before queue parallelism, because extra workers can introduce stock, cart, or order race risk without addressing the reproduced bottleneck.
+
 ## Blocked External Fixtures
 
 The following real-network scenarios were intentionally marked blocked rather than faked:
