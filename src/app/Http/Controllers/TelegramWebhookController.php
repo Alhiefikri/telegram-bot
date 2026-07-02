@@ -5,10 +5,10 @@ namespace App\Http\Controllers;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
 use App\Support\DogfoodTiming;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 class TelegramWebhookController extends Controller
 {
@@ -30,12 +30,18 @@ class TelegramWebhookController extends Controller
             return response()->json(['message' => 'Unsupported update type'], 422);
         }
 
-        try {
-            $update = TelegramUpdate::create(['update_id' => (int) $validated['update_id'], 'payload' => $payload, 'created_at' => now()]);
+        $inserted = DB::table('telegram_updates')->insertOrIgnore([
+            'update_id' => (int) $validated['update_id'],
+            'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+            'created_at' => now(),
+        ]);
+
+        if ($inserted === 1) {
+            $update = TelegramUpdate::query()->where('update_id', (int) $validated['update_id'])->firstOrFail();
             $jobEnqueuedAt = now();
             $this->dispatchProcessor($update->id, $jobEnqueuedAt->toISOString());
             $duplicate = false;
-        } catch (UniqueConstraintViolationException) {
+        } else {
             // Duplicate Telegram update: already stored/processing/processed.
             $update = null;
             $jobEnqueuedAt = null;
