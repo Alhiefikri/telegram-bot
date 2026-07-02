@@ -44,11 +44,13 @@ COPY --from=assets /app/public/build ./public/build
 COPY --from=assets /app/public/build /opt/lhiestore-public-build
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint-laravel
+COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel
 
 RUN rm -rf public/storage \
     && ln -s /var/www/html/storage/app/public public/storage \
     && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache \
     && chmod +x /usr/local/bin/docker-entrypoint-laravel \
+    && chmod +x /usr/local/bin/docker-scheduler-laravel \
     && chown -R laravel:laravel /var/www/html \
     && chmod -R ug+rwX storage bootstrap/cache
 

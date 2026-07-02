@@ -10,9 +10,9 @@ use Throwable;
 
 class HealthCheck extends Command
 {
-    protected $signature = 'ops:health {--db} {--queue-schema} {--supervisor}';
+    protected $signature = 'ops:health {--db} {--queue-schema} {--supervisor} {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
 
-    protected $description = 'Check operational health for database, queue schema, and supervisor-managed processes.';
+    protected $description = 'Check operational health for database, queue schema, supervisor-managed processes, and scheduler liveness.';
 
     public function handle(): int
     {
@@ -50,6 +50,28 @@ class HealthCheck extends Command
                 $this->line(trim($result->output().$result->errorOutput()));
             } else {
                 $this->info('Supervisor: ok');
+            }
+        }
+
+        if ($this->option('scheduler-heartbeat') !== null) {
+            $maxAgeSeconds = (int) $this->option('scheduler-heartbeat');
+            $heartbeatPath = storage_path('framework/scheduler-heartbeat');
+
+            if ($maxAgeSeconds <= 0) {
+                $healthy = false;
+                $this->error('Scheduler heartbeat: max age must be greater than 0 seconds');
+            } elseif (! is_file($heartbeatPath)) {
+                $healthy = false;
+                $this->error('Scheduler heartbeat: missing');
+            } else {
+                $ageSeconds = time() - filemtime($heartbeatPath);
+
+                if ($ageSeconds > $maxAgeSeconds) {
+                    $healthy = false;
+                    $this->error("Scheduler heartbeat: stale ({$ageSeconds}s old, max {$maxAgeSeconds}s)");
+                } else {
+                    $this->info("Scheduler heartbeat: ok ({$ageSeconds}s old)");
+                }
             }
         }
 

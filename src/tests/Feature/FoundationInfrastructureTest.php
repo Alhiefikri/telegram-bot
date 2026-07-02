@@ -25,6 +25,20 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('--queue=notifications,default', $contents);
     }
 
+    public function test_docker_scheduler_runs_laravel_schedule_run_loop(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $script = file_get_contents(base_path('../docker-scheduler.sh'));
+
+        $this->assertStringContainsString('scheduler:', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: false', $compose);
+        $this->assertStringContainsString('php artisan ops:health --scheduler-heartbeat=180', $compose);
+        $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
+        $this->assertStringContainsString('php artisan schedule:run', $script);
+        $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
+    }
+
     public function test_queue_migration_contains_required_tables(): void
     {
         $migration = database_path('migrations/0001_01_01_000002_create_jobs_table.php');

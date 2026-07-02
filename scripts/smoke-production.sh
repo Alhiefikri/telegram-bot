@@ -15,5 +15,14 @@ printf 'Smoke check passed: %s/up\n' "$BASE_URL"
 PROJECT_NAME=${SMOKE_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}
 if [ -n "$PROJECT_NAME" ]; then
   docker compose -p "$PROJECT_NAME" exec -T app php artisan ops:health --db --queue-schema --supervisor
-  printf 'Ops health check passed for compose project: %s\n' "$PROJECT_NAME"
+  SCHEDULER_DEADLINE=$((SECONDS + ${SCHEDULER_HEALTH_TIMEOUT:-120}))
+  until docker compose -p "$PROJECT_NAME" exec -T scheduler php artisan ops:health --scheduler-heartbeat="${SCHEDULER_HEARTBEAT_MAX_AGE:-180}"; do
+    if [ "$SECONDS" -ge "$SCHEDULER_DEADLINE" ]; then
+      printf 'Scheduler health check failed for compose project: %s\n' "$PROJECT_NAME" >&2
+      exit 1
+    fi
+
+    sleep 5
+  done
+  printf 'Ops and scheduler health checks passed for compose project: %s\n' "$PROJECT_NAME"
 fi

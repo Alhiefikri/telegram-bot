@@ -69,6 +69,50 @@ services:
     networks:
       - bot_network
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["/usr/local/bin/docker-scheduler-laravel"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${POSTGRES_DB:-telegram_bot}
+      DB_USERNAME: ${POSTGRES_USER:-telegram_bot}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      QUEUE_CONNECTION: database
+      APP_AUTO_MIGRATE: false
+      APP_AUTO_SET_TELEGRAM_WEBHOOK: false
+    volumes:
+      - laravel_storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php artisan ops:health --scheduler-heartbeat=180 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    cpus: "0.25"
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - bot_network
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped

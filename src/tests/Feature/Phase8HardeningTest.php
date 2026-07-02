@@ -115,6 +115,8 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('BASE_URL', $contents);
         $this->assertStringContainsString('/up', $contents);
         $this->assertStringContainsString('curl --fail', $contents);
+        $this->assertStringContainsString('scheduler php artisan ops:health --scheduler-heartbeat', $contents);
+        $this->assertStringContainsString('SCHEDULER_HEALTH_TIMEOUT', $contents);
     }
 
     public function test_restore_drill_script_dry_run_accepts_sql_gz_without_mutation(): void
@@ -238,7 +240,7 @@ SH);
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));
 
-        foreach (['app:', 'web:', 'db:'] as $service) {
+        foreach (['app:', 'web:', 'scheduler:', 'db:'] as $service) {
             $this->assertStringContainsString($service, $compose);
         }
 
@@ -268,7 +270,34 @@ SH);
         $this->assertStringContainsString('php artisan migrate --force', $entrypoint);
         $this->assertStringContainsString('exec "$@"', $entrypoint);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: false', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE=true', $envExample);
+    }
+
+    public function test_ops_health_checks_scheduler_heartbeat(): void
+    {
+        $heartbeat = storage_path('framework/scheduler-heartbeat');
+
+        @unlink($heartbeat);
+
+        $this->artisan('ops:health', ['--scheduler-heartbeat' => 180])
+            ->expectsOutputToContain('Scheduler heartbeat: missing')
+            ->assertFailed();
+
+        file_put_contents($heartbeat, now()->toISOString());
+        touch($heartbeat, time());
+
+        $this->artisan('ops:health', ['--scheduler-heartbeat' => 180])
+            ->expectsOutputToContain('Scheduler heartbeat: ok')
+            ->assertSuccessful();
+
+        touch($heartbeat, time() - 181);
+
+        $this->artisan('ops:health', ['--scheduler-heartbeat' => 180])
+            ->expectsOutputToContain('Scheduler heartbeat: stale')
+            ->assertFailed();
+
+        @unlink($heartbeat);
     }
 
     private function makeShellWorkspace(string $prefix): string

@@ -185,6 +185,8 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam sta
 
 The production Docker image runs pending Laravel migrations before Supervisor starts PHP-FPM and the queue worker. This keeps first boot from failing healthchecks because tables such as `cache` or `jobs` do not exist yet. Set `APP_AUTO_MIGRATE=false` if an environment requires manual migration orchestration.
 
+The production-like Docker stack also starts a dedicated `scheduler` service from the same application image. The scheduler service does not run migrations; it waits for the healthy app service, then invokes Laravel's scheduler with `php artisan schedule:run` every minute and writes a heartbeat to `storage/framework/scheduler-heartbeat`.
+
 Production-like local dogfooding should target Docker/Nginx/PostgreSQL, not `php artisan serve` with SQLite:
 
 ```bash
@@ -196,6 +198,7 @@ DOGFOOD_TIMING_ENABLED=true \
 WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood up -d --build
 
+SMOKE_COMPOSE_PROJECT=telegram-bot-dogfood \
 BASE_URL=http://127.0.0.1:18080 ./scripts/smoke-production.sh
 
 POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
@@ -213,7 +216,7 @@ docker compose -p telegram-bot-dogfood exec app \
 php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
 
-The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
+The production smoke checks `/up`, app operational health, and the scheduler heartbeat when `SMOKE_COMPOSE_PROJECT` or `COMPOSE_PROJECT_NAME` is set. The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
 
 The perf dogfood JSON includes `manual_checkout_qr_report`, which breaks the manual QR checkout into queue wait, worker processing, order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage` timings. Use the dominant step from that report before making any checkout optimization.
 
@@ -273,15 +276,22 @@ Scheduler menjalankan command periodik dari `routes/console.php`:
 
 ```text
 orders:expire-pending          setiap menit
+pakasir:reconcile --chunk=100  setiap lima menit
 ```
 
-Pastikan cron Laravel aktif, biasanya:
+Production-like Docker menjalankan service `scheduler` yang memanggil `php artisan schedule:run` setiap menit. Service ini menulis heartbeat ke `storage/framework/scheduler-heartbeat`; cek dengan:
+
+```bash
+php artisan ops:health --scheduler-heartbeat=180
+```
+
+Untuk deployment non-Docker, gunakan scheduler platform/host cron yang menjalankan Laravel scheduler setiap menit:
 
 ```bash
 * * * * * cd /path/to/src && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-Sesuaikan path dengan lokasi deploy.
+Sesuaikan path dengan lokasi deploy. Jangan jalankan command terjadwal satu per satu sebagai model runtime production; biarkan Laravel scheduler membaca `routes/console.php`.
 
 ### 5.5 Health check
 
@@ -295,6 +305,7 @@ Command operasional project:
 
 ```bash
 php artisan ops:health --db --queue-schema --supervisor
+php artisan ops:health --scheduler-heartbeat=180
 ```
 
 Opsi tersedia:
@@ -302,6 +313,7 @@ Opsi tersedia:
 - `--db`: cek koneksi database;
 - `--queue-schema`: cek tabel penting untuk database queue/session/cache;
 - `--supervisor`: cek proses yang dikelola Supervisor sesuai konfigurasi command.
+- `--scheduler-heartbeat=<detik>`: cek heartbeat scheduler masih baru.
 
 Smoke check admin sebelum deploy:
 
@@ -446,7 +458,7 @@ Kemungkinan penyebab:
 
 Langkah cek:
 
-- pastikan cron menjalankan `php artisan schedule:run` setiap menit;
+- pastikan service `scheduler` Docker sehat atau cron/platform menjalankan `php artisan schedule:run` setiap menit;
 - jalankan manual `php artisan orders:expire-pending --chunk=100`;
 - cek log Laravel;
 - cek status order dan nilai `expires_at`;
