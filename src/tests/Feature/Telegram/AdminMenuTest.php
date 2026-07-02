@@ -83,7 +83,7 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'Menu utama')
-            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Marketplace'
+            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
             && ($request['reply_markup']['keyboard'][0][1]['text'] ?? null) === '📦 Pesanan'
             && ! str_contains(json_encode($request['reply_markup']), 'Admin Dashboard'));
     }
@@ -112,7 +112,7 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'welcome ke LHIE STORE')
-            && str_contains(json_encode($request['reply_markup']), 'Buka Katalog')
+            && str_contains(json_encode($request['reply_markup']), 'Lihat Produk')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), 'web_app')
             && ! str_contains(json_encode($request['reply_markup']), 'localhost'));

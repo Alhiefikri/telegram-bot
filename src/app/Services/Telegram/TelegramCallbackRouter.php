@@ -101,7 +101,7 @@ class TelegramCallbackRouter
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /katalog ya.");
+            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.");
 
             return;
         }
@@ -177,7 +177,7 @@ class TelegramCallbackRouter
                 ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
                 : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual'));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
-            $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka katalog lagi dan pilih produk ulang ya.");
+            $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.");
 
             return;
         }

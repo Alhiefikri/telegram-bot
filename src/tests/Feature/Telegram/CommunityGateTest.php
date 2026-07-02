@@ -46,7 +46,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(10, '/katalog'))->assertOk();
 
         $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Katalog'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Produk'));
     }
 
     public function test_member_administrator_creator_and_restricted_member_statuses_are_allowed(): void
@@ -65,7 +65,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
             $this->assertSame(0, TelegramCommunityGatePrompt::count(), "{$status} should not be prompted.");
             Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-                && str_contains($r['text'] ?? '', 'Katalog'));
+                && str_contains($r['text'] ?? '', 'Produk'));
         }
     }
 
@@ -89,7 +89,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(20, '/katalog'))->assertOk();
 
         $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Katalog'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Produk'));
     }
 
     public function test_successful_verification_deletes_prompt_and_sends_welcome_menu(): void

@@ -4,10 +4,11 @@ namespace App\Services\Telegram;
 
 use App\Models\Category;
 use App\Models\Product;
+use Illuminate\Support\Str;
 
 class TelegramCatalogIntents
 {
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(private TelegramBotClient $bot, private ProductBrandIconResolver $icons) {}
 
     public function sendCategoryCatalog(string $chatId): void
     {
@@ -21,7 +22,7 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => '📂 Lainnya', 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? "🛍️ Katalog masih kosong nih\n━━━━━━━━━━━━━━\nProduk belum tampil karena admin belum menambahkan produk aktif.\n\nCek lagi nanti ya. Biasanya stok baru suka muncul tiba-tiba 👀" : "🛍️ Katalog Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Semua produk aktif akan muncul otomatis di sini.", ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $keyboard === [] ? "🛍️ Produk masih kosong nih\n━━━━━━━━━━━━━━\nProduk belum tampil karena admin belum menambahkan produk aktif.\n\nCek lagi nanti ya. Biasanya stok baru suka muncul tiba-tiba 👀" : "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk ready dan kosong tetap kelihatan jelas di sini.", ['inline_keyboard' => $keyboard]);
     }
 
     public function sendStockChoices(string $chatId, Product $product, int $availableStock): void
@@ -81,7 +82,7 @@ class TelegramCatalogIntents
 
     public function sendCategoryProducts(string $chatId, string $categoryId): void
     {
-        $query = Product::publicVisible()->orderBy('id');
+        $query = Product::publicVisible()->storefrontOrder();
         $category = null;
         if ($categoryId === 'uncategorized') {
             $query->whereNull('category_id');
@@ -97,19 +98,17 @@ class TelegramCatalogIntents
             $title = $category->name;
         }
 
-        $products = $query->limit(9)->get();
-        $lines = ['📂 '.$title, '━━━━━━━━━━━━━━'];
+        $products = $query->limit(12)->get();
+        $lines = ['🛍️ Daftar Produk', '━━━━━━━━━━━━━━', 'Kategori: '.$title];
         if ($category?->description) {
+            $lines[] = '';
             $lines[] = $category->description;
         }
         $lines[] = '';
-        foreach ($products as $i => $product) {
-            $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-            $lines[] = '   💰 Rp'.number_format($product->price_amount, 0, ',', '.');
-            $lines[] = '   📝 '.$this->descriptionExcerpt($product);
-        }
-        $keyboard = $products->values()->map(fn ($product, $i) => [['text' => '👀 Intip #'.($i + 1), 'callback_data' => 'product:'.$product->id]])->all();
-        $keyboard[] = [['text' => '⬅️ Balik ke Kategori', 'callback_data' => 'back:categories']];
+        $lines[] = 'Pilih produk untuk melihat detail.';
+
+        $keyboard = $products->values()->map(fn ($product) => [$this->productButton($product)])->all();
+        $keyboard[] = [['text' => '⬅️ Pilih Kategori', 'callback_data' => 'back:categories']];
 
         $this->bot->sendMessage($chatId, $products->isEmpty() ? "📂 Belum ada produk di kategori ini\n━━━━━━━━━━━━━━\nCoba cek kategori lain dulu ya. Siapa tahu stok incaran kamu ada di sana 👀" : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -130,7 +129,7 @@ class TelegramCatalogIntents
             ->get();
 
         if ($products->isEmpty()) {
-            $this->bot->sendMessage($chatId, "Produk dengan kata kunci \"{$keyword}\" belum ketemu.\n\nCoba kata kunci lain, atau buka katalog untuk lihat semua produk.", ['inline_keyboard' => [[['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog']]]]);
+            $this->bot->sendMessage($chatId, "Produk dengan kata kunci \"{$keyword}\" belum ketemu.\n\nCoba kata kunci lain, atau buka /produk untuk lihat semua produk.", ['inline_keyboard' => [[['text' => '🛍️ Lihat Produk', 'callback_data' => 'katalog']]]]);
 
             return;
         }
@@ -148,8 +147,8 @@ class TelegramCatalogIntents
             $lines[] = 'Masih ada hasil lain. Coba pakai kata kunci yang lebih spesifik biar lebih cepat ketemu.';
         }
 
-        $keyboard = $products->map(fn ($product, $i) => [['text' => '👀 Intip #'.($i + 1), 'callback_data' => 'product:'.$product->id]])->all();
-        $keyboard[] = [['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog']];
+        $keyboard = $products->map(fn ($product) => [$this->productButton($product)])->all();
+        $keyboard[] = [['text' => '🛍️ Lihat Produk', 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -166,5 +165,31 @@ class TelegramCatalogIntents
         $description = preg_replace('/\s+/', ' ', $this->descriptionText($product)) ?? '';
 
         return strlen($description) > 90 ? substr($description, 0, 87).'...' : $description;
+    }
+
+    /**
+     * @return array{text: string, callback_data: string, style?: string, icon_custom_emoji_id?: string}
+     */
+    private function productButton(Product $product): array
+    {
+        $availableStock = max(0, $product->availableStock());
+        $icon = $this->icons->resolve($product->name);
+        $customEmojiId = $icon['custom_emoji_id'];
+        $fallbackIcon = $customEmojiId ? '' : $icon['fallback'].' ';
+        $status = $availableStock > 0 ? '✨' : '❌';
+
+        $button = [
+            'text' => $status.' '.$fallbackIcon.Str::limit($product->name, 44, '...')
+                .' | Rp'.number_format($product->price_amount, 0, ',', '.')
+                .' | 📦 '.$availableStock,
+            'callback_data' => 'product:'.$product->id,
+            'style' => $availableStock > 0 ? 'success' : 'danger',
+        ];
+
+        if ($customEmojiId) {
+            $button['icon_custom_emoji_id'] = $customEmojiId;
+        }
+
+        return $button;
     }
 }

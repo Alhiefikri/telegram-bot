@@ -16,7 +16,7 @@ class TelegramMenuIntents
             '━━━━━━━━━━━━━━',
             'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
             '',
-            '🛍️ Pilih produk',
+            '🛍️ Lihat produk',
             '💳 Bayar via QRIS / transfer',
             '📦 Cek pesanan kapan aja',
             '⚡ Akun dikirim otomatis setelah pembayaran beres',
@@ -44,7 +44,7 @@ class TelegramMenuIntents
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null): array
     {
         $keyboard = [
-            [['text' => '🛍️ Marketplace'], ['text' => '📦 Pesanan']],
+            [['text' => '🛍️ Lihat Produk'], ['text' => '📦 Pesanan']],
             [['text' => '👤 Akun Saya'], ['text' => '💬 Support']],
         ];
 
@@ -62,7 +62,7 @@ class TelegramMenuIntents
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'is_persistent' => true,
-            'input_field_placeholder' => 'Pilih menu atau ketik /cari nama produk',
+            'input_field_placeholder' => 'Pilih menu atau ketik /produk',
         ];
     }
 
@@ -70,7 +70,7 @@ class TelegramMenuIntents
     {
         $keyboard = [
             [
-                ['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog'],
+                ['text' => '🛍️ Lihat Produk', 'callback_data' => 'katalog'],
                 ['text' => '📦 Cek Pesanan', 'callback_data' => 'status'],
             ],
         ];

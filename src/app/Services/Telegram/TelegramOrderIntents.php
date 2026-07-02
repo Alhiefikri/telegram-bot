@@ -16,7 +16,7 @@ class TelegramOrderIntents
     {
         $orders = $customer->orders()->latest()->limit(5)->get();
         if ($orders->isEmpty()) {
-            $this->bot->sendMessage($chatId, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk cek katalog dulu, siapa tahu ada produk yang cocok.", ['inline_keyboard' => [[['text' => '🛍️ Buka Katalog', 'callback_data' => 'katalog']]]]);
+            $this->bot->sendMessage($chatId, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk lihat produk dulu, siapa tahu ada yang cocok.", ['inline_keyboard' => [[['text' => '🛍️ Lihat Produk', 'callback_data' => 'katalog']]]]);
 
             return;
         }
@@ -90,7 +90,7 @@ class TelegramOrderIntents
             return 'Pembayaran sudah diterima. Pesanan sedang atau sudah selesai diproses.';
         }
         if (in_array($orderStatus, [OrderStatus::Expired, OrderStatus::Cancelled], true) || in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true)) {
-            return 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /katalog.';
+            return 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /produk.';
         }
 
         return 'Kalau butuh bantuan, hubungi admin toko lewat /support.';

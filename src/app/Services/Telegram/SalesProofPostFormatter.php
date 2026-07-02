@@ -15,12 +15,13 @@ class SalesProofPostFormatter
         $otherCount = max(0, $order->orderItems->count() - 1);
         $other = $otherCount > 0 ? " + {$otherCount} produk lainnya" : '';
 
-        return "✅ Pesanan berhasil diproses\n\n"
-            .'Buyer: '.$this->maskBuyer($order)."\n"
-            .'Produk: '.$primary.$other."\n\n"
-            .'Total order sukses: #'.$successfulPostNumber."\n\n"
-            ."Mau produk digital juga?\n"
-            .'Gas belanja lewat tombol di bawah 👇';
+        return "🎉 PEMBELIAN SUKSES 🎉\n\n"
+            .'👤 Pembeli: '.$this->maskBuyer($order)."\n"
+            .'🛍️ Produk: '.$primary.$other."\n"
+            .'📦 Jumlah: '.$order->orderItems->sum('quantity')."x\n"
+            .'🏆 Order sukses: #'.$successfulPostNumber."\n\n"
+            ."✨ Terima kasih telah berbelanja!\n"
+            .'Mau order juga? Tap tombol di bawah 👇';
     }
 
     private function nextSuccessfulPostNumber(Order $order): int

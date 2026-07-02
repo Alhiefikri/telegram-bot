@@ -52,7 +52,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Riwayat masih kosong')
-            && str_contains($r['text'], 'Yuk cek katalog dulu'));
+            && str_contains($r['text'], 'Yuk lihat produk dulu'));
     }
 
     public function test_riwayat_hides_other_customer_orders(): void
@@ -138,6 +138,6 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(209, '/order INV-EXP'))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(210, '/order INV-CAN'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'checkout ulang lewat /katalog'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'checkout ulang lewat /produk'));
     }
 }

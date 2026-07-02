@@ -23,7 +23,7 @@ class TelegramManualPaymentIntents
         $order = $this->manualPaymentOrderForCustomer($customer, $invoice);
         if (! $order) {
             $this->bot->sendMessage($chatId, $invoice === ''
-                ? "Belum ada pesanan manual yang menunggu pembayaran.\n\nCheckout dulu lewat /katalog, lalu kirim screenshot bukti transfer sebagai FOTO dengan caption:\n\n/payment"
+                ? "Belum ada pesanan manual yang menunggu pembayaran.\n\nCheckout dulu lewat /produk, lalu kirim screenshot bukti transfer sebagai FOTO dengan caption:\n\n/payment"
                 : "Invoice tidak ditemukan atau bukan pesanan manual milik kamu.\n\nCoba cek lagi di /status atau /riwayat ya.");
 
             return;

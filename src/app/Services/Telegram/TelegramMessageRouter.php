@@ -39,7 +39,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/katalog', '🛍️ Marketplace'], true)) {
+        if (in_array($text, ['/produk', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Marketplace'], true)) {
             $this->session->forget($customer);
             $this->catalog->sendCategoryCatalog($chatId);
 
@@ -120,7 +120,7 @@ class TelegramMessageRouter
         if ($text === '/batal') {
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /katalog ya.");
+            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.");
 
             return;
         }
@@ -135,7 +135,7 @@ class TelegramMessageRouter
         if (in_array($text, ['/status', '/pesanan', '📦 Pesanan'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}" : "Belum ada pesanan nih.\n\nBuka /katalog dulu untuk mulai belanja 🛍️");
+            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}" : "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️");
 
             return;
         }
@@ -175,6 +175,6 @@ class TelegramMessageRouter
         }
 
         $this->session->forget($customer);
-        $this->bot->sendMessage($chatId, "Aku belum paham perintah itu 😅\n\nCoba buka /katalog untuk belanja, atau /support kalau butuh bantuan.");
+        $this->bot->sendMessage($chatId, "Aku belum paham perintah itu 😅\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.");
     }
 }

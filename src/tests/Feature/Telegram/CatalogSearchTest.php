@@ -29,7 +29,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'Status akun'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Menu utama')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Marketplace'
+            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
             && ($r['reply_markup']['keyboard'][0][1]['text'] ?? null) === '📦 Pesanan'
             && ($r['reply_markup']['keyboard'][1][0]['text'] ?? null) === '👤 Akun Saya'
             && ($r['reply_markup']['keyboard'][1][1]['text'] ?? null) === '💬 Support'
@@ -64,10 +64,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Mati', 'is_active' => false]);
 
-        $this->postTelegramWebhook($this->messageUpdate(12, '/katalog'))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(12, '/produk'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Katalog Produk')
+            && str_contains($r['text'], 'Lihat Produk')
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
             && str_contains(json_encode($r->data()), 'category:'.$unavailableCategory->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized')
@@ -81,7 +81,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(120, '/katalog'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Katalog masih kosong')
+            && str_contains($r['text'], 'Produk masih kosong')
             && str_contains($r['text'], 'admin belum menambahkan produk aktif'));
     }
 
@@ -93,7 +93,20 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Menu utama')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Marketplace');
+            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk');
+    }
+
+    public function test_lihat_produk_command_alias_opens_product_catalog(): void
+    {
+        $this->fakeTelegramHttp();
+        $category = Category::factory()->create(['name' => 'AI Tools']);
+        Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(133, '/lihat produk'))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Lihat Produk')
+            && str_contains(json_encode($r->data()), 'category:'.$category->id));
     }
 
     public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
@@ -110,21 +123,23 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Games')
-            && str_contains($r['text'], '1. ✅ Diamond')
-            && str_contains($r['text'], '2. ❌ Diamond Habis')
-            && str_contains($r['text'], 'Rp15.000')
+            && str_contains($r['text'], 'Daftar Produk')
+            && ! str_contains($r['text'], '1. ✅ Diamond')
+            && ! str_contains($r['text'], '2. ❌ Diamond Habis')
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond | Rp15.000 | 📦 3'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '❌ 🛍️ Diamond Habis | Rp10.000 | 📦 0'
             && ! str_contains($r['text'], 'Stok 3')
             && ! str_contains($r['text'], 'Stok 0')
-            && str_contains($r['text'], 'Voucher MLBB instant.')
+            && ! str_contains($r['text'], 'Voucher MLBB instant.')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'akun-diamond@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip #1'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond | Rp15.000 | 📦 3'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Katalog Produk')
+            && str_contains($r['text'], 'Lihat Produk')
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
     }
@@ -164,7 +179,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'netflix@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '👀 Intip #1'
+            && str_contains(($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? ''), 'Netflix Habis')
             && str_contains(json_encode($r->data()), 'product:'.$matching->id)
             && str_contains(json_encode($r->data()), 'product:'.$empty->id));
     }
@@ -196,7 +211,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'belum ketemu')
-            && str_contains($r['text'], 'buka katalog')
+            && str_contains($r['text'], 'buka /produk')
             && str_contains(json_encode($r->data()), 'katalog'));
     }
 
