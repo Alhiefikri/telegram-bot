@@ -19,6 +19,7 @@ services:
       QUEUE_CONNECTION: database
       APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}
       APP_AUTO_SET_TELEGRAM_WEBHOOK: ${APP_AUTO_SET_TELEGRAM_WEBHOOK:-false}
+      DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}
     volumes:
       - laravel_storage:/var/www/html/storage
       - laravel_public:/var/www/html/public
@@ -90,6 +91,7 @@ services:
       QUEUE_CONNECTION: database
       APP_AUTO_MIGRATE: false
       APP_AUTO_SET_TELEGRAM_WEBHOOK: false
+      DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}
     volumes:
       - laravel_storage:/var/www/html/storage
     depends_on:

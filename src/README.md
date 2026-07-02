@@ -197,6 +197,7 @@ APP_KEY=base64:replace-with-generated-key \
 TELEGRAM_BOT_TOKEN=dogfood-token \
 TELEGRAM_WEBHOOK_SECRET=dogfood-secret \
 DOGFOOD_TIMING_ENABLED=true \
+DOGFOOD_TIMING_LOG_CHANNEL=stderr \
 WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood up -d --build
 
@@ -214,11 +215,13 @@ PLAYWRIGHT_TELEGRAM_WEBHOOK_SECRET='replace-with-secret' \
 npm run test:browser:docker
 
 POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
-docker compose -p telegram-bot-dogfood exec app \
+docker compose -p telegram-bot-dogfood exec --user laravel app \
 php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
 
 External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` instead of using fake Telegram or Pakasir data.
+
+Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for production-like Docker runs, and the broad perf script should be executed with `docker compose exec --user laravel app`. The perf script also forces its own Laravel logger to `stderr`. This keeps benchmark instrumentation in Docker logs instead of writing additional timing records to `storage/logs`, so a CLI timing run cannot make PHP-FPM or the Supervisor queue worker lose write access to Laravel's file logs.
 
 - `DOGFOOD_TELEGRAM_PHOTO_FILE_ID`: real Telegram `photo.file_id` from the dogfood bot chat for `/payment` proof forwarding.
 - `DOGFOOD_STORE_CHANNEL_CHAT_ID`, `DOGFOOD_STORE_CHANNEL_USERNAME`, `DOGFOOD_STORE_CHANNEL_LINK`: disposable Store Channel target where the bot can post.

@@ -25,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 require __DIR__.'/../vendor/autoload.php';
@@ -156,6 +157,10 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
 $collector = new PerfTraceCollector;
 $app->singleton(PerfTraceCollector::class, fn () => $collector);
 $app->bind(TelegramBotClient::class, fn () => new MeasuredTelegramBotClient($collector));
+config()->set('logging.default', 'stderr');
+config()->set('logging.channels.stack.channels', ['stderr']);
+Log::setDefaultDriver('stderr');
+config()->set('services.dogfood_timing.log_channel', 'stderr');
 config()->set('services.dogfood_timing.enabled', true);
 $fixtures = DogfoodExternalFixtures::fromConfig();
 

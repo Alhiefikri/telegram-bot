@@ -59,6 +59,7 @@ return [
 
     'dogfood_timing' => [
         'enabled' => env('DOGFOOD_TIMING_ENABLED', false),
+        'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL'),
     ],
 
     'dogfood_fixtures' => [

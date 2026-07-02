@@ -5,9 +5,11 @@ namespace Tests\Feature\Telegram;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
+use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Mockery;
 use Tests\Support\TelegramBotTestSupport;
 
 class WebhookIngressTest extends TelegramBotTestSupport
@@ -81,6 +83,19 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(130, '/start'))->assertOk();
 
         Log::shouldNotHaveReceived('info');
+    }
+
+    public function test_dogfood_timing_can_use_a_configured_non_file_log_channel(): void
+    {
+        config()->set('services.dogfood_timing.enabled', true);
+        config()->set('services.dogfood_timing.log_channel', 'stderr');
+        $logger = Mockery::mock();
+
+        Log::shouldReceive('channel')->once()->with('stderr')->andReturn($logger);
+        $logger->shouldReceive('info')->once()->with('dogfood.test_event', ['status' => 'ok']);
+        Log::shouldReceive('info')->never();
+
+        DogfoodTiming::log('dogfood.test_event', ['status' => 'ok']);
     }
 
     public function test_enabled_dogfood_timing_logs_safe_webhook_job_and_outbound_context(): void

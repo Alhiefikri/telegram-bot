@@ -115,6 +115,14 @@ class DogfoodTiming
             return;
         }
 
+        $channel = config('services.dogfood_timing.log_channel');
+
+        if (is_string($channel) && $channel !== '') {
+            Log::channel($channel)->info($event, $context);
+
+            return;
+        }
+
         Log::info($event, $context);
     }
 }

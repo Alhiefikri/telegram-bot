@@ -70,10 +70,30 @@ class Phase8HardeningTest extends TestCase
     {
         $logging = file_get_contents(config_path('logging.php'));
         $this->assertStringContainsString("env('LOG_STACK', 'daily')", $logging);
+        $this->assertStringContainsString("'permission' => 0664", $logging);
 
         $env = file_get_contents(base_path('.env.example'));
         $this->assertStringContainsString('LOG_STACK=daily', $env);
         $this->assertStringContainsString('LOG_DAILY_DAYS=14', $env);
+        $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL=', $env);
+    }
+
+    public function test_dogfood_timing_uses_container_logs_and_repairs_storage_ownership_in_docker(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
+        $perfScript = file_get_contents(base_path('scripts/perf-dogfood.php'));
+        $services = file_get_contents(config_path('services.php'));
+
+        $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}', $compose);
+        $this->assertStringContainsString('install -d -o laravel -g laravel -m 0775 storage/logs', $entrypoint);
+        $this->assertStringContainsString('chown -R laravel:laravel storage/logs', $entrypoint);
+        $this->assertStringContainsString('chmod -R ug+rwX storage/logs', $entrypoint);
+        $this->assertStringContainsString('chmod 2775 storage/logs', $entrypoint);
+        $this->assertStringContainsString("config()->set('logging.default', 'stderr')", $perfScript);
+        $this->assertStringContainsString("Log::setDefaultDriver('stderr')", $perfScript);
+        $this->assertStringContainsString("config()->set('services.dogfood_timing.log_channel', 'stderr')", $perfScript);
+        $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 
     public function test_failed_job_monitor_alerts_when_threshold_exceeded(): void
