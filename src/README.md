@@ -253,6 +253,14 @@ The production smoke checks `/up`, app operational health, and the scheduler hea
 
 The perf dogfood JSON includes `manual_checkout_qr_report`, which breaks the manual QR checkout into queue wait, worker processing, order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage` timings. Use the dominant step from that report before making any checkout optimization.
 
+For a repeatable production-like benchmark with pass/fail budgets and no real Telegram sends for synthetic handler scenarios, run:
+
+```bash
+./scripts/benchmark-production.sh
+```
+
+The command writes `report.json` and `report.md` under `artifacts/production-benchmark/<timestamp>/`, reports p50/p95/max latency, status counts, queue depth, failed jobs, health, and container memory, and exits non-zero when budgets fail. Details and budget environment variables are documented in `../docs/production-benchmark.md`.
+
 ### 5.1 Webhook Telegram
 
 Endpoint aplikasi:

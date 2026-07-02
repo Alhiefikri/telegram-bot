@@ -12,6 +12,8 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Telegram\FakeTelegramBotClient;
+use App\Services\Telegram\TelegramBotClient;
 use App\Support\DogfoodTiming;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -33,6 +35,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
+        $this->app->bind(TelegramBotClient::class, config('services.dogfood_timing.fake_telegram_outbound')
+            ? FakeTelegramBotClient::class
+            : TelegramBotClient::class);
     }
 
     /**

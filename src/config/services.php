@@ -60,6 +60,8 @@ return [
     'dogfood_timing' => [
         'enabled' => env('DOGFOOD_TIMING_ENABLED', false),
         'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL'),
+        'fake_telegram_outbound' => env('DOGFOOD_FAKE_TELEGRAM_OUTBOUND', false),
+        'fake_telegram_latency_us' => env('DOGFOOD_FAKE_TELEGRAM_LATENCY_US', 1000),
     ],
 
     'dogfood_fixtures' => [

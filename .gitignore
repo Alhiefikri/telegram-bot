@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 backups/
+artifacts/
 storage/
 build/
 dist/
