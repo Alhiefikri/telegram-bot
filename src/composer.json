@@ -53,6 +53,9 @@
             "@php artisan config:clear --ansi",
             "@php artisan test --env=testing --group=concurrency"
         ],
+        "test:concurrency-gate": [
+            "../scripts/concurrency-deploy-gate.sh"
+        ],
         "test:foundation": [
             "@php artisan config:clear --ansi",
             "@php artisan test --filter=FoundationInfrastructureTest"

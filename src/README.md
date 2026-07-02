@@ -265,6 +265,31 @@ For a repeatable production-like benchmark with pass/fail budgets and no real Te
 
 The command writes `report.json` and `report.md` under `artifacts/production-benchmark/<timestamp>/`, reports p50/p95/max latency, status counts, queue depth, failed jobs, health, and container memory, and exits non-zero when budgets fail. Details and budget environment variables are documented in `../docs/production-benchmark.md`.
 
+Run the PostgreSQL concurrency deploy gate before shipping changes that affect inventory, cart, checkout, payment, order expiry, or admin stock operations:
+
+```bash
+cd src
+CONCURRENCY_DB_HOST=127.0.0.1 \
+CONCURRENCY_DB_PORT=5432 \
+CONCURRENCY_DB_ADMIN_DATABASE=postgres \
+CONCURRENCY_DB_ADMIN_USERNAME=postgres \
+CONCURRENCY_DB_ADMIN_PASSWORD='postgres-password' \
+CONCURRENCY_DB_APP_USERNAME=postgres \
+CONCURRENCY_DB_APP_PASSWORD='postgres-password' \
+composer test:concurrency-gate
+```
+
+The gate creates a one-off PostgreSQL database named like `telegram_bot_concurrency_test_*`, runs the `concurrency` PHPUnit group with `RUN_CONCURRENCY_TESTS=1`, fails if PHPUnit reports any skipped concurrency test, and drops the database during cleanup. It writes `phpunit.log`, `junit.xml`, and `report.md` under `artifacts/concurrency-gate/<timestamp>/`. Attach the latest `report.md` to the issue or PR so reviewers can see the test count, skipped count, failures, and exit code.
+
+Use the faster default suite for ordinary edits:
+
+```bash
+cd src
+composer test
+```
+
+Use the concurrency gate only when stock/order behavior or deployment readiness depends on real PostgreSQL locking semantics. The default suite remains SQLite-backed for fast feedback and should not be treated as proof that process-level stock races are safe.
+
 ### 5.1 Webhook Telegram
 
 Endpoint aplikasi:
@@ -586,6 +611,8 @@ Langkah cek:
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.
 - `src/config/orders.php` — konfigurasi TTL pending payment.
+- `scripts/concurrency-deploy-gate.sh` — deploy gate PostgreSQL untuk race test inventory/cart/checkout/payment/admin stock.
+- `src/phpunit.concurrency.xml` — konfigurasi PHPUnit khusus concurrency gate tanpa override SQLite default.
 - `src/tests/Feature/Phase6TelegramBotTest.php` — coverage flow customer Telegram, checkout manual, receipt, callback paid, dan rate limit.
 - `src/tests/Feature/Phase7AdminOperationsTest.php` — coverage operasi admin, resend receipt, complete manual order, reconcile payment, dan health check.
 - `src/tests/Feature/Phase8HardeningTest.php` — coverage hardening operasional/security sesuai fase project.
