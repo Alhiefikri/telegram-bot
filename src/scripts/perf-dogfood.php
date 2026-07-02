@@ -598,6 +598,31 @@ foreach ($results as $result) {
     break;
 }
 
+$adminTelegramLatencyReport = [];
+foreach ($results as $result) {
+    foreach ($result['runs_detail'] as $run) {
+        foreach ($run['dogfood_events'] ?? [] as $event) {
+            if (($event['event'] ?? '') !== 'dogfood.telegram.admin_request_finished') {
+                continue;
+            }
+
+            $context = $event['context'] ?? [];
+            $adminTelegramLatencyReport[] = [
+                'scenario' => $result['feature'].' / '.$result['scenario'],
+                'run_label' => $run['label'] ?? null,
+                'action' => $context['action'] ?? null,
+                'request_duration_ms' => $context['request_duration_ms'] ?? null,
+                'recipient_count' => $context['recipient_count'] ?? null,
+                'sent' => $context['sent'] ?? null,
+                'failed' => $context['failed'] ?? null,
+                'skipped' => $context['skipped'] ?? null,
+                'telegram_total_duration_ms' => $context['telegram_total_duration_ms'] ?? null,
+                'per_recipient_telegram' => $context['per_recipient_telegram'] ?? [],
+            ];
+        }
+    }
+}
+
 $output = [
     'started_at' => $startedAt,
     'finished_at' => date(DATE_ATOM),
@@ -615,6 +640,7 @@ $output = [
     'product_id' => $product->id,
     'category_id' => $category->id,
     'manual_checkout_qr_report' => $manualCheckoutQrReport,
+    'admin_telegram_latency_report' => $adminTelegramLatencyReport,
     'results' => $results,
 ];
 

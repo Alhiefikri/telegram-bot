@@ -8,6 +8,8 @@ use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
+use App\Support\AdminTelegramDogfoodTiming;
+use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -18,6 +20,7 @@ class AdminProductCreateController extends Controller
 {
     public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
+        $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
 
         Gate::authorize('create', Product::class);
@@ -69,7 +72,8 @@ class AdminProductCreateController extends Controller
             $request->ip(),
         );
 
-        $notifications->notifyProductCreated($product);
+        $result = $notifications->notifyProductCreated($product);
+        AdminTelegramDogfoodTiming::logRequestFinished('admin.product_create', $startedAt, $result);
 
         return $forms->productCreated($product->name);
     }

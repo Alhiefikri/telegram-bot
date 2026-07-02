@@ -13,15 +13,15 @@ class TelegramProductNotificationService
         private TelegramAdminAccess $adminAccess,
     ) {}
 
-    public function notifyProductCreated(Product $product): void
+    public function notifyProductCreated(Product $product): array
     {
         if (! $product->is_active) {
-            return;
+            return $this->skippedResult();
         }
 
         $availableStock = max(0, $product->stock - $product->reserved_stock);
 
-        $this->broadcast->sendToActiveUsers(implode("\n", [
+        return $this->broadcast->sendToActiveUsers(implode("\n", [
             'Produk baru sudah masuk nih 👀',
             '📦 '.$product->name,
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
@@ -32,18 +32,19 @@ class TelegramProductNotificationService
         ]), '🆕 Produk Baru', $this->productReplyMarkup($product, $availableStock));
     }
 
-    public function notifyStockAdded(Product $product, int $addedQuantity): void
+    public function notifyStockAdded(Product $product, int $addedQuantity): array
     {
         $product = $product->fresh();
         if (! $product || ! $product->is_active || $addedQuantity < 1) {
-            return;
+            return $this->skippedResult();
         }
 
         $availableStock = $product->stock - $product->reserved_stock;
         if ($availableStock < 1) {
-            return;
+            return $this->skippedResult();
         }
-        $this->broadcast->sendToActiveUsers(implode("\n", [
+
+        return $this->broadcast->sendToActiveUsers(implode("\n", [
             'Stok sudah ready lagi 🔥',
             '📦 '.$product->name,
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
@@ -72,6 +73,18 @@ class TelegramProductNotificationService
         $description = trim((string) $product->description);
 
         return $description !== '' ? $description : 'Deskripsi produk belum ditambahkan.';
+    }
+
+    private function skippedResult(): array
+    {
+        return [
+            'sent' => 0,
+            'failed' => 0,
+            'skipped' => true,
+            'recipient_count' => 0,
+            'telegram_total_duration_ms' => 0.0,
+            'per_recipient_telegram' => [],
+        ];
     }
 
     public function notifyOutOfStock(Product $product): void

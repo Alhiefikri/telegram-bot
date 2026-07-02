@@ -7,6 +7,8 @@ use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramProductNotificationService;
+use App\Support\AdminTelegramDogfoodTiming;
+use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -16,6 +18,7 @@ class AdminProductStockController extends Controller
 {
     public function __invoke(Request $request, Product $product, StockAdjustmentService $stockAdjustment, TelegramProductNotificationService $notifications, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
+        $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
 
         Gate::authorize('adjustStock', $product);
@@ -43,7 +46,8 @@ class AdminProductStockController extends Controller
         $notes = "Tambah stok manual dashboard ({$itemCount} item).";
 
         $adjusted = $stockAdjustment->adjust($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
-        $notifications->notifyStockAdded($adjusted, $itemCount);
+        $result = $notifications->notifyStockAdded($adjusted, $itemCount);
+        AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, $result);
 
         return $forms->stockAdded($product->name, $itemCount);
     }
