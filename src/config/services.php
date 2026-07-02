@@ -63,6 +63,8 @@ return [
     ],
 
     'dogfood_fixtures' => [
+        'admin_email' => env('DOGFOOD_ADMIN_EMAIL', env('PLAYWRIGHT_ADMIN_EMAIL')),
+        'admin_password' => env('DOGFOOD_ADMIN_PASSWORD', env('PLAYWRIGHT_ADMIN_PASSWORD')),
         'telegram_photo_file_id' => env('DOGFOOD_TELEGRAM_PHOTO_FILE_ID'),
         'store_channel_chat_id' => env('DOGFOOD_STORE_CHANNEL_CHAT_ID'),
         'store_channel_username' => env('DOGFOOD_STORE_CHANNEL_USERNAME'),

@@ -10,6 +10,8 @@ class DogfoodExternalFixturesTest extends TestCase
     public function test_missing_fixture_report_names_required_env_without_raw_values(): void
     {
         config()->set('services.dogfood_fixtures', [
+            'admin_email' => '',
+            'admin_password' => '',
             'telegram_photo_file_id' => '',
             'store_channel_chat_id' => '',
             'store_channel_username' => '',
@@ -33,6 +35,10 @@ class DogfoodExternalFixturesTest extends TestCase
             ['DOGFOOD_PAKASIR_PENDING_ORDER_ID', 'DOGFOOD_PAKASIR_PENDING_AMOUNT', 'PAKASIR_SLUG', 'PAKASIR_API_KEY'],
             $fixtures->missingFor(DogfoodExternalFixtures::PAKASIR_RECONCILIATION),
         );
+        $this->assertSame(
+            ['DOGFOOD_ADMIN_EMAIL', 'DOGFOOD_ADMIN_PASSWORD'],
+            $fixtures->missingFor(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION),
+        );
 
         $summary = json_encode($fixtures->summary(), JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('DOGFOOD_', $summary);
@@ -41,6 +47,8 @@ class DogfoodExternalFixturesTest extends TestCase
     public function test_complete_fixtures_are_redacted_and_unblock_external_scenarios(): void
     {
         config()->set('services.dogfood_fixtures', [
+            'admin_email' => 'owner@example.test',
+            'admin_password' => 'secret-password',
             'telegram_photo_file_id' => 'AgAC-real-photo-file-id',
             'store_channel_chat_id' => '-100123456789',
             'store_channel_username' => '@dogfood_channel',
@@ -59,9 +67,14 @@ class DogfoodExternalFixturesTest extends TestCase
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF));
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE));
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::PAKASIR_RECONCILIATION));
+        $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION));
+        $this->assertSame('owner@example.test', $fixtures->adminEmail());
+        $this->assertSame('secret-password', $fixtures->adminPassword());
         $this->assertNull($fixtures->blockedReason(DogfoodExternalFixtures::CALLBACK_ANSWER));
 
         $summary = json_encode($fixtures->summary(), JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('owner@example.test', $summary);
+        $this->assertStringNotContainsString('secret-password', $summary);
         $this->assertStringNotContainsString('AgAC-real-photo-file-id', $summary);
         $this->assertStringNotContainsString('-100123456789', $summary);
         $this->assertStringNotContainsString('111222333', $summary);

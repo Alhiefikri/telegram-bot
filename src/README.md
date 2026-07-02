@@ -215,7 +215,10 @@ PLAYWRIGHT_TELEGRAM_WEBHOOK_SECRET='replace-with-secret' \
 npm run test:browser:docker
 
 POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
-docker compose -p telegram-bot-dogfood exec --user laravel app \
+docker compose -p telegram-bot-dogfood exec --user laravel \
+  -e DOGFOOD_ADMIN_EMAIL=owner@example.test \
+  -e DOGFOOD_ADMIN_PASSWORD='replace-with-password' \
+  app \
 php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
 
@@ -224,6 +227,7 @@ External dogfood scenarios require real disposable fixtures. Leave missing value
 Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for production-like Docker runs, and the broad perf script should be executed with `docker compose exec --user laravel app`. The perf script also forces its own Laravel logger to `stderr`. This keeps benchmark instrumentation in Docker logs instead of writing additional timing records to `storage/logs`, so a CLI timing run cannot make PHP-FPM or the Supervisor queue worker lose write access to Laravel's file logs.
 
 - `DOGFOOD_TELEGRAM_PHOTO_FILE_ID`: real Telegram `photo.file_id` from the dogfood bot chat for `/payment` proof forwarding.
+- `DOGFOOD_ADMIN_EMAIL`, `DOGFOOD_ADMIN_PASSWORD`: safe dogfood admin account used by the performance script to log in through the real admin form and submit CSRF-protected admin mutations. If unset, the script falls back to `PLAYWRIGHT_ADMIN_EMAIL` and `PLAYWRIGHT_ADMIN_PASSWORD`.
 - `DOGFOOD_STORE_CHANNEL_CHAT_ID`, `DOGFOOD_STORE_CHANNEL_USERNAME`, `DOGFOOD_STORE_CHANNEL_LINK`: disposable Store Channel target where the bot can post.
 - `DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID`, `DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID`: Telegram identities used to measure Community Gate member/non-member paths.
 - `DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID`: fresh callback query ID from a real Telegram tap; it expires quickly, so set it only for that run.

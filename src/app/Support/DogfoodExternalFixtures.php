@@ -16,7 +16,11 @@ class DogfoodExternalFixtures
 
     public const CALLBACK_ANSWER = 'callback_answer';
 
+    public const ADMIN_AUTHENTICATED_SESSION = 'admin_authenticated_session';
+
     private const LABELS = [
+        'admin_email' => 'DOGFOOD_ADMIN_EMAIL',
+        'admin_password' => 'DOGFOOD_ADMIN_PASSWORD',
         'telegram_photo_file_id' => 'DOGFOOD_TELEGRAM_PHOTO_FILE_ID',
         'store_channel_chat_id' => 'DOGFOOD_STORE_CHANNEL_CHAT_ID',
         'store_channel_member_user_id' => 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID',
@@ -33,6 +37,8 @@ class DogfoodExternalFixtures
     public static function fromConfig(): self
     {
         return new self([
+            'admin_email' => config('services.dogfood_fixtures.admin_email'),
+            'admin_password' => config('services.dogfood_fixtures.admin_password'),
             'telegram_photo_file_id' => config('services.dogfood_fixtures.telegram_photo_file_id'),
             'store_channel_chat_id' => config('services.dogfood_fixtures.store_channel_chat_id'),
             'store_channel_username' => config('services.dogfood_fixtures.store_channel_username'),
@@ -55,6 +61,7 @@ class DogfoodExternalFixtures
             self::STORE_CHANNEL_SEND, self::SALES_PROOF_POST => $this->missing(['store_channel_chat_id']),
             self::PAKASIR_RECONCILIATION => $this->missing(['pakasir_pending_order_id', 'pakasir_pending_amount', 'pakasir_slug_configured', 'pakasir_api_key_configured']),
             self::CALLBACK_ANSWER => $this->missing(['telegram_callback_query_id']),
+            self::ADMIN_AUTHENTICATED_SESSION => $this->missing(['admin_email', 'admin_password']),
             default => [],
         };
     }
@@ -72,6 +79,16 @@ class DogfoodExternalFixtures
     public function telegramPhotoFileId(): string
     {
         return $this->string('telegram_photo_file_id');
+    }
+
+    public function adminEmail(): string
+    {
+        return $this->string('admin_email');
+    }
+
+    public function adminPassword(): string
+    {
+        return $this->string('admin_password');
     }
 
     public function storeChannelChatId(): string
@@ -121,6 +138,8 @@ class DogfoodExternalFixtures
     public function summary(): array
     {
         return [
+            'admin_email' => $this->redactedValue('admin_email'),
+            'admin_password_configured' => $this->string('admin_password') !== '',
             'telegram_photo_file_id' => $this->redactedValue('telegram_photo_file_id'),
             'store_channel_chat_id' => $this->redactedValue('store_channel_chat_id'),
             'store_channel_username_configured' => $this->string('store_channel_username') !== '',

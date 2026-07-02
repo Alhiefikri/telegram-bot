@@ -18,6 +18,7 @@ use App\Models\TelegramUpdate;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\Telegram\TelegramBotClient;
+use App\Support\AdminDogfoodHttpRunner;
 use App\Support\DogfoodExternalFixtures;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -439,6 +440,22 @@ $runFixtureScenario = function (string $fixtureScenario, string $feature, string
     $runScenario($feature, $scenario, $input, $warmRuns, $action);
 };
 
+$adminRunner = null;
+$authenticatedAdminRunner = function () use (&$adminRunner, $app, $fixtures): AdminDogfoodHttpRunner {
+    if ($adminRunner instanceof AdminDogfoodHttpRunner) {
+        return $adminRunner;
+    }
+
+    $adminRunner = new AdminDogfoodHttpRunner(
+        $app->make(HttpKernel::class),
+        $fixtures->adminEmail(),
+        $fixtures->adminPassword(),
+    );
+    $adminRunner->login();
+
+    return $adminRunner;
+};
+
 $configureStoreChannelFixture = function (bool $communityGateEnabled = false, bool $salesProofEnabled = false) use ($fixtures): StoreChannelSetting {
     return StoreChannelSetting::query()->updateOrCreate(
         ['singleton_key' => StoreChannelSetting::SINGLETON_KEY],
@@ -492,6 +509,67 @@ $makePakasirFixtureProduct = function () use ($fixtures, $category): Product {
 };
 
 $runScenario('startup/cold boot', 'artisan kernel already booted baseline', 'script boot + app bootstrap', 0, fn () => true);
+
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin dashboard', 'authenticated login through HTTP kernel', 'GET /admin/login then POST /admin/login with CSRF', 0, function () use (&$adminRunner, $app, $fixtures) {
+    $adminRunner = new AdminDogfoodHttpRunner(
+        $app->make(HttpKernel::class),
+        $fixtures->adminEmail(),
+        $fixtures->adminPassword(),
+    );
+
+    return $adminRunner->login()->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation payment mode', 'invalid input through authenticated form', 'POST /admin/payment-mode invalid payment_mode', 1, function () use ($authenticatedAdminRunner) {
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/payment-mode', ['payment_mode' => 'invalid-dogfood-mode'])
+        ->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation payment mode', 'valid manual mode through authenticated form', 'POST /admin/payment-mode payment_mode=manual', 1, function () use ($authenticatedAdminRunner) {
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/payment-mode', ['payment_mode' => 'manual'])
+        ->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation category create', 'invalid input through authenticated form', 'POST /admin/categories blank category_name', 1, function () use ($authenticatedAdminRunner) {
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/categories', ['category_name' => '', 'category_description' => ''])
+        ->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation category create', 'valid namespaced category through authenticated form', 'POST /admin/categories Perf Dogfood category', 1, function () use ($authenticatedAdminRunner) {
+    $name = 'Perf Dogfood Category '.date('YmdHis').'-'.bin2hex(random_bytes(3));
+
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/categories', [
+            'category_name' => $name,
+            'category_description' => 'Safe performance dogfood category.',
+        ])
+        ->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation product create', 'invalid input through authenticated form', 'POST /admin/products blank product', 1, function () use ($authenticatedAdminRunner, $category) {
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/products', [
+            'name' => '',
+            'price_amount' => '',
+            'category_id' => (string) $category->id,
+            'description' => '',
+            'features' => '',
+            'specifications' => '',
+        ])
+        ->toScenarioResult();
+});
+$runFixtureScenario(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION, 'Admin mutation product create', 'valid namespaced product through authenticated form', 'POST /admin/products Perf Dogfood product', 1, function () use ($authenticatedAdminRunner, $category) {
+    $name = 'Perf Dogfood Product '.date('YmdHis').'-'.bin2hex(random_bytes(3));
+
+    return $authenticatedAdminRunner()
+        ->submitForm('POST', '/admin/products', [
+            'name' => $name,
+            'price_amount' => '35000',
+            'category_id' => (string) $category->id,
+            'description' => 'Safe performance dogfood product.',
+            'features' => "Namespaced benchmark item\nCreated through authenticated form",
+            'specifications' => 'No production customer data',
+        ])
+        ->toScenarioResult();
+});
 
 $runScenario('Telegram webhook intake', 'happy path through HTTP kernel', '/start JSON update', 2, fn () => $httpWebhook($messagePayload('/start')));
 $duplicatePayload = $messagePayload('/start');
