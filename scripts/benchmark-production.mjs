@@ -32,12 +32,14 @@ const env = {
   DOGFOOD_FAKE_TELEGRAM_OUTBOUND: process.env.DOGFOOD_FAKE_TELEGRAM_OUTBOUND ?? 'true',
   DOGFOOD_ADMIN_EMAIL: adminEmail,
   DOGFOOD_ADMIN_PASSWORD: adminPassword,
+  SESSION_DRIVER: process.env.SESSION_DRIVER ?? 'cookie',
   WEB_PORT: webPort,
 };
 
 const budgets = {
   httpP95Ms: Number(process.env.BENCHMARK_HTTP_P95_MS ?? 1000),
   storefrontConcurrentP95Ms: Number(process.env.BENCHMARK_STOREFRONT_CONCURRENT_P95_MS ?? 500),
+  adminLoginP95Ms: Number(process.env.BENCHMARK_ADMIN_LOGIN_P95_MS ?? 500),
   webhookAckP95Ms: Number(process.env.BENCHMARK_WEBHOOK_ACK_P95_MS ?? 500),
   handlerDrainMaxMs: Number(process.env.BENCHMARK_HANDLER_DRAIN_MAX_MS ?? 15000),
   appMemoryMaxMiB: Number(process.env.BENCHMARK_APP_MEMORY_MAX_MIB ?? 768),
@@ -52,7 +54,9 @@ const expectedStatuses = new Map([
   ['storefront warmup /', [200]],
   ['storefront concurrent /', [200]],
   ['admin login page', [200]],
-  ['admin valid login', [200]],
+  ['admin login page concurrent /admin/login', [200]],
+  ['admin valid login', [302]],
+  ['admin dashboard after login', [200]],
   ['webhook invalid secret', [403]],
   ['webhook unsupported update', [422]],
   ['webhook valid /start', [200]],
@@ -286,32 +290,39 @@ async function postTelegram(name, payload, secret = webhookSecret) {
 }
 
 async function adminLogin() {
-  const getStarted = performance.now();
   const login = await fetch(`${baseUrl}/admin/login`, { redirect: 'manual' });
   const html = await login.text();
   const cookies = setCookies(login.headers).map((cookie) => cookie.split(';')[0]).join('; ');
   const token = html.match(/name="_token"\s+value="([^"]+)"/)?.[1];
   if (!token) {
-    samples.push({ name: 'admin valid login', method: 'POST', path: '/admin/login', status: 0, ms: round(performance.now() - getStarted) });
+    samples.push({ name: 'admin valid login', method: 'POST', path: '/admin/login', status: 0, ms: 0 });
     failures.push('admin login CSRF token was not found');
     return;
   }
 
+  const postStarted = performance.now();
   const response = await fetch(`${baseUrl}/admin/login`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: cookies },
     body: new URLSearchParams({ _token: token, email: adminEmail, password: adminPassword }),
   });
-  let status = response.status;
-  if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
-    const nextCookies = [...setCookies(login.headers), ...setCookies(response.headers)].map((cookie) => cookie.split(';')[0]).join('; ');
-    const followed = await fetch(new URL(response.headers.get('location'), baseUrl), { headers: { cookie: nextCookies } });
-    status = followed.status;
-  }
-  const sample = { name: 'admin valid login', method: 'POST', path: '/admin/login', status, ms: round(performance.now() - getStarted) };
+  await response.text();
+
+  const sample = { name: 'admin valid login', method: 'POST', path: '/admin/login', status: response.status, ms: round(performance.now() - postStarted) };
   samples.push(sample);
   assertExpectedStatus(sample);
+
+  const location = response.headers.get('location');
+  if (response.status >= 300 && response.status < 400 && location) {
+    const nextCookies = [...setCookies(login.headers), ...setCookies(response.headers)].map((cookie) => cookie.split(';')[0]).join('; ');
+    const dashboardStarted = performance.now();
+    const followed = await fetch(new URL(location, baseUrl), { headers: { cookie: nextCookies } });
+    await followed.text();
+    const dashboardSample = { name: 'admin dashboard after login', method: 'GET', path: '/admin', status: followed.status, ms: round(performance.now() - dashboardStarted) };
+    samples.push(dashboardSample);
+    assertExpectedStatus(dashboardSample);
+  }
 }
 
 function containerMemory() {
@@ -353,6 +364,7 @@ function markdown(report) {
     `- Health: ${report.health.ok ? 'passed' : 'failed'}`,
     `- HTTP p95: ${report.summaries.http.p95_ms} ms`,
     `- Storefront concurrency p95: ${report.summaries.storefront_concurrent.p95_ms} ms`,
+    `- Admin login p95: ${report.summaries.admin_login.p95_ms} ms`,
     `- Webhook ACK p95: ${report.summaries.webhook_ack.p95_ms} ms`,
     `- Handler drain: ${report.handler_drain.ms} ms`,
     `- Queue depth after run: ${report.final_state.queue_depth}`,
@@ -402,6 +414,7 @@ async function main() {
   await timedFetch('storefront warmup /', 'GET', '/');
   await timedConcurrentFetch('storefront concurrent /', 'GET', '/', 100, 10);
   await timedFetch('admin login page', 'GET', '/admin/login');
+  await timedConcurrentFetch('admin login page concurrent /admin/login', 'GET', '/admin/login', 100, 10);
   await adminLogin();
 
   const baseUpdateId = Math.floor(Date.now() / 1000) * 1000;
@@ -428,6 +441,7 @@ async function main() {
   const summaries = {
     http: summarize((sample) => ['health /up', 'storefront /', 'admin login page', 'admin valid login'].includes(sample.name)),
     storefront_concurrent: summarize((sample) => sample.name === 'storefront concurrent /'),
+    admin_login: summarize((sample) => ['admin login page', 'admin login page concurrent /admin/login', 'admin valid login'].includes(sample.name)),
     webhook_ack: summarize((sample) => sample.path === '/api/webhook/telegram'),
     all: summarize(() => true),
   };
@@ -437,6 +451,9 @@ async function main() {
   }
   if (summaries.storefront_concurrent.p95_ms !== null && summaries.storefront_concurrent.p95_ms > budgets.storefrontConcurrentP95Ms) {
     failures.push(`Storefront concurrency p95 ${summaries.storefront_concurrent.p95_ms} ms exceeded budget ${budgets.storefrontConcurrentP95Ms} ms`);
+  }
+  if (summaries.admin_login.p95_ms !== null && summaries.admin_login.p95_ms > budgets.adminLoginP95Ms) {
+    failures.push(`Admin login p95 ${summaries.admin_login.p95_ms} ms exceeded budget ${budgets.adminLoginP95Ms} ms`);
   }
   if (summaries.webhook_ack.p95_ms !== null && summaries.webhook_ack.p95_ms > budgets.webhookAckP95Ms) {
     failures.push(`Webhook ACK p95 ${summaries.webhook_ack.p95_ms} ms exceeded budget ${budgets.webhookAckP95Ms} ms`);

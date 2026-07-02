@@ -62,6 +62,22 @@ class AdminDashboardAccessTest extends TestCase
         ])->assertForbidden();
     }
 
+    public function test_user_without_admin_access_cannot_log_in_through_admin_login(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'buyer@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => null,
+        ]);
+
+        $this->post(route('admin.login.store'), [
+            'email' => $user->email,
+            'password' => 'correct-password',
+        ])->assertSessionHasErrors(['email']);
+
+        $this->assertGuest();
+    }
+
     public function test_production_csrf_middleware_rejects_admin_mutation_without_token(): void
     {
         $middleware = new class($this->app, app(Encrypter::class)) extends PreventRequestForgery

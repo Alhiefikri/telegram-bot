@@ -32,6 +32,7 @@ The command supplies safe dogfood defaults when the environment does not provide
 - `TELEGRAM_WEBHOOK_SECRET=benchmark-secret`
 - `TELEGRAM_PAYMENT_MODE=manual`
 - `APP_OPTIMIZE=true`
+- `SESSION_DRIVER=cookie`
 - `DOGFOOD_TIMING_ENABLED=true`
 - `DOGFOOD_TIMING_LOG_CHANNEL=stderr`
 - `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`
@@ -43,12 +44,15 @@ Override any of these by exporting the variable before running the command.
 The benchmark covers:
 
 - `/up`, `/`, and `/admin/login` over the exposed Docker Nginx service.
-- Valid admin login with a seeded dogfood owner account.
+- `/admin/login` page concurrency at 10 workers.
+- Valid admin login with a seeded dogfood owner account, plus a follow-up dashboard request to verify the session.
 - Telegram webhook invalid secret, unsupported update, valid update, and duplicate update paths.
 - Telegram handler product, quantity, and checkout happy paths through the real webhook, database queue, and Supervisor worker.
 - Manual checkout queue behavior across the `default` update worker and `telegram-outbound` notification worker, including the timing events emitted for order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage`.
 - Operational commands: `ops:health --db --queue-schema --supervisor`, scheduler heartbeat health, `orders:expire-pending`, `pakasir:reconcile --chunk=5`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
+
+The Docker default uses Laravel's encrypted cookie session driver for admin web sessions. This keeps login/logout and CSRF behavior stateful for the browser while avoiding database writes for anonymous `/admin/login` page requests under concurrency. Set `SESSION_DRIVER=database` before running the benchmark if you need to compare the older database-backed session path.
 
 ## Latest Issue 70 Run
 
@@ -74,6 +78,7 @@ Defaults:
 
 - `BENCHMARK_HTTP_P95_MS=1000`
 - `BENCHMARK_STOREFRONT_CONCURRENT_P95_MS=500`
+- `BENCHMARK_ADMIN_LOGIN_P95_MS=500`
 - `BENCHMARK_WEBHOOK_ACK_P95_MS=500`
 - `BENCHMARK_HANDLER_DRAIN_MAX_MS=15000`
 - `BENCHMARK_APP_MEMORY_MAX_MIB=768`
@@ -82,6 +87,7 @@ The command exits non-zero when:
 
 - HTTP p95 exceeds `BENCHMARK_HTTP_P95_MS`.
 - Storefront `/` concurrency-10 p95 exceeds `BENCHMARK_STOREFRONT_CONCURRENT_P95_MS`.
+- Admin login p95 exceeds `BENCHMARK_ADMIN_LOGIN_P95_MS`.
 - Telegram webhook ACK p95 exceeds `BENCHMARK_WEBHOOK_ACK_P95_MS`.
 - handler queue drain exceeds `BENCHMARK_HANDLER_DRAIN_MAX_MS`;
 - final `jobs` queue depth is not `0`;
