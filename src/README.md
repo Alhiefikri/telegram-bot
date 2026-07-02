@@ -190,6 +190,8 @@ The production-like Docker stack also starts a dedicated `scheduler` service fro
 Production-like local dogfooding should target Docker/Nginx/PostgreSQL, not `php artisan serve` with SQLite:
 
 ```bash
+./scripts/dogfood-volume-preflight.sh
+
 POSTGRES_PASSWORD=dogfood_password \
 APP_KEY=base64:replace-with-generated-key \
 TELEGRAM_BOT_TOKEN=dogfood-token \
@@ -215,6 +217,22 @@ POSTGRES_PASSWORD=dogfood_password WEB_PORT=18080 \
 docker compose -p telegram-bot-dogfood exec app \
 php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 ```
+
+Run `./scripts/dogfood-volume-preflight.sh` before a production-like performance run. It lists Docker volumes for the `telegram-bot-dogfood` Compose project by the `com.docker.compose.project` label and exits non-zero when existing dogfood volumes are present. Existing dogfood volumes can preserve old PostgreSQL roles/databases and make a fresh build look unhealthy for reasons unrelated to current code.
+
+If the dogfood volumes are intentionally disposable, preserve any raw artifacts first: copy performance JSON files, app logs, Docker logs, screenshots, and notes from `storage/logs/`, `.slim/deepwork/`, or other run-specific locations. Then reset only the dogfood project volumes:
+
+```bash
+./scripts/dogfood-volume-preflight.sh --reset --yes
+```
+
+For parallel dogfood runs, pass an explicit dogfood project name:
+
+```bash
+./scripts/dogfood-volume-preflight.sh --project telegram-bot-dogfood-ci --reset --yes
+```
+
+The helper refuses destructive resets for project names that do not contain `dogfood`; do not use it for default or production Compose projects.
 
 The production smoke checks `/up`, app operational health, and the scheduler heartbeat when `SMOKE_COMPOSE_PROJECT` or `COMPOSE_PROJECT_NAME` is set. The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
 
