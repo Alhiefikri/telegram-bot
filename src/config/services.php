@@ -61,4 +61,16 @@ return [
         'enabled' => env('DOGFOOD_TIMING_ENABLED', false),
     ],
 
+    'dogfood_fixtures' => [
+        'telegram_photo_file_id' => env('DOGFOOD_TELEGRAM_PHOTO_FILE_ID'),
+        'store_channel_chat_id' => env('DOGFOOD_STORE_CHANNEL_CHAT_ID'),
+        'store_channel_username' => env('DOGFOOD_STORE_CHANNEL_USERNAME'),
+        'store_channel_link' => env('DOGFOOD_STORE_CHANNEL_LINK'),
+        'store_channel_member_user_id' => env('DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID'),
+        'store_channel_non_member_user_id' => env('DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID'),
+        'telegram_callback_query_id' => env('DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID'),
+        'pakasir_pending_order_id' => env('DOGFOOD_PAKASIR_PENDING_ORDER_ID'),
+        'pakasir_pending_amount' => env('DOGFOOD_PAKASIR_PENDING_AMOUNT'),
+    ],
+
 ];

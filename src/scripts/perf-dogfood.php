@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Enums\CartStatus;
 use App\Jobs\ProcessTelegramUpdate;
+use App\Jobs\PublishSalesProofPost;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Category;
@@ -10,8 +12,13 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Models\TelegramUpdate;
+use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Services\Telegram\TelegramBotClient;
+use App\Support\DogfoodExternalFixtures;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
@@ -150,6 +157,7 @@ $collector = new PerfTraceCollector;
 $app->singleton(PerfTraceCollector::class, fn () => $collector);
 $app->bind(TelegramBotClient::class, fn () => new MeasuredTelegramBotClient($collector));
 config()->set('services.dogfood_timing.enabled', true);
+$fixtures = DogfoodExternalFixtures::fromConfig();
 
 DB::listen(function ($query) use ($collector): void {
     $collector->recordDb($query->sql, (float) $query->time);
@@ -249,7 +257,7 @@ $messagePayload = function (string $text, ?int $chatId = null, ?int $fromId = nu
     ];
 };
 
-$photoPayload = function (string $caption, string $photoFileId = 'AgACAgUAAxkBAAIBperfDogfoodPhoto') use ($nextId, $adminChatId, $adminUserId): array {
+$photoPayload = function (string $caption, string $photoFileId) use ($nextId, $adminChatId, $adminUserId): array {
     $id = $nextId();
 
     return [
@@ -400,6 +408,84 @@ $runScenario = function (string $feature, string $scenario, string $input, int $
     ];
 };
 
+$blockScenario = function (string $fixtureScenario, string $feature, string $scenario, string $input) use (&$results, $fixtures): void {
+    $results[] = [
+        'feature' => $feature,
+        'scenario' => $scenario,
+        'input' => $input,
+        'runs' => 0,
+        'cold_ms' => null,
+        'warm_avg_ms' => null,
+        'slowest_ms' => null,
+        'result' => 'blocked',
+        'blocked_reason' => $fixtures->blockedReason($fixtureScenario),
+        'required_fixtures' => $fixtures->missingFor($fixtureScenario),
+        'runs_detail' => [],
+    ];
+};
+
+$runFixtureScenario = function (string $fixtureScenario, string $feature, string $scenario, string $input, int $warmRuns, Closure $action) use ($fixtures, $blockScenario, $runScenario): void {
+    if ($fixtures->blockedReason($fixtureScenario) !== null) {
+        $blockScenario($fixtureScenario, $feature, $scenario, $input);
+
+        return;
+    }
+
+    $runScenario($feature, $scenario, $input, $warmRuns, $action);
+};
+
+$configureStoreChannelFixture = function (bool $communityGateEnabled = false, bool $salesProofEnabled = false) use ($fixtures): StoreChannelSetting {
+    return StoreChannelSetting::query()->updateOrCreate(
+        ['singleton_key' => StoreChannelSetting::SINGLETON_KEY],
+        [
+            'channel_username' => $fixtures->storeChannelUsername(),
+            'channel_link' => $fixtures->storeChannelLink(),
+            'telegram_chat_id' => $fixtures->storeChannelChatId(),
+            'community_gate_enabled' => $communityGateEnabled,
+            'sales_proof_enabled' => $salesProofEnabled,
+            'last_tested_at' => now(),
+            'last_test_success' => true,
+            'last_test_error' => null,
+        ],
+    );
+};
+
+$makeFixtureCart = function (int $telegramUserId, Product $cartProduct, int $quantity = 1): Cart {
+    $customer = Customer::query()->updateOrCreate(
+        ['telegram_id' => $telegramUserId],
+        ['first_name' => 'Perf', 'username' => 'perf_dogfood']
+    );
+    Cart::query()->where('customer_id', $customer->id)->where('status', CartStatus::Active->value)->update(['status' => CartStatus::Abandoned->value]);
+    $cart = Cart::query()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active->value, 'expires_at' => now()->addHour()]);
+    CartItem::query()->create(['cart_id' => $cart->id, 'product_id' => $cartProduct->id, 'quantity' => $quantity]);
+
+    return $cart;
+};
+
+$makePakasirFixtureProduct = function () use ($fixtures, $category): Product {
+    $amount = $fixtures->pakasirPendingAmount();
+    $pakasirProduct = Product::query()->firstOrCreate(
+        ['name' => 'Perf Dogfood Pakasir Fixture '.$amount],
+        [
+            'category_id' => $category->id,
+            'description' => 'Pakasir dogfood transaction-detail fixture',
+            'price_amount' => $amount,
+            'currency' => 'IDR',
+            'image_path' => null,
+            'is_active' => true,
+        ],
+    );
+    $pakasirProduct->forceFill([
+        'category_id' => $category->id,
+        'price_amount' => $amount,
+        'stock' => 50,
+        'reserved_stock' => 0,
+        'is_active' => true,
+    ])->save();
+
+    return $pakasirProduct;
+};
+
 $runScenario('startup/cold boot', 'artisan kernel already booted baseline', 'script boot + app bootstrap', 0, fn () => true);
 
 $runScenario('Telegram webhook intake', 'happy path through HTTP kernel', '/start JSON update', 2, fn () => $httpWebhook($messagePayload('/start')));
@@ -475,13 +561,70 @@ $runScenario('checkout manual', 'happy path file/media QR send', 'active cart th
     $processPayload($callbackPayload('checkout'));
 });
 $runScenario('checkout manual', 'invalid empty cart path', 'checkout callback without cart', 1, fn () => $processPayload($callbackPayload('checkout')));
-$runScenario('manual payment proof', 'photo proof happy path', 'photo caption /payment latest invoice', 1, function () use ($makeActiveCart, $processPayload, $callbackPayload, $photoPayload, $latestManualOrderInvoice) {
+$runFixtureScenario(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF, 'manual payment proof', 'photo proof happy path', 'real photo.file_id caption /payment latest invoice', 1, function () use ($fixtures, $makeActiveCart, $processPayload, $callbackPayload, $photoPayload, $latestManualOrderInvoice) {
     $makeActiveCart(1);
     $processPayload($callbackPayload('checkout'));
     $invoice = $latestManualOrderInvoice();
-    $processPayload($photoPayload('/payment '.$invoice));
+    $processPayload($photoPayload('/payment '.$invoice, $fixtures->telegramPhotoFileId()));
 });
 $runScenario('manual payment proof', 'invalid no photo path', 'text /payment', 1, fn () => $processPayload($messagePayload('/payment')));
+
+$runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_SEND, 'Store Channel', 'test send to disposable channel', 'sendMessage to DOGFOOD_STORE_CHANNEL_CHAT_ID', 1, function () use ($app, $fixtures, $configureStoreChannelFixture) {
+    $configureStoreChannelFixture(false, false);
+    $app->make(TelegramBotClient::class)->sendMessage(
+        $fixtures->storeChannelChatId(),
+        'Dogfood Store Channel test '.date(DATE_ATOM),
+    );
+});
+$runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE, 'Store Channel community gate', 'known member can browse catalog', '/katalog from DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID', 1, function () use ($fixtures, $configureStoreChannelFixture, $messagePayload, $processPayload) {
+    $configureStoreChannelFixture(true, false);
+    $processPayload($messagePayload('/katalog', $fixtures->storeChannelMemberUserId(), $fixtures->storeChannelMemberUserId()));
+});
+$runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE, 'Store Channel community gate', 'known non-member is prompted', '/katalog from DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID', 1, function () use ($fixtures, $configureStoreChannelFixture, $messagePayload, $processPayload) {
+    $configureStoreChannelFixture(true, false);
+    $processPayload($messagePayload('/katalog', $fixtures->storeChannelNonMemberUserId(), $fixtures->storeChannelNonMemberUserId()));
+});
+$runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'publish paid order proof to Store Channel', 'paid manual order fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
+    $configureStoreChannelFixture(false, true);
+    $cart = $makeFixtureCart((int) $adminUserId, $product);
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual');
+    $payment = $order->payments()->latest()->firstOrFail();
+    $app->make(OrderStateMachine::class)->markPaymentPaid($payment);
+
+    return ['status' => $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--queue' => 'notifications',
+        '--once' => true,
+        '--stop-when-empty' => true,
+    ])];
+});
+$runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'manual retry failed proof to Store Channel', 'failed sales proof fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
+    $configureStoreChannelFixture(false, true);
+    $cart = $makeFixtureCart((int) $adminUserId, $product);
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual');
+    $payment = $order->payments()->latest()->firstOrFail();
+    $paidOrder = $app->make(OrderStateMachine::class)->markPaymentPaid($payment);
+    SalesProofPost::query()->updateOrCreate(
+        ['order_id' => $paidOrder->id],
+        ['status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'dogfood retry fixture'],
+    );
+
+    $app->call([new PublishSalesProofPost($paidOrder->id, true, now()->toISOString()), 'handle']);
+});
+$runFixtureScenario(DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'Pakasir transaction-detail', 'reconcile real pending transaction fixture', 'pakasir:reconcile against DOGFOOD_PAKASIR_PENDING_ORDER_ID', 1, function () use ($app, $adminUserId, $fixtures, $makeFixtureCart, $makePakasirFixtureProduct) {
+    $cart = $makeFixtureCart((int) $adminUserId, $makePakasirFixtureProduct());
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'hosted', 'pakasir');
+    $payment = $order->payments()->latest()->firstOrFail();
+    $payment->update([
+        'merchant_ref' => $fixtures->pakasirPendingOrderId(),
+        'amount' => $fixtures->pakasirPendingAmount(),
+    ]);
+    $order->update(['total_amount' => $fixtures->pakasirPendingAmount()]);
+
+    return ['status' => $app->make(ConsoleKernel::class)->call('pakasir:reconcile', ['--chunk' => 5])];
+});
+$runFixtureScenario(DogfoodExternalFixtures::CALLBACK_ANSWER, 'Telegram callback-answer', 'real callback query happy path', 'DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID from live Telegram tap', 0, function () use ($fixtures, $callbackPayload, $processPayload) {
+    $processPayload($callbackPayload('status', $fixtures->telegramCallbackQueryId()));
+});
 
 $runScenario('scheduled job orders:expire-pending', 'artisan command', 'orders:expire-pending', 1, function () use ($app) {
     return ['status' => $app->make(ConsoleKernel::class)->call('orders:expire-pending')];
@@ -637,6 +780,7 @@ $output = [
         'admin_chat_configured' => $adminChatId !== '',
         'admin_user_configured' => $adminUserId !== '',
     ],
+    'external_fixtures' => $fixtures->summary(),
     'product_id' => $product->id,
     'category_id' => $category->id,
     'manual_checkout_qr_report' => $manualCheckoutQrReport,
