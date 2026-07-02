@@ -60,6 +60,7 @@ run_subject() {
   fake_docker=$(make_fake_docker "$scenario")
   FAKE_DOCKER_SCENARIO=$scenario \
     FAKE_DOCKER_LOG="$TMP_DIR/docker-$scenario.log" \
+    DOGFOOD_VOLUME_RESET_CONFIRM=${DOGFOOD_VOLUME_RESET_CONFIRM:-} \
     DOCKER_BIN="$fake_docker" \
     "$SUBJECT" "$@" >"$LAST_STDOUT" 2>"$LAST_STDERR"
 }
@@ -112,7 +113,15 @@ status=0
 run_subject volumes || status=$?
 assert_exit 1 "$status" 'existing volumes are detected'
 assert_contains "$LAST_STDOUT" 'telegram-bot-dogfood_postgres_data' 'existing volume list'
+assert_contains "$LAST_STDOUT" 'State: warm/reused dogfood Docker volume state.' 'existing volume state'
+assert_contains "$LAST_STDOUT" 'PostgreSQL role, database, and password identity may come from an older run' 'existing volume identity warning'
 assert_not_contains "$TMP_DIR/docker-volumes.log" 'volume rm' 'preflight does not remove'
+
+status=0
+run_subject volumes --allow-existing || status=$?
+assert_exit 0 "$status" 'existing volumes can be explicitly allowed'
+assert_contains "$LAST_STDOUT" 'Existing dogfood volumes are intentionally allowed for this run (--allow-existing).' 'allow-existing output'
+assert_not_contains "$TMP_DIR/docker-volumes.log" 'volume rm' 'allow-existing does not remove'
 
 status=0
 run_subject volumes --reset || status=$?
@@ -120,9 +129,20 @@ assert_exit 2 "$status" 'reset requires confirmation'
 assert_not_contains "$TMP_DIR/docker-volumes.log" 'volume rm' 'unconfirmed reset does not remove'
 
 status=0
+run_subject volumes --reset --allow-existing || status=$?
+assert_exit 2 "$status" 'reset and allow-existing are mutually exclusive'
+assert_not_contains "$TMP_DIR/docker-volumes.log" 'volume ls' 'ambiguous reset does not query docker'
+assert_not_contains "$TMP_DIR/docker-volumes.log" 'volume rm' 'ambiguous reset does not remove'
+
+status=0
 run_subject ci-volumes --project telegram-bot-dogfood-ci --reset --yes || status=$?
 assert_exit 0 "$status" 'confirmed explicit dogfood project reset passes'
 assert_contains "$TMP_DIR/docker-ci-volumes.log" 'volume rm telegram-bot-dogfood-ci_postgres_data' 'confirmed reset removes selected volume'
+
+status=0
+DOGFOOD_VOLUME_RESET_CONFIRM=yes run_subject ci-volumes --project telegram-bot-dogfood-ci --reset || status=$?
+assert_exit 0 "$status" 'env-confirmed dogfood project reset passes'
+assert_contains "$TMP_DIR/docker-ci-volumes.log" 'volume rm telegram-bot-dogfood-ci_postgres_data' 'env-confirmed reset removes selected volume'
 
 status=0
 run_subject none --project telegram-bot --reset --yes || status=$?

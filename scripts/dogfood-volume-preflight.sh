@@ -73,6 +73,11 @@ if [ -z "$PROJECT_NAME" ]; then
   exit 2
 fi
 
+if [ "$RESET" = true ] && [ "$ALLOW_EXISTING" = true ]; then
+  printf 'Choose either --reset or --allow-existing, not both.\n' >&2
+  exit 2
+fi
+
 case "$PROJECT_NAME" in
   *dogfood*) ;;
   *)
@@ -98,15 +103,17 @@ for volume in "${VOLUMES[@]}"; do
   printf '  - %s\n' "$volume"
 done
 
-printf '\nThese volumes can preserve PostgreSQL roles/databases and Laravel artifacts from earlier dogfood runs.\n'
+printf '\nState: warm/reused dogfood Docker volume state.\n'
+printf 'Risk: PostgreSQL role, database, and password identity may come from an older run, not the current .env/Compose defaults.\n'
+printf 'No volumes will be removed unless --reset is confirmed explicitly.\n'
 
 if [ "$RESET" != true ]; then
-  printf 'No volumes removed. Re-run with --reset --yes after preserving needed artifacts/logs.\n'
-
   if [ "$ALLOW_EXISTING" = true ]; then
+    printf 'Existing dogfood volumes are intentionally allowed for this run (--allow-existing).\n'
     exit 0
   fi
 
+  printf 'No volumes removed. Re-run with --allow-existing to use warm state, or --reset --yes after preserving needed artifacts/logs.\n'
   exit 1
 fi
 
