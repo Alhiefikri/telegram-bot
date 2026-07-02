@@ -185,6 +185,10 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam sta
 
 The production Docker image runs pending Laravel migrations before Supervisor starts PHP-FPM and the queue worker. This keeps first boot from failing healthchecks because tables such as `cache` or `jobs` do not exist yet. Set `APP_AUTO_MIGRATE=false` if an environment requires manual migration orchestration.
 
+After migrations, the Docker entrypoint runs `php artisan optimize` by default. This creates Laravel's production cache artifacts for the live container environment: cached config, routes, events, and compiled Blade views. The command is intentionally run at container startup rather than during `docker build`, because the cached config file contains runtime values such as `APP_KEY`, database credentials, Telegram credentials, and Pakasir credentials. Do not bake `bootstrap/cache/config.php` into the image.
+
+Set `APP_OPTIMIZE=false` to skip startup optimization for one-off debugging. When runtime environment variables change, recreate the app and scheduler containers so the entrypoint rebuilds the cache from the new environment. Use `php artisan optimize` after manual runtime config changes, and use targeted clears such as `php artisan config:clear`, `php artisan route:clear`, `php artisan event:clear`, or `php artisan view:clear` when intentionally invalidating one artifact. Avoid routine `php artisan optimize:clear` on production boot because Laravel also clears keys from the default cache driver.
+
 The production-like Docker stack also starts a dedicated `scheduler` service from the same application image. The scheduler service does not run migrations; it waits for the healthy app service, then invokes Laravel's scheduler with `php artisan schedule:run` every minute and writes a heartbeat to `storage/framework/scheduler-heartbeat`.
 
 Production-like local dogfooding should target Docker/Nginx/PostgreSQL, not `php artisan serve` with SQLite:

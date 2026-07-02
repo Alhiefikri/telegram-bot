@@ -31,6 +31,7 @@ The command supplies safe dogfood defaults when the environment does not provide
 - `TELEGRAM_BOT_TOKEN=benchmark-token`
 - `TELEGRAM_WEBHOOK_SECRET=benchmark-secret`
 - `TELEGRAM_PAYMENT_MODE=manual`
+- `APP_OPTIMIZE=true`
 - `DOGFOOD_TIMING_ENABLED=true`
 - `DOGFOOD_TIMING_LOG_CHANNEL=stderr`
 - `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`

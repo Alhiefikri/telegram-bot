@@ -287,11 +287,23 @@ SH);
         $envExample = file_get_contents(base_path('../.env.example'));
 
         $this->assertStringContainsString('ENTRYPOINT ["/usr/local/bin/docker-entrypoint-laravel"]', $dockerfile);
-        $this->assertStringContainsString('php artisan migrate --force', $entrypoint);
+        $this->assertStringNotContainsString('php artisan optimize', $dockerfile);
+        $this->assertStringContainsString('artisan migrate --force', $entrypoint);
+        $this->assertStringContainsString('artisan optimize', $entrypoint);
         $this->assertStringContainsString('exec "$@"', $entrypoint);
+        $this->assertLessThan(
+            strpos($entrypoint, 'artisan optimize'),
+            strpos($entrypoint, 'artisan migrate --force')
+        );
+        $this->assertLessThan(
+            strpos($entrypoint, 'exec "$@"'),
+            strpos($entrypoint, 'artisan optimize')
+        );
         $this->assertStringContainsString('APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}', $compose);
+        $this->assertStringContainsString('APP_OPTIMIZE: ${APP_OPTIMIZE:-true}', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: false', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE=true', $envExample);
+        $this->assertStringContainsString('APP_OPTIMIZE=true', $envExample);
     }
 
     public function test_ops_health_checks_scheduler_heartbeat(): void
