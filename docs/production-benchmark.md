@@ -46,8 +46,19 @@ The benchmark covers:
 - Valid admin login with a seeded dogfood owner account.
 - Telegram webhook invalid secret, unsupported update, valid update, and duplicate update paths.
 - Telegram handler product, quantity, and checkout happy paths through the real webhook, database queue, and Supervisor worker.
+- Manual checkout queue behavior across the `default` update worker and `telegram-outbound` notification worker, including the timing events emitted for order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage`.
 - Operational commands: `ops:health --db --queue-schema --supervisor`, scheduler heartbeat health, `orders:expire-pending`, `pakasir:reconcile --chunk=5`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
+
+## Latest Issue 70 Run
+
+On 2026-07-02, issue #70 was verified with clean dogfood volumes by running:
+
+```bash
+BENCHMARK_COMPOSE_PROJECT=telegram-bot-dogfood-issue70 WEB_PORT=18081 BASE_URL=http://127.0.0.1:18081 ./scripts/benchmark-production.sh
+```
+
+Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the real Docker/Nginx/PostgreSQL/Supervisor queue topology with the split `default` and `telegram-outbound,notifications` workers.
 
 ## Synthetic Versus Real External Calls
 

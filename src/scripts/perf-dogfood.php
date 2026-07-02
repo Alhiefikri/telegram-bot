@@ -325,7 +325,12 @@ $processPayload = function (array $payload) use ($app): void {
 
     ProcessTelegramUpdate::dispatch($update->id, now()->toISOString());
     $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--queue' => 'default',
         '--once' => true,
+        '--stop-when-empty' => true,
+    ]);
+    $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--queue' => 'telegram-outbound,notifications',
         '--stop-when-empty' => true,
     ]);
 };
@@ -758,6 +763,8 @@ foreach ($results as $result) {
         $steps = [];
         $queueWaitMs = null;
         $workerProcessingMs = null;
+        $manualNotificationJobQueueWaitMs = null;
+        $manualNotificationJobProcessingMs = null;
 
         foreach ($run['dogfood_events'] ?? [] as $event) {
             $context = $event['context'] ?? [];
@@ -778,11 +785,21 @@ foreach ($results as $result) {
             if (($event['event'] ?? '') === 'dogfood.telegram.handler_finished') {
                 $workerProcessingMs = $context['handler_duration_ms'] ?? null;
             }
+
+            if (($event['event'] ?? '') === 'dogfood.telegram.manual_checkout_notifications_job_picked_up') {
+                $manualNotificationJobQueueWaitMs = $context['queue_wait_ms'] ?? null;
+            }
+
+            if (($event['event'] ?? '') === 'dogfood.telegram.manual_checkout_notifications_job_finished') {
+                $manualNotificationJobProcessingMs = $context['handler_duration_ms'] ?? null;
+            }
         }
 
         $dominantCandidates = [
             'queue_wait' => $queueWaitMs,
-            'worker_processing' => $workerProcessingMs,
+            'update_worker_processing' => $workerProcessingMs,
+            'manual_notification_job_queue_wait' => $manualNotificationJobQueueWaitMs,
+            'manual_notification_job_processing' => $manualNotificationJobProcessingMs,
             'order_checkout' => $steps['order_checkout']['duration_ms'] ?? null,
             'manual_qr_file_read' => $steps['manual_qr_file_read']['duration_ms'] ?? null,
             'manual_customer_send_photo' => $steps['manual_customer_send_photo']['duration_ms'] ?? null,
@@ -807,7 +824,9 @@ foreach ($results as $result) {
             'label' => $run['label'],
             'total_ms' => $run['ms'],
             'queue_wait_ms' => $queueWaitMs,
-            'worker_processing_ms' => $workerProcessingMs,
+            'update_worker_processing_ms' => $workerProcessingMs,
+            'manual_notification_job_queue_wait_ms' => $manualNotificationJobQueueWaitMs,
+            'manual_notification_job_processing_ms' => $manualNotificationJobProcessingMs,
             'dominant_step' => $dominantStep,
             'dominant_step_ms' => $dominantStep === null ? null : $dominantMs,
             'dominant_candidates' => $dominantCandidates,
@@ -817,7 +836,7 @@ foreach ($results as $result) {
 
     $manualCheckoutQrReport = [
         'scenario' => $result['feature'].' / '.$result['scenario'],
-        'interpretation' => 'Compare queue_wait_ms, worker_processing_ms, order_checkout, manual_qr_file_read, manual_customer_send_photo, manual_admin_send_message, and the wrapper steps before optimizing.',
+        'interpretation' => 'Compare queue_wait_ms, update_worker_processing_ms, manual_notification_job_queue_wait_ms, manual_notification_job_processing_ms, order_checkout, manual_qr_file_read, manual_customer_send_photo, manual_admin_send_message, and the wrapper steps before optimizing.',
         'runs' => $runs,
     ];
 

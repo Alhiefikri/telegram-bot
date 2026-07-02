@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\CartStatus;
+use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -11,8 +12,11 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
+use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramCheckoutIntents;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Tests\Support\TelegramBotTestSupport;
 
 class CartCheckoutTest extends TelegramBotTestSupport
@@ -278,6 +282,67 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Checkout manual baru')
             && str_contains($r['text'], 'Metode: QR Manual')
             && str_contains($r['text'], $order->invoice_number));
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+        $this->assertNotNull($order->fresh()->manual_checkout_admin_notified_at);
+    }
+
+    public function test_manual_checkout_enqueues_outbound_notifications_without_inline_photo_or_admin_send(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        Queue::fake([SendManualCheckoutNotifications::class]);
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(173, 'cb-manual-queued', 'checkout'))->assertOk();
+
+        $order = Order::firstOrFail();
+        Queue::assertPushedOn('telegram-outbound', SendManualCheckoutNotifications::class, fn (SendManualCheckoutNotifications $job): bool => $job->orderId === $order->id);
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), '✅ Checkout berhasil dibuat'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && ($r['chat_id'] ?? null) === '999'
+            && str_contains((string) ($r['text'] ?? ''), 'Checkout manual baru'));
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+        $this->assertNull($order->fresh()->manual_checkout_admin_notified_at);
+    }
+
+    public function test_manual_checkout_notification_retry_does_not_resend_customer_photo_after_admin_failure(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::sequence()
+                ->push(['ok' => false], 500)
+                ->push(['ok' => true, 'result' => ['message_id' => 88]]),
+        ]);
+
+        try {
+            (new SendManualCheckoutNotifications($order->id))->handle(app(TelegramCheckoutIntents::class));
+            $this->fail('Expected the first admin notification attempt to fail.');
+        } catch (\Throwable) {
+            //
+        }
+
+        $order = $order->fresh();
+        $this->assertNotNull($order->manual_checkout_customer_notified_at);
+        $this->assertNull($order->manual_checkout_admin_notified_at);
+
+        (new SendManualCheckoutNotifications($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        $this->assertNotNull($order->fresh()->manual_checkout_admin_notified_at);
+        Http::assertSentCount(3);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), '✅ Checkout berhasil dibuat'));
+        $photoSends = Http::recorded(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoSends);
     }
 
     public function test_manual_checkout_dogfood_timing_reports_each_qr_step(): void

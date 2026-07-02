@@ -125,7 +125,7 @@ Issue #65 asked whether burst queue wait was caused by one worker plus real Tele
 - failed jobs stayed at zero;
 - handler duration and manual checkout duration were still dominated by real Telegram outbound calls.
 
-Keep the one-worker Docker default until a clean benchmark reproduces sustained queue wait. If latency work continues, prioritize Telegram outbound and manual checkout send-path measurement before queue parallelism, because extra workers can introduce stock, cart, or order race risk without addressing the reproduced bottleneck.
+Historical decision for this run: keep the one-worker Docker default until a clean benchmark reproduces sustained queue wait. This was superseded by issue #70, which isolates manual checkout Telegram outbound work into a separate `telegram-outbound` queue after order checkout has committed. Newer benchmark interpretation should compare update-worker processing against manual outbound job queue wait/processing instead of treating the whole manual checkout as one update-worker handler.
 
 ## Blocked External Fixtures
 

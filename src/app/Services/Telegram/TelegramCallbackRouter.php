@@ -6,6 +6,7 @@ use App\Enums\CartStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
+use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
@@ -185,19 +186,7 @@ class TelegramCallbackRouter
         if ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);
         } else {
-            DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => 'manual_payment_instructions',
-                'payment_mode' => 'manual',
-                'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
-                'order_correlation_id' => DogfoodTiming::correlation($order->id),
-            ], fn () => $this->checkoutIntents->sendPaymentInstructions($chatId, $order));
-
-            DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => 'manual_admin_notification',
-                'payment_mode' => 'manual',
-                'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
-                'order_correlation_id' => DogfoodTiming::correlation($order->id),
-            ], fn () => $this->checkoutIntents->notifyAdminAboutManualOrder($order));
+            SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         }
     }
 }

@@ -255,7 +255,7 @@ The helper refuses destructive resets for project names that do not contain `dog
 
 The production smoke checks `/up`, app operational health, and the scheduler heartbeat when `SMOKE_COMPOSE_PROJECT` or `COMPOSE_PROJECT_NAME` is set. The Docker browser smoke validates the deployed HTTP surface, admin login/dashboard, mobile overflow, unauthenticated admin redirect, and Telegram webhook fail-closed behavior. It does **not** prove end-to-end Telegram delivery through Telegram's real network unless the environment is configured with a real bot token, a public HTTPS webhook URL, and a controlled Telegram test account.
 
-The perf dogfood JSON includes `manual_checkout_qr_report`, which breaks the manual QR checkout into queue wait, worker processing, order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage` timings. Use the dominant step from that report before making any checkout optimization.
+The perf dogfood JSON includes `manual_checkout_qr_report`, which breaks the manual QR checkout into default update queue wait, update-worker processing, manual outbound notification job queue wait/processing, order checkout, QR file read, customer `sendPhoto`, and admin `sendMessage` timings. Use the dominant step from that report before making any checkout optimization.
 
 For a repeatable production-like benchmark with pass/fail budgets and no real Telegram sends for synthetic handler scenarios, run:
 
@@ -298,16 +298,26 @@ Hal penting:
 
 ### 5.3 Queue worker
 
-Queue diperlukan untuk pekerjaan background seperti pemrosesan update Telegram dan pengiriman receipt.
+Queue diperlukan untuk pekerjaan background seperti pemrosesan update Telegram, pengiriman instruksi checkout manual, notifikasi admin, dan pengiriman receipt.
 
 Checklist operasional:
 
 - pastikan `QUEUE_CONNECTION` sesuai kebutuhan production; default project menggunakan database queue;
 - jalankan queue worker di process manager seperti Supervisor;
 - monitor tabel/job failed jobs;
-- pastikan queue `notifications` ikut diproses karena receipt dikirim melalui queue tersebut.
+- pastikan queue `default` diproses untuk update Telegram;
+- pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi admin;
+- pastikan queue `notifications` ikut diproses karena receipt dan Sales Proof Post dikirim melalui queue tersebut.
 
-Production-like Docker currently runs one Supervisor-managed queue worker for `notifications,default`. Before increasing worker count or changing queue topology, run the dogfood benchmark from clean dogfood volumes and compare queue wait, worker handler time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs, so the run 1 burst backlog did not reproduce after harness noise was removed. Treat real Telegram outbound latency and manual checkout media/message sends as the first bottleneck unless a newer clean benchmark shows queue wait regressing.
+Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, while `laravel-outbound-worker` handles `telegram-outbound,notifications`. Manual checkout creates the pending order on the update worker, then dispatches customer payment instructions and admin notification to `telegram-outbound` so slow Telegram `sendPhoto`/`sendMessage` calls do not occupy the update worker. Before changing worker counts again, run the dogfood benchmark from clean dogfood volumes and compare queue wait, update-worker handler time, manual outbound job time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs before this split; use newer clean runs for current queue behavior.
+
+Manual checkout notification retry behavior:
+
+- the job is unique per order while queued/running, so duplicate checkout callbacks cannot enqueue concurrent sends for the same order;
+- successful customer QR/photo delivery sets `orders.manual_checkout_customer_notified_at`;
+- successful admin notification delivery, or a configured no-op because no admin chat exists, sets `orders.manual_checkout_admin_notified_at`;
+- if the customer send succeeds and the admin send fails, retry sends only the admin notification;
+- if the customer send fails before the timestamp is written, retry sends the customer instructions again because Telegram delivery was not confirmed durably.
 
 Contoh command umum Laravel:
 
