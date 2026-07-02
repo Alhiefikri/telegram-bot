@@ -8,7 +8,7 @@ Run the production-like Docker benchmark from the repository root:
 ./scripts/benchmark-production.sh
 ```
 
-The command starts the regular `docker-compose.yml` stack with project name `telegram-bot-dogfood`, waits for `/up`, seeds namespaced benchmark fixtures, exercises HTTP/admin/webhook/handler/command scenarios, writes a report, and exits non-zero when budgets or final queue state fail.
+The command starts the regular `docker-compose.yml` stack with project name `telegram-bot-dogfood`, recreates containers so Docker and Nginx config changes are represented, waits for `/up`, seeds namespaced benchmark fixtures, exercises HTTP/admin/webhook/handler/command scenarios, writes a report, and exits non-zero when budgets or final queue state fail.
 
 Reports are written under:
 
@@ -62,6 +62,7 @@ Pakasir reconciliation is run as an operational command. With the default manual
 Defaults:
 
 - `BENCHMARK_HTTP_P95_MS=1000`
+- `BENCHMARK_STOREFRONT_CONCURRENT_P95_MS=500`
 - `BENCHMARK_WEBHOOK_ACK_P95_MS=500`
 - `BENCHMARK_HANDLER_DRAIN_MAX_MS=15000`
 - `BENCHMARK_APP_MEMORY_MAX_MIB=768`
@@ -69,6 +70,7 @@ Defaults:
 The command exits non-zero when:
 
 - HTTP p95 exceeds `BENCHMARK_HTTP_P95_MS`.
+- Storefront `/` concurrency-10 p95 exceeds `BENCHMARK_STOREFRONT_CONCURRENT_P95_MS`.
 - Telegram webhook ACK p95 exceeds `BENCHMARK_WEBHOOK_ACK_P95_MS`.
 - handler queue drain exceeds `BENCHMARK_HANDLER_DRAIN_MAX_MS`;
 - final `jobs` queue depth is not `0`;

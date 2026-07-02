@@ -3,7 +3,7 @@ set -eu
 
 cd /var/www/html
 
-mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache
+mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache public/storefront
 
 artisan() {
     if [ "$(id -u)" = "0" ]; then
@@ -14,11 +14,13 @@ artisan() {
 }
 
 if [ "$(id -u)" = "0" ]; then
-    install -d -o laravel -g laravel -m 0775 storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache
+    install -d -o laravel -g laravel -m 0775 storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache public/storefront
     chown -R laravel:laravel storage/logs
     chmod -R ug+rwX storage/logs
     chmod 2775 storage/logs
 fi
+
+rm -f public/storefront/index.html public/storefront/index.html.tmp
 
 if [ -d /opt/lhiestore-public-build ]; then
     rm -rf public/build

@@ -37,6 +37,7 @@ const env = {
 
 const budgets = {
   httpP95Ms: Number(process.env.BENCHMARK_HTTP_P95_MS ?? 1000),
+  storefrontConcurrentP95Ms: Number(process.env.BENCHMARK_STOREFRONT_CONCURRENT_P95_MS ?? 500),
   webhookAckP95Ms: Number(process.env.BENCHMARK_WEBHOOK_ACK_P95_MS ?? 500),
   handlerDrainMaxMs: Number(process.env.BENCHMARK_HANDLER_DRAIN_MAX_MS ?? 15000),
   appMemoryMaxMiB: Number(process.env.BENCHMARK_APP_MEMORY_MAX_MIB ?? 768),
@@ -48,6 +49,8 @@ const failures = [];
 const expectedStatuses = new Map([
   ['health /up', [200]],
   ['storefront /', [200]],
+  ['storefront warmup /', [200]],
+  ['storefront concurrent /', [200]],
   ['admin login page', [200]],
   ['admin valid login', [200]],
   ['webhook invalid secret', [403]],
@@ -148,6 +151,18 @@ async function timedFetch(name, method, path, options = {}) {
   assertExpectedStatus(sample);
 
   return { response, body, sample };
+}
+
+async function timedConcurrentFetch(name, method, path, total, concurrency, options = {}) {
+  let next = 0;
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (next < total) {
+      next++;
+      await timedFetch(name, method, path, options);
+    }
+  });
+
+  await Promise.all(workers);
 }
 
 function assertExpectedStatus(sample) {
@@ -337,6 +352,7 @@ function markdown(report) {
     '',
     `- Health: ${report.health.ok ? 'passed' : 'failed'}`,
     `- HTTP p95: ${report.summaries.http.p95_ms} ms`,
+    `- Storefront concurrency p95: ${report.summaries.storefront_concurrent.p95_ms} ms`,
     `- Webhook ACK p95: ${report.summaries.webhook_ack.p95_ms} ms`,
     `- Handler drain: ${report.handler_drain.ms} ms`,
     `- Queue depth after run: ${report.final_state.queue_depth}`,
@@ -374,7 +390,7 @@ async function main() {
 
   console.log(`Benchmark output: ${outputDir}`);
   console.log(`Starting Docker Compose project ${project} on ${baseUrl}`);
-  compose(['up', '-d', '--build'], { inherit: true });
+  compose(['up', '-d', '--build', '--force-recreate'], { inherit: true });
   await waitForHealth();
 
   timedCommand('ops:health --db --queue-schema --supervisor', ['php', 'artisan', 'ops:health', '--db', '--queue-schema', '--supervisor']);
@@ -383,6 +399,8 @@ async function main() {
 
   await timedFetch('health /up', 'GET', '/up');
   await timedFetch('storefront /', 'GET', '/');
+  await timedFetch('storefront warmup /', 'GET', '/');
+  await timedConcurrentFetch('storefront concurrent /', 'GET', '/', 100, 10);
   await timedFetch('admin login page', 'GET', '/admin/login');
   await adminLogin();
 
@@ -409,12 +427,16 @@ async function main() {
 
   const summaries = {
     http: summarize((sample) => ['health /up', 'storefront /', 'admin login page', 'admin valid login'].includes(sample.name)),
+    storefront_concurrent: summarize((sample) => sample.name === 'storefront concurrent /'),
     webhook_ack: summarize((sample) => sample.path === '/api/webhook/telegram'),
     all: summarize(() => true),
   };
 
   if (summaries.http.p95_ms !== null && summaries.http.p95_ms > budgets.httpP95Ms) {
     failures.push(`HTTP p95 ${summaries.http.p95_ms} ms exceeded budget ${budgets.httpP95Ms} ms`);
+  }
+  if (summaries.storefront_concurrent.p95_ms !== null && summaries.storefront_concurrent.p95_ms > budgets.storefrontConcurrentP95Ms) {
+    failures.push(`Storefront concurrency p95 ${summaries.storefront_concurrent.p95_ms} ms exceeded budget ${budgets.storefrontConcurrentP95Ms} ms`);
   }
   if (summaries.webhook_ack.p95_ms !== null && summaries.webhook_ack.p95_ms > budgets.webhookAckP95Ms) {
     failures.push(`Webhook ACK p95 ${summaries.webhook_ack.p95_ms} ms exceeded budget ${budgets.webhookAckP95Ms} ms`);

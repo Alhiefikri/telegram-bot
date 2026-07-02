@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\Category;
 use App\Models\Product;
 use App\Observers\ProductAuditObserver;
 use App\Services\Admin\AdminAccessAuthorizer;
@@ -14,6 +15,7 @@ use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
+use App\Storefront\StorefrontResponseCache;
 use App\Support\DogfoodTiming;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -48,6 +50,13 @@ class AppServiceProvider extends ServiceProvider
         $this->validateProductionConfiguration();
 
         Product::observe(ProductAuditObserver::class);
+        $invalidateStorefront = fn () => app(StorefrontResponseCache::class)->invalidate();
+        Product::saved($invalidateStorefront);
+        Product::deleted($invalidateStorefront);
+        Product::restored($invalidateStorefront);
+        Category::saved($invalidateStorefront);
+        Category::deleted($invalidateStorefront);
+        Category::restored($invalidateStorefront);
 
         DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
 

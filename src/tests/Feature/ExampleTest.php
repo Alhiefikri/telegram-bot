@@ -132,6 +132,28 @@ class ExampleTest extends TestCase
             ->assertDontSee('Produk Dari Kategori Terhapus');
     }
 
+    public function test_storefront_response_cache_is_invalidated_when_catalog_products_change(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Canva Pro Lama',
+            'description' => 'Produk awal.',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Canva Pro Lama');
+
+        $product->update(['name' => 'Canva Pro Baru']);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Canva Pro Baru')
+            ->assertDontSee('Canva Pro Lama');
+    }
+
     public function test_storefront_product_cards_show_public_details_links_and_hide_stock_item_secrets(): void
     {
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore');

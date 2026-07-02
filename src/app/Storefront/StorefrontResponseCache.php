@@ -1,0 +1,151 @@
+<?php
+
+namespace App\Storefront;
+
+use App\Support\DogfoodTiming;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
+use Throwable;
+
+class StorefrontResponseCache
+{
+    private const VERSION_KEY = 'storefront.response.version';
+
+    private const CACHE_TTL_MINUTES = 30;
+
+    private const LOCK_SECONDS = 10;
+
+    private const LOCK_WAIT_SECONDS = 5;
+
+    public function __construct(private readonly StorefrontCatalogQuery $catalogQuery) {}
+
+    public function get(string $search): string
+    {
+        $search = trim($search);
+        $startedAt = DogfoodTiming::now();
+        $querySnapshot = DogfoodTiming::querySnapshot();
+        $version = $this->version();
+        $key = $this->key($version, $search);
+
+        $cached = Cache::get($key);
+        if (is_string($cached)) {
+            $this->writeStaticHomepage($search, $cached, onlyIfMissing: true);
+            $this->log($startedAt, $querySnapshot, $search, true, strlen($cached));
+
+            return $cached;
+        }
+
+        try {
+            $lock = Cache::lock($key.':lock', self::LOCK_SECONDS);
+            $lock->block(self::LOCK_WAIT_SECONDS);
+        } catch (LockTimeoutException) {
+            $html = $this->render($search);
+            $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'lock_timeout');
+
+            return $html;
+        }
+
+        try {
+            $cached = Cache::get($key);
+            if (is_string($cached)) {
+                $this->writeStaticHomepage($search, $cached, onlyIfMissing: true);
+                $this->log($startedAt, $querySnapshot, $search, true, strlen($cached), 'after_lock');
+
+                return $cached;
+            }
+
+            $html = $this->render($search);
+            Cache::put($key, $html, now()->addMinutes(self::CACHE_TTL_MINUTES));
+            $this->writeStaticHomepage($search, $html);
+            $this->log($startedAt, $querySnapshot, $search, false, strlen($html));
+
+            return $html;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function invalidate(): void
+    {
+        Cache::add(self::VERSION_KEY, 1, now()->addYears(5));
+        Cache::increment(self::VERSION_KEY);
+        $this->deleteStaticHomepage();
+    }
+
+    private function version(): int
+    {
+        Cache::add(self::VERSION_KEY, 1, now()->addYears(5));
+
+        return (int) Cache::get(self::VERSION_KEY, 1);
+    }
+
+    private function key(int $version, string $search): string
+    {
+        $context = [
+            'search' => $search,
+            'locale' => app()->getLocale(),
+            'app_url' => config('app.url'),
+            'telegram_admin_contact_url' => config('services.telegram.admin_contact_url'),
+            'telegram_admin_username' => config('services.telegram.admin_username'),
+        ];
+
+        return 'storefront.response.v'.$version.'.'.hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));
+    }
+
+    private function render(string $search): string
+    {
+        return view('storefront', $this->catalogQuery->get($search))->render();
+    }
+
+    private function writeStaticHomepage(string $search, string $html, bool $onlyIfMissing = false): void
+    {
+        if ($search !== '') {
+            return;
+        }
+
+        try {
+            $path = public_path('storefront/index.html');
+            if ($onlyIfMissing && File::exists($path)) {
+                return;
+            }
+
+            File::ensureDirectoryExists(dirname($path));
+            $temporaryPath = $path.'.tmp';
+            File::put($temporaryPath, $html);
+            rename($temporaryPath, $path);
+        } catch (Throwable $exception) {
+            DogfoodTiming::log('dogfood.storefront.static_write_failed', [
+                'exception' => $exception::class,
+            ]);
+        }
+    }
+
+    private function deleteStaticHomepage(): void
+    {
+        try {
+            File::delete(public_path('storefront/index.html'), public_path('storefront/index.html.tmp'));
+        } catch (Throwable $exception) {
+            DogfoodTiming::log('dogfood.storefront.static_delete_failed', [
+                'exception' => $exception::class,
+            ]);
+        }
+    }
+
+    private function log(
+        int $startedAt,
+        array $querySnapshot,
+        string $search,
+        bool $cacheHit,
+        int $htmlBytes,
+        ?string $note = null,
+    ): void {
+        DogfoodTiming::log('dogfood.storefront.response', DogfoodTiming::queryDelta($querySnapshot) + [
+            'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            'cache_hit' => $cacheHit,
+            'search_present' => trim($search) !== '',
+            'html_bytes' => $htmlBytes,
+            'note' => $note,
+        ]);
+    }
+}

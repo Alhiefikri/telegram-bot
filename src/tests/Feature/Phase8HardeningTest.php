@@ -96,6 +96,27 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 
+    public function test_production_php_fpm_pool_handles_storefront_concurrency_budget(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+
+        $this->assertStringContainsString('pm.max_children = 12', $dockerfile);
+        $this->assertStringContainsString('pm.start_servers = 4', $dockerfile);
+        $this->assertStringContainsString('pm.max_spare_servers = 8', $dockerfile);
+    }
+
+    public function test_nginx_can_serve_warm_storefront_homepage_without_php_fpm(): void
+    {
+        $nginx = file_get_contents(base_path('../nginx/default.conf'));
+        $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
+
+        $this->assertStringContainsString('location = /', $nginx);
+        $this->assertStringContainsString('try_files /storefront/index.html /index.php?$query_string;', $nginx);
+        $this->assertStringContainsString('if ($args != "")', $nginx);
+        $this->assertStringContainsString('public/storefront', $entrypoint);
+        $this->assertStringContainsString('rm -f public/storefront/index.html', $entrypoint);
+    }
+
     public function test_failed_job_monitor_alerts_when_threshold_exceeded(): void
     {
         DB::table('failed_jobs')->insert([
