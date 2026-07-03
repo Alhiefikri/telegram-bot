@@ -46,6 +46,15 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
     }
 
+    public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
+    {
+        $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
+
+        $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $workflow);
+        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans', $workflow);
+        $this->assertStringNotContainsString('docker compose --env-file .env up -d --build --remove-orphans', $workflow);
+    }
+
     public function test_queue_migration_contains_required_tables(): void
     {
         $migration = database_path('migrations/0001_01_01_000002_create_jobs_table.php');

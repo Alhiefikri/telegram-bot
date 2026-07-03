@@ -5,6 +5,7 @@ on:
 
 env:
   DEPLOY_BRANCH: main
+  COMPOSE_PROJECT_NAME: telegram-bot-prod
 
 permissions:
   contents: read
@@ -112,7 +113,7 @@ jobs:
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" 'bash -s' <<'REMOTE'
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
 
@@ -120,17 +121,17 @@ jobs:
           git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
           git reset --hard "origin/$DEPLOY_BRANCH"
 
-          docker compose --env-file .env config >/dev/null
-          docker compose --env-file .env up -d --build --remove-orphans
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env config >/dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans
 
           for attempt in $(seq 1 36); do
-            if docker compose --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor; then
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor; then
               break
             fi
 
             if [ "$attempt" -eq 36 ]; then
-              docker compose --env-file .env ps
-              docker compose --env-file .env logs --tail=120 app web scheduler
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env logs --tail=120 app web scheduler
               exit 1
             fi
 
@@ -138,18 +139,18 @@ jobs:
           done
 
           for attempt in $(seq 1 36); do
-            if docker compose --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180; then
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180; then
               break
             fi
 
             if [ "$attempt" -eq 36 ]; then
-              docker compose --env-file .env ps
-              docker compose --env-file .env logs --tail=120 scheduler
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env logs --tail=120 scheduler
               exit 1
             fi
 
             sleep 5
           done
 
-          docker compose --env-file .env ps
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
           REMOTE
