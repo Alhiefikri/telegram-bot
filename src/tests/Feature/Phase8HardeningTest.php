@@ -38,6 +38,7 @@ class Phase8HardeningTest extends TestCase
             'services.pakasir.base_url' => 'https://app.pakasir.test',
         ]);
         app()->detectEnvironment(fn () => 'production');
+        app()->instance('request', Request::create('http://store.example/admin/login'));
 
         (new AppServiceProvider(app()))->boot();
 

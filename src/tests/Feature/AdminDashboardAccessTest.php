@@ -47,6 +47,20 @@ class AdminDashboardAccessTest extends TestCase
         $this->assertStringContainsString('no-store', (string) $legacyMiniApp->headers->get('Cache-Control'));
     }
 
+    public function test_admin_session_cookie_supports_telegram_mini_app_webviews(): void
+    {
+        $response = $this->get('/admin/login')
+            ->assertOk();
+
+        $sessionCookie = collect($response->headers->getCookies())
+            ->first(fn ($cookie) => $cookie->getName() === config('session.cookie'));
+
+        $this->assertNotNull($sessionCookie, 'Admin login response should set the Laravel session cookie.');
+        $this->assertTrue($sessionCookie->isSecure(), 'Telegram Mini App WebViews require Secure cookies.');
+        $this->assertSame('none', strtolower((string) $sessionCookie->getSameSite()), 'Telegram Mini App WebViews need SameSite=None so the session survives inside Telegram.');
+        $this->assertTrue((bool) config('session.partitioned'), 'Partitioned cookies keep the admin session available in modern third-party WebView contexts.');
+    }
+
     public function test_admin_route_contracts_keep_existing_paths_methods_names_and_middleware(): void
     {
         $expectedRoutes = [
