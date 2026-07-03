@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\LoginAdminRequest;
 use App\Models\User;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
@@ -27,21 +28,14 @@ class AdminLoginController extends Controller
         return redirect()->route('admin.dashboard');
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(LoginAdminRequest $request): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $querySnapshot = DogfoodTiming::querySnapshot();
         $passwordCheckMs = null;
         $status = 'ok';
 
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-        ], [
-            'email.required' => 'Email admin wajib diisi.',
-            'email.email' => 'Format email tidak valid.',
-            'password.required' => 'Password admin wajib diisi.',
-        ]);
+        $credentials = $request->validated();
 
         $remember = $request->boolean('remember');
 

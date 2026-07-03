@@ -3,36 +3,19 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdatePaymentModeRequest;
 use App\Models\ManualPaymentSetting;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 
 class AdminPaymentModeController extends Controller
 {
-    public function __invoke(Request $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
-        abort_unless((bool) $user->role?->canManagePaymentSettings(), 403);
 
-        $validator = Validator::make($request->all(), [
-            'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir'])],
-        ], [
-            'payment_mode.required' => 'Pilih mode pembayaran.',
-            'payment_mode.in' => 'Mode pembayaran tidak valid.',
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()
-                ->route('admin.dashboard', ['tab' => 'stats'])
-                ->withErrors($validator, 'paymentMode')
-                ->withInput();
-        }
-
-        $mode = (string) $validator->validated()['payment_mode'];
+        $mode = (string) $request->validated('payment_mode');
 
         [$setting, $oldMode] = DB::transaction(function () use ($mode): array {
             $setting = ManualPaymentSetting::query()

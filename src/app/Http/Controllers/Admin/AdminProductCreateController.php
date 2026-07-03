@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreProductRequest;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
@@ -11,40 +12,15 @@ use App\Services\Telegram\TelegramProductNotificationService;
 use App\Support\AdminTelegramDogfoodTiming;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(Request $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
 
-        Gate::authorize('create', Product::class);
-
-        $validator = Validator::make($request->all(), [
-            'name' => ['required', 'string', 'max:255'],
-            'price_amount' => ['required', 'integer', 'min:0'],
-            'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
-            'description' => ['required', 'string', 'max:1000'],
-            'features' => ['nullable', 'string', 'max:2000'],
-            'specifications' => ['nullable', 'string', 'max:2000'],
-        ], [
-            'name.required' => 'Nama produk wajib diisi.',
-            'price_amount.required' => 'Harga wajib diisi.',
-            'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
-            'description.required' => 'Deskripsi singkat wajib diisi.',
-            'category_id.exists' => 'Kategori tidak valid.',
-        ]);
-
-        if ($validator->fails()) {
-            return $forms->productCreateValidationErrors($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
 
         $product = new Product([
             'category_id' => $validated['category_id'] ?? null,

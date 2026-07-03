@@ -3,45 +3,20 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 
 class AdminProductUpdateController extends Controller
 {
-    public function __invoke(Request $request, Product $product, AuditLogger $auditLogger, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
-        Gate::authorize('update', $product);
-
-        $validator = Validator::make($request->all(), [
-            'name' => ['required', 'string', 'max:255'],
-            'price_amount' => ['required', 'integer', 'min:0'],
-            'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
-            'description' => ['required', 'string', 'max:1000'],
-            'features' => ['nullable', 'string', 'max:2000'],
-            'specifications' => ['nullable', 'string', 'max:2000'],
-            'is_active' => ['sometimes', 'boolean'],
-        ], [
-            'name.required' => 'Nama produk wajib diisi.',
-            'price_amount.required' => 'Harga wajib diisi.',
-            'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
-            'description.required' => 'Deskripsi singkat wajib diisi.',
-            'category_id.exists' => 'Kategori tidak valid.',
-        ]);
-
-        if ($validator->fails()) {
-            return $forms->productUpdateValidationErrors($request, $validator, $product);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $oldValues = $product->only(['category_id', 'name', 'description', 'price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
 
         $product->fill([

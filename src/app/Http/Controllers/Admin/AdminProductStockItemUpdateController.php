@@ -3,38 +3,23 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateProductStockItemRequest;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\ProductStockItemManager;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Validator;
 
 class AdminProductStockItemUpdateController extends Controller
 {
-    public function __invoke(Request $request, Product $product, ProductStockItem $stockItem, ProductStockItemManager $stockItemManager, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(UpdateProductStockItemRequest $request, Product $product, ProductStockItem $stockItem, ProductStockItemManager $stockItemManager, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
-
-        Gate::authorize('adjustStock', $product);
-
-        $validator = Validator::make($request->all(), [
-            'secret' => ['required', 'string', 'max:5000'],
-        ], [
-            'secret.required' => 'Isi akun stok tidak boleh kosong.',
-            'secret.max' => 'Isi akun stok maksimal 5000 karakter.',
-        ]);
-
-        if ($validator->fails()) {
-            return $forms->stockItemUpdateValidationErrors($request, $validator);
-        }
 
         $stockItemManager->updateAvailableSecret(
             $product,
             $stockItem,
-            trim((string) $validator->validated()['secret']),
+            trim((string) $request->validated('secret')),
             $user,
             $request->ip(),
         );

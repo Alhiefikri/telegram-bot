@@ -67,6 +67,20 @@ class AdminDashboardPaymentModeTest extends TestCase
         ]);
     }
 
+    public function test_payment_mode_validation_uses_payment_mode_error_bag_and_stats_tab(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Admin,
+        ]));
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'unknown'])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
+
+        $this->assertDatabaseCount('manual_payment_settings', 0);
+    }
+
     public function test_non_manager_role_cannot_toggle_payment_mode(): void
     {
         $this->actingAs(User::factory()->create([

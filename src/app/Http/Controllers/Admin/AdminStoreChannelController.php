@@ -3,32 +3,19 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateStoreChannelRequest;
 use App\Models\StoreChannelSetting;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
 
 class AdminStoreChannelController extends Controller
 {
-    public function __invoke(Request $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdateStoreChannelRequest $request, AuditLogger $auditLogger): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
-        abort_unless((bool) $user->role?->canManagePaymentSettings(), 403);
 
-        $validator = Validator::make($request->all(), [
-            'channel_username' => ['nullable', 'string', 'max:255'],
-            'channel_link' => ['nullable', 'string', 'max:255'],
-            'community_gate_enabled' => ['nullable', 'boolean'],
-            'sales_proof_enabled' => ['nullable', 'boolean'],
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->route('admin.dashboard', ['tab' => 'telegram-channel'])->withErrors($validator, 'storeChannel')->withInput();
-        }
-
-        $data = $validator->validated();
+        $data = $request->validated();
         $data['channel_username'] = trim((string) ($data['channel_username'] ?? '')) ?: null;
         $data['channel_link'] = trim((string) ($data['channel_link'] ?? '')) ?: null;
         if ($data['channel_link'] !== null) {

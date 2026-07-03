@@ -3,26 +3,18 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateProductVisibilityRequest;
 use App\Models\Product;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Validator;
 
 class AdminProductVisibilityController extends Controller
 {
-    public function __invoke(Request $request, Product $product, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdateProductVisibilityRequest $request, Product $product, AuditLogger $auditLogger): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
-        Gate::authorize('update', $product);
-
-        $validator = Validator::make($request->all(), [
-            'is_active' => ['required', 'boolean'],
-        ]);
-
-        $validated = $validator->validate();
+        $validated = $request->validated();
         $oldValues = $product->only(['is_active']);
 
         $product->forceFill(['is_active' => (bool) $validated['is_active']])->save();

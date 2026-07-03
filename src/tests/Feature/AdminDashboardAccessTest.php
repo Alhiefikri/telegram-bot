@@ -183,6 +183,20 @@ class AdminDashboardAccessTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_admin_login_validation_keeps_custom_messages(): void
+    {
+        $this->from(route('admin.login'))
+            ->post(route('admin.login.store'), [
+                'email' => '',
+                'password' => '',
+            ])
+            ->assertRedirect(route('admin.login'))
+            ->assertSessionHasErrors([
+                'email' => 'Email admin wajib diisi.',
+                'password' => 'Password admin wajib diisi.',
+            ]);
+    }
+
     public function test_user_without_admin_access_is_forbidden(): void
     {
         $this->actingAs(User::factory()->create(['role' => null]));
@@ -223,6 +237,19 @@ class AdminDashboardAccessTest extends TestCase
                 'message' => 'Support should not broadcast',
             ])
             ->assertForbidden();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_broadcast_validation_uses_broadcast_error_bag_and_broadcast_tab(): void
+    {
+        Http::fake();
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+            ->from('/admin?tab=broadcast')
+            ->post(route('admin.broadcast.store'), ['message' => ''])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'broadcast']))
+            ->assertSessionHasErrors(['message'], null, 'broadcast');
 
         Http::assertNothingSent();
     }

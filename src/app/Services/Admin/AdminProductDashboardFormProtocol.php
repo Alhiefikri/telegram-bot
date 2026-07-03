@@ -3,9 +3,9 @@
 namespace App\Services\Admin;
 
 use App\Models\Product;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Validator;
 
 class AdminProductDashboardFormProtocol
 {

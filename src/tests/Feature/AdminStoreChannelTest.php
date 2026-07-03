@@ -120,6 +120,20 @@ class AdminStoreChannelTest extends TestCase
         $this->assertNull($setting->last_test_message_id);
     }
 
+    public function test_store_channel_validation_uses_store_channel_error_bag_and_channel_tab(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $this->from('/admin?tab=telegram-channel')
+            ->post(route('admin.store-channel.update'), [
+                'channel_username' => str_repeat('x', 256),
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']))
+            ->assertSessionHasErrors(['channel_username'], null, 'storeChannel');
+
+        $this->assertDatabaseCount('store_channel_settings', 0);
+    }
+
     public function test_non_manager_cannot_update_store_channel(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
