@@ -7,7 +7,7 @@
 @theme {
     --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
     --font-lhie: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-    --font-display: "Space Grotesk", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 
     --color-brand-electric: #0052ff;
     --color-brand-electric-dark: #003ecc;
@@ -94,10 +94,142 @@
         font-family: 'Georgia', serif;
         line-height: 0.6;
     }
+
+    body {
+        background-color: #fcfcfc;
+        color: #09090b;
+        font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    .font-display {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
 }
 
 @layer utilities {
     .storefront-shell {
         background: var(--sf-paper);
+    }
+
+    .bg-grid-pattern {
+        background-color: rgba(15, 23, 42, 0.03);
+    }
+
+    .hover-lift {
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    }
+
+    .hover-lift:hover {
+        transform: translateY(-2px);
+    }
+
+    .reveal-item {
+        opacity: 1;
+        transform: none;
+        transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .js-enabled .reveal-item {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    .js-enabled .reveal-item.revealed {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .animate-marquee {
+        display: flex;
+        width: max-content;
+        animation: marquee 42s linear infinite;
+    }
+
+    .hero-preview-panel {
+        animation: hero-panel-in 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .hero-flow-row {
+        animation: hero-flow 5.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    }
+
+    .hero-flow-row:nth-child(2) {
+        animation-delay: 800ms;
+    }
+
+    .hero-flow-row:nth-child(3) {
+        animation-delay: 1600ms;
+    }
+
+    .counter-number {
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@keyframes marquee {
+    0% {
+        transform: translateX(0%);
+    }
+
+    100% {
+        transform: translateX(-50%);
+    }
+}
+
+@keyframes hero-panel-in {
+    from {
+        opacity: 0;
+        transform: translate3d(0, 20px, 0) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+}
+
+@keyframes hero-flow {
+    0%,
+    100% {
+        opacity: 0.55;
+        transform: translate3d(0, 0, 0);
+    }
+
+    42% {
+        opacity: 1;
+        transform: translate3d(0, -2px, 0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-marquee {
+        animation: none !important;
+        flex-wrap: wrap !important;
+        gap: 2rem !important;
+        justify-content: center !important;
+        transform: none !important;
+        width: auto !important;
+    }
+
+    .js-enabled .reveal-item,
+    .reveal-item {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+    }
+
+    .hover-lift:hover {
+        transform: none !important;
+    }
+
+    .hero-preview-panel,
+    .hero-flow-row {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
     }
 }

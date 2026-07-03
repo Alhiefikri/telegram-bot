@@ -2,10 +2,6 @@
     @if ($featuredProduct)
         @php
             $featuredStock = $storefront->stockAvailable($featuredProduct);
-            $featuredOriginalPrice = $featuredProduct->price_amount * 1.5;
-            $featuredSold = 32 + ($featuredProduct->id * 7) % 25;
-            $featuredTotalStock = $featuredStock + $featuredSold;
-            $progressPercent = min(95, ($featuredSold / $featuredTotalStock) * 100);
             $featuredLink = $storefront->featuredLink($featuredProduct);
         @endphp
 
@@ -28,18 +24,9 @@
 
                     <div class="grid sm:grid-cols-2 gap-6 items-end">
                         <div class="space-y-1">
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs text-slate-400 line-through font-medium">{{ $storefront->idr($featuredOriginalPrice) }}</span>
-                                <span class="text-3xl font-black text-slate-900 tracking-tight font-display">{{ $storefront->idr($featuredProduct->price_amount) }}</span>
-                            </div>
-                            <div class="space-y-1.5 pt-2">
-                                <div class="flex justify-between text-[10px] font-semibold text-slate-500">
-                                    <span>Sisa {{ $featuredStock }}</span>
-                                    <span>Terjual {{ $featuredSold }}</span>
-                                </div>
-                                <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                                    <div class="h-full bg-slate-700 rounded-full" style="width: {{ $progressPercent }}%"></div>
-                                </div>
+                            <span class="text-3xl font-black text-slate-900 tracking-tight font-display">{{ $storefront->idr($featuredProduct->price_amount) }}</span>
+                            <div class="pt-2">
+                                <span class="inline-flex rounded-lg bg-slate-50 px-3 py-1 text-[10px] font-semibold text-slate-600">Sisa {{ $featuredStock }}</span>
                             </div>
                         </div>
 
@@ -48,10 +35,6 @@
                                     class="w-full h-12 bg-[var(--sf-ink)] hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg flex items-center justify-center gap-2 select-none">
                                 Belanja Sekarang
                             </a>
-                            <div class="sr-only">
-                                <span>Pilihan hari ini</span>
-                                <a href="{{ $featuredLink }}">Belanja Sekarang</a>
-                            </div>
                         </div>
                     </div>
                 </div>

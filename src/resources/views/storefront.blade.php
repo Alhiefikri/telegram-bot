@@ -11,7 +11,6 @@
     $supportHref = $storefront->supportHref();
     $supportDestination = $storefront->supportDestination();
     $categoriesWithProducts = $storefront->categoriesWithProducts($categories, $products);
-    $productsWithoutVisibleCategory = $storefront->productsWithoutVisibleCategory($products, $categories);
     $catalogProducts = $products;
     $popularProducts = $storefront->popularProducts($products);
 @endphp
@@ -41,6 +40,5 @@
     </div>
 
     @include('storefront.partials.floating-support')
-    @include('storefront.partials.scripts')
 </body>
 </html>

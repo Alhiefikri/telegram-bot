@@ -38,7 +38,6 @@ class ExampleTest extends TestCase
             ->assertSee('storefront-hero-card', false)
             ->assertSee('storefront-popular-card', false)
             ->assertSee('hero-preview-panel', false)
-            ->assertSee('hover-lift', false)
             ->assertSee('motion-safe:animate-storefront-reveal', false)
             ->assertSee('motion-reduce:animate-none', false)
             ->assertDontSee('bg-[#09090b]', false);
@@ -161,7 +160,7 @@ class ExampleTest extends TestCase
             ->assertSee('Rp175.000')
             ->assertSee('Akses Claude premium untuk kerja harian.')
             ->assertSee('✅ Tersedia')
-            ->assertSee('Order Sekarang')
+            ->assertSee('Sisa 3')
             ->assertSee('https://t.me/lhiestore?text=', false)
             ->assertSee('Support Telegram')
             ->assertDontSee('Produk Nonaktif Rahasia')
@@ -171,17 +170,23 @@ class ExampleTest extends TestCase
 
     public function test_active_categories_render_in_sort_order_while_inactive_and_deleted_stay_hidden(): void
     {
-        Category::factory()->create(['name' => 'AI Tools', 'slug' => 'ai-tools', 'sort_order' => 20, 'is_active' => true]);
-        Category::factory()->create(['name' => 'Akun Premium', 'slug' => 'akun-premium', 'sort_order' => 10, 'is_active' => true]);
-        Category::factory()->create(['name' => 'Kategori Nonaktif', 'slug' => 'kategori-nonaktif', 'is_active' => false]);
+        $later = Category::factory()->create(['name' => 'AI Tools', 'slug' => 'ai-tools', 'sort_order' => 20, 'is_active' => true]);
+        $first = Category::factory()->create(['name' => 'Akun Premium', 'slug' => 'akun-premium', 'sort_order' => 10, 'is_active' => true]);
+        $inactive = Category::factory()->create(['name' => 'Kategori Nonaktif', 'slug' => 'kategori-nonaktif', 'is_active' => false]);
         $deleted = Category::factory()->create(['name' => 'Kategori Terhapus', 'slug' => 'kategori-terhapus']);
+        Product::factory()->create(['category_id' => $later->id, 'name' => 'Produk AI', 'is_active' => true]);
+        Product::factory()->create(['category_id' => $first->id, 'name' => 'Produk Premium', 'is_active' => true]);
+        Product::factory()->create(['category_id' => $inactive->id, 'name' => 'Produk Kategori Nonaktif', 'is_active' => true]);
+        Product::factory()->create(['category_id' => $deleted->id, 'name' => 'Produk Kategori Terhapus', 'is_active' => true]);
         $deleted->delete();
 
         $this->get('/')
             ->assertOk()
             ->assertSeeInOrder(['Akun Premium', 'AI Tools'])
             ->assertDontSee('Kategori Nonaktif')
-            ->assertDontSee('Kategori Terhapus');
+            ->assertDontSee('Kategori Terhapus')
+            ->assertDontSee('Produk Kategori Nonaktif')
+            ->assertDontSee('Produk Kategori Terhapus');
     }
 
     public function test_featured_offer_selects_available_public_product_only(): void
@@ -229,7 +234,6 @@ class ExampleTest extends TestCase
 
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
 
-        $this->assertStringContainsString('Pilihan hari ini', $featuredHtml);
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
@@ -267,7 +271,7 @@ class ExampleTest extends TestCase
         $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
     }
 
-    public function test_category_controls_link_to_ordered_catalog_sections(): void
+    public function test_category_controls_render_ordered_accessible_filter_buttons(): void
     {
         $later = Category::factory()->create(['name' => 'AI Tools', 'slug' => 'ai-tools', 'sort_order' => 20, 'is_active' => true]);
         $first = Category::factory()->create(['name' => 'Akun Premium', 'slug' => 'akun-premium', 'sort_order' => 10, 'is_active' => true]);
@@ -276,9 +280,16 @@ class ExampleTest extends TestCase
 
         $this->get('/')
             ->assertOk()
-            ->assertSeeInOrder(['href="#category-akun-premium"', 'href="#category-ai-tools"'], false)
-            ->assertSee('id="category-akun-premium"', false)
-            ->assertSee('id="category-ai-tools"', false);
+            ->assertSee('aria-label="Filter kategori produk"', false)
+            ->assertSee('aria-controls="storefront-product-grid"', false)
+            ->assertSeeInOrder([
+                'data-filter="'.$first->id.'"',
+                'Akun Premium',
+                'data-filter="'.$later->id.'"',
+                'AI Tools',
+            ], false)
+            ->assertDontSee('href="#category-akun-premium"', false)
+            ->assertDontSee('id="category-akun-premium"', false);
     }
 
     public function test_out_of_stock_products_are_deprioritized_and_not_presented_as_ready_to_buy(): void
@@ -304,9 +315,31 @@ class ExampleTest extends TestCase
             ->assertSee('✅ Tersedia')
             ->assertSee('❌ Stok habis')
             ->assertDontSee('Ready (1)')
-            ->assertSee('Tanya stok ke support')
+            ->assertSee('Stok 0')
             ->assertSee('Belanja Sekarang')
             ->assertSee('href="#support"', false);
+    }
+
+    public function test_storefront_avoids_inline_assets_and_mock_only_presentation(): void
+    {
+        Product::factory()->create([
+            'name' => 'Claude Pro Bulanan',
+            'description' => 'Akses Claude premium untuk kerja harian.',
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $html = $this->get('/')
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringNotContainsString('<style>', $html);
+        $this->assertStringNotContainsString('onclick=', $html);
+        $this->assertStringNotContainsString('Terjual', $html);
+        $this->assertStringNotContainsString('★', $html);
+        $this->assertStringContainsString('Sisa 3', $html);
     }
 
     public function test_catalog_search_filters_public_products(): void

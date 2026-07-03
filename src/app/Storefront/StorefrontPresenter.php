@@ -41,25 +41,12 @@ class StorefrontPresenter
         return $path ? '/storage/'.ltrim($path, '/') : null;
     }
 
-    public function categoryAnchor(Category $category): string
-    {
-        return 'category-'.($category->slug ?: $category->id);
-    }
-
     /**
      * @param  Collection<int, Product>  $products
      */
     public function categoriesWithProducts(Collection $categories, Collection $products): Collection
     {
         return $categories->filter(fn (Category $category) => $products->contains('category_id', $category->id));
-    }
-
-    /**
-     * @param  Collection<int, Product>  $products
-     */
-    public function productsWithoutVisibleCategory(Collection $products, Collection $categories): Collection
-    {
-        return $products->reject(fn (Product $product) => $product->category_id && $categories->contains('id', $product->category_id));
     }
 
     /**

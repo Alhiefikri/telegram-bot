@@ -6,7 +6,7 @@
                 $isNumeric = !empty($cleanedVal) && is_numeric($cleanedVal);
                 $suffix = str_replace($cleanedVal, '', $stat['value']);
             @endphp
-            <div class="reveal-item opacity-0 transform translate-y-8">
+            <div class="reveal-item">
                 @if ($isNumeric)
                     <p class="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-zinc-900 counter-number"
                        data-counter="{{ $cleanedVal }}"

@@ -18,27 +18,14 @@
         </form>
     </div>
 
-    <div class="sr-only" aria-hidden="true" style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;">
-        @foreach ($categories as $category)
-            <a href="#{{ $storefront->categoryAnchor($category) }}">Link {{ $category->name }}</a>
-            <span id="{{ $storefront->categoryAnchor($category) }}"></span>
-        @endforeach
-        @if ($productsWithoutVisibleCategory->isNotEmpty())
-            <span id="category-lainnya"></span>
-        @endif
-        @if ($popularProducts->isEmpty())
-            <span>{{ $copy['hero']['popular_empty'] }}</span>
-        @endif
-    </div>
-
     @if ($categories->isNotEmpty())
         @if ($categoriesWithProducts->isNotEmpty())
-            <div class="flex flex-wrap gap-2 justify-center mb-10">
-                <button class="category-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-slate-900 text-white border border-slate-900 transition-all duration-300 focus:outline-none" data-filter="all">
+            <div class="flex flex-wrap gap-2 justify-center mb-10" aria-label="Filter kategori produk">
+                <button type="button" class="category-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-slate-900 text-white border border-slate-900 transition-all duration-300 focus:outline-none" data-filter="all" aria-pressed="true" aria-controls="storefront-product-grid">
                     Semua
                 </button>
                 @foreach ($categoriesWithProducts as $category)
-                    <button class="category-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:border-slate-300 transition-all duration-300 focus:outline-none" data-filter="{{ $category->id }}">
+                    <button type="button" class="category-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:border-slate-300 transition-all duration-300 focus:outline-none" data-filter="{{ $category->id }}" aria-pressed="false" aria-controls="storefront-product-grid">
                         {{ $category->name }}
                     </button>
                 @endforeach
@@ -51,14 +38,18 @@
         </div>
     @endif
 
-    <div class="grid gap-6 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 storefront-popular-card">
+    @if ($popularProducts->isEmpty())
+        <p class="mb-8 text-center text-xs text-slate-500">{{ $copy['hero']['popular_empty'] }}</p>
+    @endif
+
+    <div id="storefront-product-grid" class="grid gap-6 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 storefront-popular-card">
         @forelse ($catalogProducts as $product)
             @include('storefront.components.product-card', [
                 'product' => $product,
                 'isPopular' => $popularProducts->contains('id', $product->id),
             ])
         @empty
-            <div class="col-span-full py-16 text-center bg-white border border-zinc-200 rounded-2xl p-8 max-w-md mx-auto reveal-item opacity-0 transform translate-y-8">
+            <div class="col-span-full py-16 text-center bg-white border border-zinc-200 rounded-2xl p-8 max-w-md mx-auto reveal-item">
                 <svg class="mx-auto h-10 w-10 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
                 </svg>
