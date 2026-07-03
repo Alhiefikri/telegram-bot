@@ -161,6 +161,7 @@ class AdminDashboardAccessTest extends TestCase
     {
         $admin = User::factory()->create([
             'email' => 'owner@example.test',
+            'name' => 'adminuser',
             'password' => Hash::make('correct-password'),
             'role' => UserRole::Owner,
         ]);
@@ -171,7 +172,7 @@ class AdminDashboardAccessTest extends TestCase
         ])->assertSessionHasErrors(['email']);
 
         $this->post(route('admin.login.store'), [
-            'email' => $admin->email,
+            'email' => 'adminuser',
             'password' => 'correct-password',
         ])->assertRedirect(route('admin.dashboard'));
 
@@ -192,9 +193,40 @@ class AdminDashboardAccessTest extends TestCase
             ])
             ->assertRedirect(route('admin.login'))
             ->assertSessionHasErrors([
-                'email' => 'Email admin wajib diisi.',
+                'email' => 'Login admin wajib diisi.',
                 'password' => 'Password admin wajib diisi.',
             ]);
+    }
+
+    public function test_admin_allow_list_blocks_other_admin_accounts(): void
+    {
+        config(['auth.admin_allowed_logins' => 'adminuser,owner@example.test']);
+
+        $allowed = User::factory()->create([
+            'name' => 'adminuser',
+            'email' => 'owner@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Owner,
+        ]);
+        $blocked = User::factory()->create([
+            'email' => 'other-admin@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Owner,
+        ]);
+
+        $this->actingAs($blocked)
+            ->get('/admin')
+            ->assertForbidden();
+
+        $this->post(route('admin.login.store'), [
+            'email' => $blocked->email,
+            'password' => 'correct-password',
+        ])->assertSessionHasErrors(['email']);
+
+        $this->post(route('admin.login.store'), [
+            'email' => $allowed->name,
+            'password' => 'correct-password',
+        ])->assertRedirect(route('admin.dashboard'));
     }
 
     public function test_user_without_admin_access_is_forbidden(): void

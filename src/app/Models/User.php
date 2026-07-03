@@ -33,6 +33,20 @@ class User extends Authenticatable
 
     public function canAccessAdmin(): bool
     {
-        return $this->role instanceof UserRole;
+        if (! $this->role instanceof UserRole) {
+            return false;
+        }
+
+        $allowedLogins = collect(explode(',', (string) config('auth.admin_allowed_logins')))
+            ->map(fn (string $login) => mb_strtolower(trim($login)))
+            ->filter()
+            ->values();
+
+        if ($allowedLogins->isEmpty()) {
+            return true;
+        }
+
+        return $allowedLogins->contains(mb_strtolower($this->email))
+            || $allowedLogins->contains(mb_strtolower($this->name));
     }
 }

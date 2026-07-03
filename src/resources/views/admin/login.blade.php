@@ -39,16 +39,16 @@
                     @csrf
 
                     <div>
-                        <label for="email" class="font-display text-xs font-black uppercase tracking-wider text-neo-ink">Email admin</label>
+                        <label for="email" class="font-display text-xs font-black uppercase tracking-wider text-neo-ink">Username / email admin</label>
                         <input
                             id="email"
                             name="email"
-                            type="email"
+                            type="text"
                             value="{{ old('email') }}"
-                            autocomplete="email"
+                            autocomplete="username"
                             autofocus
                             class="mt-2 w-full rounded-[1rem] border-[3px] border-neo-ink bg-white px-4 py-3 text-sm font-bold text-neo-ink outline-none transition focus:shadow-[0_0_0_4px_rgba(135,88,222,0.18)]"
-                            placeholder="admin@example.test"
+                            placeholder="username"
                         >
                     </div>
 

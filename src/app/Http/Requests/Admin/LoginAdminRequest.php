@@ -17,7 +17,7 @@ class LoginAdminRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'email'],
+            'email' => ['required', 'string', 'max:255'],
             'password' => ['required', 'string'],
         ];
     }
@@ -28,8 +28,7 @@ class LoginAdminRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'email.required' => 'Email admin wajib diisi.',
-            'email.email' => 'Format email tidak valid.',
+            'email.required' => 'Login admin wajib diisi.',
             'password.required' => 'Password admin wajib diisi.',
         ];
     }

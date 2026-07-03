@@ -10,6 +10,8 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -36,12 +38,23 @@ class AdminLoginController extends Controller
         $status = 'ok';
 
         $credentials = $request->validated();
+        $login = trim($credentials['email']);
+        $throttleKey = Str::lower($login).'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'email' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
+            ]);
+        }
 
         $remember = $request->boolean('remember');
 
         try {
             $user = User::query()
-                ->where('email', $credentials['email'])
+                ->where('email', $login)
+                ->orWhere('name', $login)
                 ->first();
 
             $passwordStartedAt = DogfoodTiming::now();
@@ -50,6 +63,7 @@ class AdminLoginController extends Controller
 
             if (! $user || ! $passwordMatches) {
                 $status = 'bad_credentials';
+                RateLimiter::hit($throttleKey, 60);
 
                 throw ValidationException::withMessages([
                     'email' => 'Email atau password admin tidak cocok.',
@@ -58,6 +72,7 @@ class AdminLoginController extends Controller
 
             if (! $user->canAccessAdmin()) {
                 $status = 'forbidden';
+                RateLimiter::hit($throttleKey, 60);
 
                 throw ValidationException::withMessages([
                     'email' => 'Akun ini tidak punya akses admin.',
@@ -71,6 +86,7 @@ class AdminLoginController extends Controller
             }
 
             Auth::login($user, $remember);
+            RateLimiter::clear($throttleKey);
             $request->session()->regenerate();
 
             return redirect()->intended(route('admin.dashboard'));

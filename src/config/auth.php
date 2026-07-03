@@ -22,6 +22,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin Dashboard Access Allow List
+    |--------------------------------------------------------------------------
+    |
+    | Leave empty to allow every user with an admin role. Set a comma-separated
+    | list of admin emails/usernames to lock the dashboard to specific accounts.
+    |
+    */
+
+    'admin_allowed_logins' => env('ADMIN_ALLOWED_LOGINS'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication Guards
     |--------------------------------------------------------------------------
     |
