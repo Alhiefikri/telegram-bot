@@ -5,16 +5,22 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
+use App\Services\Admin\AdminOrderOperations;
+use App\Services\CartService;
+use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AdminDashboardSalesRenderingTest extends TestCase
@@ -94,6 +100,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
         ]));
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
 
         $sentOrder = Order::factory()->create(['invoice_number' => 'INV-SENT', 'created_at' => now()]);
         OrderItem::factory()->create(['order_id' => $sentOrder->id, 'product_name' => 'Sent Product']);
@@ -163,5 +170,66 @@ class AdminDashboardSalesRenderingTest extends TestCase
 
         $this->post(route('admin.orders.sales-proof.retry', $order))->assertSessionHas('status', 'Sales Proof Post tidak dalam status gagal. Retry tidak dijalankan.');
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
+    }
+
+    public function test_legacy_pending_sales_proof_rows_do_not_render_as_pending_when_feature_is_disabled(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create(['invoice_number' => 'INV-LEGACY-PENDING', 'created_at' => now()]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Legacy Pending Product']);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee('INV-LEGACY-PENDING')
+            ->assertSee('Disabled')
+            ->assertSee('Error: Sales Proof Post is disabled.')
+            ->assertDontSee('>Pending<', false);
+    }
+
+    public function test_manual_payment_approval_without_enabled_sales_proof_does_not_leave_dashboard_pending(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $user = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($user);
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+
+        app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
+
+        $this->assertDatabaseMissing('sales_proof_posts', ['order_id' => $order->id]);
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee($order->invoice_number)
+            ->assertSee('Belum ada post')
+            ->assertDontSee('>Pending<', false);
+    }
+
+    public function test_enabled_sales_proof_without_channel_config_marks_dashboard_failed_instead_of_pending(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true]);
+        $user = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($user);
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+
+        app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
+
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertStringContainsString('Store Channel chat is not configured', (string) $post->last_error);
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee($order->invoice_number)
+            ->assertSee('Failed')
+            ->assertSee('Error: Store Channel chat is not configured')
+            ->assertDontSee('>Pending<', false);
     }
 }

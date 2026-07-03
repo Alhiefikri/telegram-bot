@@ -71,7 +71,15 @@ class PublishSalesProofPost implements ShouldQueue
     {
         $setting = StoreChannelSetting::current();
         $chatId = $setting->telegram_chat_id ?: $setting->channel_username;
-        if (! $setting->sales_proof_enabled || ! $chatId) {
+        if (! $setting->sales_proof_enabled) {
+            $this->markUnpublishable('Sales Proof Post is disabled.');
+
+            return;
+        }
+
+        if (! $chatId) {
+            $this->markUnpublishable('Store Channel chat is not configured.');
+
             return;
         }
 
@@ -107,5 +115,21 @@ class PublishSalesProofPost implements ShouldQueue
                 $this->release($this->backoff()[$post->attempts - 1] ?? 120);
             }
         }
+    }
+
+    private function markUnpublishable(string $message): void
+    {
+        DB::transaction(function () use ($message): void {
+            $post = SalesProofPost::query()->where('order_id', $this->orderId)->lockForUpdate()->first();
+            if (! $post || $post->status === SalesProofPost::STATUS_SENT || (! $this->manualRetry && $post->attempts >= 3)) {
+                return;
+            }
+
+            $post->update([
+                'status' => SalesProofPost::STATUS_FAILED,
+                'attempts' => $post->attempts + 1,
+                'last_error' => mb_substr($message, 0, 1000),
+            ]);
+        });
     }
 }

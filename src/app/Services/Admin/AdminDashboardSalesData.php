@@ -6,10 +6,13 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Support\Money;
 
 final class AdminDashboardSalesData
 {
+    private ?StoreChannelSetting $storeChannelSetting = null;
+
     /**
      * @param  array<string, mixed>  $statusCounts
      * @return array<string, mixed>
@@ -157,6 +160,17 @@ final class AdminDashboardSalesData
             ];
         }
 
+        if (in_array($post->status, [SalesProofPost::STATUS_PENDING, SalesProofPost::STATUS_SENDING], true)) {
+            $setting = $this->storeChannelSetting();
+            if (! $setting->sales_proof_enabled) {
+                return $this->salesProofUnavailableState($order, $post, 'disabled', 'Disabled', 'Sales Proof Post is disabled.', false);
+            }
+
+            if (! ($setting->telegram_chat_id ?: $setting->channel_username)) {
+                return $this->salesProofUnavailableState($order, $post, SalesProofPost::STATUS_FAILED, 'Failed', 'Store Channel chat is not configured.', $canRetrySalesProof);
+            }
+        }
+
         $tone = match ($post->status) {
             SalesProofPost::STATUS_SENT => 'emerald',
             SalesProofPost::STATUS_FAILED => 'rose',
@@ -180,6 +194,25 @@ final class AdminDashboardSalesData
             'can_retry' => $canRetrySalesProof && $post->status === SalesProofPost::STATUS_FAILED,
             'retry_url' => route('admin.orders.sales-proof.retry', $order),
         ];
+    }
+
+    private function salesProofUnavailableState(Order $order, SalesProofPost $post, string $status, string $label, string $lastError, bool $canRetry): array
+    {
+        return [
+            'status' => $status,
+            'label' => $label,
+            'tone' => $status === SalesProofPost::STATUS_FAILED ? 'rose' : 'slate',
+            'message_id' => $post->telegram_message_id,
+            'last_error' => $lastError,
+            'attempts' => $post->attempts,
+            'can_retry' => $canRetry,
+            'retry_url' => route('admin.orders.sales-proof.retry', $order),
+        ];
+    }
+
+    private function storeChannelSetting(): StoreChannelSetting
+    {
+        return $this->storeChannelSetting ??= StoreChannelSetting::current();
     }
 
     private function orderStatusLabel(OrderStatus $status): string

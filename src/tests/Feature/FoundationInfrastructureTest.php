@@ -66,4 +66,23 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('DB_HOST=db', $contents);
         $this->assertStringContainsString('QUEUE_CONNECTION=database', $contents);
     }
+
+    public function test_phpunit_blocks_unfaked_http_requests_to_real_services(): void
+    {
+        $testCase = file_get_contents(base_path('tests/TestCase.php'));
+
+        $this->assertStringContainsString('use Illuminate\Support\Facades\Http;', $testCase);
+        $this->assertStringContainsString('Http::preventStrayRequests();', $testCase);
+    }
+
+    public function test_testing_runtime_uses_fake_telegram_client_outside_phpunit(): void
+    {
+        $provider = file_get_contents(app_path('Providers/AppServiceProvider.php'));
+        $browserSpec = file_get_contents(base_path('tests/Browser/admin-dashboard-responsive.spec.js'));
+
+        $this->assertStringContainsString("\$this->app->environment('testing') && ! \$this->isPhpUnitProcess()", $provider);
+        $this->assertStringContainsString('private function isPhpUnitProcess(): bool', $provider);
+        $this->assertStringContainsString('FakeTelegramBotClient::class', $provider);
+        $this->assertStringContainsString("DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true'", $browserSpec);
+    }
 }

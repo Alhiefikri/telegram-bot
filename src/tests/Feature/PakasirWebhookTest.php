@@ -46,6 +46,7 @@ class PakasirWebhookTest extends TestCase
     public function test_verified_completed_callback_marks_paid_logs_event_and_dispatches_receipt_once(): void
     {
         Queue::fake();
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);

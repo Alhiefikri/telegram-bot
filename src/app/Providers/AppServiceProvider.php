@@ -37,9 +37,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
-        $this->app->bind(TelegramBotClient::class, config('services.dogfood_timing.fake_telegram_outbound')
-            ? FakeTelegramBotClient::class
-            : TelegramBotClient::class);
+        $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
     }
 
     /**
@@ -120,6 +118,25 @@ class AppServiceProvider extends ServiceProvider
         if (((bool) config('services.dogfood_timing.enabled') || (bool) config('services.dogfood_timing.fake_telegram_outbound')) && ! (bool) config('services.dogfood_timing.allow_runtime')) {
             throw new RuntimeException('Dogfood runtime flags are not allowed in production.');
         }
+    }
+
+    private function telegramBotClientClass(): string
+    {
+        if (($this->app->environment('testing') && ! $this->isPhpUnitProcess())
+            || (bool) config('services.dogfood_timing.fake_telegram_outbound')) {
+            return FakeTelegramBotClient::class;
+        }
+
+        return TelegramBotClient::class;
+    }
+
+    private function isPhpUnitProcess(): bool
+    {
+        $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+
+        return defined('PHPUNIT_COMPOSER_INSTALL')
+            || defined('__PHPUNIT_PHAR__')
+            || str_ends_with($script, 'phpunit');
     }
 
     private function isLoopbackHttpRequest(): bool

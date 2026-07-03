@@ -330,6 +330,7 @@ function appEnv() {
         CACHE_STORE: 'array',
         QUEUE_CONNECTION: 'sync',
         MAIL_MAILER: 'log',
+        DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true',
     };
 }
 
