@@ -1,18 +1,27 @@
 .git
 .gitignore
+.agents/
+.commandcode/
+.github/
+.slim/
 .env
 .env.*
 !.env.example
+artifacts/
 backups/
 docs/
 node_modules/
 vendor/
+scripts/
 
 src/.env
 src/.env.*
 !src/.env.example
+src/database/factories/
+src/database/seeders/
 src/vendor/
 src/node_modules/
+src/storage/
 src/storage/logs/
 src/bootstrap/cache/*.php
 src/tests/

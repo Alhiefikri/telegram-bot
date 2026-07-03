@@ -41,8 +41,8 @@ npm --prefix "$APP_DIR" run build
 
 printf 'Preparing isolated SQLite database at %s...\n' "$DB_PATH"
 php "$APP_DIR/artisan" optimize:clear
-php "$APP_DIR/artisan" migrate:fresh --seed --force
-php "$APP_DIR/artisan" tinker --execute="App\\Models\\User::where('email', 'test@example.com')->update(['role' => App\\Enums\\UserRole::Owner]);"
+php "$APP_DIR/artisan" migrate:fresh --force
+php "$APP_DIR/artisan" tinker --execute="App\\Models\\User::updateOrCreate(['email' => 'test@example.com'], ['name' => 'Test User', 'email_verified_at' => now(), 'password' => Illuminate\\Support\\Facades\\Hash::make('password'), 'role' => App\\Enums\\UserRole::Owner]);"
 
 printf 'Starting Laravel server at %s...\n' "$BASE_URL"
 php "$APP_DIR/artisan" serve --host=127.0.0.1 --port="$PORT" >"$SERVER_LOG" 2>&1 &

@@ -24,6 +24,7 @@ export default function adminDashboard(initialState = {}) {
         storeLink: initialState.storeLink ?? '',
         copyState: 'Salin',
         productModalOpen: Boolean(initialState.productModalOpen),
+        productFormSubmitting: false,
         productFormAction: initialState.productStoreUrl ?? '',
         ...emptyProductForm(),
         ...(initialState.productForm ?? {}),
@@ -35,6 +36,7 @@ export default function adminDashboard(initialState = {}) {
         stockProductName: initialState.stockForm?.stockProductName ?? '',
         stockProductStock: initialState.stockForm?.stockProductStock ?? 0,
         stockItems: initialState.stockForm?.stockItems ?? '',
+        stockFormSubmitting: false,
         manageStockModalOpen: false,
         manageStockProductName: '',
         manageStockProductStock: 0,
@@ -55,6 +57,7 @@ export default function adminDashboard(initialState = {}) {
             Object.assign(this, {
                 activeTab: 'produk',
                 productFormAction: initialState.productStoreUrl ?? '',
+                productFormSubmitting: false,
                 ...emptyProductForm(),
                 productModalOpen: true,
             });
@@ -66,6 +69,7 @@ export default function adminDashboard(initialState = {}) {
                 activeTab: 'produk',
                 productModalMode: 'edit',
                 productFormAction: product.updateUrl,
+                productFormSubmitting: false,
                 productFormMethod: 'PATCH',
                 productId: product.id,
                 productName: product.name,
@@ -83,6 +87,16 @@ export default function adminDashboard(initialState = {}) {
         },
 
         closeProductModal() {
+            this.productFormSubmitting = false;
+            this.productModalOpen = false;
+        },
+
+        submitProductForm(event) {
+            if (! event.target.checkValidity()) {
+                return;
+            }
+
+            this.productFormSubmitting = true;
             this.productModalOpen = false;
         },
 
@@ -128,14 +142,25 @@ export default function adminDashboard(initialState = {}) {
                 stockProductName: product.name,
                 stockProductStock: product.stock,
                 stockItems: '',
+                stockFormSubmitting: false,
                 stockModalOpen: true,
             });
             this.$nextTick(() => this.$refs.stockItems?.focus());
         },
 
         closeStockModal() {
+            this.stockFormSubmitting = false;
             this.stockModalOpen = false;
             this.stockItems = '';
+        },
+
+        submitStockForm(event) {
+            if (! event.target.checkValidity()) {
+                return;
+            }
+
+            this.stockFormSubmitting = true;
+            this.stockModalOpen = false;
         },
 
         handleCloseModal(event) {

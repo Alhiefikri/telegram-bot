@@ -23,7 +23,7 @@ test.beforeAll(async () => {
     baseUrl = `http://127.0.0.1:${await findAvailablePort()}`;
 
     runArtisan(['optimize:clear']);
-    runArtisan(['migrate:fresh', '--seed', '--force']);
+    runArtisan(['migrate:fresh', '--force']);
     runArtisan(['tinker', '--execute', responsiveSeedScript]);
 
     serverProcess = spawn('php', ['artisan', 'serve', '--host=127.0.0.1', `--port=${new URL(baseUrl).port}`], {
@@ -84,6 +84,7 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expect(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' })).toBeVisible();
     await expectOneColumn(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' }), page.locator('article:visible').filter({ hasText: 'Browser QA Produk B' }));
     await expectNoDocumentOverflow(page);
+    await submitProductFromMiniAppModal(page);
 
     const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
     await productCard.getByRole('button', { name: 'Kelola' }).click();
@@ -117,6 +118,28 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
     await expectPrimaryActionsAtLeast44px(page);
 });
+
+async function submitProductFromMiniAppModal(page) {
+    const productName = `Mini App Produk ${Date.now()}`;
+
+    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
+    await expect(productModal).toBeVisible();
+    await productModal.locator('#product-name').fill(productName);
+    await productModal.locator('#product-price').fill('33000');
+    await productModal.locator('#product-description').fill('Produk dibuat dari viewport Telegram Mini App.');
+
+    await Promise.all([
+        page.waitForURL(`${baseUrl}/admin?tab=produk`),
+        productModal.getByRole('button', { name: /Submit produk/i }).click(),
+    ]);
+
+    await expect(page.getByRole('dialog', { name: /Tambah produk/i })).toBeHidden();
+    await expect(page.locator('article:visible').filter({ hasText: productName })).toBeVisible();
+    await expect(page.getByText(`Produk ${productName} berhasil dibuat.`)).toBeVisible();
+    await expectNoDocumentOverflow(page);
+    await expectPrimaryActionsAtLeast44px(page);
+}
 
 async function login(page) {
     await page.goto(`${baseUrl}/admin/login`);
@@ -344,13 +367,12 @@ async function waitForServer(url) {
     throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? 'no response'}`);
 }
 
-// Test data setup:
-// DatabaseSeeder creates test@example.com/password as an owner in local/testing.
-// This browser smoke adds two products and two orders so mobile card layout can be
-// measured as a real one-column stack rather than inferred from CSS class names.
+// Test data setup: create one owner plus enough product and order data to measure
+// mobile card layout as a real one-column stack rather than inferred from CSS.
 const responsiveSeedScript = String.raw`
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Order;
@@ -358,6 +380,18 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+
+User::query()->updateOrCreate(
+    ['email' => 'test@example.com'],
+    [
+        'name' => 'Test User',
+        'email_verified_at' => now(),
+        'password' => Hash::make('password'),
+        'role' => UserRole::Owner,
+    ],
+);
 
 $category = Category::query()->firstOrCreate(
     ['slug' => 'browser-responsive-qa'],

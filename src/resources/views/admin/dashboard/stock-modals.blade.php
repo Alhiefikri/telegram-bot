@@ -18,7 +18,7 @@
                         description="1 baris = 1 item"
                         class="w-full max-w-md bg-[#7BD10A]"
                     >
-                        <form method="POST" x-bind:action="stockFormAction" class="space-y-3">
+                        <form method="POST" x-bind:action="stockFormAction" x-on:submit="submitStockForm($event)" class="space-y-3">
                             @csrf
                             <input type="hidden" name="stock_product_id" x-bind:value="stockProductId">
 
@@ -36,6 +36,7 @@
                                     class="neo-textarea"
                                     x-model="stockItems"
                                     x-ref="stockItems"
+                                    required
                                 ></textarea>
 
                                 @error('stock_items', 'stockAdjustment')
@@ -44,11 +45,11 @@
                             </div>
 
                             <div class="grid grid-cols-2 gap-2 pt-1">
-                                <button type="button" class="neo-btn neo-btn-white" x-on:click="closeStockModal()">
+                                <button type="button" class="neo-btn neo-btn-white" x-on:click="closeStockModal()" x-bind:disabled="stockFormSubmitting">
                                     Batal
                                 </button>
-                                <button type="submit" class="neo-btn neo-btn-pink">
-                                    ⚡ Simpan
+                                <button type="submit" class="neo-btn neo-btn-pink" x-bind:disabled="stockFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': stockFormSubmitting }">
+                                    <span x-text="stockFormSubmitting ? 'Menyimpan...' : '⚡ Simpan'">⚡ Simpan</span>
                                 </button>
                             </div>
                         </form>

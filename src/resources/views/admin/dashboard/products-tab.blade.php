@@ -55,12 +55,6 @@
                 </form>
                 @endif
 
-                @if (session('status'))
-                    <div class="animate-slide-up rounded-xl p-4 text-sm font-bold" style="background: #e8ffd4; border: 2px solid #050505; box-shadow: 3px 3px 0px #050505; color: #050505;">
-                        {{ session('status') }}
-                    </div>
-                @endif
-
                 <div class="grid gap-4 md:grid-cols-2">
                     @forelse ($products as $product)
 

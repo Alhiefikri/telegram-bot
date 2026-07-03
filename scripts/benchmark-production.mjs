@@ -21,7 +21,7 @@ const env = {
   APP_DEBUG: process.env.APP_DEBUG ?? 'false',
   APP_URL: process.env.APP_URL ?? 'https://benchmark.localhost.test',
   APP_KEY: process.env.APP_KEY ?? 'base64:MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=',
-  POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD ?? 'dogfood_password',
+  POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD ?? 'benchmark_postgres_password',
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? 'benchmark-token',
   TELEGRAM_WEBHOOK_SECRET: webhookSecret,
   TELEGRAM_ADMIN_CHAT_ID: process.env.TELEGRAM_ADMIN_CHAT_ID ?? '700000001',
@@ -78,12 +78,12 @@ function run(command, args, options = {}) {
 }
 
 function compose(args, options = {}) {
-  return run('docker', ['compose', '-p', project, ...args], options);
+  return run('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, ...args], options);
 }
 
 function timedCommand(name, args, service = 'app') {
   const started = performance.now();
-  const result = spawnSync('docker', ['compose', '-p', project, 'exec', '-T', service, ...args], {
+  const result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-T', service, ...args], {
     cwd: rootDir,
     env,
     encoding: 'utf8',
@@ -110,7 +110,7 @@ async function waitForSchedulerHealth() {
   let result;
 
   do {
-    result = spawnSync('docker', ['compose', '-p', project, 'exec', '-T', 'scheduler', ...args], {
+    result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-T', 'scheduler', ...args], {
       cwd: rootDir,
       env,
       encoding: 'utf8',

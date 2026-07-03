@@ -75,17 +75,20 @@ class Phase8HardeningTest extends TestCase
         $env = file_get_contents(base_path('.env.example'));
         $this->assertStringContainsString('LOG_STACK=daily', $env);
         $this->assertStringContainsString('LOG_DAILY_DAYS=14', $env);
-        $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL=', $env);
+        $this->assertStringNotContainsString('DOGFOOD_TIMING_LOG_CHANNEL=', $env);
     }
 
     public function test_dogfood_timing_uses_container_logs_and_repairs_storage_ownership_in_docker(): void
     {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $compose = file_get_contents(base_path('../docker-compose.benchmark.yml'));
+        $productionCompose = file_get_contents(base_path('../docker-compose.yml'));
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
         $perfScript = file_get_contents(base_path('scripts/perf-dogfood.php'));
         $services = file_get_contents(config_path('services.php'));
 
         $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}', $compose);
+        $this->assertStringContainsString('APP_ALLOW_DOGFOOD_RUNTIME: "true"', $compose);
+        $this->assertStringNotContainsString('DOGFOOD_TIMING_LOG_CHANNEL:', $productionCompose);
         $this->assertStringContainsString('install -d -o laravel -g laravel -m 0775 storage/logs', $entrypoint);
         $this->assertStringContainsString('chown -R laravel:laravel storage/logs', $entrypoint);
         $this->assertStringContainsString('chmod -R ug+rwX storage/logs', $entrypoint);
@@ -162,6 +165,9 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('BASE_URL', $contents);
         $this->assertStringContainsString('/up', $contents);
         $this->assertStringContainsString('curl --fail', $contents);
+        $this->assertStringContainsString('TELEGRAM_MINI_APP_URL', $contents);
+        $this->assertStringContainsString('$BASE_URL/admin', $contents);
+        $this->assertStringContainsString('--location', $contents);
         $this->assertStringContainsString('scheduler php artisan ops:health --scheduler-heartbeat', $contents);
         $this->assertStringContainsString('SCHEDULER_HEALTH_TIMEOUT', $contents);
     }
@@ -213,6 +219,47 @@ class Phase8HardeningTest extends TestCase
 
         $this->assertNotSame(0, $result['exitCode']);
         $this->assertStringNotContainsString('Smoke check passed', $result['stdout']);
+    }
+
+    public function test_smoke_production_script_fails_closed_on_bad_mini_app_dashboard_url(): void
+    {
+        $workspace = $this->makeShellWorkspace('smoke-mini-app');
+        $fakeCurl = $workspace.'/curl';
+
+        try {
+            $this->writeExecutable($fakeCurl, <<<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+url="${@: -1}"
+printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
+case "$url" in
+  */up)
+    exit 0
+    ;;
+  */telegram-mini-app)
+    exit 22
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+SH);
+
+            $curlLog = $workspace.'/curl.log';
+            $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
+                'BASE_URL' => 'https://store.example',
+                'FAKE_CURL_LOG' => $curlLog,
+                'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
+                'TELEGRAM_MINI_APP_URL' => 'https://store.example/telegram-mini-app',
+            ]);
+
+            $this->assertNotSame(0, $result['exitCode']);
+            $this->assertStringContainsString('Smoke check passed: https://store.example/up', $result['stdout']);
+            $this->assertStringNotContainsString('Mini app dashboard smoke check passed', $result['stdout']);
+            $this->assertStringContainsString("https://store.example/up\nhttps://store.example/telegram-mini-app", file_get_contents($curlLog));
+        } finally {
+            File::deleteDirectory($workspace);
+        }
     }
 
     public function test_backup_script_writes_gzip_to_safe_temp_path_with_fake_compose(): void
@@ -328,7 +375,7 @@ SH);
         );
         $this->assertStringContainsString('APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}', $compose);
         $this->assertStringContainsString('APP_OPTIMIZE: ${APP_OPTIMIZE:-true}', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE: false', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE=true', $envExample);
         $this->assertStringContainsString('APP_OPTIMIZE=true', $envExample);
     }

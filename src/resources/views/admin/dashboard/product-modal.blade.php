@@ -26,7 +26,7 @@
                         </div>
                     @endif
 
-                    <form method="POST" x-bind:action="productFormAction" class="space-y-3">
+                    <form method="POST" x-bind:action="productFormAction" x-on:submit="submitProductForm($event)" class="space-y-3">
                         @csrf
                         <input type="hidden" x-bind:name="productFormMethod ? '_method' : ''" x-bind:value="productFormMethod">
                         <input type="hidden" name="product_id" x-bind:value="productId">
@@ -42,6 +42,7 @@
                                 class="neo-input mt-1.5"
                                 x-model="productName"
                                 x-ref="productName"
+                                required
                             >
                             @error('name', 'productCreate')
                                 <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
@@ -64,6 +65,7 @@
                                     placeholder="25000"
                                     class="neo-input mt-1.5"
                                     x-model="productPrice"
+                                    required
                                 >
                                 @error('price_amount', 'productCreate')
                                     <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
@@ -99,6 +101,7 @@
                                 placeholder="Deskripsi singkat produk (1–3 kalimat)..."
                                 class="neo-textarea mt-2"
                                 x-model="productDescription"
+                                required
                             ></textarea>
                             @error('description', 'productCreate')
                                 <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
@@ -175,11 +178,11 @@
                         </div>
 
                         <div class="grid grid-cols-2 gap-2 pt-1">
-                            <button type="button" class="neo-btn neo-btn-white" x-on:click="closeProductModal()">
+                            <button type="button" class="neo-btn neo-btn-white" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">
                                 Batal
                             </button>
-                            <button type="submit" class="neo-btn neo-btn-pink">
-                                <span x-text="productModalMode === 'edit' ? '⚡ Simpan' : '⚡ Submit produk'">⚡ Submit produk</span>
+                            <button type="submit" class="neo-btn neo-btn-pink" x-bind:disabled="productFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': productFormSubmitting }">
+                                <span x-text="productFormSubmitting ? 'Menyimpan...' : (productModalMode === 'edit' ? '⚡ Simpan' : '⚡ Submit produk')">⚡ Submit produk</span>
                             </button>
                         </div>
                     </form>

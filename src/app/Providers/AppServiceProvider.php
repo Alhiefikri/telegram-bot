@@ -101,12 +101,24 @@ class AppServiceProvider extends ServiceProvider
             throw new RuntimeException('Missing required production configuration: '.implode(', ', $missing));
         }
 
+        if ((bool) config('app.debug')) {
+            throw new RuntimeException('APP_DEBUG must be false in production.');
+        }
+
         if (config('services.telegram.payment_mode') === 'pakasir' && ! str_starts_with((string) config('services.pakasir.base_url'), 'https://')) {
             throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
         }
 
         if (! str_starts_with((string) config('app.url'), 'https://')) {
             throw new RuntimeException('APP_URL must use HTTPS in production.');
+        }
+
+        if (in_array(rtrim((string) config('app.url'), '/'), ['https://example.com'], true)) {
+            throw new RuntimeException('APP_URL must not use the example domain in production.');
+        }
+
+        if (((bool) config('services.dogfood_timing.enabled') || (bool) config('services.dogfood_timing.fake_telegram_outbound')) && ! (bool) config('services.dogfood_timing.allow_runtime')) {
+            throw new RuntimeException('Dogfood runtime flags are not allowed in production.');
         }
     }
 

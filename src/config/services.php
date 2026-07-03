@@ -58,6 +58,7 @@ return [
     ],
 
     'dogfood_timing' => [
+        'allow_runtime' => env('APP_ALLOW_DOGFOOD_RUNTIME', false),
         'enabled' => env('DOGFOOD_TIMING_ENABLED', false),
         'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL'),
         'fake_telegram_outbound' => env('DOGFOOD_FAKE_TELEGRAM_OUTBOUND', false),

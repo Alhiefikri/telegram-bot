@@ -2,16 +2,13 @@
 
 namespace Tests\Feature;
 
-use App\Enums\UserRole;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -45,16 +42,6 @@ class ExampleTest extends TestCase
             ->assertSee('motion-safe:animate-storefront-reveal', false)
             ->assertSee('motion-reduce:animate-none', false)
             ->assertDontSee('bg-[#09090b]', false);
-    }
-
-    public function test_local_testing_seeded_user_can_access_admin_panel_with_advertised_credentials(): void
-    {
-        $this->seed();
-
-        $user = User::where('email', 'test@example.com')->firstOrFail();
-
-        $this->assertTrue(Hash::check('password', $user->password));
-        $this->assertSame(UserRole::Owner, $user->role);
     }
 
     public function test_root_path_renders_trust_payment_telegram_and_faq_content_without_dispatching_webhook_jobs(): void

@@ -39,7 +39,7 @@ class FoundationInfrastructureTest extends TestCase
         $script = file_get_contents(base_path('../docker-scheduler.sh'));
 
         $this->assertStringContainsString('scheduler:', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE: false', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('php artisan ops:health --scheduler-heartbeat=180', $compose);
         $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
         $this->assertStringContainsString('php artisan schedule:run', $script);
