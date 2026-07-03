@@ -52,11 +52,11 @@ class Phase7AdminOperationsTest extends TestCase
         $payment = Payment::factory()->create(['order_id' => $order->id]);
 
         $expectations = [
-            'owner' => ['role' => UserRole::Owner, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
-            'admin' => ['role' => UserRole::Admin, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
-            'finance' => ['role' => UserRole::Finance, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'reconcile' => true],
-            'support' => ['role' => UserRole::Support, 'view' => true, 'completeManual' => false, 'resendReceipt' => true, 'reconcile' => false],
-            'null-role' => ['role' => null, 'view' => false, 'completeManual' => false, 'resendReceipt' => false, 'reconcile' => false],
+            'owner' => ['role' => UserRole::Owner, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'retrySalesProof' => true, 'reconcile' => true],
+            'admin' => ['role' => UserRole::Admin, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'retrySalesProof' => true, 'reconcile' => true],
+            'finance' => ['role' => UserRole::Finance, 'view' => true, 'completeManual' => true, 'resendReceipt' => true, 'retrySalesProof' => false, 'reconcile' => true],
+            'support' => ['role' => UserRole::Support, 'view' => true, 'completeManual' => false, 'resendReceipt' => true, 'retrySalesProof' => false, 'reconcile' => false],
+            'null-role' => ['role' => null, 'view' => false, 'completeManual' => false, 'resendReceipt' => false, 'retrySalesProof' => false, 'reconcile' => false],
         ];
 
         foreach ($expectations as $case => $expected) {
@@ -69,6 +69,7 @@ class Phase7AdminOperationsTest extends TestCase
             $this->assertFalse($orderPolicy->delete($user, $order), "{$case} order delete");
             $this->assertSame($expected['completeManual'], $orderPolicy->completeManual($user, $order), "{$case} order completeManual");
             $this->assertSame($expected['resendReceipt'], $orderPolicy->resendReceipt($user, $order), "{$case} order resendReceipt");
+            $this->assertSame($expected['retrySalesProof'], $orderPolicy->retrySalesProof($user, $order), "{$case} order retrySalesProof");
 
             $this->assertSame($expected['view'], $paymentPolicy->viewAny($user), "{$case} payment viewAny");
             $this->assertSame($expected['view'], $paymentPolicy->view($user, $payment), "{$case} payment view");

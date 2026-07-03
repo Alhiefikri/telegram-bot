@@ -20,24 +20,40 @@ use App\Http\Controllers\StorefrontController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
-Route::get('/admin/login', [AdminLoginController::class, 'create'])->name('admin.login');
-Route::post('/admin/login', [AdminLoginController::class, 'store'])->name('admin.login.store');
-Route::post('/admin/logout', [AdminLoginController::class, 'destroy'])->name('admin.logout');
 
-Route::middleware('admin.access')->group(function (): void {
-    Route::get('/admin', AdminDashboardController::class)->name('admin.dashboard');
-    Route::post('/admin/payment-mode', AdminPaymentModeController::class)->name('admin.payment-mode.update');
-    Route::post('/admin/store-channel', AdminStoreChannelController::class)->name('admin.store-channel.update');
-    Route::post('/admin/store-channel/test', AdminStoreChannelTestController::class)->name('admin.store-channel.test');
-    Route::post('/admin/broadcast', AdminBroadcastController::class)->name('admin.broadcast.store');
-    Route::get('/admin/orders/{order}', AdminOrderDetailController::class)->name('admin.orders.show');
-    Route::post('/admin/orders/{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('admin.orders.sales-proof.retry');
-    Route::patch('/admin/products/{product}', AdminProductUpdateController::class)->name('admin.products.update');
-    Route::delete('/admin/products/{product}', AdminProductDeleteController::class)->name('admin.products.destroy');
-    Route::post('/admin/products', AdminProductCreateController::class)->name('admin.products.store');
-    Route::patch('/admin/products/{product}/visibility', AdminProductVisibilityController::class)->name('admin.products.visibility.update');
-    Route::post('/admin/products/{product}/stock', AdminProductStockController::class)->name('admin.products.stock.store');
-    Route::patch('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('admin.products.stock-items.update');
-    Route::delete('/admin/products/{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('admin.products.stock-items.destroy');
-    Route::post('/admin/categories', AdminCategoryCreateController::class)->name('admin.categories.store');
+Route::middleware('admin.no-cache')->group(function (): void {
+    Route::redirect('/telegram-mini-app', '/admin')->name('telegram-mini-app.dashboard');
+
+    Route::prefix('admin')->name('admin.')->group(function (): void {
+        Route::get('login', [AdminLoginController::class, 'create'])->name('login');
+        Route::post('login', [AdminLoginController::class, 'store'])->name('login.store');
+        Route::post('logout', [AdminLoginController::class, 'destroy'])->name('logout');
+
+        Route::middleware('admin.access')->group(function (): void {
+            Route::get('/', AdminDashboardController::class)->name('dashboard');
+            Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
+            Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
+
+            Route::prefix('store-channel')->name('store-channel.')->group(function (): void {
+                Route::post('/', AdminStoreChannelController::class)->name('update');
+                Route::post('test', AdminStoreChannelTestController::class)->name('test');
+            });
+
+            Route::prefix('orders')->name('orders.')->group(function (): void {
+                Route::get('{order}', AdminOrderDetailController::class)->name('show');
+                Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
+            });
+
+            Route::prefix('products')->name('products.')->group(function (): void {
+                Route::post('/', AdminProductCreateController::class)->name('store');
+                Route::patch('{product}', AdminProductUpdateController::class)->name('update');
+                Route::delete('{product}', AdminProductDeleteController::class)->name('destroy');
+                Route::patch('{product}/visibility', AdminProductVisibilityController::class)->name('visibility.update');
+                Route::post('{product}/stock', AdminProductStockController::class)->name('stock.store');
+                Route::patch('{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('stock-items.update');
+                Route::delete('{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('stock-items.destroy');
+            });
+        });
+    });
 });

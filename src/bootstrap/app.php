@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthorizeAdminAccess;
+use App\Http\Middleware\PreventAdminMiniAppCache;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -16,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'admin.access' => AuthorizeAdminAccess::class,
+            'admin.no-cache' => PreventAdminMiniAppCache::class,
         ]);
 
         $trustedProxies = array_values(array_filter(array_map(

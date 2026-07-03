@@ -9,13 +9,15 @@ use App\Models\SalesProofPost;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class AdminSalesProofRetryController extends Controller
 {
     public function __invoke(Request $request, Order $order, AuditLogger $auditLogger): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
-        abort_unless((bool) $user->role?->canManagePaymentSettings(), 403);
+
+        Gate::authorize('retrySalesProof', $order);
 
         $post = $order->salesProofPost()->first();
         if (! $post || $post->status !== SalesProofPost::STATUS_FAILED) {

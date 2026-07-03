@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Support\Money;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
 
 class AdminOrderDetailController extends Controller
@@ -14,7 +15,8 @@ class AdminOrderDetailController extends Controller
     public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData): View
     {
         $user = $request->attributes->get('adminUser');
-        abort_unless((bool) $user->role?->canViewOrdersAndPayments(), 403);
+
+        Gate::authorize('view', $order);
 
         $order->load(['customer', 'orderItems', 'payments', 'salesProofPost']);
 

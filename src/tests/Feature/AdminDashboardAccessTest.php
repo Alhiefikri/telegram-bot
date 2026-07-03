@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 class AdminDashboardAccessTest extends TestCase
@@ -22,6 +23,138 @@ class AdminDashboardAccessTest extends TestCase
     {
         $this->get('/admin')
             ->assertRedirect('/admin/login');
+    }
+
+    public function test_legacy_telegram_mini_app_dashboard_path_redirects_to_admin_dashboard(): void
+    {
+        $this->get('/telegram-mini-app')
+            ->assertRedirect('/admin');
+    }
+
+    public function test_admin_dashboard_responses_are_not_cached_by_mini_app_webviews(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $dashboard = $this->actingAs($owner)
+            ->get('/admin?tab=produk')
+            ->assertOk();
+
+        $this->assertStringContainsString('no-store', (string) $dashboard->headers->get('Cache-Control'));
+
+        $legacyMiniApp = $this->get('/telegram-mini-app')
+            ->assertRedirect('/admin');
+
+        $this->assertStringContainsString('no-store', (string) $legacyMiniApp->headers->get('Cache-Control'));
+    }
+
+    public function test_admin_route_contracts_keep_existing_paths_methods_names_and_middleware(): void
+    {
+        $expectedRoutes = [
+            'telegram-mini-app.dashboard' => [
+                'uri' => 'telegram-mini-app',
+                'methods' => ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+                'middleware' => ['web', 'admin.no-cache'],
+            ],
+            'admin.dashboard' => [
+                'uri' => 'admin',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.login' => [
+                'uri' => 'admin/login',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache'],
+            ],
+            'admin.login.store' => [
+                'uri' => 'admin/login',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache'],
+            ],
+            'admin.logout' => [
+                'uri' => 'admin/logout',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache'],
+            ],
+            'admin.payment-mode.update' => [
+                'uri' => 'admin/payment-mode',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.store-channel.update' => [
+                'uri' => 'admin/store-channel',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.store-channel.test' => [
+                'uri' => 'admin/store-channel/test',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.broadcast.store' => [
+                'uri' => 'admin/broadcast',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.orders.show' => [
+                'uri' => 'admin/orders/{order}',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.orders.sales-proof.retry' => [
+                'uri' => 'admin/orders/{order}/sales-proof/retry',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.store' => [
+                'uri' => 'admin/products',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.update' => [
+                'uri' => 'admin/products/{product}',
+                'methods' => ['PATCH'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.destroy' => [
+                'uri' => 'admin/products/{product}',
+                'methods' => ['DELETE'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.visibility.update' => [
+                'uri' => 'admin/products/{product}/visibility',
+                'methods' => ['PATCH'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.stock.store' => [
+                'uri' => 'admin/products/{product}/stock',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.stock-items.update' => [
+                'uri' => 'admin/products/{product}/stock-items/{stockItem}',
+                'methods' => ['PATCH'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.products.stock-items.destroy' => [
+                'uri' => 'admin/products/{product}/stock-items/{stockItem}',
+                'methods' => ['DELETE'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.categories.store' => [
+                'uri' => 'admin/categories',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+        ];
+
+        foreach ($expectedRoutes as $name => $expected) {
+            $route = Route::getRoutes()->getByName($name);
+
+            $this->assertNotNull($route, "{$name} route exists");
+            $this->assertSame($expected['uri'], $route->uri(), "{$name} uri");
+            $this->assertSame($expected['methods'], $route->methods(), "{$name} methods");
+            $this->assertSame($expected['middleware'], $route->gatherMiddleware(), "{$name} middleware");
+        }
     }
 
     public function test_admin_login_rejects_bad_credentials_and_logout_returns_to_login(): void
