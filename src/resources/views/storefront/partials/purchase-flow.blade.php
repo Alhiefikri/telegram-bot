@@ -28,4 +28,15 @@
             <p class="mt-3 text-sm text-zinc-500 leading-relaxed">{{ $copy['telegram_support']['body'] }}</p>
         </div>
     </div>
+
+    <div class="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <p class="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Panduan login</p>
+            <h3 class="text-base font-bold text-zinc-900">Bingung cara masuk atau amankan akun?</h3>
+            <p class="mt-2 text-sm text-zinc-500 leading-relaxed">Setelah akun dikirim, ikuti panduan login dan pengamanan akun agar akses tetap aman.</p>
+        </div>
+        <a href="{{ route('storefront.login-guide') }}" class="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-bold text-white hover:bg-slate-700 transition-colors">
+            Lihat Panduan
+        </a>
+    </div>
 </section>

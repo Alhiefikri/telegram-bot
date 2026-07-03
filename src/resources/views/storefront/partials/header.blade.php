@@ -8,6 +8,7 @@
         <nav class="hidden md:flex items-center gap-1.5 p-1 bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 border border-slate-200">
             <a href="#products" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Produk</a>
             <a href="#cara-beli" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Cara Beli</a>
+            <a href="{{ route('storefront.login-guide') }}" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Panduan Login</a>
         </nav>
 
         <div class="flex items-center gap-3">
@@ -26,6 +27,7 @@
         <nav class="flex flex-col gap-4 text-sm font-bold text-slate-600">
             <a href="#products" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Produk</a>
             <a href="#cara-beli" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Cara Beli</a>
+            <a href="{{ route('storefront.login-guide') }}" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Panduan Login</a>
             <a href="#faq" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">FAQ</a>
             <a href="#support" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Support</a>
             <a href="#products" class="mt-2 inline-flex items-center justify-center rounded-full bg-slate-900 py-3 text-center text-xs font-bold text-white">

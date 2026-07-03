@@ -82,18 +82,24 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
-        foreach (['admin.product_create', 'admin.product_stock_add'] as $action) {
-            $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === $action
-                && $context['recipient_count'] === 1
-                && $context['sent'] === 1
-                && $context['failed'] === 0
-                && $context['skipped'] === false
-                && array_key_exists('request_duration_ms', $context)
-                && array_key_exists('telegram_total_duration_ms', $context)
-                && count($context['per_recipient_telegram']) === 1
-                && $context['per_recipient_telegram'][0]['status'] === 'ok'
-            );
-        }
+        $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.product_create'
+            && $context['recipient_count'] === 0
+            && $context['sent'] === 0
+            && $context['failed'] === 0
+            && $context['skipped'] === true
+            && array_key_exists('request_duration_ms', $context)
+        );
+
+        $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.product_stock_add'
+            && $context['recipient_count'] === 1
+            && $context['sent'] === 1
+            && $context['failed'] === 0
+            && $context['skipped'] === false
+            && array_key_exists('request_duration_ms', $context)
+            && array_key_exists('telegram_total_duration_ms', $context)
+            && count($context['per_recipient_telegram']) === 1
+            && $context['per_recipient_telegram'][0]['status'] === 'ok'
+        );
 
         $this->assertDogfoodLogsDoNotContain($logs, [
             '333',

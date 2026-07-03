@@ -52,9 +52,11 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->assertSee('Produk')
             ->assertSee('Cara Beli')
+            ->assertSee('Panduan Login')
             ->assertSee('FAQ')
             ->assertSee('Support')
             ->assertSee('Belanja akun AI dalam tiga langkah')
+            ->assertSee('/panduan-login-akun', false)
             ->assertSee('Setelah pembayaran terkonfirmasi')
             ->assertSee('Pengiriman digital')
             ->assertSee('Bot dan admin Telegram membantu status order')
@@ -66,6 +68,22 @@ class ExampleTest extends TestCase
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);
         Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
+    public function test_login_guide_page_explains_login_security_and_serves_pdf(): void
+    {
+        $this->get('/panduan-login-akun')
+            ->assertOk()
+            ->assertSee('Cara masuk dan amankan akun digital kamu')
+            ->assertSee('Download PDF')
+            ->assertSee('/panduan-login-akun/pdf', false)
+            ->assertSee('Kalau gagal masuk');
+
+        $this->get('/cara-loginoutlook')->assertRedirect('/panduan-login-akun');
+
+        $this->get('/panduan-login-akun/pdf')
+            ->assertOk()
+            ->assertDownload('Tutorial_Login_Outlook_iCloud_Google_Authenticator_LHIESTORE.pdf');
     }
 
     public function test_empty_catalog_renders_customer_facing_state(): void

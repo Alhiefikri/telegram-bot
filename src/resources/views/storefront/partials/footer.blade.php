@@ -15,6 +15,7 @@
             <ul class="space-y-3 text-sm text-zinc-500">
                 <li><a href="#products" class="hover:text-zinc-900 transition-colors">Katalog Lengkap</a></li>
                 <li><a href="#cara-beli" class="hover:text-zinc-900 transition-colors">Cara Pembelian</a></li>
+                <li><a href="{{ route('storefront.login-guide') }}" class="hover:text-zinc-900 transition-colors">Panduan Login</a></li>
                 <li><a href="#faq" class="hover:text-zinc-900 transition-colors">FAQ</a></li>
             </ul>
         </div>

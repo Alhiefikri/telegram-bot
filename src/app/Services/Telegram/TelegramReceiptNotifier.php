@@ -60,6 +60,9 @@ class TelegramReceiptNotifier
                 $lines[] = '';
                 $lines[] = '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.';
                 $lines[] = '';
+                $lines[] = 'Bingung cara masuk dan amankan akunnya?';
+                $lines[] = 'Panduan: '.route('storefront.login-guide');
+                $lines[] = '';
                 $lines[] = 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.';
                 $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
             } else {
@@ -70,7 +73,7 @@ class TelegramReceiptNotifier
                 $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
             }
 
-            $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines));
+            $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup());
             $receiptSentAt = Order::whereKey($claimed->id);
             if (! $force) {
                 $receiptSentAt->whereNull('telegram_receipt_sent_at');
@@ -101,5 +104,14 @@ class TelegramReceiptNotifier
         }
 
         return $lines;
+    }
+
+    private function receiptReplyMarkup(): array
+    {
+        return [
+            'inline_keyboard' => [[
+                ['text' => 'Panduan Login & Keamanan', 'url' => route('storefront.login-guide')],
+            ]],
+        ];
     }
 }

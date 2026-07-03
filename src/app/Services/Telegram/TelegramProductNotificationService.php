@@ -20,6 +20,9 @@ class TelegramProductNotificationService
         }
 
         $availableStock = max(0, $product->stock - $product->reserved_stock);
+        if ($availableStock < 1) {
+            return $this->skippedResult();
+        }
 
         return $this->broadcast->sendToActiveUsers(implode("\n", [
             'Produk baru sudah masuk nih 👀',
