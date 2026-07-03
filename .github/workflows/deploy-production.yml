@@ -70,10 +70,10 @@ jobs:
           php artisan key:generate --ansi
           mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
 
-      - name: Run tests and build assets
+      - name: Build assets and run tests
         run: |
-          composer test
           ../scripts/smoke-admin-assets.sh
+          composer test
 
       - name: Build production Docker image
         working-directory: ${{ github.workspace }}
