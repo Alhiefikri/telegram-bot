@@ -2,28 +2,19 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PRODUCT CREATE/EDIT MODAL                         ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div
-                x-cloak
-                x-show="productModalOpen"
-                x-transition.opacity
-                x-on:keydown.escape.window="closeProductModal()"
-                class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
-                style="background: rgba(5,5,5,0.6);"
-            >
-                <div class="absolute inset-0" x-on:click="closeProductModal()" aria-hidden="true"></div>
-
+            <x-admin-dashboard.modal-backdrop show="productModalOpen" close="closeProductModal()">
                 <x-admin-dashboard.modal-shell
                     id="product-modal"
                     title="Tambah produk"
                     title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
                     description="Nama, harga, kategori, deskripsi."
                     class="max-h-[92vh] w-full max-w-xl overflow-y-auto"
-                    x-bind:style="{ backgroundColor: productModalMode === 'edit' ? '#fee648' : '#7BD10A' }"
+                    x-bind:class="productModalMode === 'edit' ? '!bg-[#fee648]' : '!bg-[#7BD10A]'"
                 >
                     @if ($errors->productCreate->any() || $errors->productUpdate->any())
-                        <div class="mb-3 animate-slide-up rounded-[0.6rem] p-3 text-sm font-bold text-white" style="background: #ef4444; border: 3px solid #050505; box-shadow: 3px 3px 0px #050505;">
+                        <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">
                             Periksa kembali field produk yang ditandai.
-                        </div>
+                        </x-admin-dashboard.notice>
                     @endif
 
                     <form method="POST" x-bind:action="productFormAction" x-on:submit="submitProductForm($event)" class="space-y-3">
@@ -33,29 +24,28 @@
                         <input type="hidden" name="is_active" x-bind:value="productIsActive ? 1 : 0">
 
                         <div>
-                            <label for="product-name" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Nama produk</label>
-                            <input
-                                type="text"
+                            <x-admin-dashboard.field-label for="product-name">Nama produk</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.input
                                 id="product-name"
                                 name="name"
                                 placeholder="NETFLIX PREMIUM"
-                                class="neo-input mt-1.5"
+                                class="mt-1.5"
                                 x-model="productName"
                                 x-ref="productName"
                                 required
-                            >
+                            />
                             @error('name', 'productCreate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                             @error('name', 'productUpdate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </div>
 
                         <div class="grid gap-3 sm:grid-cols-2">
                             <div>
-                                <label for="product-price" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Harga (IDR)</label>
-                                <input
+                                <x-admin-dashboard.field-label for="product-price">Harga (IDR)</x-admin-dashboard.field-label>
+                                <x-admin-dashboard.input
                                     type="number"
                                     id="product-price"
                                     name="price_amount"
@@ -63,129 +53,129 @@
                                     step="1"
                                     inputmode="numeric"
                                     placeholder="25000"
-                                    class="neo-input mt-1.5"
+                                    class="mt-1.5"
                                     x-model="productPrice"
                                     required
-                                >
+                                />
                                 @error('price_amount', 'productCreate')
-                                    <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                 @enderror
                                 @error('price_amount', 'productUpdate')
-                                    <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                 @enderror
                             </div>
 
                             <div>
-                                <label for="product-category" class="font-display text-[11px] font-extrabold uppercase tracking-wider" style="color: #050505;">Kategori</label>
-                                <select id="product-category" name="category_id" class="neo-select mt-1.5" x-model="productCategoryId">
+                                <x-admin-dashboard.field-label for="product-category">Kategori</x-admin-dashboard.field-label>
+                                <x-admin-dashboard.select id="product-category" name="category_id" class="mt-1.5" x-model="productCategoryId">
                                     <option value="">— Pilih —</option>
                                     @foreach ($categoryOptions as $category)
                                         <option value="{{ $category['id'] }}">{{ $category['name'] }}</option>
                                     @endforeach
-                                </select>
+                                </x-admin-dashboard.select>
                                 @error('category_id', 'productCreate')
-                                    <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                 @enderror
                                 @error('category_id', 'productUpdate')
-                                    <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                 @enderror
                             </div>
                         </div>
 
-                        <div class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
-                            <label for="product-description" class="font-display text-sm font-extrabold text-neo-ink">📝 Deskripsi singkat</label>
-                            <textarea
+                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi singkat</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.textarea
                                 id="product-description"
                                 name="description"
                                 rows="3"
                                 placeholder="Deskripsi singkat produk (1–3 kalimat)..."
-                                class="neo-textarea mt-2"
+                                class="mt-2"
                                 x-model="productDescription"
                                 required
-                            ></textarea>
+                            />
                             @error('description', 'productCreate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                             @error('description', 'productUpdate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
-                        </div>
+                        </x-admin-dashboard.card>
 
                         <div class="grid gap-3">
-                            <section class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
+                            <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <p class="font-display text-sm font-extrabold text-neo-ink">✨ Fitur utama</p>
                                         <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productFeaturesOpen">Tap “+ tambah” untuk menambah fitur.</p>
                                     </div>
-                                    <button
+                                    <x-admin-dashboard.button
                                         type="button"
-                                        class="product-action-btn min-h-9 px-2 py-1 text-[10px]"
-                                        style="background: #7BD10A; color: #050505;"
+                                        variant="primary"
+                                        size="sm"
+                                        class="min-h-9 px-2 py-1 text-[10px]"
                                         x-on:click="productFeaturesOpen = ! productFeaturesOpen"
                                         x-text="productFeaturesOpen ? 'Tutup' : '+ Tambah'"
-                                    >+ Tambah</button>
+                                    >+ Tambah</x-admin-dashboard.button>
                                 </div>
 
                                 <div class="mt-3" x-show="productFeaturesOpen" x-transition>
-                                    <textarea
+                                    <x-admin-dashboard.textarea
                                         name="features"
                                         rows="3"
                                         placeholder="Satu fitur per baris"
-                                        class="neo-textarea"
                                         x-model="productFeatures"
-                                    ></textarea>
+                                    />
                                     @error('features', 'productCreate')
-                                        <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                     @enderror
                                     @error('features', 'productUpdate')
-                                        <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                     @enderror
                                 </div>
-                            </section>
+                            </x-admin-dashboard.card>
 
-                            <section class="rounded-[0.6rem] border-[3px] border-neo-ink p-3">
+                            <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <p class="font-display text-sm font-extrabold text-neo-ink">🌐 Paket / spesifikasi</p>
                                         <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productSpecificationsOpen">Opsional. Cocok untuk produk multi-tier.</p>
                                     </div>
-                                    <button
+                                    <x-admin-dashboard.button
                                         type="button"
-                                        class="product-action-btn min-h-9 px-2 py-1 text-[10px]"
-                                        style="background: #16b4ca; color: #050505;"
+                                        variant="secondary"
+                                        size="sm"
+                                        class="min-h-9 px-2 py-1 text-[10px]"
                                         x-on:click="productSpecificationsOpen = ! productSpecificationsOpen"
                                         x-text="productSpecificationsOpen ? 'Tutup' : '+ Paket'"
-                                    >+ Paket</button>
+                                    >+ Paket</x-admin-dashboard.button>
                                 </div>
 
                                 <div class="mt-3" x-show="productSpecificationsOpen" x-transition>
-                                    <textarea
+                                    <x-admin-dashboard.textarea
                                         name="specifications"
                                         rows="3"
                                         placeholder="Satu spesifikasi per baris"
-                                        class="neo-textarea"
                                         x-model="productSpecifications"
-                                    ></textarea>
+                                    />
                                     @error('specifications', 'productCreate')
-                                        <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                     @enderror
                                     @error('specifications', 'productUpdate')
-                                        <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                     @enderror
                                 </div>
-                            </section>
+                            </x-admin-dashboard.card>
                         </div>
 
                         <div class="grid grid-cols-2 gap-2 pt-1">
-                            <button type="button" class="neo-btn neo-btn-white" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">
+                            <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">
                                 Batal
-                            </button>
-                            <button type="submit" class="neo-btn neo-btn-pink" x-bind:disabled="productFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': productFormSubmitting }">
+                            </x-admin-dashboard.button>
+                            <x-admin-dashboard.button type="submit" variant="pink" x-bind:disabled="productFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': productFormSubmitting }">
                                 <span x-text="productFormSubmitting ? 'Menyimpan...' : (productModalMode === 'edit' ? '⚡ Simpan' : '⚡ Submit produk')">⚡ Submit produk</span>
-                            </button>
+                            </x-admin-dashboard.button>
                         </div>
                     </form>
                 </x-admin-dashboard.modal-shell>
-            </div>
+            </x-admin-dashboard.modal-backdrop>
             @endif

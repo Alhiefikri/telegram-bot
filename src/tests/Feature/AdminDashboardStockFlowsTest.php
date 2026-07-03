@@ -55,7 +55,10 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('available@example.test|pass')
             ->assertDontSee('claimed@example.test|pass')
             ->assertSee('email@example.com|password', false)
-            ->assertSee('background: #fecaca; color: #dc2626;', false)
+            ->assertSee('admin-dashboard-action', false)
+            ->assertSee('bg-[#ef4444] text-white', false)
+            ->assertDontSee('background: #fecaca; color: #dc2626;', false)
+            ->assertDontSee('product-action-btn', false)
             ->assertDontSee('@js(', false)
             ->assertDontSee('fi-form', false)
             ->assertDontSee('fi-modal', false);

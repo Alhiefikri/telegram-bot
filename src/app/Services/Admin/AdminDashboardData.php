@@ -170,14 +170,6 @@ final class AdminDashboardData
             },
             'count' => $count,
             'tone' => $tone,
-            'card_class' => match ($tone) {
-                'emerald' => 'stat-card-green',
-                'blue' => 'stat-card-cyan',
-                'amber' => 'stat-card-yellow',
-                'rose' => 'stat-card-pink',
-                default => 'stat-card-purple',
-            },
-            'inline_style' => $tone === 'slate' ? 'background: #fff;' : null,
         ];
     }
 }

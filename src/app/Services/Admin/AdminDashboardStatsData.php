@@ -78,7 +78,6 @@ final class AdminDashboardStatsData
             'value' => $value,
             'hint' => $hint,
             'tone' => $tone,
-            'card_class' => $this->toneCardClass($tone),
         ];
     }
 
@@ -114,8 +113,6 @@ final class AdminDashboardStatsData
             'update_url' => route('admin.payment-mode.update'),
             'status_badge' => [
                 'label' => $isPakasirEnabled ? 'AKTIF' : 'NONAKTIF',
-                'background' => $isPakasirEnabled ? '#e8ffd4' : '#fce4f0',
-                'dot' => $isPakasirEnabled ? '#7BD10A' : '#ef4444',
             ],
         ];
     }
@@ -160,16 +157,5 @@ final class AdminDashboardStatsData
                 ];
             })
             ->all();
-    }
-
-    private function toneCardClass(string $tone): string
-    {
-        return match ($tone) {
-            'emerald' => 'stat-card-green',
-            'blue' => 'stat-card-cyan',
-            'amber' => 'stat-card-yellow',
-            'rose' => 'stat-card-pink',
-            default => 'stat-card-purple',
-        };
     }
 }

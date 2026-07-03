@@ -6,16 +6,16 @@
     <title>Detail Order {{ $order->invoice_number }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="min-h-screen" style="background: #f8fafc; color: #050505;">
+<body class="min-h-screen bg-brand-bg text-neo-ink">
     <main class="mx-auto max-w-3xl p-4 sm:p-6">
-        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-bold underline" style="color: #334155;">← Kembali ke Penjualan</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke Penjualan</a>
 
-        <section class="mt-4 rounded-2xl bg-white p-5" style="border: 2px solid #050505; box-shadow: 4px 4px 0 #050505;">
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-wider" style="color: #64748b;">Detail Order</p>
+                    <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Detail Order</p>
                     <h1 class="mt-1 text-2xl font-black">{{ $order->invoice_number }}</h1>
-                    <p class="mt-1 text-sm font-semibold" style="color: #475569;">{{ $customerLabel }} · {{ $order->created_at?->format('d M Y H:i') }}</p>
+                    <p class="mt-1 text-sm font-semibold text-[#475569]">{{ $customerLabel }} · {{ $order->created_at?->format('d M Y H:i') }}</p>
                 </div>
                 <div class="text-right text-sm font-bold">
                     <p>{{ $order->order_status->value }} / {{ $order->payment_status->value }}</p>
@@ -24,8 +24,8 @@
             </div>
 
             <div class="mt-5 grid gap-3 sm:grid-cols-2">
-                <div class="rounded-xl p-3" style="background: #f1f5f9; border: 1px solid #e2e8f0;">
-                    <p class="text-xs font-bold uppercase" style="color: #64748b;">Item</p>
+                <x-admin-dashboard.card padding="sm" tone="slate" shadow="none" class="rounded-xl border">
+                    <p class="text-xs font-bold uppercase text-brand-muted">Item</p>
                     <ul class="mt-2 space-y-1 text-sm font-semibold">
                         @forelse ($order->orderItems as $item)
                             <li>{{ $item->product_name }} × {{ $item->quantity }}</li>
@@ -33,10 +33,10 @@
                             <li>Belum ada item.</li>
                         @endforelse
                     </ul>
-                </div>
+                </x-admin-dashboard.card>
 
-                <div class="rounded-xl p-3" style="background: #f1f5f9; border: 1px solid #e2e8f0;">
-                    <p class="text-xs font-bold uppercase" style="color: #64748b;">Pembayaran</p>
+                <x-admin-dashboard.card padding="sm" tone="slate" shadow="none" class="rounded-xl border">
+                    <p class="text-xs font-bold uppercase text-brand-muted">Pembayaran</p>
                     <ul class="mt-2 space-y-1 text-sm font-semibold">
                         @forelse ($order->payments as $payment)
                             <li>{{ $payment->method }} · {{ $payment->status->value }} · {{ $payment->paid_at?->format('d M Y H:i') ?? 'belum paid' }}</li>
@@ -44,17 +44,17 @@
                             <li>Belum ada payment.</li>
                         @endforelse
                     </ul>
-                </div>
+                </x-admin-dashboard.card>
             </div>
-        </section>
+        </x-admin-dashboard.card>
 
-        <section class="mt-4 rounded-2xl bg-white p-5" style="border: 2px solid #050505; box-shadow: 4px 4px 0 #050505;">
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <div class="flex items-start justify-between gap-3">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-wider" style="color: #64748b;">Sales Proof Post</p>
+                    <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Sales Proof Post</p>
                     <h2 class="mt-1 text-xl font-black">{{ $salesProof['label'] }}</h2>
                 </div>
-                <span class="rounded-full px-3 py-1 text-xs font-black uppercase" style="background: {{ $salesProof['badge']['background'] }}; color: {{ $salesProof['badge']['color'] }};">{{ $salesProof['status'] }}</span>
+                <x-admin-dashboard.badge :tone="$salesProof['tone']">{{ $salesProof['status'] }}</x-admin-dashboard.badge>
             </div>
 
             @if ($salesProof['message_id'])
@@ -62,20 +62,20 @@
             @endif
 
             @if ($salesProof['last_error'])
-                <p class="mt-3 break-words rounded-xl p-3 text-sm font-semibold" style="background: #fee2e2; color: #991b1b;">Error: {{ $salesProof['last_error'] }}</p>
+                <x-admin-dashboard.notice tone="danger" class="mt-3 break-words rounded-xl text-sm font-semibold">Error: {{ $salesProof['last_error'] }}</x-admin-dashboard.notice>
             @endif
 
             @if ($salesProof['status'] !== 'none')
-                <p class="mt-3 text-xs font-bold uppercase" style="color: #64748b;">Attempts: {{ $salesProof['attempts'] }}</p>
+                <p class="mt-3 text-xs font-bold uppercase text-brand-muted">Attempts: {{ $salesProof['attempts'] }}</p>
             @endif
 
             @if ($salesProof['can_retry'])
                 <form method="POST" action="{{ $salesProof['retry_url'] }}" class="mt-4">
                     @csrf
-                    <button type="submit" class="rounded-xl px-4 py-3 text-sm font-black uppercase" style="background: #050505; color: #fff;">Retry Sales Proof Post</button>
+                    <x-admin-dashboard.button type="submit" variant="ink">Retry Sales Proof Post</x-admin-dashboard.button>
                 </form>
             @endif
-        </section>
+        </x-admin-dashboard.card>
     </main>
 </body>
 </html>

@@ -2,8 +2,7 @@
                  BOTTOM TAB NAVIGATION — Dark (#050505) with 4 tabs
                  ═══════════════════════════════════════════════════════ --}}
             <nav
-                class="bottom-nav mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 px-4 pb-safe pt-2"
-                style="border-top: 2px solid #050505;"
+                class="bottom-nav mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 border-t-2 border-neo-ink px-4 pb-safe pt-2"
                 aria-label="Navigasi dashboard"
             >
                 <div class="mx-auto flex max-w-md items-center justify-between">

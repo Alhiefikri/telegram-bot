@@ -1,106 +1,115 @@
-                        <article class="neo-card min-w-0">
+                        <x-admin-dashboard.card as="article" padding="compact" shadow="sm" class="min-w-0 rounded-[1.125rem]">
+                            <div
+                                class="contents"
+                                x-data="{
+                                    editPayload: @js($product['edit_payload']),
+                                    stockPayload: @js($product['stock_payload']),
+                                    shareUrl: @js($product['share_url'])
+                                }"
+                            >
                             {{-- Product name + status badge --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <p class="truncate font-display text-base font-bold" style="color: #050505;">{{ $product['name'] }}</p>
-                                    <span class="neo-badge mt-1" style="background: {{ $product['status_badge']['background'] }}; color: {{ $product['status_badge']['color'] }};">
+                                    <p class="truncate font-display text-base font-bold text-neo-ink">{{ $product['name'] }}</p>
+                                    <x-admin-dashboard.badge
+                                        :tone="$product['is_active'] ? 'emerald' : 'slate'"
+                                        class="mt-1"
+                                    >
                                         {{ $product['status_label'] }}
-                                    </span>
+                                    </x-admin-dashboard.badge>
                                 </div>
-                                <span class="neo-badge" style="background: #ede5fa; color: #8758de;">
+                                <x-admin-dashboard.badge tone="purple">
                                     {{ $product['category'] }}
-                                </span>
+                                </x-admin-dashboard.badge>
                             </div>
 
                             {{-- Price --}}
-                            <p class="mt-4 font-display text-2xl font-bold" style="color: #050505;">{{ $product['price'] }}</p>
+                            <p class="mt-4 font-display text-2xl font-bold text-neo-ink">{{ $product['price'] }}</p>
 
                             {{-- Short description --}}
-                            <p class="mt-2 break-words text-xs font-bold leading-5" style="color: #64748b;">{{ $product['description'] }}</p>
+                            <p class="mt-2 break-words text-xs font-bold leading-5 text-brand-muted">{{ $product['description'] }}</p>
 
                             {{-- Stock info --}}
                             <div class="mt-3 grid grid-cols-3 gap-2">
-                                <div class="rounded-lg p-2 text-center" style="background: #f1f5f9; border: 1px solid #e2e8f0;">
-                                    <p class="text-[9px] font-bold uppercase" style="color: #64748b;">Stok</p>
-                                    <p class="mt-0.5 font-display text-sm font-bold" style="color: #050505;">{{ $product['stock'] }}</p>
-                                </div>
-                                <div class="rounded-lg p-2 text-center" style="background: #d4f6fb; border: 1px solid #16b4ca;">
-                                    <p class="text-[9px] font-bold uppercase" style="color: #0e7490;">Tersedia</p>
-                                    <p class="mt-0.5 font-display text-sm font-bold" style="color: #050505;">{{ $product['available_stock'] }}</p>
-                                </div>
-                                <div class="rounded-lg p-2 text-center" style="background: #fef9c3; border: 1px solid #f2da3d;">
-                                    <p class="text-[9px] font-bold uppercase" style="color: #92400e;">Dipesan</p>
-                                    <p class="mt-0.5 font-display text-sm font-bold" style="color: #050505;">{{ $product['reserved_stock'] }}</p>
-                                </div>
+                                <x-admin-dashboard.mini-stat label="Stok" :value="$product['stock']" />
+                                <x-admin-dashboard.mini-stat label="Tersedia" :value="$product['available_stock']" tone="cyan" />
+                                <x-admin-dashboard.mini-stat label="Dipesan" :value="$product['reserved_stock']" tone="amber" />
                             </div>
 
                             {{-- Visibility status --}}
-                            <p class="mt-2 text-[11px] font-semibold" style="color: {{ $product['visibility_color'] }};">
+                            <p @class([
+                                'mt-2 text-[11px] font-semibold',
+                                'text-neo-green' => $product['is_active'],
+                                'text-neo-red' => ! $product['is_active'],
+                            ])>
                                 {{ $product['visibility_label'] }}
                             </p>
 
                             @if ($canManageProducts)
                             {{-- Action buttons: in-page only --}}
                             <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                <button
+                                <x-admin-dashboard.button
                                     type="button"
-                                    class="product-action-btn"
-                                    style="background: #d4f6fb; color: #0e7490;"
-                                    x-on:click="openProductEditModal(@js($product['edit_payload']))"
+                                    variant="secondary"
+                                    size="sm"
+                                    x-on:click="openProductEditModal(editPayload)"
                                 >
                                     ✏️ Ubah
-                                </button>
-                                <button
+                                </x-admin-dashboard.button>
+                                <x-admin-dashboard.button
                                     type="button"
-                                    class="product-action-btn"
-                                    style="background: #7BD10A; color: #166534;"
-                                    x-on:click="openStockModal(@js($product['stock_payload']))"
+                                    variant="primary"
+                                    size="sm"
+                                    x-on:click="openStockModal(stockPayload)"
                                 >
                                     ➕ Stok
-                                </button>
-                                <button
+                                </x-admin-dashboard.button>
+                                <x-admin-dashboard.button
                                     type="button"
-                                    class="product-action-btn"
-                                    style="background: #f2da3d; color: #92400e;"
-                                    x-on:click="openManageStockModal(@js($product['edit_payload']))"
+                                    variant="warning"
+                                    size="sm"
+                                    x-on:click="openManageStockModal(editPayload)"
                                 >
                                     📦 Kelola
-                                </button>
-                                <button
+                                </x-admin-dashboard.button>
+                                <x-admin-dashboard.button
                                     type="button"
-                                    class="product-action-btn"
-                                    style="background: #8758de; color: #fff;"
-                                    x-on:click="copyProductShareLink(@js($product['share_url']))"
+                                    variant="purple"
+                                    size="sm"
+                                    x-on:click="copyProductShareLink(shareUrl)"
                                 >
                                     🔗 Share
-                                </button>
+                                </x-admin-dashboard.button>
                                 <form method="POST" action="{{ $product['visibility_url'] }}">
                                     @csrf
                                     @method('PATCH')
                                     <input type="hidden" name="is_active" value="{{ $product['is_active'] ? 0 : 1 }}">
-                                    <button
+                                    <x-admin-dashboard.button
                                         type="submit"
-                                        class="product-action-btn w-full"
-                                        style="background: #fef9c3; color: #92400e;"
+                                        variant="warning"
+                                        size="sm"
+                                        class="w-full"
                                     >
                                         {{ $product['visibility_action_label'] }}
-                                    </button>
+                                    </x-admin-dashboard.button>
                                 </form>
                                 <form method="POST" action="{{ $product['delete_url'] }}" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">
                                     @csrf
                                     @method('DELETE')
-                                    <button
+                                    <x-admin-dashboard.button
                                         type="submit"
-                                        class="product-action-btn w-full"
-                                        style="background: #fecaca; color: #dc2626;"
+                                        variant="destructive"
+                                        size="sm"
+                                        class="w-full"
                                     >
                                         🗑️ Hapus
-                                    </button>
+                                    </x-admin-dashboard.button>
                                 </form>
                             </div>
                             @else
-                                <div class="mt-4 rounded-[0.75rem] border-[3px] border-neo-ink bg-[#f1f5f9] p-3 text-xs font-bold text-neo-ink/70">
+                                <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">
                                     Role ini hanya bisa melihat produk. Aksi stok khusus owner/admin.
-                                </div>
+                                </x-admin-dashboard.notice>
                             @endif
-                        </article>
+                            </div>
+                        </x-admin-dashboard.card>

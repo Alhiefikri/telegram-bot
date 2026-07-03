@@ -5,27 +5,29 @@
 
                 <div class="flex items-end justify-between gap-3">
                     <div>
-                        <h2 class="font-display text-lg font-bold uppercase tracking-wider" style="color: #050505;">📦 Produk Saya</h2>
-                        <p class="mt-1 text-xs font-semibold" style="color: #64748b;">Semua kelola produk dan stok tetap di dashboard ini</p>
+                        <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">📦 Produk Saya</h2>
+                        <p class="mt-1 text-xs font-semibold text-brand-muted">Semua kelola produk dan stok tetap di dashboard ini</p>
                     </div>
 
                     @if ($canManageProducts)
-                    <button
+                    <x-admin-dashboard.button
                         type="button"
-                        class="neo-btn neo-btn-purple shrink-0 text-[11px]"
+                        variant="purple"
+                        size="sm"
+                        class="shrink-0 text-[11px]"
                         x-on:click="openProductForm()"
                     >
                         ➕ Tambah Produk
-                    </button>
+                    </x-admin-dashboard.button>
                     @endif
                 </div>
 
-                <div class="rounded-[1.25rem] border-[3px] border-neo-ink bg-[#ede5fa] px-4 py-3 text-sm font-bold text-neo-ink shadow-[4px_4px_0_0_#050505]">
+                <x-admin-dashboard.notice class="px-4 py-3 text-sm">
                     <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
-                </div>
+                </x-admin-dashboard.notice>
 
                 @if ($canManageProducts)
-                <form method="POST" action="{{ route('admin.categories.store') }}" class="rounded-[1rem] border-[3px] border-neo-ink bg-[#fef9c3] p-4 shadow-[4px_4px_0_0_#050505]">
+                <x-admin-dashboard.card as="form" method="POST" action="{{ route('admin.categories.store') }}" tone="yellow" padding="compact" shadow="sm" class="rounded-[1rem]">
                     @csrf
                     <div class="flex items-center justify-between gap-3">
                         <div>
@@ -35,24 +37,24 @@
                     </div>
                     <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1.2fr_auto]">
                         <div>
-                            <label for="category-name" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Nama</label>
-                            <input id="category-name" name="category_name" value="{{ old('category_name') }}" class="neo-input mt-1.5" placeholder="AI Tools">
+                            <x-admin-dashboard.field-label for="category-name">Nama</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.input id="category-name" name="category_name" value="{{ old('category_name') }}" class="mt-1.5" placeholder="AI Tools" />
                             @error('category_name', 'categoryCreate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </div>
                         <div>
-                            <label for="category-description" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Deskripsi opsional</label>
-                            <input id="category-description" name="category_description" value="{{ old('category_description') }}" class="neo-input mt-1.5" placeholder="Kategori akun premium">
+                            <x-admin-dashboard.field-label for="category-description">Deskripsi opsional</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.input id="category-description" name="category_description" value="{{ old('category_description') }}" class="mt-1.5" placeholder="Kategori akun premium" />
                             @error('category_description', 'categoryCreate')
-                                <p class="mt-2 text-sm font-bold" style="color: #ef4444;">{{ $message }}</p>
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </div>
-                        <button type="submit" class="neo-btn neo-btn-yellow self-end text-[11px]">
+                        <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="self-end text-[11px]">
                             + Kategori
-                        </button>
+                        </x-admin-dashboard.button>
                     </div>
-                </form>
+                </x-admin-dashboard.card>
                 @endif
 
                 <div class="grid gap-4 md:grid-cols-2">
@@ -60,9 +62,9 @@
 
                         @include('admin.dashboard.product-card')
                     @empty
-                        <div class="rounded-xl p-6 text-center" style="background: #fff; border: 2px dashed #050505;">
-                            <p class="font-display text-sm font-bold" style="color: #64748b;">Belum ada produk.</p>
-                        </div>
+                        <x-admin-dashboard.card border="dashed" shadow="none" class="rounded-xl p-6 text-center">
+                            <p class="font-display text-sm font-bold text-brand-muted">Belum ada produk.</p>
+                        </x-admin-dashboard.card>
                     @endforelse
                 </div>
 

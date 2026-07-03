@@ -276,7 +276,7 @@ async function expectPrimaryActionsAtLeast44px(page) {
                 && style.visibility !== 'hidden'
                 && rect.width > 0
                 && rect.height > 0
-                && (element.matches('.neo-btn') || element.matches('.product-action-btn'));
+                && (element.matches('.admin-dashboard-action') || element.matches('.filter-pill'));
         })
         .map((element) => ({
             label: (element.textContent || element.getAttribute('aria-label') || element.href || element.tagName).trim(),

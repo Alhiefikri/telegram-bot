@@ -2,12 +2,12 @@
                  STATUS MESSAGE
                  ═══════════════════════════════════════════════════════ --}}
             @if (session('status'))
-                <div class="mt-4 animate-slide-up rounded-xl p-4 text-sm font-bold" style="background: #e8ffd4; border: 2px solid #050505; box-shadow: 3px 3px 0px #050505; color: #050505;">
+                <x-admin-dashboard.notice tone="success" class="mt-4 animate-slide-up rounded-xl">
                     {{ session('status') }}
-                </div>
+                </x-admin-dashboard.notice>
             @endif
             @if (session('error'))
-                <div class="mt-4 animate-slide-up rounded-xl p-4 text-sm font-bold" style="background: #fee2e2; border: 2px solid #050505; box-shadow: 3px 3px 0px #050505; color: #050505;">
+                <x-admin-dashboard.notice tone="danger" class="mt-4 animate-slide-up rounded-xl">
                     {{ session('error') }}
-                </div>
+                </x-admin-dashboard.notice>
             @endif

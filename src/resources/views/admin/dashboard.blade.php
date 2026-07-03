@@ -10,7 +10,7 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
         @include('admin.dashboard.styles')
     </head>
-    <body class="min-h-full font-sans antialiased" style="font-family: 'Plus Jakarta Sans', sans-serif;">
+    <body class="min-h-full font-sans antialiased">
         @php
             $storeLink = $statsTab['storeLink'];
             $summary = $statsTab['summary'];

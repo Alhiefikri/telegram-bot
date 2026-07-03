@@ -54,11 +54,9 @@ final class AdminDashboardSalesData
                     'order_status' => $order->order_status->value,
                     'order_status_label' => $this->orderStatusLabel($order->order_status),
                     'order_status_tone' => $orderStatusTone,
-                    'order_status_badge' => $this->toneBadgeStyle($orderStatusTone),
                     'payment_status' => $order->payment_status->value,
                     'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
                     'payment_status_tone' => $paymentStatusTone,
-                    'payment_status_badge' => $this->toneBadgeStyle($paymentStatusTone),
                     'price' => Money::idr($order->total_amount),
                     'earning' => Money::idr($paidAmount),
                     'earning_amount' => $paidAmount,
@@ -151,7 +149,6 @@ final class AdminDashboardSalesData
                 'status' => 'none',
                 'label' => 'Belum ada post',
                 'tone' => 'slate',
-                'badge' => $this->toneBadgeStyle('slate'),
                 'message_id' => null,
                 'last_error' => null,
                 'attempts' => 0,
@@ -177,7 +174,6 @@ final class AdminDashboardSalesData
                 default => ucfirst((string) $post->status),
             },
             'tone' => $tone,
-            'badge' => $this->toneBadgeStyle($tone),
             'message_id' => $post->telegram_message_id,
             'last_error' => $post->last_error,
             'attempts' => $post->attempts,
@@ -226,17 +222,6 @@ final class AdminDashboardSalesData
             OrderStatus::Completed => 'emerald',
             OrderStatus::Cancelled, OrderStatus::Expired => 'rose',
             default => 'slate',
-        };
-    }
-
-    private function toneBadgeStyle(string $tone): array
-    {
-        return match ($tone) {
-            'emerald' => ['background' => '#e8ffd4', 'color' => '#166534'],
-            'amber' => ['background' => '#fef9c3', 'color' => '#92400e'],
-            'blue' => ['background' => '#d4f6fb', 'color' => '#0e7490'],
-            'rose' => ['background' => '#fecaca', 'color' => '#dc2626'],
-            default => ['background' => '#f1f5f9', 'color' => '#64748b'],
         };
     }
 }

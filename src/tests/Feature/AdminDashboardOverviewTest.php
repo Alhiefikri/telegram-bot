@@ -209,7 +209,8 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame('NONAKTIF', $data['statsTab']['paymentControl']['status_badge']['label']);
         $this->assertTrue($data['statsTab']['paymentControl']['can_manage']);
         $this->assertSame(['gmv', 'saldo', 'orders', 'sales_proof_posts', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
-        $this->assertContainsOnly('string', array_column($data['statsTab']['cards'], 'card_class'));
+        $this->assertSame(['blue', 'emerald', 'amber', 'emerald', 'emerald'], array_column($data['statsTab']['cards'], 'tone'));
+        $this->assertArrayNotHasKey('card_class', $data['statsTab']['cards'][0]);
         $this->assertSame(1, $data['statsTab']['statusCounts']['processing']['count']);
         $this->assertSame(1, $data['statsTab']['statusCounts']['completed']['count']);
         $this->assertSame(['pending_payment', 'processing', 'cancelled', 'expired'], array_keys($data['statsTab']['actionableStatusCounts']));
@@ -233,7 +234,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame('IDR 125.000', $data['salesTab']['orders'][0]['price']);
         $this->assertSame('IDR 125.000', $data['salesTab']['orders'][0]['earning']);
         $this->assertSame('emerald', $data['salesTab']['orders'][0]['payment_status_tone']);
-        $this->assertSame('#166534', $data['salesTab']['orders'][0]['payment_status_badge']['color']);
+        $this->assertArrayNotHasKey('payment_status_badge', $data['salesTab']['orders'][0]);
         $this->assertCount(7, $data['statsTab']['earnings']);
         $this->assertSame(205000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
 

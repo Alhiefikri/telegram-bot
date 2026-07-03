@@ -1,19 +1,23 @@
             {{-- ═══════════════════════════════════════════════════════
                  HEADER CARD — Purple/Magenta Gradient
                  ═══════════════════════════════════════════════════════ --}}
-            <header class="header-gradient desktop-header relative overflow-hidden rounded-[1.5rem] p-4 text-neo-ink md:rounded-[2rem] md:p-6" style="border: 3px solid #050505; box-shadow: 5px 5px 0px #050505;">
+            <x-admin-dashboard.card
+                as="header"
+                padding="compact"
+                shadow="sm"
+                class="header-gradient desktop-header relative overflow-hidden rounded-[1.5rem] text-neo-ink md:rounded-[2rem] md:p-6"
+            >
                 {{-- Diagonal stripe decoration --}}
-                <div class="pointer-events-none absolute -right-6 top-0 h-36 w-36 opacity-20" style="background: radial-gradient(circle at center, rgba(255,255,255,0.85) 0, rgba(255,255,255,0.15) 42%, transparent 70%);"></div>
+                <div class="header-glow pointer-events-none absolute -right-6 top-0 h-36 w-36 opacity-20"></div>
 
                 {{-- Top chip row --}}
                 <div class="relative z-10 flex flex-wrap items-center justify-between gap-2">
-                    <span class="neo-badge" style="background: rgba(255,255,255,0.55); color: #050505;">
-                        <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
+                    <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505" dot>
                         Telegram Mini App
-                    </span>
-                    <span class="neo-badge" style="background: rgba(255,255,255,0.55); color: #050505;">
+                    </x-admin-dashboard.badge>
+                    <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505">
                         {{ $storeStatus['label'] }}
-                    </span>
+                    </x-admin-dashboard.badge>
                 </div>
 
                 {{-- Name --}}
@@ -29,34 +33,34 @@
                 {{-- 2x2 stat cards grid --}}
                 <section class="relative z-10 mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3" aria-label="Ringkasan toko">
                     @foreach ($summary as $metric)
-                        <div class="{{ $metric['card_class'] }} rounded-[1rem] p-3 md:p-4" style="border: 3px solid #050505; box-shadow: 3px 3px 0px #050505;">
-                            <p class="font-display text-[10px] font-black uppercase tracking-[0.18em]" style="color: #050505;">{{ $metric['label'] }}</p>
-                            <p class="mt-1 break-words font-display text-lg font-black leading-none" style="color: #050505;">{{ $metric['value'] }}</p>
-                            @if ($metric['hint'])
-                                <p class="mt-1 text-[10px] font-semibold opacity-70" style="color: #050505;">{{ $metric['hint'] }}</p>
-                            @endif
-                        </div>
+                        <x-admin-dashboard.stat-card
+                            :label="$metric['label']"
+                            :value="$metric['value']"
+                            :hint="$metric['hint']"
+                            :tone="$metric['tone']"
+                            class="rounded-[1rem] shadow-[3px_3px_0_0_#050505]"
+                        />
                     @endforeach
                 </section>
 
                 {{-- Action buttons --}}
                 <div class="relative z-10 mt-4 grid grid-cols-2 gap-2 md:mt-5 md:gap-3">
-                    <a
-                        href="{{ $actions['shop'] }}"
-                        class="neo-btn neo-btn-white text-[11px] md:min-h-14 md:text-sm"
-                        style="box-shadow: 3px 3px 0px rgba(0,0,0,0.35);"
+                    <x-admin-dashboard.button
+                        :href="$actions['shop']"
+                        variant="neutral"
+                        class="text-[11px] md:min-h-14 md:text-sm"
                     >
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M4.5 7.5h15l-.75 12.75H5.25L4.5 7.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
                             <path d="M8 7.5a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                         </svg>
                         Buka Toko
-                    </a>
+                    </x-admin-dashboard.button>
 
-                    <button
+                    <x-admin-dashboard.button
                         type="button"
-                        class="neo-btn neo-btn-yellow text-[11px] md:min-h-14 md:text-sm"
-                        style="box-shadow: 3px 3px 0px rgba(0,0,0,0.35);"
+                        variant="warning"
+                        class="text-[11px] md:min-h-14 md:text-sm"
                         x-on:click="shareStore()"
                     >
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -66,6 +70,6 @@
                             <circle cx="18" cy="17" r="2.5" stroke="currentColor" stroke-width="1.8"/>
                         </svg>
                         <span x-text="copied ? 'Tersalin' : 'Bagikan Toko'">Bagikan Toko</span>
-                    </button>
+                    </x-admin-dashboard.button>
                 </div>
-            </header>
+            </x-admin-dashboard.card>
