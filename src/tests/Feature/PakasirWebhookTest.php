@@ -251,6 +251,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_expire_pending_orders_sends_telegram_expired_notice(): void
     {
+        config()->set('services.telegram.token', 'bot-token');
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
