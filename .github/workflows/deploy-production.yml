@@ -17,6 +17,9 @@ jobs:
   release-gate:
     name: Release gate
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      APP_FORCE_HTTPS: false
     defaults:
       run:
         working-directory: src
