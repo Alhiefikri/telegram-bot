@@ -70,20 +70,20 @@ class ExampleTest extends TestCase
         Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
-    public function test_login_guide_page_explains_login_security_and_serves_pdf(): void
+    public function test_login_guide_page_explains_login_security_with_inline_images(): void
     {
         $this->get('/panduan-login-akun')
             ->assertOk()
             ->assertSee('Cara masuk dan amankan akun digital kamu')
-            ->assertSee('Download PDF')
-            ->assertSee('/panduan-login-akun/pdf', false)
-            ->assertSee('Kalau gagal masuk');
+            ->assertSee('Siapkan data login dulu')
+            ->assertSee('Tambahkan MFA di Google Authenticator')
+            ->assertSee('Checklist keamanan')
+            ->assertSee('storefront/login-guide/page-1.jpg', false)
+            ->assertSee('storefront/login-guide/page-9.jpg', false)
+            ->assertDontSee('Download PDF')
+            ->assertDontSee('/panduan-login-akun/pdf', false);
 
         $this->get('/cara-loginoutlook')->assertRedirect('/panduan-login-akun');
-
-        $this->get('/panduan-login-akun/pdf')
-            ->assertOk()
-            ->assertDownload('Tutorial_Login_Outlook_iCloud_Google_Authenticator_LHIESTORE.pdf');
     }
 
     public function test_empty_catalog_renders_customer_facing_state(): void

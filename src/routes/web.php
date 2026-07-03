@@ -22,9 +22,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
 Route::get('/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
-Route::get('/panduan-login-akun/pdf', [StorefrontLoginGuideController::class, 'downloadPdf'])->name('storefront.login-guide.pdf');
 Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
-Route::redirect('/cara-loginoutlook/pdf', '/panduan-login-akun/pdf');
 
 Route::middleware('admin.no-cache')->group(function (): void {
     Route::redirect('/telegram-mini-app', '/admin')->name('telegram-mini-app.dashboard');
