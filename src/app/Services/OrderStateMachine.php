@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\PublishSalesProofPost;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
@@ -23,33 +24,61 @@ class OrderStateMachine
     {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
-            $order = Order::whereKey($initial->order_id)->lockForUpdate()->firstOrFail();
-            $payments = Payment::where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
-            $lockedPayment = $payments->firstWhere('id', $payment->id);
 
-            if ($order->order_status === OrderStatus::Expired || $order->order_status === OrderStatus::Cancelled) {
-                return $this->markLatePaymentPaid($lockedPayment, $order);
-            }
+            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): Order {
+                $lockedPayment = $payments->firstWhere('id', $payment->id);
+                if (! $lockedPayment) {
+                    throw new InvalidOrderTransition('Payment is not attached to order.');
+                }
 
-            if ($lockedPayment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProofForOrder($order)) {
-                return $order->fresh();
-            }
+                return $this->applyPaidTransition($lockedPayment, $order);
+            });
+        }, 5);
+    }
 
-            if ($lockedPayment->status !== PaymentStatus::Pending || $order->order_status !== OrderStatus::PendingPayment) {
-                throw new InvalidOrderTransition('Payment cannot be marked paid from current state.');
-            }
+    public function completeManualOrder(Order $order): Order
+    {
+        return DB::transaction(function () use ($order): Order {
+            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): Order {
+                $payment = $payments
+                    ->where('provider', 'manual')
+                    ->where('status', PaymentStatus::Pending)
+                    ->first();
 
-            $this->inventory->recordOrderSales($order);
+                if (! $this->canTransitionManualOrder($lockedOrder, $payment)) {
+                    throw new InvalidOrderTransition('Only pending manual orders can be completed.');
+                }
 
-            $lockedPayment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
-            $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+                $paidOrder = $this->applyPaidTransition($payment, $lockedOrder);
+                if ($paidOrder->order_status !== OrderStatus::Processing || $paidOrder->payment_status !== PaymentStatus::Paid) {
+                    throw new InvalidOrderTransition('Only newly paid manual orders can be completed.');
+                }
 
-            if (StoreChannelSetting::current()->sales_proof_enabled) {
-                SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
-                PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
-            }
+                $lockedOrder->refresh();
+                $lockedOrder->update(['order_status' => OrderStatus::Completed]);
 
-            return $order->fresh(['payments']);
+                SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
+
+                return $lockedOrder->fresh(['payments']);
+            });
+        }, 5);
+    }
+
+    public function rejectManualOrder(Order $order): Order
+    {
+        return DB::transaction(function () use ($order): Order {
+            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): Order {
+                $payment = $payments
+                    ->where('provider', 'manual')
+                    ->where('status', PaymentStatus::Pending)
+                    ->first();
+
+                if (! $this->canTransitionManualOrder($lockedOrder, $payment)) {
+                    throw new InvalidOrderTransition('Only pending manual orders can be rejected.');
+                }
+
+                return $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
+            });
         }, 5);
     }
 
@@ -57,33 +86,85 @@ class OrderStateMachine
     {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
-            $order = Order::whereKey($initial->order_id)->lockForUpdate()->firstOrFail();
-            $lockedPayment = Payment::where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get()->firstWhere('id', $payment->id);
 
-            if (! $lockedPayment) {
-                throw new InvalidOrderTransition('Payment is not attached to order.');
-            }
+            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): Order {
+                $lockedPayment = $payments->firstWhere('id', $payment->id);
+                if (! $lockedPayment) {
+                    throw new InvalidOrderTransition('Payment is not attached to order.');
+                }
 
-            if ($lockedPayment->status !== PaymentStatus::Refunded) {
-                $lockedPayment->update(['status' => PaymentStatus::Refunded]);
-            }
+                if ($lockedPayment->status !== PaymentStatus::Refunded) {
+                    $lockedPayment->update(['status' => PaymentStatus::Refunded]);
+                }
 
-            $updates = ['payment_status' => PaymentStatus::Refunded];
-            if ($order->order_status !== OrderStatus::Completed) {
-                $updates['order_status'] = OrderStatus::Cancelled;
-            }
-            $order->update($updates);
+                $updates = ['payment_status' => PaymentStatus::Refunded];
+                if ($order->order_status !== OrderStatus::Completed) {
+                    $updates['order_status'] = OrderStatus::Cancelled;
+                }
+                $order->update($updates);
 
-            return $order->fresh(['payments']);
+                return $order->fresh(['payments']);
+            });
         }, 5);
     }
 
     public function markPaymentExpired(Payment $payment): ?Order
     {
         $initial = Payment::findOrFail($payment->id);
-        $order = Order::whereKey($initial->order_id)->firstOrFail();
 
-        return $this->releasePending($order, OrderStatus::Expired, PaymentStatus::Expired, false);
+        return $this->releasePendingByOrderId($initial->order_id, OrderStatus::Expired, PaymentStatus::Expired, false);
+    }
+
+    public function expirePendingOrder(Order $order): ?Order
+    {
+        return $this->releasePendingByOrderId($order->id, OrderStatus::Expired, PaymentStatus::Expired, true);
+    }
+
+    public function cancelPendingOrder(Order $order): Order
+    {
+        return $this->releasePendingByOrderId($order->id, OrderStatus::Cancelled, PaymentStatus::Failed, false);
+    }
+
+    private function releasePendingByOrderId(int|string $orderId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
+    {
+        return DB::transaction(function () use ($orderId, $orderStatus, $paymentStatus, $mustBeDue) {
+            return $this->withLockedOrderPayments($orderId, fn (Order $order, $payments): ?Order => $this->applyReleaseTransition($order, $payments, $orderStatus, $paymentStatus, $mustBeDue));
+        }, 5);
+    }
+
+    private function withLockedOrderPayments(int|string $orderId, callable $callback): mixed
+    {
+        $order = Order::whereKey($orderId)->lockForUpdate()->firstOrFail();
+        $payments = Payment::where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+
+        return $callback($order, $payments);
+    }
+
+    private function applyPaidTransition(Payment $payment, Order $order): Order
+    {
+        if ($order->order_status === OrderStatus::Expired || $order->order_status === OrderStatus::Cancelled) {
+            return $this->markLatePaymentPaid($payment, $order);
+        }
+
+        if ($payment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProofForOrder($order)) {
+            return $order->fresh(['payments']);
+        }
+
+        if ($payment->status !== PaymentStatus::Pending || $order->order_status !== OrderStatus::PendingPayment) {
+            throw new InvalidOrderTransition('Payment cannot be marked paid from current state.');
+        }
+
+        $this->inventory->recordOrderSales($order);
+
+        $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
+        $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+
+        if (StoreChannelSetting::current()->sales_proof_enabled) {
+            SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
+            PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
+        }
+
+        return $order->fresh(['payments']);
     }
 
     private function markLatePaymentPaid(Payment $payment, Order $order): Order
@@ -111,48 +192,43 @@ class OrderStateMachine
         return $order->fresh(['payments']);
     }
 
-    public function expirePendingOrder(Order $order): ?Order
+    private function applyReleaseTransition(Order $order, $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
     {
-        return $this->releasePending($order, OrderStatus::Expired, PaymentStatus::Expired, true);
+        if ($order->order_status === $orderStatus) {
+            if (! $this->inventory->hasReleaseProofForOrder($order)) {
+                throw new InvalidOrderTransition('Release movement proof is missing.');
+            }
+
+            $this->credentials()->release($order);
+
+            return $order->fresh(['payments']);
+        }
+
+        if ($order->order_status !== OrderStatus::PendingPayment) {
+            throw new InvalidOrderTransition('Only pending-payment orders can be released.');
+        }
+
+        if ($mustBeDue && $order->expires_at && $order->expires_at->isFuture()) {
+            return null;
+        }
+
+        $this->inventory->releaseOrderReservations($order);
+        $this->credentials()->release($order);
+
+        foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
+            $payment->update(['status' => $paymentStatus]);
+        }
+        $order->update(['order_status' => $orderStatus, 'payment_status' => $paymentStatus]);
+
+        return $order->fresh(['payments']);
     }
 
-    public function cancelPendingOrder(Order $order): Order
+    private function canTransitionManualOrder(Order $order, ?Payment $payment): bool
     {
-        return $this->releasePending($order, OrderStatus::Cancelled, PaymentStatus::Failed, false);
-    }
-
-    private function releasePending(Order $order, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
-    {
-        return DB::transaction(function () use ($order, $orderStatus, $paymentStatus, $mustBeDue) {
-            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            $payments = Payment::where('order_id', $lockedOrder->id)->orderBy('id')->lockForUpdate()->get();
-
-            if ($lockedOrder->order_status === $orderStatus) {
-                if (! $this->inventory->hasReleaseProofForOrder($lockedOrder)) {
-                    throw new InvalidOrderTransition('Release movement proof is missing.');
-                }
-
-                $this->credentials()->release($lockedOrder);
-
-                return $lockedOrder->fresh();
-            }
-            if ($lockedOrder->order_status !== OrderStatus::PendingPayment) {
-                throw new InvalidOrderTransition('Only pending-payment orders can be released.');
-            }
-            if ($mustBeDue && $lockedOrder->expires_at && $lockedOrder->expires_at->isFuture()) {
-                return null;
-            }
-
-            $this->inventory->releaseOrderReservations($lockedOrder);
-            $this->credentials()->release($lockedOrder);
-
-            foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
-                $payment->update(['status' => $paymentStatus]);
-            }
-            $lockedOrder->update(['order_status' => $orderStatus, 'payment_status' => $paymentStatus]);
-
-            return $lockedOrder->fresh(['payments']);
-        }, 5);
+        return $order->order_status === OrderStatus::PendingPayment
+            && $order->payment_status === PaymentStatus::Pending
+            && $payment?->provider === 'manual'
+            && $payment->status === PaymentStatus::Pending;
     }
 
     private function credentials(): ProductCredentialAllocator

@@ -4,13 +4,12 @@ namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
-use App\Models\Payment;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\OrderStateMachine;
-use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class AdminOrderOperations
@@ -30,52 +29,28 @@ class AdminOrderOperations
 
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
-        return DB::transaction(function () use ($order, $user, $ip): Order {
-            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            $lockedOrder->load('payments');
+        try {
+            $completedOrder = $this->orders->completeManualOrder($order);
+        } catch (InvalidOrderTransition $exception) {
+            throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
+        }
 
-            if (! $this->canCompleteManualOrder($lockedOrder)) {
-                throw new InvalidArgumentException('Only pending manual orders can be completed.');
-            }
+        $this->audit->log('order.manual_completed', $completedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
 
-            $payment = Payment::where('order_id', $lockedOrder->id)
-                ->where('provider', 'manual')
-                ->where('status', PaymentStatus::Pending)
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $paidOrder = $this->orders->markPaymentPaid($payment);
-            if ($paidOrder->order_status !== OrderStatus::Processing || $paidOrder->payment_status !== PaymentStatus::Paid) {
-                throw new InvalidArgumentException('Only newly paid manual orders can be completed.');
-            }
-
-            $paidOrder->update(['order_status' => OrderStatus::Completed]);
-
-            SendTelegramReceipt::dispatch($paidOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
-
-            $this->audit->log('order.manual_completed', $paidOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
-
-            return $paidOrder->fresh(['payments']);
-        }, 5);
+        return $completedOrder->fresh(['payments']);
     }
 
     public function rejectManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
-        return DB::transaction(function () use ($order, $user, $ip): Order {
-            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            $lockedOrder->load('payments');
+        try {
+            $rejectedOrder = $this->orders->rejectManualOrder($order);
+        } catch (InvalidOrderTransition $exception) {
+            throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
+        }
 
-            if (! $this->canCompleteManualOrder($lockedOrder)) {
-                throw new InvalidArgumentException('Only pending manual orders can be rejected.');
-            }
+        $this->audit->log('order.manual_rejected', $rejectedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Cancelled->value, 'payment_status' => PaymentStatus::Failed->value], $user, $ip);
 
-            $rejectedOrder = $this->orders->cancelPendingOrder($lockedOrder);
-
-            $this->audit->log('order.manual_rejected', $rejectedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Cancelled->value, 'payment_status' => PaymentStatus::Failed->value], $user, $ip);
-
-            return $rejectedOrder->fresh(['payments', 'customer', 'orderItems']);
-        }, 5);
+        return $rejectedOrder->fresh(['payments', 'customer', 'orderItems']);
     }
 
     public function canResendReceipt(Order $order): bool

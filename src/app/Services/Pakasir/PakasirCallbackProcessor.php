@@ -9,7 +9,6 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Throwable;
@@ -106,22 +105,15 @@ class PakasirCallbackProcessor
 
     private function applyPaid(PaymentEvent $event): void
     {
-        DB::transaction(function () use ($event): void {
-            $payment = Payment::query()->whereKey($event->payment_id)->lockForUpdate()->firstOrFail();
+        $payment = Payment::query()->whereKey($event->payment_id)->firstOrFail();
+        $order = $this->orders->markPaymentPaid($payment);
 
-            if ($payment->status !== PaymentStatus::Pending) {
-                return;
-            }
+        $payment->refresh();
+        if ($payment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing) {
+            SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->afterCommit();
+        }
 
-            $order = $this->orders->markPaymentPaid($payment);
-
-            $payment->refresh();
-            if ($payment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing) {
-                SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->afterCommit();
-            }
-
-            $event->update(['processed_at' => now()]);
-        }, 5);
+        $event->update(['processed_at' => now()]);
     }
 
     private function findPayment(PakasirTransaction $transaction): ?Payment
