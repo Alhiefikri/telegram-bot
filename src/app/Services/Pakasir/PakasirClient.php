@@ -12,10 +12,12 @@ use UnexpectedValueException;
 
 class PakasirClient implements PakasirProviderAdapter
 {
-    public function __construct(private readonly PakasirPaymentEventLogger $events) {}
+    public function __construct(private readonly PakasirPaymentEventLogger $events, private readonly PakasirProviderReadiness $readiness) {}
 
     public function hostedPaymentUrl(Payment $payment): string
     {
+        $this->readiness->verification()->assertReady('Pakasir hosted payment URL cannot be created.');
+
         $query = [
             'order_id' => $payment->merchant_ref,
             'redirect' => config('services.pakasir.redirect_url'),
@@ -38,6 +40,8 @@ class PakasirClient implements PakasirProviderAdapter
 
     public function transactionDetail(Payment $payment): array
     {
+        $this->readiness->verification()->assertReady('Pakasir transaction detail cannot be requested.');
+
         return $this->timed('transactionDetail', fn () => Http::get($this->baseUrl().'/api/transactiondetail', [
             'project' => config('services.pakasir.slug'),
             'amount' => $payment->amount,
@@ -48,6 +52,8 @@ class PakasirClient implements PakasirProviderAdapter
 
     public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
     {
+        $this->readiness->verification()->assertReady('Pakasir QRIS transaction cannot be created.');
+
         $project = (string) config('services.pakasir.slug');
         $response = $this->timed('createQrisTransaction', fn () => Http::asJson()->post($this->baseUrl().'/api/transactioncreate/qris', [
             'project' => $project,

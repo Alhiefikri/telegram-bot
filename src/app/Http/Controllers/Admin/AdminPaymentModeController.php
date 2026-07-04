@@ -6,13 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdatePaymentModeRequest;
 use App\Models\ManualPaymentSetting;
 use App\Services\AuditLogger;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 
 class AdminPaymentModeController extends Controller
 {
-    public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger, PakasirProviderReadiness $pakasirReadiness): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -50,7 +51,7 @@ class AdminPaymentModeController extends Controller
         );
 
         $label = match ($mode) {
-            'pakasir' => PakasirCheckoutFlow::configured() === PakasirCheckoutFlow::API_QRIS
+            'pakasir' => $pakasirReadiness->checkout()->checkoutFlow() === PakasirCheckoutFlow::API_QRIS
                 ? 'Pakasir native QRIS diaktifkan. QR payment_number dikirim di Telegram dengan fallback hosted Pakasir.'
                 : 'Pakasir hosted diaktifkan. Checkout baru memakai QR/link website Pakasir.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.',

@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use Illuminate\Console\Command;
 
 class ReconcilePakasirPayments extends Command
@@ -14,14 +15,15 @@ class ReconcilePakasirPayments extends Command
 
     protected $description = 'Reconcile pending Pakasir payments from Pakasir transaction detail.';
 
-    public function handle(PakasirProviderAdapter $client, PakasirCallbackProcessor $processor): int
+    public function handle(PakasirProviderAdapter $client, PakasirCallbackProcessor $processor, PakasirProviderReadiness $pakasirReadiness): int
     {
         $processed = 0;
         $skipped = 0;
         $failed = 0;
 
-        if (! filled(config('services.pakasir.slug')) || ! filled(config('services.pakasir.api_key'))) {
-            $this->error('pakasir:reconcile failed: Pakasir project slug/API key is not configured.');
+        $readiness = $pakasirReadiness->verification();
+        if (! $readiness->isReady()) {
+            $this->error('pakasir:reconcile failed: '.$readiness->configurationMessage());
 
             return self::FAILURE;
         }

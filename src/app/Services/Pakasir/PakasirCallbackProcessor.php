@@ -11,7 +11,6 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Throwable;
 
@@ -21,6 +20,7 @@ class PakasirCallbackProcessor
         private readonly OrderStateMachine $orders,
         private readonly PakasirProviderAdapter $client,
         private readonly PakasirPaymentEventLogger $events,
+        private readonly PakasirProviderReadiness $readiness,
     ) {}
 
     public function processCallback(array $payload): PaymentEvent
@@ -83,21 +83,18 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Pakasir amount mismatch.');
         }
 
-        $project = config('services.pakasir.slug');
-        if (! is_string($project) || trim($project) === '') {
-            throw new UnprocessableEntityHttpException('Pakasir project is not configured.');
+        $readiness = $this->readiness->verification();
+        if (! $readiness->isReady()) {
+            throw new UnprocessableEntityHttpException('Pakasir verification is not configured.');
         }
 
+        $project = (string) config('services.pakasir.slug');
         if ($transaction->project() !== $project) {
             throw new UnprocessableEntityHttpException('Pakasir project mismatch.');
         }
 
         if (! $transaction->isCompleted()) {
             throw new UnprocessableEntityHttpException('Pakasir status is not completed.');
-        }
-
-        if (! filled(config('services.pakasir.api_key'))) {
-            throw new UnprocessableEntityHttpException('Pakasir verification is not configured.');
         }
     }
 
@@ -181,11 +178,6 @@ class PakasirCallbackProcessor
 
     private function ensureConfigured(): void
     {
-        foreach (['slug' => 'project', 'api_key' => 'API key'] as $key => $label) {
-            $value = config('services.pakasir.'.$key);
-            if (! is_string($value) || trim($value) === '') {
-                throw new RuntimeException('Pakasir '.$label.' is not configured.');
-            }
-        }
+        $this->readiness->verification()->assertReady('Pakasir verification is not configured.');
     }
 }

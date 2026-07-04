@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Pakasir\PakasirTransaction;
 use App\Support\PakasirCheckoutFlow;
@@ -21,7 +22,7 @@ class ValidatePakasirNativeQris extends Command
 
     protected $description = 'Validate a staging Pakasir native QRIS payment without exposing secrets or raw QR payment numbers.';
 
-    public function handle(PakasirNativeQrisService $nativeQris, PakasirProviderAdapter $pakasir, PakasirCallbackProcessor $processor): int
+    public function handle(PakasirNativeQrisService $nativeQris, PakasirProviderAdapter $pakasir, PakasirCallbackProcessor $processor, PakasirProviderReadiness $pakasirReadiness): int
     {
         $report = [
             'command' => 'pakasir:validate-native-qris',
@@ -37,7 +38,7 @@ class ValidatePakasirNativeQris extends Command
             ],
         ];
 
-        $this->validateConfiguration($report);
+        $this->validateConfiguration($report, $pakasirReadiness);
 
         if ($this->hasHardFailure($report)) {
             return $this->finish($report);
@@ -86,10 +87,12 @@ class ValidatePakasirNativeQris extends Command
         return $this->finish($report);
     }
 
-    private function validateConfiguration(array &$report): void
+    private function validateConfiguration(array &$report, PakasirProviderReadiness $pakasirReadiness): void
     {
         $paymentMode = (string) config('services.telegram.payment_mode', 'manual');
-        $checkoutFlow = (string) config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
+        $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
+        $checkoutFlowLabel = is_scalar($checkoutFlow) ? (string) $checkoutFlow : get_debug_type($checkoutFlow);
+        $readiness = $pakasirReadiness->checkout();
 
         if ($paymentMode !== 'pakasir') {
             $this->addCheck($report, 'fail', 'TELEGRAM_PAYMENT_MODE=pakasir', "Configured value is {$paymentMode}.");
@@ -98,21 +101,31 @@ class ValidatePakasirNativeQris extends Command
         }
 
         if ($checkoutFlow !== PakasirCheckoutFlow::API_QRIS) {
-            $this->addCheck($report, 'fail', 'PAKASIR_CHECKOUT_FLOW=api_qris', "Configured value is {$checkoutFlow}.");
+            $this->addCheck($report, 'fail', 'PAKASIR_CHECKOUT_FLOW=api_qris', "Configured value is {$checkoutFlowLabel}.");
         } else {
             $this->addCheck($report, 'pass', 'PAKASIR_CHECKOUT_FLOW=api_qris');
         }
 
-        foreach (['slug' => 'PAKASIR_SLUG', 'api_key' => 'PAKASIR_API_KEY'] as $key => $label) {
-            if (blank(config('services.pakasir.'.$key))) {
+        if ($checkoutFlowMessage = $readiness->invalidMessage('PAKASIR_CHECKOUT_FLOW')) {
+            $this->addCheck($report, 'fail', 'PAKASIR_CHECKOUT_FLOW valid', $checkoutFlowMessage);
+        }
+
+        foreach (['PAKASIR_SLUG', 'PAKASIR_API_KEY'] as $label) {
+            if ($readiness->isMissing($label)) {
                 $this->addCheck($report, 'fail', "{$label} configured", 'Value is blank.');
             } else {
                 $this->addCheck($report, 'pass', "{$label} configured", 'Value present; raw value redacted.');
             }
         }
 
-        $baseUrl = (string) config('services.pakasir.base_url', '');
-        if (! str_starts_with($baseUrl, 'https://')) {
+        if ($readiness->isMissing('PAKASIR_BASE_URL')) {
+            $this->addCheck($report, 'fail', 'PAKASIR_BASE_URL configured', 'Value is blank.');
+
+            return;
+        }
+
+        $baseUrl = config('services.pakasir.base_url', '');
+        if (! is_string($baseUrl) || ! str_starts_with($baseUrl, 'https://')) {
             $this->addCheck($report, 'fail', 'PAKASIR_BASE_URL uses HTTPS', 'Configured base URL is not HTTPS.');
         } else {
             $this->addCheck($report, 'pass', 'PAKASIR_BASE_URL uses HTTPS', 'URL redacted.');

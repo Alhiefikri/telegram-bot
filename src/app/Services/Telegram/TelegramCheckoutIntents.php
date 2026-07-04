@@ -7,9 +7,9 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
-use App\Support\PakasirCheckoutFlow;
 use Carbon\CarbonInterface;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
@@ -18,7 +18,12 @@ use Throwable;
 
 class TelegramCheckoutIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirNativeQrisService $nativeQris) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private PakasirProviderAdapter $pakasir,
+        private PakasirNativeQrisService $nativeQris,
+        private PakasirProviderReadiness $pakasirReadiness,
+    ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
     {
@@ -202,7 +207,7 @@ class TelegramCheckoutIntents
 
     private function pakasirCheckoutFlow(): string
     {
-        return PakasirCheckoutFlow::configured();
+        return $this->pakasirReadiness->checkout()->checkoutFlow();
     }
 
     private function formatRupiah(int $amount): string
@@ -263,10 +268,20 @@ class TelegramCheckoutIntents
 
     public function paymentMode(): string
     {
+        return $this->pakasirReadiness->effectivePaymentMode($this->requestedPaymentMode());
+    }
+
+    public function requestedPaymentMode(): string
+    {
         $settings = ManualPaymentSetting::current();
         $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
 
         return $mode === 'pakasir' ? 'pakasir' : 'manual';
+    }
+
+    public function pakasirUnavailableCustomerMessage(): string
+    {
+        return "Pakasir otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi Pakasir sebelum pembayaran otomatis dipakai lagi.";
     }
 
     public function manualPaymentMethod(): string

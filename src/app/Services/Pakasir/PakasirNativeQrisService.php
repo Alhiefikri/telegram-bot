@@ -7,10 +7,12 @@ use Illuminate\Support\Facades\Cache;
 
 class PakasirNativeQrisService
 {
-    public function __construct(private readonly PakasirProviderAdapter $pakasir) {}
+    public function __construct(private readonly PakasirProviderAdapter $pakasir, private readonly PakasirProviderReadiness $readiness) {}
 
     public function ensureCreated(Payment $payment): PakasirQrisTransaction
     {
+        $this->readiness->verification()->assertReady('Pakasir native QRIS cannot be created.');
+
         $payment->refresh();
         if ($this->hasPersistedQris($payment)) {
             return $this->transactionFromPayment($payment);

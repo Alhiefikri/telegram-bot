@@ -3,7 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
-use App\Support\PakasirCheckoutFlow;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
@@ -53,29 +53,12 @@ class UpdatePaymentModeRequest extends FormRequest
                     return;
                 }
 
-                $missing = [];
+                $readiness = app(PakasirProviderReadiness::class)->checkout();
 
-                if (blank(config('services.pakasir.slug'))) {
-                    $missing[] = 'PAKASIR_SLUG';
-                }
-
-                if (blank(config('services.pakasir.api_key'))) {
-                    $missing[] = 'PAKASIR_API_KEY';
-                }
-
-                if ($missing !== []) {
+                if (! $readiness->isReady()) {
                     $validator->errors()->add(
                         'payment_mode',
-                        'Mode Pakasir belum bisa diaktifkan. Lengkapi '.implode(' dan ', $missing).' di environment.',
-                    );
-                }
-
-                $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
-
-                if (! PakasirCheckoutFlow::isAllowed($checkoutFlow)) {
-                    $validator->errors()->add(
-                        'payment_mode',
-                        'Mode Pakasir belum bisa diaktifkan. '.PakasirCheckoutFlow::validationMessage(),
+                        'Mode Pakasir belum bisa diaktifkan. '.$readiness->configurationMessage(),
                     );
                 }
             },

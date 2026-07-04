@@ -16,7 +16,6 @@ use App\Models\Product;
 use App\Models\User;
 use App\Policies\OrderPolicy;
 use App\Policies\PaymentPolicy;
-use App\Providers\AppServiceProvider;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
@@ -49,6 +48,7 @@ class Phase7AdminOperationsTest extends TestCase
     {
         config()->set('services.pakasir.slug', 'warung-ai');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
         config()->set('services.pakasir.checkout_flow', 'api_qris');
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
@@ -83,14 +83,23 @@ class Phase7AdminOperationsTest extends TestCase
         $this->assertDatabaseCount('manual_payment_settings', 0);
     }
 
-    public function test_invalid_pakasir_checkout_flow_fails_configuration_validation(): void
+    public function test_invalid_pakasir_checkout_flow_blocks_pakasir_enable_with_validation_message(): void
     {
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
         config()->set('services.pakasir.checkout_flow', 'inline_qris');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris.');
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
-        (new AppServiceProvider(app()))->boot();
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors([
+                'payment_mode' => 'Mode Pakasir belum bisa diaktifkan. PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris.',
+            ], null, 'paymentMode');
+
+        $this->assertDatabaseCount('manual_payment_settings', 0);
     }
 
     public function test_order_and_payment_policy_matrix_by_role(): void

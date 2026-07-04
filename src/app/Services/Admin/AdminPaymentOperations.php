@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use InvalidArgumentException;
 
 class AdminPaymentOperations
@@ -17,6 +18,7 @@ class AdminPaymentOperations
         private readonly AuditLogger $audit,
         private readonly PakasirProviderAdapter $pakasirClient,
         private readonly PakasirCallbackProcessor $pakasirProcessor,
+        private readonly PakasirProviderReadiness $pakasirReadiness,
     ) {}
 
     public function canReconcile(Payment $payment): bool
@@ -24,8 +26,7 @@ class AdminPaymentOperations
         return $payment->provider === 'pakasir'
             && $payment->status === PaymentStatus::Pending
             && filled($payment->merchant_ref)
-            && filled(config('services.pakasir.slug'))
-            && filled(config('services.pakasir.api_key'));
+            && $this->pakasirReadiness->verification()->isReady();
     }
 
     public function reconcile(Payment $payment, ?User $user = null, ?string $ip = null): PaymentEvent

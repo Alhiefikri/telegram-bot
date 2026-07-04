@@ -167,6 +167,7 @@ class TelegramCallbackRouter
                 throw new InvalidCheckout('Cart is empty.');
             }
 
+            $requestedPaymentMode = $this->checkoutIntents->requestedPaymentMode();
             $paymentMode = $this->checkoutIntents->paymentMode();
             $order = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                 'step' => 'order_checkout',
@@ -180,6 +181,10 @@ class TelegramCallbackRouter
             $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.");
 
             return;
+        }
+
+        if ($requestedPaymentMode === 'pakasir' && $paymentMode === 'manual') {
+            $this->bot->sendMessage($chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage());
         }
 
         $payment = $order->payments()->latest()->first();

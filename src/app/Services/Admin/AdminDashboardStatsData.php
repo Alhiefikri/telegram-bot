@@ -8,12 +8,15 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\User;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\Money;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Support\Carbon;
 
 final class AdminDashboardStatsData
 {
+    public function __construct(private readonly PakasirProviderReadiness $pakasirReadiness) {}
+
     /**
      * @param  array<string, int>  $metrics
      * @param  array<string, mixed>  $statusCounts
@@ -97,49 +100,48 @@ final class AdminDashboardStatsData
     private function paymentControl(User $user): array
     {
         $settings = ManualPaymentSetting::current();
-        $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
-        $mode = $mode === 'pakasir' ? 'pakasir' : 'manual';
-        $checkoutFlow = PakasirCheckoutFlow::configured();
-        $isPakasirEnabled = $mode === 'pakasir';
-        $pakasirConfigMissing = [];
-
-        if (blank(config('services.pakasir.slug'))) {
-            $pakasirConfigMissing[] = 'PAKASIR_SLUG';
-        }
-
-        if (blank(config('services.pakasir.api_key'))) {
-            $pakasirConfigMissing[] = 'PAKASIR_API_KEY';
-        }
+        $requestedMode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
+        $requestedMode = $requestedMode === 'pakasir' ? 'pakasir' : 'manual';
+        $readiness = $this->pakasirReadiness->checkout();
+        $checkoutFlow = $readiness->checkoutFlow();
+        $isPakasirConfigured = $readiness->isReady();
+        $isPakasirEnabled = $requestedMode === 'pakasir' && $isPakasirConfigured;
+        $isPakasirRequestedButUnavailable = $requestedMode === 'pakasir' && ! $isPakasirConfigured;
 
         $pakasirFlowLabel = $checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'native QRIS' : 'hosted';
         $label = match (true) {
+            $isPakasirRequestedButUnavailable => 'Manual /payment aktif — Pakasir belum siap',
             ! $isPakasirEnabled => 'Manual /payment aktif',
             $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Pakasir native QRIS aktif',
             default => 'Pakasir hosted aktif',
         };
         $hint = match (true) {
+            $isPakasirRequestedButUnavailable => 'Mode tersimpan meminta Pakasir, tapi checkout baru dialihkan ke QR manual sampai konfigurasi Pakasir siap.',
             ! $isPakasirEnabled => 'Provider manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
             $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Provider Pakasir / native QRIS: QR payment_number dikirim di Telegram, tombol hosted tetap jadi fallback, dan paid tetap diverifikasi via Transaction Detail.',
             default => 'Provider Pakasir / hosted: customer memakai QR/link website Pakasir, dan paid tetap diverifikasi via Transaction Detail.',
         };
         $statusBadge = match (true) {
+            $isPakasirRequestedButUnavailable => 'PAKASIR BELUM SIAP',
             ! $isPakasirEnabled => 'MANUAL',
             $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'NATIVE QRIS',
             default => 'HOSTED',
         };
-        $canEnablePakasir = $pakasirConfigMissing === [];
+        $canEnablePakasir = $isPakasirConfigured;
 
         return [
-            'mode' => $mode,
+            'mode' => $isPakasirEnabled ? 'pakasir' : 'manual',
+            'requested_mode' => $requestedMode,
             'checkout_flow' => $checkoutFlow,
             'checkout_flow_label' => $pakasirFlowLabel,
             'is_pakasir_enabled' => $isPakasirEnabled,
-            'is_pakasir_configured' => $canEnablePakasir,
+            'is_pakasir_configured' => $isPakasirConfigured,
             'can_enable_pakasir' => $canEnablePakasir,
-            'pakasir_config_missing' => $pakasirConfigMissing,
+            'pakasir_config_missing' => $readiness->missing(),
+            'pakasir_config_invalid' => array_keys($readiness->invalid()),
             'pakasir_guard_message' => $canEnablePakasir
                 ? null
-                : 'Lengkapi '.implode(' dan ', $pakasirConfigMissing).' sebelum mengaktifkan Pakasir dari dashboard.',
+                : 'Mode Pakasir belum siap. '.$readiness->configurationMessage().' Checkout baru akan memakai QR manual sampai diperbaiki.',
             'label' => $label,
             'hint' => $hint,
             'tone' => $isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber',

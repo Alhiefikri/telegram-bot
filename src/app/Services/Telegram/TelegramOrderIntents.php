@@ -9,12 +9,13 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 class TelegramOrderIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor) {}
+    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness) {}
 
     public function sendOrderHistory(Customer $customer, string $chatId): void
     {
@@ -116,8 +117,7 @@ class TelegramOrderIntents
             || $payment->status !== PaymentStatus::Pending
             || $order->order_status !== OrderStatus::PendingPayment
             || blank($payment->merchant_ref)
-            || ! filled(config('services.pakasir.slug'))
-            || ! filled(config('services.pakasir.api_key'))) {
+            || ! $this->pakasirReadiness->verification()->isReady()) {
             return null;
         }
 

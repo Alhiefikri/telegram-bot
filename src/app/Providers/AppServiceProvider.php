@@ -13,11 +13,11 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Storefront\StorefrontResponseCache;
 use App\Support\DogfoodTiming;
-use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -47,7 +47,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        PakasirCheckoutFlow::configured();
         $this->validateProductionConfiguration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 
@@ -98,17 +97,23 @@ class AppServiceProvider extends ServiceProvider
             'TELEGRAM_WEBHOOK_SECRET' => config('services.telegram.webhook_secret'),
         ];
 
+        $pakasirReadiness = null;
+
         if (config('services.telegram.payment_mode') === 'pakasir') {
-            $required += [
-                'PAKASIR_SLUG' => config('services.pakasir.slug'),
-                'PAKASIR_API_KEY' => config('services.pakasir.api_key'),
-            ];
+            $pakasirReadiness = $this->app->make(PakasirProviderReadiness::class)->checkout();
+            foreach ($pakasirReadiness->missing() as $label) {
+                $required[$label] = null;
+            }
         }
 
         $missing = array_keys(array_filter($required, fn ($value) => blank($value)));
 
         if ($missing !== []) {
             throw new RuntimeException('Missing required production configuration: '.implode(', ', $missing));
+        }
+
+        if ($pakasirReadiness !== null && $pakasirReadiness->invalid() !== []) {
+            throw new RuntimeException('Invalid production Pakasir configuration: '.implode(' ', $pakasirReadiness->invalid()));
         }
 
         if ((bool) config('app.debug')) {
