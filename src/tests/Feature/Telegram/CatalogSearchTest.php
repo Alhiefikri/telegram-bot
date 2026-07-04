@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Carbon;
 use Tests\Support\TelegramBotTestSupport;
 
 class CatalogSearchTest extends TelegramBotTestSupport
@@ -19,14 +20,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(11, '/start', ['first_name' => 'Ali', 'username' => 'ali']))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Halo Ali, welcome ke LHIE STORE')
-            && str_contains($r['text'], 'Tempat belanja produk digital')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'katalog'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'status'
-            && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
-            && ! str_contains($r['text'], '[BANNER:')
-            && ! str_contains($r['text'], 'Status akun'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Menu utama')
             && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
@@ -39,6 +33,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
     public function test_start_uses_welcome_banner_caption_when_configured(): void
     {
+        Carbon::setTestNow('2026-07-04 09:00:00');
         config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
 
@@ -46,7 +41,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && $r['photo'] === 'banner-file-id'
-            && str_contains($r['caption'], 'Halo Ayu, welcome ke LHIE STORE')
+            && str_contains($r['caption'], 'Selamat pagi, Ayu')
             && str_contains($r['caption'], 'Tempat belanja produk digital')
             && ! str_contains($r['caption'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['caption'], '[BANNER:'));

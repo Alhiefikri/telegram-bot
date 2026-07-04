@@ -11,8 +11,9 @@ class TelegramMenuIntents
     public function sendWelcome(Customer $customer, string $chatId): void
     {
         $firstName = trim((string) $customer->first_name) ?: 'kak';
+        [$greetingIcon, $greetingText] = $this->timeAwareGreeting();
         $caption = implode("\n", [
-            '🌙 Halo '.$firstName.', welcome ke LHIE STORE 👋',
+            $greetingIcon.' '.$greetingText.', '.$firstName.' — welcome ke LHIE STORE 👋',
             '━━━━━━━━━━━━━━',
             'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
             '',
@@ -25,10 +26,18 @@ class TelegramMenuIntents
         ]);
 
         $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId);
-        $bannerUrl = config('services.telegram.welcome_banner_url');
+        $bannerReference = config('services.telegram.welcome_banner_url');
+        $captionOptions = ['show_caption_above_media' => true];
 
-        if (is_string($bannerUrl) && $bannerUrl !== '') {
-            $this->bot->sendPhotoReference($chatId, $bannerUrl, $caption, $replyMarkup);
+        if (is_string($bannerReference) && trim($bannerReference) !== '') {
+            $this->bot->sendPhotoReference($chatId, trim($bannerReference), $caption, $replyMarkup, $captionOptions);
+
+            return;
+        }
+
+        $bannerPath = resource_path('images/banner-welcome.jpg');
+        if (is_file($bannerPath) && is_readable($bannerPath)) {
+            $this->bot->sendPhoto($chatId, file_get_contents($bannerPath), 'banner-welcome.jpg', $caption, $replyMarkup, $captionOptions);
 
             return;
         }
@@ -64,6 +73,21 @@ class TelegramMenuIntents
             'is_persistent' => true,
             'input_field_placeholder' => 'Pilih menu atau ketik /produk',
         ];
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function timeAwareGreeting(): array
+    {
+        $hour = now()->hour;
+
+        return match (true) {
+            $hour >= 5 && $hour < 11 => ['🌅', 'Selamat pagi'],
+            $hour >= 11 && $hour < 15 => ['☀️', 'Selamat siang'],
+            $hour >= 15 && $hour < 18 => ['🌇', 'Selamat sore'],
+            default => ['🌙', 'Selamat malam'],
+        };
     }
 
     private function welcomeInlineKeyboard(Customer $customer, string $chatId): array

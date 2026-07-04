@@ -101,6 +101,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeGateHttpSequence(['left', 'member']);
         $this->postTelegramWebhook($this->messageUpdate(30, '/katalog', ['first_name' => 'Ayu']))->assertOk();
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
@@ -111,8 +112,10 @@ class CommunityGateTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
             && $r['chat_id'] === '12345'
             && $r['message_id'] === 77);
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Halo Ayu, welcome ke LHIE STORE'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r['caption'] ?? '', 'Selamat')
+            && str_contains($r['caption'] ?? '', 'Ayu')
+            && str_contains($r['caption'] ?? '', 'welcome ke LHIE STORE'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'Menu utama'));
     }
@@ -126,14 +129,17 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeGateHttpSequence(['left', 'member'], deleteFails: true);
         $this->postTelegramWebhook($this->messageUpdate(35, '/katalog', ['first_name' => 'Ayu']))->assertOk();
 
         $this->postTelegramWebhook($this->callbackUpdate(36, 'verify-delete-fails', 'community_gate:verify', ['first_name' => 'Ayu']))->assertOk();
 
         $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Halo Ayu, welcome ke LHIE STORE'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r['caption'] ?? '', 'Selamat')
+            && str_contains($r['caption'] ?? '', 'Ayu')
+            && str_contains($r['caption'] ?? '', 'welcome ke LHIE STORE'));
     }
 
     public function test_leaving_channel_blocks_later_store_flow_again(): void

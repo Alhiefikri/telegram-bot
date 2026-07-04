@@ -9,6 +9,7 @@ use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Carbon;
 use Mockery;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -156,6 +157,35 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('bot-token', $joined);
         $this->assertStringNotContainsString('pakasir-key', $joined);
         $this->assertStringNotContainsString('/start', $joined);
+    }
+
+    public function test_start_welcome_uses_time_aware_greeting_above_banner_media(): void
+    {
+        Carbon::setTestNow('2026-07-04 21:15:00');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(210, '/start', from: ['first_name' => 'Fikri']))->assertOk();
+
+        Http::assertSent(function ($request): bool {
+            return str_ends_with($request->url(), '/sendPhoto')
+                && $request->data()['photo'] === 'telegram-banner-file-id'
+                && $request->data()['show_caption_above_media'] === true
+                && str_contains($request->data()['caption'], '🌙 Selamat malam, Fikri');
+        });
+    }
+
+    public function test_start_welcome_uses_local_banner_when_banner_url_is_not_configured(): void
+    {
+        Carbon::setTestNow('2026-07-04 09:00:00');
+        config()->set('services.telegram.welcome_banner_url', null);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(211, '/start', from: ['first_name' => 'Fikri']))->assertOk();
+
+        Http::assertSent(function ($request): bool {
+            return str_ends_with($request->url(), '/sendPhoto');
+        });
     }
 
     private function assertLog(array $logs, string $event, callable $predicate): void

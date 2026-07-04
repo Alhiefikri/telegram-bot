@@ -29,10 +29,10 @@ class TelegramBotClient
         return $this->timed('sendMessage', fn () => Http::post($this->url('sendMessage'), $payload)->throw()->json());
     }
 
-    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = []): void
+    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): void
     {
         $request = Http::attach('photo', $photoContents, $filename);
-        $payload = ['chat_id' => $chatId];
+        $payload = array_merge(['chat_id' => $chatId], $options);
 
         if ($caption !== null && $caption !== '') {
             $payload['caption'] = $caption;
@@ -45,9 +45,9 @@ class TelegramBotClient
         $this->timed('sendPhoto', fn () => $request->post($this->url('sendPhoto'), $payload)->throw());
     }
 
-    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = []): void
+    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): void
     {
-        $payload = ['chat_id' => $chatId, 'photo' => $photoFileId];
+        $payload = array_merge(['chat_id' => $chatId, 'photo' => $photoFileId], $options);
 
         if ($caption !== null && $caption !== '') {
             $payload['caption'] = $caption;

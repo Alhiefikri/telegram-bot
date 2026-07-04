@@ -92,12 +92,13 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(304, '/start', ['id' => 999], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains($request['caption'], 'welcome ke LHIE STORE')
             && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '🌐 Mini App Dashboard'
             && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][1][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v='));
     }
@@ -107,11 +108,12 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'http://localhost/admin');
         $this->fakeTelegramHttp();
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
 
         $this->postTelegramWebhook($this->messageUpdate(308, '/start', ['id' => 999], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains($request['caption'], 'welcome ke LHIE STORE')
             && str_contains(json_encode($request['reply_markup']), 'Lihat Produk')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), 'web_app')
@@ -123,11 +125,12 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         $this->fakeTelegramHttp();
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
 
         $this->postTelegramWebhook($this->messageUpdate(305, '/start', ['id' => 111], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains($request['caption'], 'welcome ke LHIE STORE')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), '/admin'));
     }
