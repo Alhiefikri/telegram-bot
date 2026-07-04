@@ -44,7 +44,7 @@ class TelegramCartIntents
             $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", [
                 'inline_keyboard' => [
                     [
-                        ['text' => '💳 Bayar QR Manual', 'callback_data' => 'checkout'],
+                        ['text' => '💳 Lanjut Checkout', 'callback_data' => 'checkout'],
                     ],
                 ],
             ]);

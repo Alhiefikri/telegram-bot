@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Providers\AppServiceProvider;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirNativeQrisService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -133,6 +134,35 @@ class PakasirGatewayTest extends TestCase
         $this->assertStringNotContainsString($paymentNumber, json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
         $this->assertArrayNotHasKey('payment_number', $event->raw_payload['payment']);
         $this->assertArrayNotHasKey('api_key', $event->raw_payload['payment']);
+    }
+
+    public function test_native_qris_service_returns_persisted_transaction_without_duplicate_provider_create(): void
+    {
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.IDEMPOTENT92';
+        Http::fake([
+            'https://app.pakasir.com/api/transactioncreate/qris' => fn ($request) => Http::response([
+                'payment' => [
+                    'project' => 'warung-ai',
+                    'order_id' => $request['order_id'],
+                    'amount' => $request['amount'],
+                    'fee' => 103,
+                    'total_payment' => $request['amount'] + 103,
+                    'payment_method' => 'qris',
+                    'payment_number' => $paymentNumber,
+                    'expired_at' => '2026-07-04T16:30:00Z',
+                ],
+            ], 200),
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $service = app(PakasirNativeQrisService::class);
+
+        $first = $service->ensureCreated($payment);
+        $second = $service->ensureCreated($payment->fresh());
+
+        $this->assertSame($paymentNumber, $first->paymentNumber());
+        $this->assertSame($paymentNumber, $second->paymentNumber());
+        $this->assertCount(1, Http::recorded(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactioncreate/qris'));
     }
 
     public function test_qris_transaction_create_fails_closed_for_mismatched_response_or_missing_payment_number(): void

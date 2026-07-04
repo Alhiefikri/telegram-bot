@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\CartStatus;
+use App\Enums\PaymentStatus;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -13,6 +14,9 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -64,7 +68,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Subtotal: Rp50.000')
             && str_contains(json_encode($r->data()), 'Sudah cocok? Lanjutkan checkout di bawah.')
             && str_contains(json_encode($r->data()), 'checkout')
-            && str_contains(json_encode($r->data()), 'Bayar QR Manual')
+            && str_contains(json_encode($r->data()), 'Lanjut Checkout')
             && ! str_contains(json_encode($r->data()), 'payment:'));
     }
 
@@ -454,6 +458,96 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Order manual baru masuk dashboard'));
     }
 
+    public function test_checkout_callback_in_pakasir_native_qris_mode_sends_payment_number_qr_with_hosted_fallback(): void
+    {
+        config()->set('services.telegram.payment_mode', 'pakasir');
+        config()->set('services.pakasir.checkout_flow', 'api_qris');
+        $this->bindCheckoutIntentsWithInspectableQr();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.NATIVE92';
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
+                'payment' => [
+                    'project' => 'sedulur-digital',
+                    'order_id' => $request['order_id'],
+                    'amount' => $request['amount'],
+                    'fee' => 103,
+                    'total_payment' => $request['amount'] + 103,
+                    'payment_method' => 'qris',
+                    'payment_number' => $paymentNumber,
+                    'expired_at' => '2026-07-04T16:30:00Z',
+                ],
+            ], 200),
+        ]);
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'price_amount' => 15000, 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 2);
+
+        $this->postTelegramWebhook($this->callbackUpdate(19, 'cb-pakasir-native', 'checkout'))->assertOk();
+
+        $order = Order::firstOrFail();
+        $payment = $order->payments()->firstOrFail();
+        $hostedUrl = 'https://app.pakasir.test/pay/sedulur-digital/30000?order_id='.rawurlencode($payment->merchant_ref);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'provider' => 'pakasir',
+            'method' => 'hosted',
+            'amount' => 30000,
+            'provider_fee' => 103,
+            'provider_total_payment' => 30103,
+            'provider_payment_method' => 'qris',
+            'provider_payment_number_hash' => hash('sha256', $paymentNumber),
+        ]);
+        $this->assertSame($paymentNumber, $payment->fresh()->provider_payment_number);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/api/transactioncreate/qris')
+            && $r['project'] === 'sedulur-digital'
+            && $r['order_id'] === $payment->merchant_ref
+            && $r['amount'] === 30000
+            && $r['api_key'] === 'pakasir-key');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), 'qr-source:'.$paymentNumber)
+            && ! str_contains($r->body(), 'qr-source:'.$hostedUrl)
+            && str_contains($r->body(), 'Total produk: Rp30.000')
+            && str_contains($r->body(), 'Biaya QRIS: Rp103')
+            && str_contains($r->body(), 'Total bayar QRIS: Rp30.103')
+            && str_contains($r->body(), 'Batas bayar QRIS: 04 Jul 2026 23:30 WIB')
+            && str_contains($r->body(), 'Tidak perlu buka browser')
+            && str_contains($r->body(), 'Bayar via Website')
+            && str_contains($r->body(), 'app.pakasir.test\\/pay\\/sedulur-digital\\/30000'));
+    }
+
+    public function test_pakasir_native_qris_create_failure_sends_hosted_fallback_and_keeps_payment_pending(): void
+    {
+        config()->set('services.telegram.payment_mode', 'pakasir');
+        config()->set('services.pakasir.checkout_flow', 'api_qris');
+        $this->bindCheckoutIntentsWithInspectableQr();
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactioncreate/qris' => Http::response(['message' => 'provider down'], 500),
+        ]);
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'GPT Plus', 'price_amount' => 15000, 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(20, 'cb-pakasir-native-fallback', 'checkout'))->assertOk();
+
+        $order = Order::firstOrFail();
+        $payment = $order->payments()->firstOrFail();
+        $hostedUrl = 'https://app.pakasir.test/pay/sedulur-digital/15000?order_id='.rawurlencode($payment->merchant_ref);
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertNull($payment->provider_payment_number);
+        $this->assertNull($payment->provider_created_at);
+        $this->assertSame(1, $order->payments()->count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/api/transactioncreate/qris'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && str_contains($r->body(), 'qr-source:'.$hostedUrl)
+            && str_contains($r->body(), 'Fallback checkout Pakasir')
+            && str_contains($r->body(), 'Order tetap pending')
+            && str_contains($r->body(), 'Bayar via Website')
+            && str_contains($r->body(), $hostedUrl));
+    }
+
     public function test_expired_callback_answer_does_not_block_callback_business_action(): void
     {
         $this->fakeTelegramHttp([
@@ -470,6 +564,17 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Pilih jumlah')
             && str_contains($r['text'], 'Callback Safe')
             && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
+    }
+
+    private function bindCheckoutIntentsWithInspectableQr(): void
+    {
+        $this->app->bind(TelegramCheckoutIntents::class, fn ($app) => new class($app->make(TelegramBotClient::class), $app->make(PakasirProviderAdapter::class), $app->make(PakasirNativeQrisService::class)) extends TelegramCheckoutIntents
+        {
+            public function qrPng(string $content): string
+            {
+                return 'qr-source:'.$content;
+            }
+        });
     }
 
     private function assertManualCheckoutTimingStepWasLogged(array $logs, string $step): void
