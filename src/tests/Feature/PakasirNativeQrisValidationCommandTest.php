@@ -42,6 +42,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 
         $payment = $this->pendingPakasirPayment(30103, 'INV-STAGE-QRIS-1');
         $paymentNumber = '00020101021226610016ID.CO.QRIS.STAGING92';
+        $apiKey = 'pakasir-secret';
+        $providerSecret = 'provider-secret-for-report';
 
         Http::fake([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn (Request $request) => Http::response([
@@ -54,6 +56,13 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
+                    'api_key' => $apiKey,
+                    'provider_context' => [
+                        'x-api-key' => $apiKey,
+                        'apiKey' => $apiKey,
+                        'secret' => $providerSecret,
+                        'status' => 'metadata-safe',
+                    ],
                 ],
             ]),
             'https://app.pakasir.test/api/transactiondetail*' => Http::response([
@@ -67,6 +76,13 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
                     'status' => 'completed',
+                    'api_key' => $apiKey,
+                    'provider_context' => [
+                        'x-api-key' => $apiKey,
+                        'apiKey' => $apiKey,
+                        'secret' => $providerSecret,
+                        'status' => 'metadata-safe',
+                    ],
                 ],
             ]),
         ]);
@@ -81,8 +97,13 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
             ->expectsOutputToContain('PASS hosted fallback URL generated for same payment')
             ->expectsOutputToContain('PASS Transaction Detail amount equals original payment amount - amount=30103.')
             ->expectsOutputToContain('PASS reconciliation can mark completed native QRIS paid - payment_status=paid event_processed=true.')
+            ->expectsOutputToContain('PASS stored provider_payload omits raw Pakasir API key')
+            ->expectsOutputToContain('PASS stored provider_payload omits sensitive Pakasir fields')
+            ->expectsOutputToContain('PASS Pakasir payment events omit raw Pakasir API key')
+            ->expectsOutputToContain('PASS Pakasir payment events omit sensitive provider fields')
             ->doesntExpectOutputToContain($paymentNumber)
-            ->doesntExpectOutputToContain('pakasir-secret')
+            ->doesntExpectOutputToContain($apiKey)
+            ->doesntExpectOutputToContain($providerSecret)
             ->doesntExpectOutputToContain('https://app.pakasir.test/pay')
             ->assertSuccessful();
 
@@ -91,17 +112,40 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
         $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
         $this->assertSame(hash('sha256', $paymentNumber), $payment->provider_payment_number_hash);
-        $this->assertStringNotContainsString($paymentNumber, json_encode($payment->provider_payload, JSON_THROW_ON_ERROR));
+        $storedPayloadJson = json_encode($payment->provider_payload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString($paymentNumber, $storedPayloadJson);
+        $this->assertStringNotContainsString($apiKey, $storedPayloadJson);
+        $this->assertStringNotContainsString($providerSecret, $storedPayloadJson);
+        $this->assertArrayNotHasKey('payment_number', $payment->provider_payload['payment']);
+        $this->assertArrayNotHasKey('api_key', $payment->provider_payload['payment']);
+        $this->assertSame('metadata-safe', $payment->provider_payload['payment']['provider_context']['status']);
+        $this->assertArrayNotHasKey('x-api-key', $payment->provider_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('apiKey', $payment->provider_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('secret', $payment->provider_payload['payment']['provider_context']);
 
         $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
         $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Reconciliation)->whereNotNull('processed_at')->count());
-        $this->assertStringNotContainsString(
-            $paymentNumber,
-            json_encode(PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->firstOrFail()->raw_payload, JSON_THROW_ON_ERROR),
-        );
+        $providerCreatePayload = PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->firstOrFail()->raw_payload;
+        $providerCreatePayloadJson = json_encode($providerCreatePayload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString($paymentNumber, $providerCreatePayloadJson);
+        $this->assertStringNotContainsString($apiKey, $providerCreatePayloadJson);
+        $this->assertStringNotContainsString($providerSecret, $providerCreatePayloadJson);
+        $this->assertArrayNotHasKey('payment_number', $providerCreatePayload['payment']);
+        $this->assertArrayNotHasKey('api_key', $providerCreatePayload['payment']);
+        $this->assertArrayNotHasKey('x-api-key', $providerCreatePayload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('apiKey', $providerCreatePayload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('secret', $providerCreatePayload['payment']['provider_context']);
+
         $reconciliationPayload = PaymentEvent::query()->where('event_type', PaymentEventType::Reconciliation)->firstOrFail()->raw_payload;
-        $this->assertStringNotContainsString($paymentNumber, json_encode($reconciliationPayload, JSON_THROW_ON_ERROR));
+        $reconciliationPayloadJson = json_encode($reconciliationPayload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString($paymentNumber, $reconciliationPayloadJson);
+        $this->assertStringNotContainsString($apiKey, $reconciliationPayloadJson);
+        $this->assertStringNotContainsString($providerSecret, $reconciliationPayloadJson);
         $this->assertArrayNotHasKey('payment_number', $reconciliationPayload['transaction']);
+        $this->assertArrayNotHasKey('api_key', $reconciliationPayload['transaction']);
+        $this->assertArrayNotHasKey('x-api-key', $reconciliationPayload['transaction']['provider_context']);
+        $this->assertArrayNotHasKey('apiKey', $reconciliationPayload['transaction']['provider_context']);
+        $this->assertArrayNotHasKey('secret', $reconciliationPayload['transaction']['provider_context']);
 
         Http::assertSentCount(2);
         Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'

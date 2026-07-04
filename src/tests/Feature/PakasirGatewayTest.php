@@ -131,6 +131,13 @@ class PakasirGatewayTest extends TestCase
     {
         Http::fake();
         $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
+        $providerSecretValues = [
+            'provider-top-level-api-key',
+            'provider-nested-x-api-key',
+            'provider-nested-camel-api-key',
+            'Bearer provider-authorization-token',
+            'provider-signature',
+        ];
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
         $providerPayload = [
@@ -143,7 +150,14 @@ class PakasirGatewayTest extends TestCase
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
                 'expired_at' => '2026-07-04T16:30:00Z',
-                'api_key' => 'provider-should-not-echo-this',
+                'api_key' => $providerSecretValues[0],
+                'provider_context' => [
+                    'x-api-key' => $providerSecretValues[1],
+                    'apiKey' => $providerSecretValues[2],
+                    'authorization' => $providerSecretValues[3],
+                    'signature' => $providerSecretValues[4],
+                    'safe_note' => 'provider metadata is safe',
+                ],
             ],
         ];
 
@@ -180,18 +194,37 @@ class PakasirGatewayTest extends TestCase
         $this->assertNotNull($payment->provider_created_at);
         $this->assertArrayNotHasKey('payment_number', $payment->provider_payload['payment']);
         $this->assertArrayNotHasKey('api_key', $payment->provider_payload['payment']);
+        $this->assertSame('provider metadata is safe', $payment->provider_payload['payment']['provider_context']['safe_note']);
+        $this->assertArrayNotHasKey('x-api-key', $payment->provider_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('apiKey', $payment->provider_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('authorization', $payment->provider_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('signature', $payment->provider_payload['payment']['provider_context']);
 
         $rawStoredPaymentNumber = DB::table('payments')->where('id', $payment->id)->value('provider_payment_number');
         $this->assertIsString($rawStoredPaymentNumber);
         $this->assertNotSame($paymentNumber, $rawStoredPaymentNumber);
-        $this->assertStringNotContainsString($paymentNumber, json_encode($payment->provider_payload, JSON_THROW_ON_ERROR));
+        $storedPayloadJson = json_encode($payment->provider_payload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString($paymentNumber, $storedPayloadJson);
+        foreach ($providerSecretValues as $providerSecretValue) {
+            $this->assertStringNotContainsString($providerSecretValue, $storedPayloadJson);
+        }
+
         $event = PaymentEvent::firstOrFail();
         $this->assertSame(PaymentEventType::ProviderCreate, $event->event_type);
         $this->assertSame($payment->id, $event->payment_id);
         $this->assertSame($payment->merchant_ref, $event->merchant_ref);
-        $this->assertStringNotContainsString($paymentNumber, json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
+        $eventPayloadJson = json_encode($event->raw_payload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString($paymentNumber, $eventPayloadJson);
+        foreach ($providerSecretValues as $providerSecretValue) {
+            $this->assertStringNotContainsString($providerSecretValue, $eventPayloadJson);
+        }
         $this->assertArrayNotHasKey('payment_number', $event->raw_payload['payment']);
         $this->assertArrayNotHasKey('api_key', $event->raw_payload['payment']);
+        $this->assertSame('provider metadata is safe', $event->raw_payload['payment']['provider_context']['safe_note']);
+        $this->assertArrayNotHasKey('x-api-key', $event->raw_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('apiKey', $event->raw_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('authorization', $event->raw_payload['payment']['provider_context']);
+        $this->assertArrayNotHasKey('signature', $event->raw_payload['payment']['provider_context']);
         Http::assertNothingSent();
     }
 

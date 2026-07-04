@@ -99,7 +99,7 @@ readonly class PakasirQrisTransaction
 
     public function sanitizedPayload(): array
     {
-        return $this->sanitize($this->payload);
+        return PakasirPayloadSanitizer::sanitize($this->payload);
     }
 
     private function stringField(string $key): string
@@ -146,25 +146,4 @@ readonly class PakasirQrisTransaction
         return preg_replace('/\.(\d{6})\d+(Z|[+-]\d{2}:\d{2})$/', '.$1$2', $value) ?? $value;
     }
 
-    private function sanitize(array $payload): array
-    {
-        $sanitized = [];
-
-        foreach ($payload as $key => $value) {
-            if ($this->isSensitiveKey((string) $key)) {
-                continue;
-            }
-
-            $sanitized[$key] = is_array($value) ? $this->sanitize($value) : $value;
-        }
-
-        return $sanitized;
-    }
-
-    private function isSensitiveKey(string $key): bool
-    {
-        $normalized = strtolower(str_replace(['-', '_'], '', $key));
-
-        return in_array($normalized, ['paymentnumber', 'apikey', 'secret', 'token', 'password', 'authorization'], true);
-    }
 }

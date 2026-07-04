@@ -9,6 +9,7 @@ use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Services\Pakasir\PakasirPayloadSanitizer;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Pakasir\PakasirTransaction;
 use App\Support\PakasirCheckoutFlow;
@@ -418,12 +419,25 @@ class ValidatePakasirNativeQris extends Command
     private function validateStoredPayloadsAreSanitized(array &$report, Payment $payment): void
     {
         $paymentNumber = (string) $payment->provider_payment_number;
-        $needlePresent = $paymentNumber !== '' && str_contains(json_encode($payment->provider_payload, JSON_THROW_ON_ERROR), $paymentNumber);
+        $providerPayload = is_array($payment->provider_payload) ? $payment->provider_payload : [];
+        $apiKey = (string) config('services.pakasir.api_key', '');
 
-        if ($needlePresent) {
+        if (PakasirPayloadSanitizer::containsStringValue($providerPayload, $paymentNumber)) {
             $this->addCheck($report, 'fail', 'stored provider_payload omits raw payment_number', 'provider_payload contains raw payment_number.');
         } else {
             $this->addCheck($report, 'pass', 'stored provider_payload omits raw payment_number');
+        }
+
+        if (PakasirPayloadSanitizer::containsStringValue($providerPayload, $apiKey)) {
+            $this->addCheck($report, 'fail', 'stored provider_payload omits raw Pakasir API key', 'provider_payload contains raw Pakasir API key.');
+        } else {
+            $this->addCheck($report, 'pass', 'stored provider_payload omits raw Pakasir API key');
+        }
+
+        if (PakasirPayloadSanitizer::containsSensitiveKeys($providerPayload)) {
+            $this->addCheck($report, 'fail', 'stored provider_payload omits sensitive Pakasir fields', 'provider_payload still contains sensitive provider keys.');
+        } else {
+            $this->addCheck($report, 'pass', 'stored provider_payload omits sensitive Pakasir fields');
         }
 
         $eventPayloads = $payment->paymentEvents()
@@ -431,18 +445,43 @@ class ValidatePakasirNativeQris extends Command
             ->pluck('raw_payload')
             ->all();
 
-        $eventNeedlePresent = false;
+        $eventPaymentNumberPresent = false;
+        $eventApiKeyPresent = false;
+        $eventSensitiveKeysPresent = false;
         foreach ($eventPayloads as $payload) {
-            if ($paymentNumber !== '' && str_contains(json_encode($payload, JSON_THROW_ON_ERROR), $paymentNumber)) {
-                $eventNeedlePresent = true;
-                break;
+            if (! is_array($payload)) {
+                continue;
+            }
+
+            if (PakasirPayloadSanitizer::containsStringValue($payload, $paymentNumber)) {
+                $eventPaymentNumberPresent = true;
+            }
+
+            if (PakasirPayloadSanitizer::containsStringValue($payload, $apiKey)) {
+                $eventApiKeyPresent = true;
+            }
+
+            if (PakasirPayloadSanitizer::containsSensitiveKeys($payload)) {
+                $eventSensitiveKeysPresent = true;
             }
         }
 
-        if ($eventNeedlePresent) {
+        if ($eventPaymentNumberPresent) {
             $this->addCheck($report, 'fail', 'Pakasir payment events omit raw payment_number', 'payment_events.raw_payload contains raw payment_number.');
         } else {
             $this->addCheck($report, 'pass', 'Pakasir payment events omit raw payment_number');
+        }
+
+        if ($eventApiKeyPresent) {
+            $this->addCheck($report, 'fail', 'Pakasir payment events omit raw Pakasir API key', 'payment_events.raw_payload contains raw Pakasir API key.');
+        } else {
+            $this->addCheck($report, 'pass', 'Pakasir payment events omit raw Pakasir API key');
+        }
+
+        if ($eventSensitiveKeysPresent) {
+            $this->addCheck($report, 'fail', 'Pakasir payment events omit sensitive provider fields', 'payment_events.raw_payload still contains sensitive provider keys.');
+        } else {
+            $this->addCheck($report, 'pass', 'Pakasir payment events omit sensitive provider fields');
         }
     }
 
