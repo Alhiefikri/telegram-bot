@@ -16,6 +16,7 @@ class PaymentDocumentationTest extends TestCase
         $this->assertStringContainsString('Transaction Detail API', $readme);
         $this->assertStringContainsString('rollback cepat ke hosted', $readme);
         $this->assertStringContainsString('Mode pembayaran', $readme);
+        $this->assertStringContainsString('pakasir:validate-native-qris', $readme);
         $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
     }
 

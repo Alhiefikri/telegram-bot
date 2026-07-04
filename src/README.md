@@ -309,16 +309,36 @@ Hal penting:
 Jika secret Telegram tidak dikonfigurasi di production, aplikasi dirancang untuk fail fast.
 
 
+### 5.2 Webhook dan validasi Pakasir
+
 Endpoint aplikasi:
 
 ```text
+POST /api/webhook/pakasir
 ```
 
 Hal penting:
 
-- gunakan HTTPS di production;
-- callback harus berisi event `payment_status` dan signature valid;
+- gunakan HTTPS di staging/production;
+- callback Pakasir adalah intake tidak tepercaya; paid hanya diterapkan setelah Transaction Detail API cocok dengan `merchant_ref`, amount, project, status `completed`, dan payment method bila tersedia;
+- endpoint memiliki rate limiter `pakasir-webhook` dan replay cache;
+- jangan menaruh API key, bot token, chat ID privat, URL privat, atau raw `payment_number` QRIS di komentar issue, log, screenshot, atau payload admin.
 
+Untuk validasi staging Pakasir native QRIS sebelum production cutover, siapkan environment disposable dengan `TELEGRAM_PAYMENT_MODE=pakasir`, `PAKASIR_CHECKOUT_FLOW=api_qris`, credential Pakasir staging/sandbox, dan bot Telegram test. Buat checkout dari Store Bot staging, ambil UUID payment atau `merchant_ref` dari admin/database, lalu jalankan:
+
+```bash
+php artisan pakasir:validate-native-qris <payment-uuid-or-merchant-ref> --create --reconcile
+```
+
+Command ini menghasilkan report redacted: config native aktif, create QRIS idempotent, QR source berupa `payment_number` non-URL, fee/`total_payment`/expiry ada dan konsisten, hosted fallback terbentuk untuk payment yang sama, Transaction Detail cocok dengan amount original, reconciliation bisa menandai paid saat detail `completed`, dan payload tersimpan tidak berisi raw `payment_number`. Gunakan `--json` jika report perlu dilampirkan sebagai artefak internal; audit dulu agar tidak ada secret.
+
+Pertanyaan provider yang sengaja menguji duplicate endpoint harus dijalankan hanya di staging disposable:
+
+```bash
+php artisan pakasir:validate-native-qris <payment-uuid-or-merchant-ref> --create --duplicate-provider-create
+```
+
+Option `--duplicate-provider-create` secara eksplisit memanggil `transactioncreate/qris` lagi untuk payment yang sama. Jangan gunakan option itu di production.
 
 ### 5.3 Queue worker
 
@@ -422,14 +442,20 @@ Fungsi:
 - melepas reservasi stok.
 
 
+### 5.7 Reconcile Pakasir
+
 Command manual:
 
 ```bash
+php artisan pakasir:reconcile --chunk=100
 ```
 
 Fungsi:
 
-- menerapkan status valid ke sistem internal.
+- mengambil Transaction Detail untuk payment Pakasir pending;
+- memverifikasi project, `merchant_ref`, amount original, status, dan payment method bila tersedia;
+- menerapkan status paid hanya setelah detail Pakasir valid;
+- menyinkronkan expiry provider bila Transaction Detail mengirim `expired_at`.
 
 ### 5.8 Logging dan monitoring
 
@@ -466,7 +492,7 @@ Sebelum production, cek minimal:
 - [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
 - [ ] `TELEGRAM_PAYMENT_MODE=manual` adalah default operasional; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
 - [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`; dashboard menolak aktivasi Pakasir tanpa slug/API key.
-- [ ] `PAKASIR_CHECKOUT_FLOW=hosted` untuk rollout aman; gunakan `api_qris` hanya setelah staging membuktikan native QRIS, dan rollback cepat ke hosted bila perlu.
+- [ ] `PAKASIR_CHECKOUT_FLOW=hosted` untuk rollout aman; gunakan `api_qris` hanya setelah staging membuktikan native QRIS dengan `php artisan pakasir:validate-native-qris <payment> --create --reconcile`, dan rollback cepat ke hosted bila perlu.
 - [ ] `PAKASIR_REDIRECT_URL` opsional; kosongkan jika tidak butuh return URL khusus.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
