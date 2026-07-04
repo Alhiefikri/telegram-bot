@@ -251,7 +251,7 @@ class PakasirWebhookTest extends TestCase
         $payment = $order->payments()->firstOrFail();
         config()->set('services.pakasir.slug', '');
 
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount, ['project' => null]))->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
@@ -299,6 +299,47 @@ class PakasirWebhookTest extends TestCase
 
         $this->assertSame(0, PaymentEvent::count());
         Http::assertNothingSent();
+    }
+
+    public function test_malformed_callback_amounts_are_rejected_before_audit_logging_or_provider_lookup(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
+        Http::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        foreach ($this->malformedAmountCases(10000) as $case => $amount) {
+            $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $amount))->assertUnprocessable();
+
+            $this->assertSame(0, PaymentEvent::count(), "{$case} created a payment event");
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_non_scalar_callback_fields_are_rejected_before_audit_logging_or_provider_lookup(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
+        Http::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        $validPayload = $this->payload($payment->merchant_ref, $payment->amount);
+
+        foreach ([
+            'array order_id' => ['order_id' => ['ORDER-123']],
+            'object order_id' => ['order_id' => (object) ['value' => 'ORDER-123']],
+            'array project' => ['project' => ['warung-ai']],
+            'object project' => ['project' => (object) ['value' => 'warung-ai']],
+            'array status' => ['status' => ['completed']],
+            'object status' => ['status' => (object) ['value' => 'completed']],
+            'array payment_method' => ['payment_method' => ['qris']],
+            'object payment_method' => ['payment_method' => (object) ['value' => 'qris']],
+        ] as $case => $override) {
+            $this->postJson('/api/webhook/pakasir', array_merge($validPayload, $override))->assertUnprocessable();
+
+            $this->assertSame(0, PaymentEvent::count(), "{$case} created a payment event");
+            Http::assertNothingSent();
+        }
     }
 
     public function test_reconcile_command_processes_completed_pakasir_payment_and_logs_reconciliation(): void

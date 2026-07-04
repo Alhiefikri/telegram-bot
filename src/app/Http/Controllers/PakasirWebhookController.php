@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirInteger;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
 class PakasirWebhookController extends Controller
@@ -34,12 +36,22 @@ class PakasirWebhookController extends Controller
 
     private function assertProviderPayloadShape(array $payload): void
     {
-        if (
-            blank($payload['order_id'] ?? null)
-            || PakasirInteger::parsePositive($payload['amount'] ?? null) === null
-            || ! array_key_exists('project', $payload)
-            || blank($payload['status'] ?? null)
-        ) {
+        $validator = Validator::make($payload, [
+            'order_id' => ['required', 'string'],
+            'amount' => [
+                'required',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    if (PakasirInteger::parsePositive($value) === null) {
+                        $fail("The {$attribute} field must be a positive integer.");
+                    }
+                },
+            ],
+            'project' => ['required', 'string'],
+            'status' => ['required', 'string'],
+            'payment_method' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        if ($validator->fails()) {
             throw new UnprocessableEntityHttpException('Invalid Pakasir callback payload.');
         }
     }
@@ -54,9 +66,9 @@ class PakasirWebhookController extends Controller
         $stablePayload = [
             'amount' => $amount,
             'order_id' => (string) $payload['order_id'],
-            'project' => $payload['project'],
+            'project' => (string) $payload['project'],
             'status' => strtolower((string) $payload['status']),
-            'payment_method' => $payload['payment_method'] ?? null,
+            'payment_method' => ($payload['payment_method'] ?? null) === null ? null : (string) $payload['payment_method'],
         ];
 
         return 'pakasir:webhook:replay:'.hash('sha256', json_encode($stablePayload, JSON_THROW_ON_ERROR));

@@ -78,7 +78,8 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('pakasir-webhook', function (Request $request) {
             $payload = $request->all();
-            $key = Arr::get($payload, 'order_id') ?: $request->ip();
+            $orderId = Arr::get($payload, 'order_id');
+            $key = is_scalar($orderId) && trim((string) $orderId) !== '' ? (string) $orderId : $request->ip();
 
             return Limit::perMinute((int) config('services.pakasir.webhook_rate_limit_per_minute', 30))->by('pakasir:'.$key);
         });
