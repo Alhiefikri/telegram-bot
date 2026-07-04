@@ -65,7 +65,7 @@ class TelegramOrderIntents
         }
         $lines[] = 'Total: Rp '.number_format($order->total_amount, 0, ',', '.');
         if ($payment) {
-            $lines[] = 'Pembayaran: '.$payment->method.' ('.$payment->status->value.')';
+            $lines[] = 'Pembayaran: '.$payment->payment_method_label.' ('.$payment->status->value.')';
             if ($payment->paid_at) {
                 $lines[] = 'Dibayar: '.$this->formatDate($payment->paid_at);
             }

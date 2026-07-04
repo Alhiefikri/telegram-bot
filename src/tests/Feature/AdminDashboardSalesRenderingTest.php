@@ -143,6 +143,47 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee(route('admin.orders.sales-proof.retry', $failedOrder), false);
     }
 
+    public function test_admin_order_detail_names_pakasir_hosted_fallback_payment(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create(['invoice_number' => 'INV-PAKASIR-HOSTED']);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'pakasir',
+            'method' => 'hosted',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Detail Order')
+            ->assertSee('INV-PAKASIR-HOSTED')
+            ->assertSee('Pakasir hosted · pending · belum paid');
+    }
+
+    public function test_admin_order_detail_names_pakasir_native_qris_payment(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create(['invoice_number' => 'INV-PAKASIR-NATIVE']);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'pakasir',
+            'method' => 'hosted',
+            'status' => PaymentStatus::Pending,
+            'provider_payment_method' => 'qris',
+            'provider_payment_number' => '00020101021226610016ID.CO.QRIS.ADMIN99',
+            'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.ADMIN99'),
+            'provider_created_at' => now(),
+        ]);
+
+        $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Detail Order')
+            ->assertSee('INV-PAKASIR-NATIVE')
+            ->assertSee('Pakasir native QRIS · pending · belum paid')
+            ->assertDontSee('hosted · pending · belum paid');
+    }
+
     public function test_sales_proof_manual_retry_uses_publisher_path_without_changing_order_state(): void
     {
         $this->actingAs(User::factory()->create([

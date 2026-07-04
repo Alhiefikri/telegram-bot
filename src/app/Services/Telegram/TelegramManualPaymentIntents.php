@@ -50,7 +50,7 @@ class TelegramManualPaymentIntents
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
             '👤 Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
-            '💳 Metode: '.($payment?->method ?: 'manual'),
+            '💳 Metode: '.($payment?->payment_method_label ?: 'manual'),
             '💰 Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
             '',
             'Item:',

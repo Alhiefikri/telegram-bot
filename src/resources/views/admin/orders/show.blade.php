@@ -47,7 +47,7 @@
                     <p class="text-xs font-bold uppercase text-brand-muted">Pembayaran</p>
                     <ul class="mt-2 space-y-1 text-sm font-semibold">
                         @forelse ($order->payments as $payment)
-                            <li>{{ $payment->method }} · {{ $payment->status->value }} · {{ $payment->paid_at?->format('d M Y H:i') ?? 'belum paid' }}</li>
+                            <li>{{ $payment->payment_method_label }} · {{ $payment->status->value }} · {{ $payment->paid_at?->format('d M Y H:i') ?? 'belum paid' }}</li>
                         @empty
                             <li>Belum ada payment.</li>
                         @endforelse

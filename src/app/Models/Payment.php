@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\PaymentStatus;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -48,6 +49,50 @@ class Payment extends Model
             'paid_at' => 'datetime',
             'expired_at' => 'datetime',
         ];
+    }
+
+    protected function paymentMethodLabel(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): string => match (true) {
+                $this->providerName() === 'pakasir' && $this->isNativePakasirQris() => 'Pakasir native QRIS',
+                $this->providerName() === 'pakasir' => 'Pakasir hosted',
+                default => $this->localPaymentMethodLabel(),
+            },
+        );
+    }
+
+    public function isNativePakasirQris(): bool
+    {
+        if ($this->providerName() !== 'pakasir' || $this->providerPaymentMethodName() !== 'qris') {
+            return false;
+        }
+
+        return filled($this->provider_payment_number_hash)
+            || $this->provider_created_at !== null
+            || filled($this->provider_payment_number);
+    }
+
+    private function providerName(): string
+    {
+        return strtolower(trim((string) $this->provider));
+    }
+
+    private function providerPaymentMethodName(): string
+    {
+        return strtolower(trim((string) $this->provider_payment_method));
+    }
+
+    private function localPaymentMethodLabel(): string
+    {
+        $method = trim((string) $this->method);
+        if ($method !== '') {
+            return $method;
+        }
+
+        $provider = trim((string) $this->provider);
+
+        return $provider !== '' ? $provider : 'unknown';
     }
 
     public function order()

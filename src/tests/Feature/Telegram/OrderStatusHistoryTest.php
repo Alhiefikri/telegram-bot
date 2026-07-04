@@ -100,6 +100,31 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Selesaikan pembayaran'));
     }
 
+    public function test_order_detail_names_pakasir_native_qris_instead_of_raw_hosted_method(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-NATIVE-QRIS', 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'ChatGPT Plus', 'quantity' => 1, 'subtotal' => 30000]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'hosted',
+            'provider' => 'pakasir',
+            'status' => PaymentStatus::Pending,
+            'provider_payment_method' => 'qris',
+            'provider_payment_number' => '00020101021226610016ID.CO.QRIS.NATIVE99',
+            'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.NATIVE99'),
+            'provider_created_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(214, '/order INV-NATIVE-QRIS'))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Detail Pesanan')
+            && str_contains($r['text'], 'Pembayaran: Pakasir native QRIS (pending)')
+            && ! str_contains($r['text'], 'Pembayaran: hosted'));
+    }
+
     public function test_order_detail_refreshes_pending_pakasir_payment_from_transaction_detail(): void
     {
         $this->fakeTelegramHttp();
