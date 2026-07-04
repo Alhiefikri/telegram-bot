@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
@@ -140,6 +141,50 @@ class Phase8HardeningTest extends TestCase
 
         $this->artisan('ops:check-failed-jobs --max=0')
             ->expectsOutputToContain('ALERT failed_jobs count 1 exceeds max 0')
+            ->assertFailed();
+    }
+
+    public function test_queue_depth_monitor_alerts_when_threshold_exceeded(): void
+    {
+        DB::table('jobs')->insert([
+            'queue' => 'telegram-outbound',
+            'payload' => '{}',
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => now()->timestamp,
+            'created_at' => now()->timestamp,
+        ]);
+
+        $this->artisan('ops:check-queue-depth --max=0 --queue=telegram-outbound')
+            ->expectsOutputToContain('ALERT queue depth 1 exceeds max 0 for queues telegram-outbound')
+            ->assertFailed();
+    }
+
+    public function test_telegram_webhook_check_is_secret_safe_and_fails_on_pending_updates(): void
+    {
+        config()->set('app.url', 'https://store.example.com');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.webhook_secret', 'webhook-secret');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        Http::fake([
+            'https://api.telegram.org/botbot-token/getWebhookInfo' => Http::response([
+                'ok' => true,
+                'result' => [
+                    'url' => 'https://store.example.com/api/webhook/telegram',
+                    'pending_update_count' => 1,
+                    'allowed_updates' => ['message', 'callback_query'],
+                ],
+            ]),
+        ]);
+
+        $this->artisan('ops:check-telegram-webhook --max-pending=0')
+            ->expectsOutputToContain('Telegram webhook telegram_ok=true')
+            ->expectsOutputToContain('Telegram webhook webhook_matches_app_url=true')
+            ->expectsOutputToContain('Telegram webhook pending_update_count=1')
+            ->doesntExpectOutputToContain('bot-token')
+            ->doesntExpectOutputToContain('webhook-secret')
+            ->doesntExpectOutputToContain('https://store.example.com/api/webhook/telegram')
             ->assertFailed();
     }
 
@@ -329,6 +374,24 @@ SH);
         $this->assertStringContainsString('../scripts/smoke-admin-assets.sh', $contents);
         $this->assertStringContainsString('npm ci', $contents);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
+    }
+
+    public function test_production_deploy_workflow_gates_release_readiness_and_image_provenance(): void
+    {
+        $workflow = base_path('../.github/workflows/deploy-production.yml');
+
+        $this->assertFileExists($workflow);
+
+        $contents = file_get_contents($workflow);
+        $this->assertStringContainsString('DEPLOY_BRANCH: main', $contents);
+        $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
+        $this->assertStringContainsString('./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env', $contents);
+        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull', $contents);
+        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans', $contents);
+        $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
+        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
+        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=0', $contents);
     }
 
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void

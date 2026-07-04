@@ -76,7 +76,7 @@ jobs:
           ../scripts/smoke-admin-assets.sh
           composer test
 
-      - name: Build production Docker image
+      - name: Build production Docker image for CI parity
         working-directory: ${{ github.workspace }}
         run: docker build --pull -t telegram-bot:${{ github.sha }} .
 
@@ -122,7 +122,8 @@ jobs:
           git reset --hard "origin/$DEPLOY_BRANCH"
 
           ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans
 
           for attempt in $(seq 1 36); do
             if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor; then
@@ -151,6 +152,10 @@ jobs:
 
             sleep 5
           done
+
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0
 
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
           REMOTE
