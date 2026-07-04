@@ -115,8 +115,10 @@ class PakasirWebhookTest extends TestCase
         $this->fakeDetail($payment->merchant_ref, $payment->amount, ['status' => 'pending']);
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
 
+        $apiFailureOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $apiFailurePayment = $apiFailureOrder->payments()->firstOrFail();
         Http::fake(['https://app.pakasir.com/api/transactiondetail*' => Http::response(['message' => 'down'], 500)]);
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', $this->payload($apiFailurePayment->merchant_ref, $apiFailurePayment->amount))->assertUnprocessable();
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
@@ -179,6 +181,49 @@ class PakasirWebhookTest extends TestCase
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
+        Http::assertNothingSent();
+    }
+
+    public function test_pakasir_webhook_is_throttled_before_processor_work(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 1);
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertTooManyRequests();
+
+        $this->assertSame(1, PaymentEvent::count());
+        Http::assertSentCount(1);
+    }
+
+    public function test_replayed_matching_pakasir_payload_does_not_repeat_provider_lookup_or_event_logging(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount, ['status' => 'pending']);
+        $payload = $this->payload($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', array_merge($payload, ['completed_at' => now()->addSecond()->toISOString()]))->assertAccepted();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(1, PaymentEvent::count());
+        Http::assertSentCount(1);
+    }
+
+    public function test_noisy_pakasir_payload_is_rejected_before_audit_logging_or_provider_lookup(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
+        Http::fake();
+
+        $this->postJson('/api/webhook/pakasir', ['noise' => 'not-a-provider-callback'])->assertUnprocessable();
+
+        $this->assertSame(0, PaymentEvent::count());
         Http::assertNothingSent();
     }
 

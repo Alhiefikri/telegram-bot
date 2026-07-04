@@ -74,6 +74,13 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute((int) config('services.telegram.webhook_rate_limit_per_minute', 120))->by('telegram:'.$key);
         });
 
+        RateLimiter::for('pakasir-webhook', function (Request $request) {
+            $payload = $request->all();
+            $key = Arr::get($payload, 'order_id') ?: $request->ip();
+
+            return Limit::perMinute((int) config('services.pakasir.webhook_rate_limit_per_minute', 30))->by('pakasir:'.$key);
+        });
+
     }
 
     private function validateProductionConfiguration(): void

@@ -114,12 +114,9 @@ Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order 
 
 ### 3.4 Pakasir payment
 
-Pada jalur Pakasir aktif, checkout membuat payment pending, mengirim customer ke hosted-link checkout Pakasir, lalu sistem melakukan API-key verification untuk memastikan status pembayaran sebelum update order/payment.
+Pada jalur Pakasir aktif, checkout membuat payment pending, mengirim customer ke hosted-link checkout Pakasir, lalu sistem memperlakukan callback publik sebagai untrusted intake. Dokumentasi Pakasir saat ini tidak menyediakan signature/HMAC webhook; adapter membatasi risikonya dengan throttle `pakasir-webhook`, shape gate sebelum audit log, replay cache untuk payload gagal yang sama, lalu API-key verification ke Transaction Detail API sebelum update order/payment.
 
-
-
-4. Callback harus lolos validasi signature dan event header.
-5. Payload dicocokkan dengan payment internal menggunakan `merchant_ref`, `reference`, nominal, dan payment method.
+Payload callback dicocokkan dengan payment internal menggunakan `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan hasil Transaction Detail API. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`.
 
 
 - `PAID`: payment menjadi `paid`, order masuk `processing`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
