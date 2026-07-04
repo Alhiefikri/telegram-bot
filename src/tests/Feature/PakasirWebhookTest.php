@@ -20,6 +20,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -357,6 +358,11 @@ class PakasirWebhookTest extends TestCase
             public function hostedPaymentUrl(Payment $payment): string
             {
                 return 'https://fake-pakasir.test/pay/'.$payment->merchant_ref;
+            }
+
+            public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
+            {
+                throw new \BadMethodCallException('QRIS create is not used by webhook tests.');
             }
 
             public function transactionDetail(Payment $payment): array
