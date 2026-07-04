@@ -2,9 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\InventoryLedger;
 use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBotClient;
 use App\Support\DogfoodTiming;
@@ -31,7 +34,7 @@ class PublishSalesProofPost implements ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramBotClient $bot, SalesProofPostFormatter $formatter): void
+    public function handle(TelegramBotClient $bot, SalesProofPostFormatter $formatter, InventoryLedger $inventory): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -53,7 +56,7 @@ class PublishSalesProofPost implements ShouldQueue
                 return;
             }
 
-            $this->publish($bot, $formatter);
+            $this->publish($bot, $formatter, $inventory);
         } finally {
             if ($lockAcquired) {
                 $publishLock->release();
@@ -67,7 +70,7 @@ class PublishSalesProofPost implements ShouldQueue
         }
     }
 
-    private function publish(TelegramBotClient $bot, SalesProofPostFormatter $formatter): void
+    private function publish(TelegramBotClient $bot, SalesProofPostFormatter $formatter, InventoryLedger $inventory): void
     {
         $setting = StoreChannelSetting::current();
         $chatId = $setting->telegram_chat_id ?: $setting->channel_username;
@@ -83,7 +86,7 @@ class PublishSalesProofPost implements ShouldQueue
             return;
         }
 
-        $post = DB::transaction(function (): ?SalesProofPost {
+        $post = DB::transaction(function () use ($inventory): ?SalesProofPost {
             $post = SalesProofPost::query()->where('order_id', $this->orderId)->lockForUpdate()->first();
             if (! $post || $post->status === SalesProofPost::STATUS_SENT || $post->status === SalesProofPost::STATUS_SENDING || (! $this->manualRetry && $post->attempts >= 3)) {
                 // STATUS_SENDING is the durable Telegram-send claim. A worker crash
@@ -91,6 +94,21 @@ class PublishSalesProofPost implements ShouldQueue
                 // retries skip it instead of risking a duplicate Sales Proof Post.
                 return null;
             }
+
+            $order = Order::with(['payments'])->whereKey($this->orderId)->lockForUpdate()->first();
+            $invariantFailure = $order
+                ? $this->paidOrderProofInvariantFailure($order, $inventory)
+                : 'Sales Proof Post requires an existing paid order.';
+            if ($invariantFailure) {
+                $post->update([
+                    'status' => SalesProofPost::STATUS_FAILED,
+                    'attempts' => $post->attempts + 1,
+                    'last_error' => mb_substr($invariantFailure, 0, 1000),
+                ]);
+
+                return null;
+            }
+
             $post->update(['status' => SalesProofPost::STATUS_SENDING, 'attempts' => $post->attempts + 1, 'last_error' => null]);
 
             return $post->fresh();
@@ -118,6 +136,22 @@ class PublishSalesProofPost implements ShouldQueue
                 $this->release($this->backoff()[$post->attempts - 1] ?? 120);
             }
         }
+    }
+
+    private function paidOrderProofInvariantFailure(Order $order, InventoryLedger $inventory): ?string
+    {
+        $isPaid = $order->payment_status === PaymentStatus::Paid
+            && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Paid);
+        $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
+        if (! $isPaid || ! $isProcessable) {
+            return 'Sales Proof Post requires a paid processable order.';
+        }
+
+        if (! $inventory->hasSaleProofForOrder($order)) {
+            return 'Sales Proof Post requires matching inventory sale proof.';
+        }
+
+        return null;
     }
 
     private function markUnpublishable(string $message): void

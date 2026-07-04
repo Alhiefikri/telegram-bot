@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\PublishSalesProofPost;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -105,8 +107,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     {
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         $customer = Customer::factory()->create(['username' => 'RetryBuyer']);
-        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
-        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Retry Product', 'unit_price' => 12000, 'subtotal' => 12000]);
+        $product = Product::factory()->create(['name' => 'Retry Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Retry Product');
         SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::sequence()
@@ -129,6 +131,64 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('99', $post->telegram_message_id);
         $this->assertNull($post->last_error);
         $this->assertNotNull($post->sent_at);
+    }
+
+    public function test_sales_proof_post_refuses_unpaid_order_without_sending_public_message(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'UnpaidBuyer']);
+        $product = Product::factory()->create(['name' => 'Unpaid Product']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Unpaid Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        $this->fakeTelegramHttp(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 501]])]);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        Http::assertNothingSent();
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertSame(1, $post->attempts);
+        $this->assertStringContainsString('paid', (string) $post->last_error);
+    }
+
+    public function test_sales_proof_post_refuses_paid_order_missing_sale_proof(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'MissingSaleBuyer']);
+        $product = Product::factory()->create(['name' => 'Missing Sale Product']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Missing Sale Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        $this->fakeTelegramHttp(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 502]])]);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        Http::assertNothingSent();
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertStringContainsString('sale proof', (string) $post->last_error);
+    }
+
+    public function test_sales_proof_post_refuses_paid_order_with_mismatched_sale_proof(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'MismatchBuyer']);
+        $product = Product::factory()->create(['name' => 'Mismatch Product']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Mismatch Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        InventoryMovement::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale, 'quantity' => -2]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        $this->fakeTelegramHttp(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 503]])]);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        Http::assertNothingSent();
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertStringContainsString('sale proof', (string) $post->last_error);
     }
 
     public function test_sales_proof_post_retry_skips_in_progress_send_after_worker_crash(): void
@@ -405,5 +465,31 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         });
         $this->assertSame(1, $sent);
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    private function paidOrderWithSaleProof(Customer $customer, Product $product, string $productName): Order
+    {
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => PaymentStatus::Paid,
+            'order_status' => OrderStatus::Processing,
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $productName,
+            'quantity' => 1,
+            'unit_price' => 12000,
+            'subtotal' => 12000,
+        ]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        InventoryMovement::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Sale,
+            'quantity' => -1,
+        ]);
+
+        return $order;
     }
 }

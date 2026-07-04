@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -156,7 +158,10 @@ class AdminDashboardSalesRenderingTest extends TestCase
             'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
         ]);
-        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Retry Product', 'unit_price' => 12000, 'subtotal' => 12000]);
+        $product = Product::factory()->create(['name' => 'Retry Product']);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Retry Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        InventoryMovement::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale, 'quantity' => -1]);
         SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
 
         $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect(route('admin.dashboard', ['tab' => 'penjualan']));
@@ -170,6 +175,36 @@ class AdminDashboardSalesRenderingTest extends TestCase
 
         $this->post(route('admin.orders.sales-proof.retry', $order))->assertSessionHas('status', 'Sales Proof Post tidak dalam status gagal. Retry tidak dijalankan.');
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
+    }
+
+    public function test_sales_proof_manual_retry_refuses_failed_row_without_sale_proof(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 920]])]);
+
+        $customer = Customer::factory()->create(['username' => 'RetryCorrupt']);
+        $product = Product::factory()->create(['name' => 'Retry Corrupt Product']);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-RETRY-CORRUPT',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Retry Corrupt Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
+
+        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect(route('admin.dashboard', ['tab' => 'penjualan']));
+
+        Http::assertNothingSent();
+        $post = $order->salesProofPost()->firstOrFail();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertSame(4, $post->attempts);
+        $this->assertStringContainsString('sale proof', (string) $post->last_error);
+        $this->assertNull($post->telegram_message_id);
     }
 
     public function test_legacy_pending_sales_proof_rows_do_not_render_as_pending_when_feature_is_disabled(): void
