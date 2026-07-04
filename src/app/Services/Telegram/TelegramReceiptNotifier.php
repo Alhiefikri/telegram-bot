@@ -25,11 +25,20 @@ class TelegramReceiptNotifier
         try {
             $claimed = DB::transaction(function () use ($order, $force) {
                 $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->payment_status !== PaymentStatus::Paid || (! $force && $locked->telegram_receipt_sent_at !== null)) {
+                if ($locked->payment_status !== PaymentStatus::Paid) {
                     return null;
                 }
 
-                return $locked;
+                if (! $force && ($locked->telegram_receipt_sent_at !== null || $locked->telegram_receipt_send_started_at !== null)) {
+                    return null;
+                }
+
+                // Claim before Telegram I/O. If the worker dies after Telegram accepts
+                // the message but before sent_at is written, retries skip this effect
+                // instead of sending duplicate account credentials.
+                $locked->forceFill(['telegram_receipt_send_started_at' => now()])->save();
+
+                return $locked->fresh();
             });
 
             if (! $claimed) {
@@ -73,10 +82,19 @@ class TelegramReceiptNotifier
                 $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
             }
 
-            $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup());
+            try {
+                $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup());
+            } catch (\Throwable $e) {
+                Order::whereKey($claimed->id)
+                    ->whereNull('telegram_receipt_sent_at')
+                    ->update(['telegram_receipt_send_started_at' => null]);
+
+                throw $e;
+            }
+
             $receiptSentAt = Order::whereKey($claimed->id);
             if (! $force) {
-                $receiptSentAt->whereNull('telegram_receipt_sent_at');
+                $receiptSentAt->whereNotNull('telegram_receipt_send_started_at')->whereNull('telegram_receipt_sent_at');
             }
             $receiptSentAt->update(['telegram_receipt_sent_at' => now()]);
         } finally {

@@ -36,16 +36,13 @@ class TelegramWebhookController extends Controller
             'created_at' => now(),
         ]);
 
-        if ($inserted === 1) {
-            $update = TelegramUpdate::query()->where('update_id', (int) $validated['update_id'])->firstOrFail();
+        $update = TelegramUpdate::query()->where('update_id', (int) $validated['update_id'])->firstOrFail();
+        $duplicate = $inserted !== 1;
+        $jobEnqueuedAt = null;
+
+        if ($update->processed_at === null) {
             $jobEnqueuedAt = now();
             $this->dispatchProcessor($update->id, $jobEnqueuedAt->toISOString());
-            $duplicate = false;
-        } else {
-            // Duplicate Telegram update: already stored/processing/processed.
-            $update = null;
-            $jobEnqueuedAt = null;
-            $duplicate = true;
         }
 
         DogfoodTiming::log('dogfood.telegram.webhook_ack', [

@@ -85,7 +85,10 @@ class PublishSalesProofPost implements ShouldQueue
 
         $post = DB::transaction(function (): ?SalesProofPost {
             $post = SalesProofPost::query()->where('order_id', $this->orderId)->lockForUpdate()->first();
-            if (! $post || $post->status === SalesProofPost::STATUS_SENT || (! $this->manualRetry && $post->attempts >= 3)) {
+            if (! $post || $post->status === SalesProofPost::STATUS_SENT || $post->status === SalesProofPost::STATUS_SENDING || (! $this->manualRetry && $post->attempts >= 3)) {
+                // STATUS_SENDING is the durable Telegram-send claim. A worker crash
+                // after Telegram accepts the channel post leaves this state behind;
+                // retries skip it instead of risking a duplicate Sales Proof Post.
                 return null;
             }
             $post->update(['status' => SalesProofPost::STATUS_SENDING, 'attempts' => $post->attempts + 1, 'last_error' => null]);

@@ -49,24 +49,47 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
             $chatId = (string) $order->customer->telegram_id;
 
-            if ($order->manual_checkout_customer_notified_at === null) {
-                DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                    'step' => 'manual_payment_instructions',
-                    'payment_mode' => 'manual',
-                    'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
-                    'order_correlation_id' => DogfoodTiming::correlation($order->id),
-                ], fn () => $checkoutIntents->sendPaymentInstructions($chatId, $order));
+            if ($order->manual_checkout_customer_notified_at === null && $order->manual_checkout_customer_notification_started_at === null) {
+                // Claim before Telegram I/O. If the worker dies after Telegram accepts
+                // the photo but before notified_at is written, retries skip this
+                // customer effect instead of sending duplicate payment instructions.
+                $order->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
+
+                try {
+                    DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                        'step' => 'manual_payment_instructions',
+                        'payment_mode' => 'manual',
+                        'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
+                        'order_correlation_id' => DogfoodTiming::correlation($order->id),
+                    ], fn () => $checkoutIntents->sendPaymentInstructions($chatId, $order));
+                } catch (\Throwable $e) {
+                    $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
+
+                    throw $e;
+                }
 
                 $order->forceFill(['manual_checkout_customer_notified_at' => now()])->save();
             }
 
-            if ($order->fresh()->manual_checkout_admin_notified_at === null) {
-                DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                    'step' => 'manual_admin_notification',
-                    'payment_mode' => 'manual',
-                    'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
-                    'order_correlation_id' => DogfoodTiming::correlation($order->id),
-                ], fn () => $checkoutIntents->notifyAdminAboutManualOrder($order));
+            $order->refresh();
+            if ($order->manual_checkout_admin_notified_at === null && $order->manual_checkout_admin_notification_started_at === null) {
+                // Same bounded-at-most-once contract as the customer photo: ordinary
+                // Telegram failures clear the claim; a worker crash after acceptance
+                // leaves the claim so retries do not duplicate the admin alert.
+                $order->forceFill(['manual_checkout_admin_notification_started_at' => now()])->save();
+
+                try {
+                    DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                        'step' => 'manual_admin_notification',
+                        'payment_mode' => 'manual',
+                        'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
+                        'order_correlation_id' => DogfoodTiming::correlation($order->id),
+                    ], fn () => $checkoutIntents->notifyAdminAboutManualOrder($order));
+                } catch (\Throwable $e) {
+                    $order->forceFill(['manual_checkout_admin_notification_started_at' => null])->save();
+
+                    throw $e;
+                }
 
                 $order->forceFill(['manual_checkout_admin_notified_at' => now()])->save();
             }

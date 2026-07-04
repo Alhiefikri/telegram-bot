@@ -25,7 +25,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         Bus::assertDispatched(ProcessTelegramUpdate::class);
     }
 
-    public function test_duplicate_webhook_post_dispatches_only_once_and_invalid_payload_is_rejected(): void
+    public function test_duplicate_unprocessed_webhook_post_is_redispatched_and_invalid_payload_is_rejected(): void
     {
         Bus::fake();
         $payload = $this->messageUpdate(101, '/start');
@@ -35,7 +35,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->postTelegramWebhook(['update_id' => 102, 'edited_message' => []])->assertUnprocessable();
 
         $this->assertSame(1, TelegramUpdate::count());
-        Bus::assertDispatchedTimes(ProcessTelegramUpdate::class, 1);
+        Bus::assertDispatchedTimes(ProcessTelegramUpdate::class, 2);
     }
 
     public function test_duplicate_update_is_not_processed_twice(): void
@@ -64,6 +64,26 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, $update->fresh()->processed_at);
         Http::assertSentCount(2);
+    }
+
+    public function test_recovery_command_redispatches_only_unprocessed_stored_updates(): void
+    {
+        Bus::fake();
+        $unprocessed = TelegramUpdate::create(['update_id' => 201, 'payload' => $this->messageUpdate(201, '/start'), 'created_at' => now()]);
+        TelegramUpdate::create(['update_id' => 202, 'payload' => $this->messageUpdate(202, '/start'), 'processed_at' => now(), 'created_at' => now()]);
+
+        $this->artisan('telegram:recover-updates', ['--chunk' => 1, '--queue' => 'default'])
+            ->expectsOutputToContain('telegram:recover-updates completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        Bus::assertDispatched(ProcessTelegramUpdate::class, fn (ProcessTelegramUpdate $job): bool => $job->telegramUpdateId === $unprocessed->id && $job->queue === 'default');
+    }
+
+    public function test_recovery_command_is_scheduled(): void
+    {
+        $this->artisan('schedule:list')
+            ->expectsOutputToContain('telegram:recover-updates --queue=default')
+            ->assertSuccessful();
     }
 
     public function test_telegram_webhook_is_rate_limited_by_user(): void

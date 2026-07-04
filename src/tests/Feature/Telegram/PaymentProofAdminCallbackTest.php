@@ -131,6 +131,21 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNotNull($post->sent_at);
     }
 
+    public function test_sales_proof_post_retry_skips_in_progress_send_after_worker_crash(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'CrashBuyer']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Crash Product', 'unit_price' => 12000, 'subtotal' => 12000]);
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_SENDING, 'attempts' => 1]);
+        $this->fakeTelegramHttp();
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        Http::assertNothingSent();
+        $this->assertSame(SalesProofPost::STATUS_SENDING, $order->salesProofPost()->firstOrFail()->status);
+    }
+
     public function test_paid_account_order_receipt_contains_only_the_buyers_allocated_secret(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
@@ -345,6 +360,23 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(TelegramReceiptNotifier::class)->send($order);
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && $r['chat_id'] === 777 && str_contains($r['text'], 'Pembayaran diterima'));
+    }
+
+    public function test_receipt_retry_skips_started_send_after_worker_crash(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 777]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => PaymentStatus::Paid,
+            'telegram_receipt_send_started_at' => now(),
+        ]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        Http::assertNothingSent();
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_pakasir_paid_callback_sends_telegram_receipt_once_on_duplicate_callback(): void
