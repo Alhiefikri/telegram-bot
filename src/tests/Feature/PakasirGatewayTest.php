@@ -7,12 +7,15 @@ use App\Enums\PaymentEventType;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Providers\AppServiceProvider;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirQrisTransaction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -76,7 +79,7 @@ class PakasirGatewayTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactiondetail?project=warung-ai&amount=10000&order_id='.$payment->merchant_ref.'&api_key=pakasir-secret');
     }
 
-    public function test_creates_qris_transaction_posts_to_pakasir_and_persists_sanitized_native_fields(): void
+    public function test_creates_qris_transaction_posts_to_pakasir_without_mutating_local_payment_state(): void
     {
         $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
         Http::fake(fn ($request) => Http::response([
@@ -113,6 +116,61 @@ class PakasirGatewayTest extends TestCase
             && $request['api_key'] === 'pakasir-secret');
 
         $payment->refresh();
+        $this->assertNull($payment->provider_payload);
+        $this->assertNull($payment->provider_fee);
+        $this->assertNull($payment->provider_total_payment);
+        $this->assertNull($payment->provider_payment_method);
+        $this->assertNull($payment->provider_payment_number);
+        $this->assertNull($payment->provider_payment_number_hash);
+        $this->assertNull($payment->provider_created_at);
+        $this->assertNull($payment->provider_expires_at);
+        $this->assertSame(0, PaymentEvent::count());
+    }
+
+    public function test_native_qris_service_persists_sanitized_native_fields_from_provider_response(): void
+    {
+        Http::fake();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $providerPayload = [
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => $payment->merchant_ref,
+                'amount' => 10000,
+                'fee' => 103,
+                'total_payment' => 10103,
+                'payment_method' => 'qris',
+                'payment_number' => $paymentNumber,
+                'expired_at' => '2026-07-04T16:30:00Z',
+                'api_key' => 'provider-should-not-echo-this',
+            ],
+        ];
+
+        $this->app->instance(PakasirProviderAdapter::class, new class($providerPayload) implements PakasirProviderAdapter
+        {
+            public function __construct(private readonly array $payload) {}
+
+            public function hostedPaymentUrl(Payment $payment): string
+            {
+                throw new \BadMethodCallException('Hosted URL is not used by this test.');
+            }
+
+            public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
+            {
+                return PakasirQrisTransaction::fromPayload($this->payload);
+            }
+
+            public function transactionDetail(Payment $payment): array
+            {
+                throw new \BadMethodCallException('Transaction detail is not used by this test.');
+            }
+        });
+
+        $transaction = app(PakasirNativeQrisService::class)->ensureCreated($payment);
+
+        $this->assertSame($paymentNumber, $transaction->paymentNumber());
+        $payment->refresh();
         $this->assertSame(103, $payment->provider_fee);
         $this->assertSame(10103, $payment->provider_total_payment);
         $this->assertSame('qris', $payment->provider_payment_method);
@@ -134,6 +192,7 @@ class PakasirGatewayTest extends TestCase
         $this->assertStringNotContainsString($paymentNumber, json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
         $this->assertArrayNotHasKey('payment_number', $event->raw_payload['payment']);
         $this->assertArrayNotHasKey('api_key', $event->raw_payload['payment']);
+        Http::assertNothingSent();
     }
 
     public function test_native_qris_provider_expiry_tightens_local_order_expiry(): void
@@ -153,7 +212,7 @@ class PakasirGatewayTest extends TestCase
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->addHour());
         $payment = $order->payments()->firstOrFail();
 
-        app(PakasirClient::class)->createQrisTransaction($payment);
+        app(PakasirNativeQrisService::class)->ensureCreated($payment);
 
         $this->assertTrue($payment->fresh()->expired_at?->equalTo($providerExpiry));
         $this->assertTrue($order->fresh()->expires_at?->equalTo($providerExpiry));
@@ -186,6 +245,7 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame($paymentNumber, $first->paymentNumber());
         $this->assertSame($paymentNumber, $second->paymentNumber());
         $this->assertCount(1, Http::recorded(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactioncreate/qris'));
+        $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
     }
 
     public function test_qris_transaction_create_fails_closed_for_mismatched_response_or_missing_payment_number(): void

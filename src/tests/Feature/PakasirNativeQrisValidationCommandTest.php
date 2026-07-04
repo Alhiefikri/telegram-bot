@@ -168,7 +168,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
             ->doesntExpectOutputToContain($paymentNumbers[1])
             ->assertSuccessful();
 
-        $this->assertSame(2, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
+        $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
         Http::assertSentCount(3);
     }
 
