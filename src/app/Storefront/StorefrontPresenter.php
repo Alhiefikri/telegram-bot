@@ -26,6 +26,16 @@ class StorefrontPresenter
         return $this->supportHref() ?: '#support';
     }
 
+    public function telegramBotHref(): string
+    {
+        return config('storefront.links.telegram_bot_url', 'https://t.me/lhiestore_bot?start=landing');
+    }
+
+    public function adminLoginHref(): string
+    {
+        return route('admin.login');
+    }
+
     public function stockAvailable(Product $product): int
     {
         return max(0, (int) $product->stock - (int) $product->reserved_stock);
@@ -38,7 +48,19 @@ class StorefrontPresenter
 
     public function publicStorageUrl(?string $path): ?string
     {
-        return $path ? '/storage/'.ltrim($path, '/') : null;
+        if (! $path) {
+            return null;
+        }
+
+        if (str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        $trackedProductImage = 'storefront/products/'.basename($path);
+
+        return file_exists(public_path($trackedProductImage))
+            ? '/'.$trackedProductImage
+            : '/storage/'.ltrim($path, '/');
     }
 
     /**

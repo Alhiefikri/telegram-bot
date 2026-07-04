@@ -112,18 +112,17 @@
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
     <div class="storefront-shell min-h-screen">
-        <header class="sticky top-4 z-50 mx-auto w-[calc(100%-2rem)] max-w-6xl rounded-2xl bg-white/92 backdrop-blur-xl border border-[var(--sf-border)] shadow-sm">
-            <div class="flex min-h-14 items-center justify-between gap-4 px-5 py-3">
+        <header class="sticky top-4 z-50 mx-auto w-[calc(100%-2rem)] max-w-6xl rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[6px_6px_0_var(--sf-shadow)]">
+            <div class="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
                 <a href="{{ route('storefront.home') }}" class="flex items-center gap-2">
-                    <div class="h-7 w-7 rounded-lg bg-slate-900 flex items-center justify-center text-white font-black text-sm select-none shadow-sm">L</div>
-                    <span class="text-sm font-bold tracking-tight text-[var(--sf-ink)]">{{ $brand }}</span>
+                    @include('storefront.components.brand-mark', ['brand' => $brand])
                 </a>
 
-                <nav class="hidden md:flex items-center gap-1.5 p-1 bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 border border-slate-200">
-                    <a href="{{ route('storefront.home') }}#products" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Produk</a>
-                    <a href="#langkah" class="px-4 py-1.5 rounded-lg bg-white text-slate-900 shadow-sm">Panduan</a>
-                    <a href="#troubleshooting" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Bantuan</a>
-                    <a href="{{ $supportDestination }}" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Support</a>
+                <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] md:flex">
+                    <a href="{{ route('storefront.home') }}#products" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
+                    <a href="#langkah" class="rounded-md bg-[var(--sf-surface)] px-4 py-2 shadow-[3px_3px_0_var(--sf-shadow)]">Panduan</a>
+                    <a href="#troubleshooting" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>
+                    <a href="{{ $supportDestination }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Support</a>
                 </nav>
             </div>
         </header>
@@ -131,84 +130,84 @@
         <main class="mx-auto max-w-6xl px-5 py-12 sm:px-6 lg:py-18">
             <section class="grid gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Panduan setelah pembelian</p>
-                    <h1 class="mt-4 max-w-3xl text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-950 leading-[1.02] text-balance">
+                    <p class="neo-chip inline-flex px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-ink)]">Panduan setelah pembelian</p>
+                    <h1 class="mt-5 max-w-3xl font-display text-4xl font-black leading-[0.98] tracking-tight text-[var(--sf-ink)] text-balance sm:text-6xl lg:text-7xl">
                         Cara masuk dan amankan akun digital kamu.
                     </h1>
-                    <p class="mt-5 max-w-2xl text-base text-slate-600 leading-relaxed">
+                    <p class="mt-5 max-w-2xl text-base font-semibold leading-relaxed text-[var(--sf-muted)]">
                         Ikuti panduan ini setelah bot mengirim data akun. Urutannya dibuat untuk akun ChatGPT yang memakai email Outlook/iCloud dan MFA Google Authenticator: masuk dengan email, verifikasi kode, lalu amankan akun supaya aksesnya ada di perangkat kamu.
                     </p>
 
                     <div class="mt-8 grid gap-3 sm:grid-cols-3">
-                        <a href="#langkah" class="inline-flex h-12 items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-bold text-white hover:bg-slate-700 active:scale-[0.98] transition-all">
+                        <a href="#langkah" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
                             Mulai panduan
                         </a>
-                        <a href="#checklist" class="inline-flex h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-5 text-sm font-bold text-slate-900 hover:border-slate-400 active:scale-[0.98] transition-all">
+                        <a href="#checklist" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-surface)] px-5 text-sm font-black text-[var(--sf-ink)]">
                             Cek keamanan
                         </a>
-                        <a href="{{ $supportDestination }}" class="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-5 text-sm font-bold text-slate-700 hover:bg-white active:scale-[0.98] transition-all">
+                        <a href="{{ $supportDestination }}" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-yellow)] px-5 text-sm font-black text-[var(--sf-ink)]">
                             Chat support
                         </a>
                     </div>
                 </div>
 
                 <figure class="relative">
-                    <div class="absolute -left-5 top-8 hidden h-28 w-28 rounded-full bg-slate-200/70 blur-2xl lg:block"></div>
+                    <div class="absolute -left-5 top-8 hidden h-20 w-20 rotate-12 border-[3px] border-[var(--sf-border)] bg-[var(--sf-blue)] shadow-[6px_6px_0_var(--sf-shadow)] lg:block"></div>
                     <img
                         src="{{ $guideImages[1] }}"
                         alt="Cover panduan login ChatGPT memakai email Outlook atau iCloud dan MFA Google Authenticator"
-                        class="relative w-full rounded-2xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.16)]"
+                        class="neo-panel relative w-full bg-[var(--sf-surface)]"
                         loading="eager"
                     >
                 </figure>
             </section>
 
             <section class="mt-14 grid gap-5 md:grid-cols-3" aria-label="Ringkasan alur login">
-                <div class="rounded-2xl bg-white p-5 shadow-sm">
-                    <p class="text-sm font-bold text-slate-950">1. Masuk akun</p>
-                    <p class="mt-2 text-sm leading-relaxed text-slate-600">Gunakan email Outlook/iCloud dan password yang dikirim oleh bot.</p>
+                <div class="neo-panel-tight bg-[var(--sf-surface)] p-5">
+                    <p class="font-display text-sm font-black text-[var(--sf-ink)]">1. Masuk akun</p>
+                    <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Gunakan email Outlook/iCloud dan password yang dikirim oleh bot.</p>
                 </div>
-                <div class="rounded-2xl bg-white p-5 shadow-sm">
-                    <p class="text-sm font-bold text-slate-950">2. Verifikasi MFA</p>
-                    <p class="mt-2 text-sm leading-relaxed text-slate-600">Tambahkan MFA Secret ke Google Authenticator, lalu pakai kode 6 digit terbaru.</p>
+                <div class="neo-panel-tight bg-[var(--sf-yellow)] p-5">
+                    <p class="font-display text-sm font-black text-[var(--sf-ink)]">2. Verifikasi MFA</p>
+                    <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Tambahkan MFA Secret ke Google Authenticator, lalu pakai kode 6 digit terbaru.</p>
                 </div>
-                <div class="rounded-2xl bg-white p-5 shadow-sm">
-                    <p class="text-sm font-bold text-slate-950">3. Amankan akses</p>
-                    <p class="mt-2 text-sm leading-relaxed text-slate-600">Ganti password dan pindahkan MFA ke perangkat buyer setelah berhasil login.</p>
+                <div class="neo-panel-tight bg-[var(--sf-blue)] p-5 text-white">
+                    <p class="font-display text-sm font-black">3. Amankan akses</p>
+                    <p class="mt-2 text-sm font-semibold leading-relaxed text-white/85">Ganti password dan pindahkan MFA ke perangkat buyer setelah berhasil login.</p>
                 </div>
             </section>
 
             <section id="langkah" class="mt-20 space-y-16 scroll-mt-28">
                 <div class="max-w-2xl">
-                    <p class="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Langkah lengkap</p>
-                    <h2 class="mt-3 text-2xl sm:text-4xl font-black tracking-tight text-slate-950">Ikuti dari atas, jangan lompat langkah.</h2>
-                    <p class="mt-4 text-sm sm:text-base leading-relaxed text-slate-600">Setiap bagian di bawah mengikuti gambar dari panduan asli. Baca catatan singkatnya, lalu cocokkan dengan screenshot agar tidak salah membedakan email, password, MFA Secret, dan kode MFA.</p>
+                    <p class="neo-chip inline-flex px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-ink)]">Langkah lengkap</p>
+                    <h2 class="mt-5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Ikuti dari atas, jangan lompat langkah.</h2>
+                    <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Setiap bagian di bawah mengikuti gambar dari panduan asli. Baca catatan singkatnya, lalu cocokkan dengan screenshot agar tidak salah membedakan email, password, MFA Secret, dan kode MFA.</p>
                 </div>
 
                 @foreach ($steps as $index => $step)
                     <article class="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start {{ $index % 2 === 1 ? 'lg:[&>figure]:order-2' : '' }}">
                         <div class="lg:sticky lg:top-28">
-                            <p class="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{{ $step['kicker'] }}</p>
-                            <h3 class="mt-3 text-2xl sm:text-3xl font-black tracking-tight text-slate-950">{{ $step['title'] }}</h3>
-                            <p class="mt-4 text-sm sm:text-base leading-relaxed text-slate-600">{{ $step['body'] }}</p>
+                            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">{{ $step['kicker'] }}</p>
+                            <h3 class="mt-3 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $step['title'] }}</h3>
+                            <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">{{ $step['body'] }}</p>
 
                             <ul class="mt-6 space-y-3">
                                 @foreach ($step['points'] as $point)
-                                    <li class="flex gap-3 text-sm leading-relaxed text-slate-700">
-                                        <span class="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-900 text-[10px] font-bold text-white">{{ $loop->iteration }}</span>
+                                    <li class="flex gap-3 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">
+                                        <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] text-[10px] font-black text-[var(--sf-ink)] shadow-[2px_2px_0_var(--sf-shadow)]">{{ $loop->iteration }}</span>
                                         <span>{{ $point }}</span>
                                     </li>
                                 @endforeach
                             </ul>
 
-                            <p class="mt-6 rounded-2xl bg-slate-100 p-4 text-sm font-semibold leading-relaxed text-slate-800">{{ $step['note'] }}</p>
+                            <p class="neo-panel-tight mt-6 bg-[var(--sf-surface)] p-4 text-sm font-bold leading-relaxed text-[var(--sf-ink)]">{{ $step['note'] }}</p>
                         </div>
 
                         <figure>
                             <img
                                 src="{{ $guideImages[$step['image']] }}"
                                 alt="{{ $step['kicker'] }} - {{ $step['title'] }}"
-                                class="w-full rounded-2xl border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.12)]"
+                                class="neo-panel w-full bg-[var(--sf-surface)]"
                                 loading="lazy"
                             >
                         </figure>
@@ -216,41 +215,41 @@
                 @endforeach
             </section>
 
-            <section id="troubleshooting" class="mt-20 grid gap-8 rounded-3xl bg-white p-6 shadow-sm md:grid-cols-[0.9fr_1.1fr] md:p-8 scroll-mt-28">
+            <section id="troubleshooting" class="neo-panel mt-20 grid scroll-mt-28 gap-8 bg-[var(--sf-surface)] p-6 md:grid-cols-[0.9fr_1.1fr] md:p-8">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Troubleshooting</p>
-                    <h2 class="mt-3 text-2xl sm:text-4xl font-black tracking-tight text-slate-950">Kalau masih gagal, cek empat penyebab paling sering.</h2>
-                    <p class="mt-4 text-sm sm:text-base leading-relaxed text-slate-600">Jangan langsung mengulang login berkali-kali. Periksa satu per satu agar akun tidak terkena pembatasan sementara.</p>
+                    <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--sf-accent)]">Troubleshooting</p>
+                    <h2 class="mt-3 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Kalau masih gagal, cek empat penyebab paling sering.</h2>
+                    <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Jangan langsung mengulang login berkali-kali. Periksa satu per satu agar akun tidak terkena pembatasan sementara.</p>
                 </div>
                 <div class="grid gap-4 sm:grid-cols-2">
-                    <div class="rounded-2xl bg-slate-50 p-5">
-                        <p class="text-sm font-bold text-slate-950">Email tidak lanjut</p>
-                        <p class="mt-2 text-sm leading-relaxed text-slate-600">Cek typo, domain email, dan spasi tersembunyi di awal/akhir.</p>
+                    <div class="neo-panel-tight bg-[#fff8dc] p-5">
+                        <p class="font-display text-sm font-black text-[var(--sf-ink)]">Email tidak lanjut</p>
+                        <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Cek typo, domain email, dan spasi tersembunyi di awal/akhir.</p>
                     </div>
-                    <div class="rounded-2xl bg-slate-50 p-5">
-                        <p class="text-sm font-bold text-slate-950">Password salah</p>
-                        <p class="mt-2 text-sm leading-relaxed text-slate-600">Periksa huruf besar/kecil, simbol, dan angka. Gunakan tombol lihat password jika ada.</p>
+                    <div class="neo-panel-tight bg-[#fff8dc] p-5">
+                        <p class="font-display text-sm font-black text-[var(--sf-ink)]">Password salah</p>
+                        <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Periksa huruf besar/kecil, simbol, dan angka. Gunakan tombol lihat password jika ada.</p>
                     </div>
-                    <div class="rounded-2xl bg-slate-50 p-5">
-                        <p class="text-sm font-bold text-slate-950">Kode MFA ditolak</p>
-                        <p class="mt-2 text-sm leading-relaxed text-slate-600">Pakai kode 6 digit terbaru dari Google Authenticator, bukan MFA Secret.</p>
+                    <div class="neo-panel-tight bg-[#fff8dc] p-5">
+                        <p class="font-display text-sm font-black text-[var(--sf-ink)]">Kode MFA ditolak</p>
+                        <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Pakai kode 6 digit terbaru dari Google Authenticator, bukan MFA Secret.</p>
                     </div>
-                    <div class="rounded-2xl bg-slate-50 p-5">
-                        <p class="text-sm font-bold text-slate-950">Kode tidak muncul</p>
-                        <p class="mt-2 text-sm leading-relaxed text-slate-600">Tambahkan ulang MFA Secret di Google Authenticator dengan tipe berbasis waktu.</p>
+                    <div class="neo-panel-tight bg-[#fff8dc] p-5">
+                        <p class="font-display text-sm font-black text-[var(--sf-ink)]">Kode tidak muncul</p>
+                        <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Tambahkan ulang MFA Secret di Google Authenticator dengan tipe berbasis waktu.</p>
                     </div>
                 </div>
             </section>
 
-            <section id="checklist" class="mt-10 grid gap-8 rounded-3xl bg-slate-950 p-6 text-white md:grid-cols-[1fr_0.9fr] md:p-8 scroll-mt-28">
+            <section id="checklist" class="neo-panel mt-10 grid scroll-mt-28 gap-8 bg-[var(--sf-accent)] p-6 text-white md:grid-cols-[1fr_0.9fr] md:p-8">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-[0.24em] text-slate-300">Checklist keamanan</p>
-                    <h2 class="mt-3 text-2xl sm:text-4xl font-black tracking-tight">Selesai login bukan berarti selesai mengamankan akun.</h2>
-                    <p class="mt-4 max-w-xl text-sm sm:text-base leading-relaxed text-slate-300">Sebelum meninggalkan halaman ini, pastikan semua poin ini sudah aman. Kalau ada satu yang belum beres, selesaikan dulu atau hubungi support.</p>
+                    <p class="text-xs font-black uppercase tracking-[0.24em] text-white/80">Checklist keamanan</p>
+                    <h2 class="mt-3 font-display text-2xl font-black tracking-tight sm:text-4xl">Selesai login bukan berarti selesai mengamankan akun.</h2>
+                    <p class="mt-4 max-w-xl text-sm font-semibold leading-relaxed text-white/85 sm:text-base">Sebelum meninggalkan halaman ini, pastikan semua poin ini sudah aman. Kalau ada satu yang belum beres, selesaikan dulu atau hubungi support.</p>
                     <ul class="mt-7 space-y-3">
                         @foreach ($securityChecklist as $item)
-                            <li class="flex gap-3 text-sm leading-relaxed text-slate-100">
-                                <span class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400"></span>
+                            <li class="flex gap-3 text-sm font-semibold leading-relaxed text-white">
+                                <span class="mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)]"></span>
                                 <span>{{ $item }}</span>
                             </li>
                         @endforeach
@@ -260,7 +259,7 @@
                     <img
                         src="{{ $guideImages[9] }}"
                         alt="Halaman selesai panduan login akun dan pengingat menyimpan password serta MFA baru"
-                        class="w-full rounded-2xl border border-white/10 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.25)]"
+                        class="w-full rounded-lg border-[3px] border-[var(--sf-border)] bg-white shadow-[6px_6px_0_var(--sf-shadow)]"
                         loading="lazy"
                     >
                 </figure>

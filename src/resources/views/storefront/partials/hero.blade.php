@@ -1,73 +1,67 @@
-<section class="mx-auto max-w-5xl px-6 pt-8 lg:pt-16 pb-16 relative storefront-hero-card">
-    <div class="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
-        <div class="lg:col-span-7 text-left motion-safe:animate-storefront-reveal">
-            <h1 class="text-4xl sm:text-5xl lg:text-[3.5rem] font-black leading-[1.05] tracking-tight text-[var(--sf-ink)] text-balance">
-                {{ $copy['hero']['headline'] }}
-            </h1>
+<section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[720px] max-w-6xl items-center justify-center px-5 pb-16 pt-10 sm:px-6 lg:min-h-[780px] lg:pb-20">
+    <div class="floating-ai-field" aria-hidden="true">
+        <span class="floating-ai-icon left-[4%] top-[10%] text-[var(--sf-yellow)]">✦</span>
+        <span class="floating-ai-icon left-[18%] bottom-[20%] h-8 w-8 rotate-45 rounded-sm bg-[#b7dcff]"></span>
+        <span class="floating-ai-icon right-[8%] top-[18%] text-5xl font-black text-[#ff8eb7]">+</span>
+        <span class="floating-ai-icon right-[28%] bottom-[22%] h-7 w-7 rounded-full border-[3px] border-[#d8b6ff]"></span>
+        <span class="floating-ai-icon left-[34%] top-[12%] h-0 w-0 border-x-[10px] border-b-[18px] border-x-transparent border-b-[#ffc1d6]"></span>
+        <span class="floating-ai-icon right-[4%] bottom-[14%] text-3xl text-[#ffb58b]">✦</span>
+        <span class="floating-ai-icon right-[25%] top-[44%] h-10 w-10 border-[3px] border-[#a9efcf] bg-transparent [clip-path:polygon(25%_6%,75%_6%,100%_50%,75%_94%,25%_94%,0_50%)]"></span>
+        <span class="floating-ai-icon right-[12%] top-[28%] h-5 w-5 rotate-12 border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[3px_3px_0_var(--sf-shadow)]"></span>
+    </div>
 
-            <p class="mt-6 max-w-xl text-sm sm:text-base text-[var(--sf-muted)] font-normal leading-relaxed">
-                {{ $copy['hero']['body'] }}
-                <span class="sr-only">Akun AI Premium Siap Pakai. Katalog akun AI premium</span>
-            </p>
-
-            <div class="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-                <a href="#products" class="inline-flex h-12 items-center justify-center rounded-xl bg-[var(--sf-ink)] hover:bg-slate-700 text-sm font-bold text-white transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg px-8 text-center select-none">
-                    {{ $copy['hero']['primary_cta'] }}
-                </a>
-                <a href="#cara-beli" class="inline-flex h-12 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-white px-8 text-sm font-bold text-[var(--sf-ink)] transition-all hover:border-slate-300 hover:text-slate-700">
-                    {{ $copy['hero']['secondary_cta'] }}
-                </a>
-            </div>
+    <div class="relative z-10 mx-auto max-w-3xl text-center motion-safe:animate-storefront-reveal">
+        <div class="mx-auto flex h-24 w-24 select-none items-center justify-center rounded-2xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[7px_7px_0_var(--sf-shadow)]">
+            <span class="font-display text-5xl font-black leading-none text-[var(--sf-accent)]">L</span>
         </div>
 
-        <div class="lg:col-span-5 flex justify-center w-full">
-            <div class="hero-preview-panel w-full max-w-md rounded-2xl border border-[var(--sf-border)] bg-white/95 p-5 shadow-xl">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div>
-                        <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Order siap diproses</p>
-                        <p class="mt-0.5 text-sm font-bold text-[var(--sf-ink)]">Katalog aktif hari ini</p>
-                    </div>
-                    <span class="rounded-lg bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Online</span>
-                </div>
-
-                <div class="mt-5 space-y-2.5">
-                    <div class="hero-flow-row rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <p class="text-xs font-bold text-zinc-900">ChatGPT Plus</p>
-                                <p class="mt-0.5 text-[11px] text-slate-500">Stok siap, pengiriman digital</p>
-                            </div>
-                            <span class="text-[11px] font-semibold text-slate-700">Ready</span>
-                        </div>
-                    </div>
-                    <div class="hero-flow-row rounded-xl border border-slate-200 bg-white p-3.5">
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <p class="text-xs font-bold text-zinc-900">Claude Pro</p>
-                                <p class="mt-0.5 text-[11px] text-slate-500">Support bantu cek detail akun</p>
-                            </div>
-                            <span class="text-[11px] font-semibold text-slate-700">Ready</span>
-                        </div>
-                    </div>
-                    <div class="hero-flow-row rounded-xl border border-slate-200 bg-white p-3.5">
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <p class="text-xs font-bold text-zinc-900">Canva Premium</p>
-                                <p class="mt-0.5 text-[11px] text-slate-500">Harga jelas sebelum order</p>
-                            </div>
-                            <span class="text-[11px] font-semibold text-zinc-500">Cek stok</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mt-5 grid grid-cols-3 gap-2 text-center">
-                    @foreach (array_slice($copy['trust_indicators'], 0, 3) as $indicator)
-                        <div class="rounded-xl bg-slate-50 px-3 py-3">
-                            <p class="text-[10px] font-bold leading-tight text-slate-900">{{ $indicator['title'] }}</p>
-                        </div>
-                    @endforeach
-                </div>
-            </div>
+        <div class="neo-chip mt-6 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
+            <span class="h-2 w-2 rounded-full bg-[var(--sf-green)]"></span>
+            {{ $catalogProducts->count() }} produk AI aktif
         </div>
+
+        <h1 class="mx-auto mt-5 max-w-3xl font-display text-5xl font-black leading-[0.92] tracking-tight text-[var(--sf-ink)] text-balance sm:text-6xl lg:text-[5.5rem]">
+            {{ $copy['hero']['headline'] }}
+        </h1>
+
+        <p class="mx-auto mt-5 max-w-xl text-sm font-bold leading-relaxed text-[var(--sf-muted)] sm:text-base">
+            {{ $copy['hero']['body'] }}
+            <span class="sr-only">Akun AI Premium Siap Pakai. Katalog akun AI premium</span>
+        </p>
+
+        <div class="mx-auto mt-8 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
+            <a href="{{ $storefront->telegramBotHref() }}" class="neo-button inline-flex h-14 items-center justify-center bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
+                {{ $copy['hero']['primary_cta'] }}
+            </a>
+            <a href="{{ $supportDestination }}" class="neo-button inline-flex h-14 items-center justify-center bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
+                {{ $copy['hero']['secondary_cta'] }}
+            </a>
+        </div>
+
+        <div class="mx-auto mt-5 grid max-w-xl gap-3 sm:grid-cols-2">
+            <a href="{{ $storefront->adminLoginHref() }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#d9efff] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
+                <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[#39a8ff] text-white">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 9h8M8 13h5"/></svg>
+                </span>
+                <span>
+                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Admin</span>
+                    <span class="block text-sm font-black text-[var(--sf-ink)]">Dashboard toko</span>
+                </span>
+            </a>
+
+            <a href="{{ $storefront->telegramBotHref() }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
+                <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] text-[var(--sf-ink)]">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 8h6M9 12h3m-7 7 3.4-2.4A4 4 0 0 1 10.7 16H17a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h.5"/></svg>
+                </span>
+                <span>
+                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Bot</span>
+                    <span class="block text-sm font-black text-[var(--sf-ink)]">Order via Telegram</span>
+                </span>
+            </a>
+        </div>
+
+        <a href="#products" class="mt-9 inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--sf-muted)] transition-transform duration-300 hover:translate-y-1 hover:text-[var(--sf-ink)]" aria-label="Lihat produk">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+        </a>
     </div>
 </section>

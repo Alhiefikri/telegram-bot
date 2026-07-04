@@ -1,21 +1,19 @@
-<section class="mx-auto max-w-5xl px-6 py-24 bg-slate-900 text-white rounded-2xl relative overflow-hidden my-16 shadow-2xl">
-    <div class="absolute top-0 right-0 w-72 h-72 rounded-full bg-slate-500/10 blur-3xl pointer-events-none"></div>
-    <div class="absolute bottom-0 left-0 w-72 h-72 rounded-full bg-slate-400/5 blur-3xl pointer-events-none"></div>
+<section class="neo-panel relative mx-auto my-16 max-w-6xl overflow-hidden bg-[var(--sf-blue)] px-5 py-20 text-white sm:px-6 lg:py-24">
+    <div class="absolute left-8 top-8 h-12 w-12 rotate-12 border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[5px_5px_0_var(--sf-shadow)]"></div>
+    <div class="absolute bottom-8 right-8 h-14 w-14 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] shadow-[5px_5px_0_var(--sf-shadow)]"></div>
 
-    <div class="max-w-3xl mx-auto text-center relative z-10">
-        <span class="text-5xl text-slate-300 font-serif block mb-6 leading-none">"</span>
-        <p class="text-lg sm:text-2xl font-medium leading-relaxed text-zinc-100">
+    <div class="relative z-10 mx-auto max-w-3xl text-center">
+        <span class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-display text-5xl font-black leading-none text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">"</span>
+        <p class="font-display text-2xl font-black leading-tight text-white sm:text-4xl">
             {{ $copy['testimonial']['quote'] }}
         </p>
-        <div class="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <div class="h-11 w-11 rounded-full border border-slate-200 p-[2px] overflow-hidden">
-                <div class="w-full h-full rounded-full bg-zinc-800 overflow-hidden">
-                    <img src="https://i.pravatar.cc/150?img=11" alt="Customer Avatar" class="w-full h-full object-cover">
-                </div>
+        <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <div class="flex h-12 w-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] font-display text-lg font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
+                LS
             </div>
             <div class="text-center sm:text-left">
-                <p class="text-xs font-bold text-white">{{ $copy['testimonial']['name'] }}</p>
-                <p class="text-[11px] text-zinc-400 mt-0.5">{{ $copy['testimonial']['role'] }}</p>
+                <p class="text-xs font-black text-white">{{ $copy['testimonial']['name'] }}</p>
+                <p class="mt-0.5 text-[11px] font-semibold text-white/80">{{ $copy['testimonial']['role'] }}</p>
             </div>
         </div>
     </div>

@@ -1,5 +1,5 @@
-const ACTIVE_CATEGORY_CLASSES = ['bg-slate-900', 'text-white', 'border-slate-900'];
-const INACTIVE_CATEGORY_CLASSES = ['bg-white', 'text-slate-600', 'border-slate-200'];
+const ACTIVE_CATEGORY_CLASSES = ['neo-filter-active'];
+const INACTIVE_CATEGORY_CLASSES = ['neo-filter-inactive'];
 
 function toggleMobileMenu(menu, iconTop, iconBottom, forceClosed = null) {
     const shouldOpen = forceClosed === null ? menu.classList.contains('hidden') : !forceClosed;

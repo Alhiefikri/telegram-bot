@@ -25,9 +25,8 @@
 
         <main class="flex-grow pb-32">
             @include('storefront.partials.hero')
-            @include('storefront.partials.trust-marquee')
-            @include('storefront.partials.featured-offer')
             @include('storefront.partials.catalog')
+            @include('storefront.partials.featured-offer')
             @include('storefront.partials.benefits')
             @include('storefront.partials.purchase-flow')
             @include('storefront.partials.testimonial')

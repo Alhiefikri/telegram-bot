@@ -28,6 +28,7 @@ src/rewrite_rounded.py
 src/test_login.py
 src/public/images/
 src/public/build/
+src/public/storefront/index.html
 test-results/
 src/test-results/
 playwright-report/

@@ -250,7 +250,7 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
+        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
 
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
@@ -280,7 +280,7 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="products"');
+        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
 
         $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
         $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
@@ -378,7 +378,7 @@ class ExampleTest extends TestCase
             ->assertSee('value="chat"', false)
             ->getContent();
 
-        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="cara-beli"');
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="featured-offer"');
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);

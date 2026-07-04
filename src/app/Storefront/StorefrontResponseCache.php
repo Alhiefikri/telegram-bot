@@ -18,6 +18,8 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
+    private const DESIGN_VERSION = 4;
+
     public function __construct(private readonly StorefrontCatalogQuery $catalogQuery) {}
 
     public function get(string $search): string
@@ -88,6 +90,8 @@ class StorefrontResponseCache
             'app_url' => config('app.url'),
             'telegram_admin_contact_url' => config('services.telegram.admin_contact_url'),
             'telegram_admin_username' => config('services.telegram.admin_username'),
+            'storefront_telegram_bot_url' => config('storefront.links.telegram_bot_url'),
+            'design_version' => self::DESIGN_VERSION,
         ];
 
         return 'storefront.response.v'.$version.'.'.hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));

@@ -13,13 +13,18 @@ return [
         ['label' => 'Support', 'href' => '#support'],
     ],
 
+    'links' => [
+        'telegram_bot_url' => env('STOREFRONT_TELEGRAM_BOT_URL', 'https://t.me/lhiestore_bot?start=landing'),
+    ],
+
     'hero' => [
-        'eyebrow' => 'Katalog akun AI premium',
-        'headline' => 'Akun AI Premium Siap Pakai.',
-        'body' => 'Pilih akun AI, cek stok langsung, lalu lanjutkan order dengan instruksi yang jelas. Cocok untuk kerja, belajar, riset, desain, dan produksi konten harian.',
-        'primary_cta' => 'Belanja Sekarang',
-        'secondary_cta' => 'Lihat Cara Beli',
-        'popular_label' => 'Produk populer',
+        'eyebrow' => 'Akun AI premium siap pakai',
+        'headline' => 'Toolkit AI premium untuk kerja harian.',
+        'body' => 'Lhie Store mengkurasi akun AI premium yang stoknya jelas, harganya terlihat, dan proses ordernya tetap dekat lewat Telegram. Pilih produk di web, lanjutkan transaksi dengan bot atau admin.',
+        'primary_cta' => 'Buka Bot Telegram',
+        'secondary_cta' => 'Hubungi Admin',
+        'tertiary_cta' => 'Lihat Produk',
+        'popular_label' => 'Produk aktif dari database',
         'popular_empty' => 'Produk populer akan tampil setelah stok aktif tersedia.',
     ],
 
@@ -78,7 +83,7 @@ return [
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
         'title' => 'Belanja akun AI dalam tiga langkah.',
-        'body' => 'Pilih produk dari katalog, hubungi support untuk instruksi pembayaran, lalu tunggu akses digital dikirim setelah konfirmasi.',
+        'body' => 'Pilih produk dari katalog, lanjutkan ke Telegram, lalu bayar dengan QRIS manual saat admin mengirim instruksi nominal.',
         'steps' => [
             [
                 'title' => 'Pilih produk',
@@ -99,6 +104,13 @@ return [
         'eyebrow' => 'Pengiriman digital',
         'title' => 'Akses dikirim setelah pembayaran terkonfirmasi.',
         'body' => 'Produk digital disiapkan setelah status pembayaran valid dan stok tervalidasi. Jika ada antrean verifikasi manual, support akan membantu memberi status order melalui kanal yang tersedia.',
+    ],
+
+    'qris' => [
+        'eyebrow' => 'QRIS manual',
+        'title' => 'Scan QRIS, kirim bukti ke Telegram.',
+        'body' => 'QRIS ini statis untuk pembayaran manual. Pastikan nominal mengikuti instruksi admin agar order mudah dicocokkan.',
+        'asset' => '/qr-lhie.jpg',
     ],
 
     'telegram_support' => [
@@ -143,8 +155,8 @@ return [
 
     'support' => [
         'eyebrow' => 'Siap belanja?',
-        'title' => 'Temukan akun AI premium yang pas untuk hari ini.',
-        'body' => 'Gunakan katalog untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
+        'title' => 'Pilih di marketplace, lanjutkan di Telegram.',
+        'body' => 'Gunakan katalog sementara ini untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
         'primary_cta' => 'Chat Support',
         'secondary_cta' => 'Login Admin',
     ],

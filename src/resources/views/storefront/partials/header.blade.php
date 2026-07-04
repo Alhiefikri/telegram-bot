@@ -1,37 +1,42 @@
-<header class="sticky top-4 z-50 mx-auto w-[calc(100%-2rem)] max-w-5xl rounded-2xl bg-white/92 backdrop-blur-xl border border-[var(--sf-border)] shadow-sm transition-all duration-300">
-    <div class="flex h-14 items-center justify-between px-6">
+<header class="sticky top-4 z-50 mx-auto w-[calc(100%-2rem)] max-w-6xl rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[6px_6px_0_var(--sf-shadow)] transition-all duration-300">
+    <div class="flex min-h-16 items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <a href="{{ $canonicalUrl }}" class="flex items-center gap-2">
-            <div class="h-7 w-7 rounded-lg bg-slate-900 flex items-center justify-center text-white font-black text-sm select-none shadow-sm">L</div>
-            <span class="text-sm font-bold tracking-tight text-[var(--sf-ink)]">{{ $brand }}</span>
+            @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
 
-        <nav class="hidden md:flex items-center gap-1.5 p-1 bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 border border-slate-200">
-            <a href="#products" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Produk</a>
-            <a href="#cara-beli" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Cara Beli</a>
-            <a href="{{ route('storefront.login-guide') }}" class="px-4 py-1.5 rounded-lg hover:bg-white hover:text-slate-900 transition-colors">Panduan Login</a>
+        <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] md:flex">
+            <a href="#products" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
+            <a href="#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
+            <a href="{{ route('storefront.login-guide') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan Login</a>
         </nav>
 
         <div class="flex items-center gap-3">
-            <a href="#products" class="hidden sm:inline-flex items-center justify-center rounded-xl bg-[var(--sf-ink)] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700">
-                Lihat Produk
+            <a href="{{ $storefront->telegramBotHref() }}" class="neo-button hidden items-center justify-center bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
+                Buka Bot
+            </a>
+            <a href="{{ $storefront->adminLoginHref() }}" class="hidden text-xs font-black text-[var(--sf-ink)] underline decoration-[3px] underline-offset-4 hover:text-[var(--sf-accent)] lg:inline-flex">
+                Admin
             </a>
 
-            <button id="mobile-menu-btn" class="md:hidden flex flex-col justify-center items-center w-8 h-8 rounded-full border border-slate-200 bg-white shadow-sm gap-1 focus:outline-none" aria-label="Toggle menu">
-                <span id="menu-icon-1" class="w-4 h-[2px] bg-slate-700 transition-transform duration-300"></span>
-                <span id="menu-icon-2" class="w-4 h-[2px] bg-slate-700 transition-transform duration-300"></span>
+            <button id="mobile-menu-btn" class="flex h-10 w-10 flex-col items-center justify-center gap-1 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[4px_4px_0_var(--sf-shadow)] focus:outline-none md:hidden" aria-label="Toggle menu">
+                <span id="menu-icon-1" class="h-[3px] w-5 bg-[var(--sf-ink)] transition-transform duration-300"></span>
+                <span id="menu-icon-2" class="h-[3px] w-5 bg-[var(--sf-ink)] transition-transform duration-300"></span>
             </button>
         </div>
     </div>
 
-    <div id="mobile-menu" class="hidden absolute top-16 left-0 right-0 p-4 mx-2 rounded-2xl bg-white border border-slate-200 shadow-xl opacity-0 scale-95 transition-all duration-300 z-50">
-        <nav class="flex flex-col gap-4 text-sm font-bold text-slate-600">
-            <a href="#products" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Produk</a>
-            <a href="#cara-beli" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Cara Beli</a>
-            <a href="{{ route('storefront.login-guide') }}" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Panduan Login</a>
-            <a href="#faq" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">FAQ</a>
-            <a href="#support" class="px-4 py-2 hover:bg-slate-50 rounded-xl transition-colors">Support</a>
-            <a href="#products" class="mt-2 inline-flex items-center justify-center rounded-full bg-slate-900 py-3 text-center text-xs font-bold text-white">
-                Lihat Produk
+    <div id="mobile-menu" class="absolute left-0 right-0 top-20 z-50 mx-2 hidden rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 opacity-0 shadow-[7px_7px_0_var(--sf-shadow)] scale-95 transition-all duration-300">
+        <nav class="flex flex-col gap-2 text-sm font-black text-[var(--sf-ink)]">
+            <a href="#products" class="rounded-lg border-2 border-transparent px-4 py-3 hover:border-[var(--sf-border)] hover:bg-[var(--sf-yellow)]">Produk</a>
+            <a href="#cara-beli" class="rounded-lg border-2 border-transparent px-4 py-3 hover:border-[var(--sf-border)] hover:bg-[var(--sf-yellow)]">Cara Beli</a>
+            <a href="{{ route('storefront.login-guide') }}" class="rounded-lg border-2 border-transparent px-4 py-3 hover:border-[var(--sf-border)] hover:bg-[var(--sf-yellow)]">Panduan Login</a>
+            <a href="#faq" class="rounded-lg border-2 border-transparent px-4 py-3 hover:border-[var(--sf-border)] hover:bg-[var(--sf-yellow)]">FAQ</a>
+            <a href="#support" class="rounded-lg border-2 border-transparent px-4 py-3 hover:border-[var(--sf-border)] hover:bg-[var(--sf-yellow)]">Support</a>
+            <a href="{{ $storefront->telegramBotHref() }}" class="neo-button mt-2 inline-flex items-center justify-center bg-[var(--sf-accent)] py-3 text-center text-xs font-black text-white">
+                Buka Bot Telegram
+            </a>
+            <a href="{{ $storefront->adminLoginHref() }}" class="rounded-lg border-2 border-[var(--sf-border)] px-4 py-3 text-center hover:bg-[var(--sf-yellow)]">
+                Login Admin
             </a>
         </nav>
     </div>
