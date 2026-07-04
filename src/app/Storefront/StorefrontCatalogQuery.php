@@ -22,7 +22,7 @@ class StorefrontCatalogQuery
             ->get();
 
         $featuredProduct = Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->publicVisible()
             ->whereColumn('stock', '>', 'reserved_stock')
@@ -30,7 +30,7 @@ class StorefrontCatalogQuery
             ->first();
 
         $products = Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->publicVisible()
             ->when($search !== '', fn ($query) => $query->where(fn ($query) => $query

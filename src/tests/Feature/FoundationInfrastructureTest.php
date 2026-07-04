@@ -46,6 +46,14 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
     }
 
+    public function test_production_php_upload_limits_allow_product_images(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+
+        $this->assertStringContainsString("echo 'upload_max_filesize=8M';", $dockerfile);
+        $this->assertStringContainsString("echo 'post_max_size=10M';", $dockerfile);
+    }
+
     public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));

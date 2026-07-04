@@ -7,7 +7,7 @@
 @endphp
 
 @if ($context === 'featured')
-    <div class="relative flex aspect-square w-full max-w-[230px] flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] {{ $coverTheme['bg'] }} p-6 text-center text-white shadow-[7px_7px_0_var(--sf-shadow)]">
+    <div class="relative flex aspect-square w-full mx-auto flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] {{ $coverTheme['bg'] }} p-6 text-center text-white shadow-[7px_7px_0_var(--sf-shadow)]">
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-20"></div>
 
         @if ($imageUrl)
@@ -21,7 +21,9 @@
             </div>
         @endif
 
-        <span class="absolute left-3 top-3 rounded-md border-2 border-[var(--sf-border)] {{ $coverTheme['badge_bg'] }} px-2 py-0.5 text-[8px] font-black uppercase tracking-widest shadow-[3px_3px_0_var(--sf-shadow)]">{{ $coverTheme['badge'] }}</span>
+        @if (!$imageUrl)
+            <span class="absolute left-3 top-3 z-10 rounded-md border-2 border-[var(--sf-border)] {{ $coverTheme['badge_bg'] }} px-2 py-0.5 text-[8px] font-black uppercase tracking-widest shadow-[3px_3px_0_var(--sf-shadow)]">{{ $coverTheme['badge'] }}</span>
+        @endif
         <span class="sr-only">Gambar produk menyusul</span>
     </div>
 @else
@@ -42,21 +44,26 @@
             <span class="sr-only">Gambar produk menyusul</span>
         @endif
 
-        <div class="absolute left-2.5 right-2.5 top-2.5 flex items-start justify-between gap-2">
-            @if ($isAvailable)
+        <div class="absolute left-2.5 right-2.5 top-2.5 z-10 flex items-start justify-between gap-2 {{ $imageUrl ? 'justify-end' : '' }}">
+            @if (!$imageUrl && $isAvailable)
                 <span class="rounded-md border-2 border-[var(--sf-border)] px-2 py-0.5 text-[8px] font-black uppercase tracking-wider shadow-[3px_3px_0_var(--sf-shadow)] {{ $coverTheme['badge_bg'] }}">
                     {{ $coverTheme['badge'] }}
                 </span>
+            @elseif(!$imageUrl && !$isAvailable)
+                 <div></div>
+            @endif
 
-                @if($isPopular)
-                    <span class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-white shadow-[3px_3px_0_var(--sf-shadow)]">
-                        POPULER
-                    </span>
-                @endif
-            @else
-                <span class="neo-float-badge rounded-md border-2 border-[var(--sf-border)] bg-[#c94856] px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-white shadow-[3px_3px_0_var(--sf-shadow)]">
-                    STOK HABIS
+            @if($isPopular)
+                <span class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-white shadow-[3px_3px_0_var(--sf-shadow)] {{ $imageUrl ? 'ml-auto' : '' }}">
+                    POPULER
                 </span>
+            @endif
+
+            @if ($imageUrl && !$isAvailable)
+                <div class="stock-empty-stamp">
+                    <span>STOK HABIS</span>
+                    <small>Restock segera</small>
+                </div>
             @endif
         </div>
     </div>

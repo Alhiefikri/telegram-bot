@@ -23,6 +23,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -46,6 +47,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->validateProductionConfiguration();
+        Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 
         Product::observe(ProductAuditObserver::class);
         $invalidateStorefront = fn () => app(StorefrontResponseCache::class)->invalidate();

@@ -21,11 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libicu-dev \
     libpng-dev \
     libpq-dev \
+    libwebp-dev \
     libzip-dev \
     supervisor \
     unzip \
     zip \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" bcmath gd intl opcache pcntl pdo_pgsql zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -43,6 +44,8 @@ RUN sed -i 's/^user = .*/user = laravel/' /usr/local/etc/php-fpm.d/www.conf \
         echo 'expose_php=0'; \
         echo 'display_errors=0'; \
         echo 'log_errors=1'; \
+        echo 'upload_max_filesize=8M'; \
+        echo 'post_max_size=10M'; \
         echo 'opcache.enable=1'; \
         echo 'opcache.enable_cli=1'; \
         echo 'opcache.validate_timestamps=0'; \

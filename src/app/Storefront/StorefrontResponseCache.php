@@ -18,7 +18,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 4;
+    private const DESIGN_VERSION = 5;
 
     public function __construct(private readonly StorefrontCatalogQuery $catalogQuery) {}
 
@@ -32,7 +32,6 @@ class StorefrontResponseCache
 
         $cached = Cache::get($key);
         if (is_string($cached)) {
-            $this->writeStaticHomepage($search, $cached, onlyIfMissing: true);
             $this->log($startedAt, $querySnapshot, $search, true, strlen($cached));
 
             return $cached;
@@ -51,7 +50,6 @@ class StorefrontResponseCache
         try {
             $cached = Cache::get($key);
             if (is_string($cached)) {
-                $this->writeStaticHomepage($search, $cached, onlyIfMissing: true);
                 $this->log($startedAt, $querySnapshot, $search, true, strlen($cached), 'after_lock');
 
                 return $cached;
@@ -59,7 +57,6 @@ class StorefrontResponseCache
 
             $html = $this->render($search);
             Cache::put($key, $html, now()->addMinutes(self::CACHE_TTL_MINUTES));
-            $this->writeStaticHomepage($search, $html);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html));
 
             return $html;
@@ -92,9 +89,17 @@ class StorefrontResponseCache
             'telegram_admin_username' => config('services.telegram.admin_username'),
             'storefront_telegram_bot_url' => config('storefront.links.telegram_bot_url'),
             'design_version' => self::DESIGN_VERSION,
+            'vite_manifest_fingerprint' => $this->viteManifestFingerprint(),
         ];
 
         return 'storefront.response.v'.$version.'.'.hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));
+    }
+
+    private function viteManifestFingerprint(): string
+    {
+        $path = public_path('build/manifest.json');
+
+        return File::exists($path) ? hash_file('sha256', $path) : 'missing';
     }
 
     private function render(string $search): string
@@ -102,28 +107,6 @@ class StorefrontResponseCache
         return view('storefront', $this->catalogQuery->get($search))->render();
     }
 
-    private function writeStaticHomepage(string $search, string $html, bool $onlyIfMissing = false): void
-    {
-        if ($search !== '') {
-            return;
-        }
-
-        try {
-            $path = public_path('storefront/index.html');
-            if ($onlyIfMissing && File::exists($path)) {
-                return;
-            }
-
-            File::ensureDirectoryExists(dirname($path));
-            $temporaryPath = $path.'.tmp';
-            File::put($temporaryPath, $html);
-            rename($temporaryPath, $path);
-        } catch (Throwable $exception) {
-            DogfoodTiming::log('dogfood.storefront.static_write_failed', [
-                'exception' => $exception::class,
-            ]);
-        }
-    }
 
     private function deleteStaticHomepage(): void
     {

@@ -17,7 +17,7 @@
             <img src="{{ $qris['asset'] }}" alt="QRIS pembayaran manual Lhie Store" class="relative z-10 aspect-square w-full object-contain">
             <div class="qris-scan-line" aria-hidden="true"></div>
             <div class="qris-logo-overlay" aria-hidden="true">
-                <span>L</span>
+                <img src="{{ Vite::asset('resources/images/lhie-store-logo.webp') }}" alt="" width="900" height="810" loading="lazy">
             </div>
         </div>
 

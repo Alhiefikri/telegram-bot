@@ -18,10 +18,16 @@ use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontLoginGuideController;
+use App\Http\Controllers\StorefrontManualCheckoutController;
+use App\Http\Controllers\StorefrontProductController;
+use App\Http\Controllers\StorefrontProductPaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
 Route::get('/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
+Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
+Route::get('/produk/{product}/bayar', StorefrontProductPaymentController::class)->name('storefront.products.payment');
+Route::get('/produk/{product}/checkout-manual', StorefrontManualCheckoutController::class)->name('storefront.products.checkout-manual');
 Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
 
 Route::middleware('admin.no-cache')->group(function (): void {

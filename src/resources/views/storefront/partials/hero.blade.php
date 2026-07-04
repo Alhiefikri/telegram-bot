@@ -1,4 +1,4 @@
-<section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[720px] max-w-6xl items-center justify-center px-5 pb-16 pt-10 sm:px-6 lg:min-h-[780px] lg:pb-20">
+<section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[calc(100dvh-5rem)] max-w-6xl items-center justify-center px-5 py-14 sm:px-6 lg:min-h-[760px] lg:pb-16 lg:pt-12">
     <div class="floating-ai-field" aria-hidden="true">
         <span class="floating-ai-icon left-[4%] top-[10%] text-[var(--sf-yellow)]">✦</span>
         <span class="floating-ai-icon left-[18%] bottom-[20%] h-8 w-8 rotate-45 rounded-sm bg-[#b7dcff]"></span>
@@ -11,25 +11,25 @@
     </div>
 
     <div class="relative z-10 mx-auto max-w-3xl text-center motion-safe:animate-storefront-reveal">
-        <div class="mx-auto flex h-24 w-24 select-none items-center justify-center rounded-2xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[7px_7px_0_var(--sf-shadow)]">
-            <span class="font-display text-5xl font-black leading-none text-[var(--sf-accent)]">L</span>
+        <div class="hero-logo-stage" aria-label="Logo Lhie Store">
+            <img src="{{ Vite::asset('resources/images/lhie-store-logo.webp') }}" alt="Logo Lhie Store" width="900" height="810" fetchpriority="high" class="hero-logo-image">
         </div>
 
-        <div class="neo-chip mt-6 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
+        <div class="neo-chip mt-3 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
             <span class="h-2 w-2 rounded-full bg-[var(--sf-green)]"></span>
             {{ $catalogProducts->count() }} produk AI aktif
         </div>
 
-        <h1 class="mx-auto mt-5 max-w-3xl font-display text-5xl font-black leading-[0.92] tracking-tight text-[var(--sf-ink)] text-balance sm:text-6xl lg:text-[5.5rem]">
+        <h1 class="mx-auto mt-4 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">
             {{ $copy['hero']['headline'] }}
         </h1>
 
-        <p class="mx-auto mt-5 max-w-xl text-sm font-bold leading-relaxed text-[var(--sf-muted)] sm:text-base">
+        <p class="mx-auto mt-4 max-w-xl text-sm font-bold leading-relaxed text-[var(--sf-muted)] sm:text-base">
             {{ $copy['hero']['body'] }}
             <span class="sr-only">Akun AI Premium Siap Pakai. Katalog akun AI premium</span>
         </p>
 
-        <div class="mx-auto mt-8 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
+        <div class="mx-auto mt-6 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
             <a href="{{ $storefront->telegramBotHref() }}" class="neo-button inline-flex h-14 items-center justify-center bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
                 {{ $copy['hero']['primary_cta'] }}
             </a>

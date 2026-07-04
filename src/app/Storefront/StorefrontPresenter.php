@@ -15,10 +15,15 @@ class StorefrontPresenter
 
     public function supportHref(): ?string
     {
-        $telegramUsername = config('services.telegram.admin_username');
+        $telegramUsername = $this->adminTelegramUsername();
 
         return config('services.telegram.admin_contact_url')
-            ?: ($telegramUsername ? 'https://t.me/'.ltrim((string) $telegramUsername, '@') : null);
+            ?: ($telegramUsername ? 'https://t.me/'.$telegramUsername : null);
+    }
+
+    public function adminTelegramUsername(): string
+    {
+        return ltrim((string) (config('services.telegram.admin_username') ?: 'alhie02'), '@');
     }
 
     public function supportDestination(): string
@@ -93,11 +98,17 @@ class StorefrontPresenter
 
     public function productLink(Product $product): string
     {
-        $message = $this->stockAvailable($product) > 0
-            ? "Halo Admin, saya ingin memesan akun {$product->name} di Lhie Store."
-            : "Halo Admin, saya ingin tanya ketersediaan akun {$product->name} di Lhie Store.";
+        return route('storefront.products.show', $product);
+    }
 
-        return $this->supportLink($message);
+    public function productSupportLink(Product $product): string
+    {
+        return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya ingin tanya ketersediaan akun {$product->name} di Lhie Store.");
+    }
+
+    public function paymentConfirmationLink(Product $product, string $orderId, int $total): string
+    {
+        return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya sudah scan QRIS untuk order {$orderId} produk {$product->name} senilai {$this->idr($total)}. Saya akan kirim bukti pembayaran.");
     }
 
     public function descriptionSnippet(Product $product): string

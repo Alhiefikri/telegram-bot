@@ -1,4 +1,5 @@
 const COPY_RESET_DELAY_MS = 1600;
+const EMPTY_IMAGE_FILE_NAME = 'Tidak ada file yang dipilih';
 
 const emptyProductForm = () => ({
     productModalMode: 'create',
@@ -6,11 +7,14 @@ const emptyProductForm = () => ({
     productId: null,
     productName: '',
     productPrice: '',
+    productFakeDiscountPrice: '',
     productCategoryId: '',
     productDescription: '',
     productFeatures: '',
     productSpecifications: '',
     productIsActive: true,
+    productImageUrl: '',
+    productImageFileName: EMPTY_IMAGE_FILE_NAME,
     productFeaturesOpen: false,
     productSpecificationsOpen: false,
 });
@@ -74,11 +78,14 @@ export default function adminDashboard(initialState = {}) {
                 productId: product.id,
                 productName: product.name,
                 productPrice: product.priceAmount,
+                productFakeDiscountPrice: product.fakeDiscountPrice ?? '',
                 productCategoryId: product.categoryId ?? '',
                 productDescription: product.description,
                 productFeatures: product.features,
                 productSpecifications: product.specifications,
                 productIsActive: product.isActive,
+                productImageUrl: product.imageUrl ?? '',
+                productImageFileName: EMPTY_IMAGE_FILE_NAME,
                 productFeaturesOpen: String(product.features || '').trim().length > 0,
                 productSpecificationsOpen: String(product.specifications || '').trim().length > 0,
                 productModalOpen: true,

@@ -30,6 +30,17 @@ class ExampleTest extends TestCase
             ->assertDontSee("Let's get started");
     }
 
+    public function test_storefront_uses_host_relative_vite_assets(): void
+    {
+        config(['app.url' => 'https://stale-ngrok.example.test']);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('href="/build/assets/', false)
+            ->assertSee('src="/build/assets/', false)
+            ->assertDontSee('https://stale-ngrok.example.test/build/assets/', false);
+    }
+
     public function test_storefront_exposes_light_warung_ai_landing_design_hooks(): void
     {
         $this->get('/')
@@ -128,7 +139,7 @@ class ExampleTest extends TestCase
             ->assertSee('AI Tools')
             ->assertSee('Rp125.000')
             ->assertSee('Akses desain premium untuk kebutuhan konten harian.')
-            ->assertSee('✅ Tersedia')
+            ->assertSee('Tersedia')
             ->assertSee('Gambar produk menyusul')
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
@@ -177,9 +188,9 @@ class ExampleTest extends TestCase
             ->assertSee('Claude Pro Bulanan')
             ->assertSee('Rp175.000')
             ->assertSee('Akses Claude premium untuk kerja harian.')
-            ->assertSee('✅ Tersedia')
-            ->assertSee('Sisa 3')
-            ->assertSee('https://t.me/lhiestore?text=', false)
+            ->assertSee('Tersedia')
+            ->assertSee('Stok: 3')
+            ->assertSee(route('storefront.products.show', $product), false)
             ->assertSee('Support Telegram')
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
@@ -255,7 +266,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Belanja Sekarang', $featuredHtml);
+        $this->assertStringContainsString('Beli Sekarang', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -284,7 +295,7 @@ class ExampleTest extends TestCase
 
         $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
         $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
-        $this->assertStringNotContainsString('Belanja Sekarang', $featuredHtml);
+        $this->assertStringNotContainsString('Beli Sekarang', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
     }
@@ -330,12 +341,14 @@ class ExampleTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
-            ->assertSee('✅ Tersedia')
-            ->assertSee('❌ Stok habis')
+            ->assertSee('Tersedia')
+            ->assertSee('STOK HABIS')
+            ->assertSee('Habis')
             ->assertDontSee('Ready (1)')
-            ->assertSee('Stok 0')
-            ->assertSee('Belanja Sekarang')
-            ->assertSee('href="#support"', false);
+            ->assertDontSee('Stok 0')
+            ->assertDontSee('Belanja Sekarang')
+            ->assertSee('Keranjang')
+            ->assertSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'"', false);
     }
 
     public function test_storefront_avoids_inline_assets_and_mock_only_presentation(): void
@@ -357,7 +370,7 @@ class ExampleTest extends TestCase
         $this->assertStringNotContainsString('onclick=', $html);
         $this->assertStringNotContainsString('Terjual', $html);
         $this->assertStringNotContainsString('★', $html);
-        $this->assertStringContainsString('Sisa 3', $html);
+        $this->assertStringContainsString('Stok: 3', $html);
     }
 
     public function test_catalog_search_filters_public_products(): void

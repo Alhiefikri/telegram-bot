@@ -7,6 +7,11 @@
                                     shareUrl: @js($product['share_url'])
                                 }"
                             >
+                            @if ($product['image_url'])
+                                <div class="-mx-1 -mt-1 mb-3 overflow-hidden rounded-[0.9rem] border-[3px] border-neo-ink bg-white shadow-[4px_4px_0_0_#050505]">
+                                    <img src="{{ $product['image_url'] }}" alt="{{ $product['name'] }}" class="aspect-[4/3] w-full object-cover">
+                                </div>
+                            @endif
                             {{-- Product name + status badge --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
                                 <div class="min-w-0">

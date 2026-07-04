@@ -8,6 +8,9 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\File\UploadedFile as SymfonyUploadedFile;
 use Tests\TestCase;
 
 class AdminDashboardProductFormsTest extends TestCase
@@ -36,6 +39,18 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('x-data', false)
             ->assertSee('min-w-0', false)
             ->assertDontSee('fi-form', false);
+    }
+
+    public function test_product_image_upload_control_uses_custom_responsive_file_picker(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Pilih gambar')
+            ->assertSee('productImageFileName', false)
+            ->assertSee('sr-only', false)
+            ->assertDontSee('file:mr-3', false);
     }
 
     public function test_admin_can_create_product_from_dashboard_modal(): void
@@ -87,6 +102,110 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSeeInOrder(['Tersedia', '0'])
             ->assertSeeInOrder(['Dipesan', '0'])
             ->assertSee('Akses Canva Pro siap pakai.');
+    }
+
+    public function test_admin_can_upload_product_image_as_optimized_webp(): void
+    {
+        Storage::fake('public');
+
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $category = Category::factory()->create(['name' => 'Tools Premium']);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Figma Pro 1 Bulan',
+                'price_amount' => '85000',
+                'category_id' => (string) $category->id,
+                'description' => 'Akses desain premium.',
+                'image' => UploadedFile::fake()->image('cover.png', 2400, 1000),
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $product = Product::where('name', 'Figma Pro 1 Bulan')->firstOrFail();
+
+        $this->assertStringStartsWith('products/', $product->image_path);
+        $this->assertStringEndsWith('.webp', $product->image_path);
+        Storage::disk('public')->assertExists($product->image_path);
+
+        [$width, $height, $type] = getimagesize(Storage::disk('public')->path($product->image_path));
+        $this->assertSame(IMAGETYPE_WEBP, $type);
+        $this->assertSame(1600, $width);
+        $this->assertSame(667, $height);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('/storage/'.$product->image_path, false);
+    }
+
+    public function test_admin_can_replace_product_image_without_clobbering_other_fields(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('products/old.webp', 'old-webp');
+
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Old Image Product',
+            'description' => 'Original description',
+            'price_amount' => 25000,
+            'stock' => 7,
+            'reserved_stock' => 2,
+            'image_path' => 'products/old.webp',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'New Image Product',
+                'price_amount' => '99000',
+                'description' => 'Updated description.',
+                'is_active' => '0',
+                'image' => UploadedFile::fake()->image('replacement.jpg', 900, 1200),
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $product->refresh();
+
+        $this->assertSame('New Image Product', $product->name);
+        $this->assertSame(99000, $product->price_amount);
+        $this->assertFalse($product->is_active);
+        $this->assertSame(7, $product->stock);
+        $this->assertSame(2, $product->reserved_stock);
+        $this->assertStringStartsWith('products/', $product->image_path);
+        $this->assertStringEndsWith('.webp', $product->image_path);
+        $this->assertNotSame('products/old.webp', $product->image_path);
+        Storage::disk('public')->assertMissing('products/old.webp');
+        Storage::disk('public')->assertExists($product->image_path);
+
+        [$width, $height, $type] = getimagesize(Storage::disk('public')->path($product->image_path));
+        $this->assertSame(IMAGETYPE_WEBP, $type);
+        $this->assertSame(900, $width);
+        $this->assertSame(1200, $height);
+    }
+
+    public function test_failed_product_image_upload_returns_actionable_validation_message(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $path = tempnam(sys_get_temp_dir(), 'failed-product-image-');
+        file_put_contents($path, 'not uploaded');
+
+        try {
+            $this->actingAs($admin)
+                ->from('/admin?tab=produk')
+                ->post(route('admin.products.store'), [
+                    'name' => 'Upload Error Product',
+                    'price_amount' => '35000',
+                    'description' => 'Produk dengan upload gagal.',
+                    'image' => new SymfonyUploadedFile($path, 'large.jpg', 'image/jpeg', UPLOAD_ERR_INI_SIZE, true),
+                ])
+                ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+                ->assertSessionHasErrors([
+                    'image' => 'Upload gambar gagal. Maksimal 5 MB; coba kompres atau pilih gambar lain.',
+                ], null, 'productCreate');
+        } finally {
+            @unlink($path);
+        }
     }
 
     public function test_owner_can_create_product_with_optional_sections_empty(): void

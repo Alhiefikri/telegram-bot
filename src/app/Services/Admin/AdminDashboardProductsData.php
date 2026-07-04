@@ -9,7 +9,7 @@ use App\Support\Money;
 
 final class AdminDashboardProductsData
 {
-    public function __construct(private readonly ProductDescriptionSectionProtocol $descriptionSections) {}
+    public function __construct(private readonly ProductDescriptionSectionProtocol $descriptionSections, private readonly ProductImageOptimizer $images) {}
 
     /**
      * @return array<string, mixed>
@@ -28,7 +28,7 @@ final class AdminDashboardProductsData
     {
         $products = Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'currency', 'stock', 'reserved_stock', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->latest()
             ->limit(5)
             ->get();
@@ -74,6 +74,7 @@ final class AdminDashboardProductsData
                     'specifications' => $descriptionSections['specifications'],
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
+                    'fake_discount_price' => $product->fake_discount_price,
                     'price' => Money::idr($product->price_amount),
                     'stock' => $product->stock,
                     'reserved_stock' => $product->reserved_stock,
@@ -86,6 +87,8 @@ final class AdminDashboardProductsData
                     'status_badge' => $this->productStatusBadge($product->is_active),
                     'visibility_label' => $product->is_active ? '● Tampil di toko' : '○ Tidak tampil',
                     'visibility_color' => $product->is_active ? '#7BD10A' : '#ef4444',
+                    'image_path' => $product->image_path,
+                    'image_url' => $this->images->publicUrl($product->image_path),
                     'visibility_action_label' => $product->is_active ? '⏸ Pause' : '▶ Play',
                     'update_url' => $updateUrl,
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
@@ -103,11 +106,13 @@ final class AdminDashboardProductsData
                         'id' => $product->id,
                         'name' => $product->name,
                         'priceAmount' => $product->price_amount,
+                        'fakeDiscountPrice' => $product->fake_discount_price,
                         'categoryId' => $product->category_id,
                         'description' => $descriptionSections['description'],
                         'features' => $descriptionSections['features'],
                         'specifications' => $descriptionSections['specifications'],
                         'isActive' => $product->is_active,
+                        'imageUrl' => $this->images->publicUrl($product->image_path),
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,
                         'stock' => $product->stock,

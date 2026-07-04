@@ -115,15 +115,15 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('pm.max_spare_servers = 8', $dockerfile);
     }
 
-    public function test_nginx_can_serve_warm_storefront_homepage_without_php_fpm(): void
+    public function test_nginx_routes_storefront_homepage_through_php_to_avoid_stale_assets(): void
     {
         $nginx = file_get_contents(base_path('../nginx/default.conf'));
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
 
         $this->assertStringContainsString('location = /', $nginx);
-        $this->assertStringContainsString('try_files /storefront/index.html /index.php?$query_string;', $nginx);
-        $this->assertStringContainsString('if ($args != "")', $nginx);
-        $this->assertStringContainsString('public/storefront', $entrypoint);
+        $this->assertStringContainsString('fastcgi_pass app:9000;', $nginx);
+        $this->assertStringContainsString('fastcgi_param REQUEST_URI /;', $nginx);
+        $this->assertStringNotContainsString('try_files /storefront/index.html /index.php?$query_string;', $nginx);
         $this->assertStringContainsString('rm -f public/storefront/index.html', $entrypoint);
     }
 

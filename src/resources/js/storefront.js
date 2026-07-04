@@ -213,6 +213,57 @@ function initFaqAccordion() {
     });
 }
 
+async function writeClipboard(text) {
+    if (!text || !navigator.clipboard) {
+        return false;
+    }
+
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function markCopied(button) {
+    const originalText = button.textContent;
+
+    button.textContent = 'Tersalin';
+    window.setTimeout(() => {
+        button.textContent = originalText;
+    }, 1200);
+}
+
+function initPaymentActions() {
+    document.querySelectorAll('[data-copy-text]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            if (await writeClipboard(button.getAttribute('data-copy-text'))) {
+                markCopied(button);
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-share-text]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const text = button.getAttribute('data-share-text') || '';
+
+            if (navigator.share) {
+                try {
+                    await navigator.share({ text });
+                    return;
+                } catch {
+                    return;
+                }
+            }
+
+            if (await writeClipboard(text)) {
+                markCopied(button);
+            }
+        });
+    });
+}
+
 export default function initStorefront() {
     const boot = () => {
         document.body.classList.add('js-enabled');
@@ -222,6 +273,7 @@ export default function initStorefront() {
         initCategoryFilters();
         initCounters();
         initFaqAccordion();
+        initPaymentActions();
     };
 
     if (document.readyState === 'loading') {

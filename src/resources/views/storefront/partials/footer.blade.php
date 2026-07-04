@@ -10,19 +10,19 @@
         <div>
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Produk</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
-                <li><a href="#products" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
-                <li><a href="#cara-beli" class="hover:text-[var(--sf-accent)]">Cara Pembelian</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#products" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#cara-beli" class="hover:text-[var(--sf-accent)]">Cara Pembelian</a></li>
                 <li><a href="{{ route('storefront.login-guide') }}" class="hover:text-[var(--sf-accent)]">Panduan Login</a></li>
-                <li><a href="#faq" class="hover:text-[var(--sf-accent)]">FAQ</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">FAQ</a></li>
             </ul>
         </div>
 
         <div>
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Toko</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
-                <li><a href="#support" class="hover:text-[var(--sf-accent)]">Tentang Kami</a></li>
-                <li><a href="#faq" class="hover:text-[var(--sf-accent)]">Kebijakan Privasi</a></li>
-                <li><a href="#faq" class="hover:text-[var(--sf-accent)]">Syarat Ketentuan</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#support" class="hover:text-[var(--sf-accent)]">Tentang Kami</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">Kebijakan Privasi</a></li>
+                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">Syarat Ketentuan</a></li>
             </ul>
         </div>
 

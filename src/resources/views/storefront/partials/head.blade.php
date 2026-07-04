@@ -8,14 +8,16 @@
 <meta property="og:title" content="{{ $pageTitle }}">
 <meta property="og:description" content="{{ $pageDescription }}">
 <meta property="og:url" content="{{ $canonicalUrl }}">
-<meta property="og:image" content="https://warungai.web.id/assets/mainlogo.png">
+<meta property="og:image" content="{{ Vite::asset('resources/images/lhie-store-logo-512.png') }}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ $pageTitle }}">
 <meta name="twitter:description" content="{{ $pageDescription }}">
+<meta name="twitter:image" content="{{ Vite::asset('resources/images/lhie-store-logo-512.png') }}">
+<link rel="icon" type="image/png" sizes="256x256" href="{{ Vite::asset('resources/images/chibi-favicon-256.png') }}">
+<link rel="icon" type="image/png" sizes="64x64" href="{{ Vite::asset('resources/images/chibi-favicon-64.png') }}">
+<link rel="apple-touch-icon" href="{{ Vite::asset('resources/images/chibi-favicon-256.png') }}">
 @fonts
-@if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
-@endif
+@vite(['resources/css/app.css', 'resources/js/app.js'])
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

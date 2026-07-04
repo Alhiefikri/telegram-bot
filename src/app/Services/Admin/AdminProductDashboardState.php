@@ -61,6 +61,7 @@ class AdminProductDashboardState
                 'productFeatures' => old('features', $editingProduct['features'] ?? ''),
                 'productSpecifications' => old('specifications', $editingProduct['specifications'] ?? ''),
                 'productIsActive' => (bool) old('is_active', $editingProduct['is_active'] ?? true),
+                'productImageUrl' => $editingProduct['image_url'] ?? '',
                 'productFeaturesOpen' => $productCreateErrors->has('features')
                     || $productUpdateErrors->has('features')
                     || trim((string) old('features', $editingProduct['features'] ?? '')) !== '',

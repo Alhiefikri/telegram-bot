@@ -1,12 +1,23 @@
 @php
     $stock = $storefront->stockAvailable($product);
     $isAvailable = $stock > 0;
-    $productLink = $storefront->productLink($product);
-    $cardLink = $isAvailable ? $productLink : '#support';
     $descriptionSnippet = $storefront->descriptionSnippet($product);
+    $productPayload = [
+        'id' => $product->id,
+        'name' => $product->name,
+        'descriptionSnippet' => $descriptionSnippet,
+        'description' => $product->description,
+        'price_amount' => $product->price_amount,
+        'fake_discount_price' => $product->fake_discount_price,
+        'stock' => $stock,
+        'isAvailable' => $isAvailable,
+        'paymentUrl' => route('storefront.products.payment', $product),
+        'coverTheme' => $storefront->productCover($product),
+        'imageUrl' => $storefront->publicStorageUrl($product->image_path),
+    ];
 @endphp
 
-<a href="{{ $cardLink }}" class="product-card reveal-item group block transition-all duration-500" data-category="{{ $product->category_id ?? 'lainnya' }}">
+<button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($productPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $product->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $product->category_id ?? 'lainnya' }}">
     <article class="neo-panel h-full overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover flex flex-col relative">
         @include('storefront.components.product-cover', [
             'product' => $product,
@@ -22,21 +33,28 @@
 
             <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
                 <div class="flex flex-wrap items-center gap-2">
+                    @if ($product->fake_discount_price)
+                        <span class="text-[10px] font-black text-[var(--sf-muted)] line-through">
+                            {{ $storefront->idr($product->fake_discount_price) }}
+                        </span>
+                    @endif
                     <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 font-display text-xs font-black text-[var(--sf-ink)]">
                         {{ $storefront->idr($product->price_amount) }}
                     </span>
                     <span class="rounded-full border-2 border-[var(--sf-border)] {{ $isAvailable ? 'bg-white text-[var(--sf-ink)]' : 'bg-[#c94856] text-white' }} px-2 py-1 text-[9px] font-black">
-                        {{ $isAvailable ? '✅ Tersedia' : '❌ Stok habis' }}
+                        {{ $isAvailable ? 'Tersedia' : 'Habis' }}
                     </span>
-                    <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
-                        {{ $isAvailable ? 'Sisa '.$stock : 'Stok 0' }}
-                    </span>
+                    @if ($isAvailable)
+                        <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
+                            Stok: {{ $stock }}
+                        </span>
+                    @endif
                 </div>
 
-                <span class="neo-button inline-flex h-10 items-center justify-center bg-[var(--sf-accent)] px-3 text-[11px] font-black text-white {{ $isAvailable ? '' : 'bg-[#d69aae]' }}">
-                    {{ $isAvailable ? 'Belanja Sekarang' : 'Tanya restock' }}
+                <span class="neo-button inline-flex h-10 items-center justify-center px-3 text-[11px] font-black text-white transition-colors {{ $isAvailable ? 'bg-[var(--sf-accent)] hover:bg-[var(--sf-accent-deep)]' : 'bg-[var(--sf-muted)]' }}">
+                    {{ $isAvailable ? 'Beli' : 'Habis' }}
                 </span>
             </div>
         </div>
     </article>
-</a>
+</button>

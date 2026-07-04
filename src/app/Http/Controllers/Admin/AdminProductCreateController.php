@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StoreProductRequest;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductDescriptionSectionProtocol;
+use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
 use App\Support\AdminTelegramDogfoodTiming;
@@ -15,7 +16,7 @@ use Illuminate\Http\RedirectResponse;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
@@ -31,8 +32,9 @@ class AdminProductCreateController extends Controller
                 $validated['specifications'] ?? '',
             ),
             'price_amount' => (int) $validated['price_amount'],
+            'fake_discount_price' => isset($validated['fake_discount_price']) ? (int) $validated['fake_discount_price'] : null,
             'currency' => 'IDR',
-            'image_path' => null,
+            'image_path' => $request->hasFile('image') ? $images->store($request->file('image')) : null,
             'is_active' => true,
         ]);
         $product->stock = 0;
@@ -43,7 +45,7 @@ class AdminProductCreateController extends Controller
             'product.created',
             $product,
             null,
-            $product->only(['category_id', 'name', 'description', 'price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
+            $product->only(['category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
             $user,
             $request->ip(),
         );

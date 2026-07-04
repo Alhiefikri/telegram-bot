@@ -48,7 +48,11 @@
 
     <div class="neo-zigzag mx-auto mb-10 max-w-lg"></div>
 
-    <div id="storefront-product-grid" class="storefront-popular-card grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div id="storefront-product-grid" @class([
+        'storefront-popular-card grid gap-6',
+        'mx-auto max-w-xs grid-cols-1' => $catalogProducts->count() === 1,
+        'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' => $catalogProducts->count() !== 1,
+    ])>
         @forelse ($catalogProducts as $product)
             @include('storefront.components.product-card', [
                 'product' => $product,
