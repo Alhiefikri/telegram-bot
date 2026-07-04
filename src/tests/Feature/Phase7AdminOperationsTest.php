@@ -16,6 +16,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Policies\OrderPolicy;
 use App\Policies\PaymentPolicy;
+use App\Providers\AppServiceProvider;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
@@ -42,6 +43,54 @@ class Phase7AdminOperationsTest extends TestCase
             ->assertOk()
             ->assertSee('INV-OPS')
             ->assertSee('IDR');
+    }
+
+    public function test_admin_dashboard_distinguishes_pakasir_native_qris_checkout_flow(): void
+    {
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        config()->set('services.pakasir.checkout_flow', 'api_qris');
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        ManualPaymentSetting::query()->create([
+            'payment_mode' => 'pakasir',
+            'is_active' => true,
+        ]);
+
+        $this->get(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertOk()
+            ->assertSee('Pakasir native QRIS aktif')
+            ->assertSee('Provider Pakasir / native QRIS')
+            ->assertSee('tombol hosted tetap jadi fallback')
+            ->assertSee('Transaction Detail');
+    }
+
+    public function test_admin_cannot_enable_pakasir_mode_without_required_config(): void
+    {
+        config()->set('services.pakasir.slug', '');
+        config()->set('services.pakasir.api_key', '');
+        config()->set('services.pakasir.checkout_flow', 'hosted');
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors([
+                'payment_mode' => 'Mode Pakasir belum bisa diaktifkan. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment.',
+            ], null, 'paymentMode');
+
+        $this->assertDatabaseCount('manual_payment_settings', 0);
+    }
+
+    public function test_invalid_pakasir_checkout_flow_fails_configuration_validation(): void
+    {
+        config()->set('services.pakasir.checkout_flow', 'inline_qris');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris.');
+
+        (new AppServiceProvider(app()))->boot();
     }
 
     public function test_order_and_payment_policy_matrix_by_role(): void

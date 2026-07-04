@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\User;
 use App\Support\Money;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Support\Carbon;
 
 final class AdminDashboardStatsData
@@ -98,21 +99,55 @@ final class AdminDashboardStatsData
         $settings = ManualPaymentSetting::current();
         $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
         $mode = $mode === 'pakasir' ? 'pakasir' : 'manual';
+        $checkoutFlow = PakasirCheckoutFlow::configured();
         $isPakasirEnabled = $mode === 'pakasir';
+        $pakasirConfigMissing = [];
+
+        if (blank(config('services.pakasir.slug'))) {
+            $pakasirConfigMissing[] = 'PAKASIR_SLUG';
+        }
+
+        if (blank(config('services.pakasir.api_key'))) {
+            $pakasirConfigMissing[] = 'PAKASIR_API_KEY';
+        }
+
+        $pakasirFlowLabel = $checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'native QRIS' : 'hosted';
+        $label = match (true) {
+            ! $isPakasirEnabled => 'Manual /payment aktif',
+            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Pakasir native QRIS aktif',
+            default => 'Pakasir hosted aktif',
+        };
+        $hint = match (true) {
+            ! $isPakasirEnabled => 'Provider manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
+            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Provider Pakasir / native QRIS: QR payment_number dikirim di Telegram, tombol hosted tetap jadi fallback, dan paid tetap diverifikasi via Transaction Detail.',
+            default => 'Provider Pakasir / hosted: customer memakai QR/link website Pakasir, dan paid tetap diverifikasi via Transaction Detail.',
+        };
+        $statusBadge = match (true) {
+            ! $isPakasirEnabled => 'MANUAL',
+            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'NATIVE QRIS',
+            default => 'HOSTED',
+        };
+        $canEnablePakasir = $pakasirConfigMissing === [];
 
         return [
             'mode' => $mode,
+            'checkout_flow' => $checkoutFlow,
+            'checkout_flow_label' => $pakasirFlowLabel,
             'is_pakasir_enabled' => $isPakasirEnabled,
-            'label' => $isPakasirEnabled ? 'Pakasir aktif' : 'QR Manual aktif',
-            'hint' => $isPakasirEnabled
-                ? 'Checkout memakai QRIS/hosted Pakasir dan auto-verifikasi.'
-                : 'Checkout memakai QR manual LHIE STORE, bukti /payment, dan approval admin.',
-            'tone' => $isPakasirEnabled ? 'emerald' : 'amber',
+            'is_pakasir_configured' => $canEnablePakasir,
+            'can_enable_pakasir' => $canEnablePakasir,
+            'pakasir_config_missing' => $pakasirConfigMissing,
+            'pakasir_guard_message' => $canEnablePakasir
+                ? null
+                : 'Lengkapi '.implode(' dan ', $pakasirConfigMissing).' sebelum mengaktifkan Pakasir dari dashboard.',
+            'label' => $label,
+            'hint' => $hint,
+            'tone' => $isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber',
             'source' => $settings ? 'dashboard_setting' : 'env_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'update_url' => route('admin.payment-mode.update'),
             'status_badge' => [
-                'label' => $isPakasirEnabled ? 'AKTIF' : 'NONAKTIF',
+                'label' => $statusBadge,
             ],
         ];
     }

@@ -3,10 +3,12 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator as ValidationValidator;
 
 class UpdatePaymentModeRequest extends FormRequest
 {
@@ -37,6 +39,46 @@ class UpdatePaymentModeRequest extends FormRequest
         return [
             'payment_mode.required' => 'Pilih mode pembayaran.',
             'payment_mode.in' => 'Mode pembayaran tidak valid.',
+        ];
+    }
+
+    /**
+     * @return array<int, callable(ValidationValidator): void>
+     */
+    public function after(): array
+    {
+        return [
+            function (ValidationValidator $validator): void {
+                if ($this->input('payment_mode') !== 'pakasir') {
+                    return;
+                }
+
+                $missing = [];
+
+                if (blank(config('services.pakasir.slug'))) {
+                    $missing[] = 'PAKASIR_SLUG';
+                }
+
+                if (blank(config('services.pakasir.api_key'))) {
+                    $missing[] = 'PAKASIR_API_KEY';
+                }
+
+                if ($missing !== []) {
+                    $validator->errors()->add(
+                        'payment_mode',
+                        'Mode Pakasir belum bisa diaktifkan. Lengkapi '.implode(' dan ', $missing).' di environment.',
+                    );
+                }
+
+                $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
+
+                if (! PakasirCheckoutFlow::isAllowed($checkoutFlow)) {
+                    $validator->errors()->add(
+                        'payment_mode',
+                        'Mode Pakasir belum bisa diaktifkan. '.PakasirCheckoutFlow::validationMessage(),
+                    );
+                }
+            },
         ];
     }
 

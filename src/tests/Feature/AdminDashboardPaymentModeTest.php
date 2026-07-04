@@ -27,7 +27,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->get('/admin')
             ->assertOk()
             ->assertSee('Mode pembayaran')
-            ->assertSee('Pakasir aktif')
+            ->assertSee('Pakasir hosted aktif')
             ->assertSee('QR Manual /payment');
 
         $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
@@ -46,8 +46,8 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('QR Manual aktif')
-            ->assertSee('Checkout memakai QR manual LHIE STORE');
+            ->assertSee('Manual /payment aktif')
+            ->assertSee('QR manual LHIE STORE');
     }
 
     public function test_payment_mode_toggle_creates_active_setting_when_none_exists(): void

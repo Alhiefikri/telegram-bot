@@ -9,6 +9,7 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
+use App\Support\PakasirCheckoutFlow;
 use Carbon\CarbonInterface;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
@@ -201,7 +202,7 @@ class TelegramCheckoutIntents
 
     private function pakasirCheckoutFlow(): string
     {
-        return config('services.pakasir.checkout_flow') === 'api_qris' ? 'api_qris' : 'hosted';
+        return PakasirCheckoutFlow::configured();
     }
 
     private function formatRupiah(int $amount): string

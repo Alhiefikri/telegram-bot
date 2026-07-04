@@ -12,7 +12,7 @@ Komponen utama:
 
 - **Telegram**: antarmuka utama untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
-- **Payment mode**: default production sementara memakai pembayaran manual `/payment` selama KYC Pakasir. Pakasir tetap tersedia sebagai hosted-link checkout dengan API-key verification dan bisa diaktifkan dari admin dashboard setelah siap.
+- **Payment mode**: manual `/payment` tetap default operasional sampai owner/admin memilih Pakasir. Pakasir tersedia sebagai Pakasir hosted checkout dan Pakasir native QRIS; kedua flow memakai API-key verification ke Transaction Detail API.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
 - **Queue**: memproses pekerjaan background, termasuk pemrosesan update Telegram dan pengiriman receipt.
 - **Scheduler**: menjalankan expiry order pending dan rekonsiliasi pembayaran berkala.
@@ -114,20 +114,16 @@ Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order 
 
 ### 3.4 Pakasir payment
 
-Pada jalur Pakasir aktif, checkout membuat payment pending, mengirim customer ke hosted-link checkout Pakasir, lalu sistem memperlakukan callback publik sebagai untrusted intake. Dokumentasi Pakasir saat ini tidak menyediakan signature/HMAC webhook; adapter membatasi risikonya dengan throttle `pakasir-webhook`, shape gate sebelum audit log, replay cache untuk payload gagal yang sama, lalu API-key verification ke Transaction Detail API sebelum update order/payment.
+Pakasir adalah provider otomatis di bawah `TELEGRAM_PAYMENT_MODE=pakasir`. Default rollout `PAKASIR_CHECKOUT_FLOW=hosted` mengirim customer ke hosted-link checkout Pakasir. Mode `api_qris` membuat native QRIS via API, mengirim QR `payment_number` langsung di Telegram, dan tetap menyertakan hosted checkout sebagai fallback sekaligus rollback cepat ke hosted.
 
-Payload callback dicocokkan dengan payment internal menggunakan `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan hasil Transaction Detail API. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`.
+Kedua flow membuat payment pending lokal lebih dulu. Hosted checkout tidak membutuhkan transaksi native. Native QRIS memanggil Pakasir setelah commit lokal; jika create gagal, order tetap pending dan customer menerima hosted fallback.
 
+Callback/webhook Pakasir adalah untrusted intake. Sistem hanya menandai paid setelah Transaction Detail API dengan API-key verification cocok terhadap `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan payment method bila tersedia. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`.
 
 - `PAID`: payment menjadi `paid`, order masuk `processing`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
 - `EXPIRED`: order pending menjadi `expired`, payment menjadi `expired`, dan reservasi stok dilepas.
 - `FAILED`: order pending menjadi `cancelled`, payment menjadi `failed`, dan reservasi stok dilepas.
 - `REFUND`: payment menjadi `refunded`; order menjadi `cancelled` kecuali order sudah `completed`.
-
-
-
-
-Ada dua cara yang terlihat di codebase:
 
 
 
@@ -468,8 +464,10 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
 - [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
-- [ ] `TELEGRAM_PAYMENT_MODE=manual` selama KYC Pakasir; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
-- [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`.
+- [ ] `TELEGRAM_PAYMENT_MODE=manual` adalah default operasional; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
+- [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`; dashboard menolak aktivasi Pakasir tanpa slug/API key.
+- [ ] `PAKASIR_CHECKOUT_FLOW=hosted` untuk rollout aman; gunakan `api_qris` hanya setelah staging membuktikan native QRIS, dan rollback cepat ke hosted bila perlu.
+- [ ] `PAKASIR_REDIRECT_URL` opsional; kosongkan jika tidak butuh return URL khusus.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
 - [ ] Queue worker berjalan di Supervisor/systemd/container process manager.
@@ -517,19 +515,20 @@ Langkah cek:
 - cek error log Laravel;
 - cek koneksi database dengan `php artisan ops:health --db`.
 
+### Pakasir tidak sinkron / belum paid
 
 Kemungkinan penyebab:
 
-- signature/private key salah;
-- event header bukan `payment_status`;
-- provider reference atau merchant reference tidak cocok;
-- nominal atau payment method tidak cocok;
-- callback ditolak oleh rate limit atau size guard;
+- `PAKASIR_SLUG` atau `PAKASIR_API_KEY` salah/kosong sehingga Transaction Detail API tidak bisa memverifikasi payment.
+- `PAKASIR_CHECKOUT_FLOW` tidak sesuai rencana rollout (`hosted` atau `api_qris`).
+- `order_id`/`merchant_ref`, nominal, project/slug, status, atau payment method dari callback/detail tidak cocok dengan payment internal.
+- callback ditolak oleh throttle `pakasir-webhook`, shape gate, atau replay cache payload gagal.
 
 Langkah cek:
 
-- cek payment event yang masuk;
-- cek log untuk pesan validasi callback.
+- cek payment event yang masuk dan status payment internal;
+- cek log untuk pesan validasi callback/reconciliation;
+- jalankan reconcile manual hanya setelah credential Pakasir benar, karena paid tetap harus dikonfirmasi Transaction Detail API.
 
 ### Order pending tidak expired
 

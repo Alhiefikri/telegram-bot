@@ -17,6 +17,7 @@ use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Storefront\StorefrontResponseCache;
 use App\Support\DogfoodTiming;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -46,6 +47,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        PakasirCheckoutFlow::configured();
         $this->validateProductionConfiguration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 

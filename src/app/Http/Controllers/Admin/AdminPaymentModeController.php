@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdatePaymentModeRequest;
 use App\Models\ManualPaymentSetting;
 use App\Services\AuditLogger;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -48,9 +49,12 @@ class AdminPaymentModeController extends Controller
             $request->ip(),
         );
 
-        $label = $mode === 'pakasir'
-            ? 'Pakasir diaktifkan. Checkout baru akan memakai QRIS/hosted Pakasir.'
-            : 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.';
+        $label = match ($mode) {
+            'pakasir' => PakasirCheckoutFlow::configured() === PakasirCheckoutFlow::API_QRIS
+                ? 'Pakasir native QRIS diaktifkan. QR payment_number dikirim di Telegram dengan fallback hosted Pakasir.'
+                : 'Pakasir hosted diaktifkan. Checkout baru memakai QR/link website Pakasir.',
+            default => 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.',
+        };
 
         return redirect()
             ->route('admin.dashboard', ['tab' => 'stats'])

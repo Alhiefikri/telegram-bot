@@ -107,6 +107,12 @@
                         {{ $paymentControl['hint'] }}
                     </p>
 
+                    @if (! $paymentControl['is_pakasir_configured'])
+                        <x-admin-dashboard.notice tone="warning" class="mt-3 text-xs">
+                            {{ $paymentControl['pakasir_guard_message'] }}
+                        </x-admin-dashboard.notice>
+                    @endif
+
                     @error('payment_mode', 'paymentMode')
                         <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                     @enderror
@@ -133,9 +139,11 @@
                                     type="submit"
                                     :variant="$paymentControl['mode'] === 'pakasir' ? 'purple' : 'neutral'"
                                     size="sm"
-                                    class="w-full text-xs"
+                                    class="w-full text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="! $paymentControl['can_enable_pakasir']"
+                                    title="{{ $paymentControl['pakasir_guard_message'] }}"
                                 >
-                                    Pakasir
+                                    Pakasir {{ $paymentControl['checkout_flow_label'] }}
                                 </x-admin-dashboard.button>
                             </form>
                         </div>
