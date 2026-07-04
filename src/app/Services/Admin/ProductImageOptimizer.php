@@ -1,0 +1,123 @@
+<?php
+
+namespace App\Services\Admin;
+
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+final class ProductImageOptimizer
+{
+    private const DIRECTORY = 'products';
+
+    private const MAX_DIMENSION = 1600;
+
+    private const WEBP_QUALITY = 84;
+
+    public function store(UploadedFile $image): string
+    {
+        $source = $this->createImageResource($image);
+        $sourceWidth = imagesx($source);
+        $sourceHeight = imagesy($source);
+        $targetWidth = $sourceWidth;
+        $targetHeight = $sourceHeight;
+
+        $largestSide = max($sourceWidth, $sourceHeight);
+        if ($largestSide > self::MAX_DIMENSION) {
+            $scale = self::MAX_DIMENSION / $largestSide;
+            $targetWidth = max(1, (int) round($sourceWidth * $scale));
+            $targetHeight = max(1, (int) round($sourceHeight * $scale));
+        }
+
+        $target = $this->resizePreservingTransparency($source, $targetWidth, $targetHeight);
+        imagedestroy($source);
+
+        $path = self::DIRECTORY.'/'.Str::uuid()->toString().'.webp';
+        $disk = Storage::disk('public');
+        $disk->makeDirectory(self::DIRECTORY);
+
+        $absolutePath = $disk->path($path);
+        if (! imagewebp($target, $absolutePath, self::WEBP_QUALITY)) {
+            imagedestroy($target);
+            throw new RuntimeException('Failed to encode product image as WebP.');
+        }
+
+        imagedestroy($target);
+
+        return $path;
+    }
+
+    public function replace(?string $oldPath, UploadedFile $image): string
+    {
+        $newPath = $this->store($image);
+        $this->deleteManagedImage($oldPath);
+
+        return $newPath;
+    }
+
+    public function publicUrl(?string $path): ?string
+    {
+        if (! $path) {
+            return null;
+        }
+
+        if (str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        return '/storage/'.ltrim($path, '/');
+    }
+
+    private function createImageResource(UploadedFile $image): \GdImage
+    {
+        $contents = file_get_contents($image->getRealPath());
+        $source = $contents === false ? false : imagecreatefromstring($contents);
+
+        if (! $source instanceof \GdImage) {
+            throw new RuntimeException('Uploaded product image could not be decoded.');
+        }
+
+        if (! imageistruecolor($source)) {
+            imagepalettetotruecolor($source);
+        }
+
+        imagesavealpha($source, true);
+
+        return $source;
+    }
+
+    private function resizePreservingTransparency(\GdImage $source, int $targetWidth, int $targetHeight): \GdImage
+    {
+        $target = imagecreatetruecolor($targetWidth, $targetHeight);
+        imagealphablending($target, false);
+        imagesavealpha($target, true);
+
+        $transparent = imagecolorallocatealpha($target, 0, 0, 0, 127);
+        imagefilledrectangle($target, 0, 0, $targetWidth, $targetHeight, $transparent);
+
+        imagecopyresampled(
+            $target,
+            $source,
+            0,
+            0,
+            0,
+            0,
+            $targetWidth,
+            $targetHeight,
+            imagesx($source),
+            imagesy($source),
+        );
+
+        return $target;
+    }
+
+    private function deleteManagedImage(?string $path): void
+    {
+        if (! $path || ! str_starts_with($path, self::DIRECTORY.'/')) {
+            return;
+        }
+
+        Storage::disk('public')->delete($path);
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "files": [
+    "src/resources/views/**/*.blade.php"
+  ],
+  "exclude": [
+    "src/resources/views/vendor/**/*.blade.php",
+    "src/resources/views/mail/**/*.blade.php",
+    "src/resources/views/emails/**/*.blade.php"
+  ],
+  "insertBefore": "</body>",
+  "commentSyntax": "html",
+  "cspChecked": true
+}
