@@ -64,7 +64,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame('completed', $event->provider_status);
         $this->assertSame($payload, $event->raw_payload);
         $this->assertNotNull($event->processed_at);
-        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
         Queue::assertPushed(PublishSalesProofPost::class, 1);
 
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
