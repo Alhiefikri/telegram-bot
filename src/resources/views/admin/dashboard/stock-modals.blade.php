@@ -50,12 +50,12 @@
                     <x-admin-dashboard.modal-shell
                         id="manage-stock-modal"
                         title="Kelola stok"
-                        description="Akun tersedia, belum dipesan pembeli."
+                        description="Riwayat akun tersedia, dipesan, dan paid."
                         class="max-h-[92vh] w-full max-w-xl overflow-y-auto bg-[#fee648] p-3 sm:p-4"
                     >
                         <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold uppercase text-neo-ink">
                             <span class="max-w-[15rem] truncate" x-text="manageStockProductName">Produk</span>
-                            <span x-text="`${manageStockItems.length} dari ${manageStockAvailableCount} akun`">0 akun</span>
+                            <span x-text="`${manageStockSummary.available} tersedia · ${manageStockSummary.reserved} dipesan · ${manageStockSummary.paid} paid`">0 tersedia · 0 dipesan · 0 paid</span>
                         </div>
 
                         <x-admin-dashboard.notice tone="neutral" x-show="manageStockTruncated" class="mb-2 rounded-[0.45rem] p-2 text-[11px]">
@@ -69,7 +69,9 @@
                                         <div class="min-w-0">
                                             <div class="flex flex-wrap items-center gap-1.5">
                                                 <span class="font-display text-[11px] font-black text-neo-ink" x-text="`#${index + 1}`">#1</span>
-                                                <x-admin-dashboard.badge tone="blue" class="rounded-[0.35rem] border-2 px-1.5 py-0.5 text-[8px] shadow-none">Tersedia</x-admin-dashboard.badge>
+                                                <span class="rounded-[0.35rem] border-2 border-neo-ink px-1.5 py-0.5 text-[8px] font-black uppercase shadow-none" x-bind:class="{ 'bg-[#38bdf8]': item.status === 'TERSEDIA', 'bg-[#facc15]': item.status === 'DIPESAN', 'bg-[#7BD10A]': item.status === 'PAID', 'bg-[#fb7185] text-white': item.status === 'EXPIRED' || item.status === 'CANCELLED' }" x-text="item.status">TERSEDIA</span>
+                                                <span x-show="item.metadata" class="text-[9px] font-extrabold normal-case text-[#475569]" x-text="item.metadata"></span>
+                                                <span x-show="item.repair_needed" class="rounded-[0.35rem] border-2 border-neo-ink bg-white px-1 py-0.5 text-[8px] font-black uppercase">Perlu repair</span>
                                             </div>
                                             <p class="mt-1.5 break-all font-mono text-[10px] font-bold leading-4 text-neo-ink" x-text="item.secret"></p>
                                         </div>
@@ -82,8 +84,9 @@
                                                 aria-label="Ubah akun stok"
                                                 x-bind:aria-expanded="item.editing"
                                                 x-on:click="item.editing = ! item.editing"
+                                                x-show="item.editable"
                                             >✏️</x-admin-dashboard.button>
-                                            <form method="POST" x-bind:action="item.delete_url" x-on:submit="if (! confirm('Hapus akun stok ini?')) $event.preventDefault()">
+                                            <form method="POST" x-bind:action="item.delete_url" x-show="item.editable" x-on:submit="if (! confirm('Hapus akun stok ini?')) $event.preventDefault()">
                                                 @csrf
                                                 <input type="hidden" name="_method" value="DELETE">
                                                 <x-admin-dashboard.button
@@ -93,6 +96,16 @@
                                                     class="rounded-[0.35rem]"
                                                     aria-label="Hapus akun stok"
                                                 >🗑️</x-admin-dashboard.button>
+                                            </form>
+                                            <form method="POST" x-bind:action="item.cancel_release_url" x-show="item.cancel_release_url" x-on:submit="if (! confirm('Batalkan order dan lepas stok ini?')) $event.preventDefault()">
+                                                @csrf
+                                                <x-admin-dashboard.button
+                                                    type="submit"
+                                                    variant="warning"
+                                                    size="icon"
+                                                    class="rounded-[0.35rem]"
+                                                    aria-label="Batalkan order dan lepas stok"
+                                                >↩</x-admin-dashboard.button>
                                             </form>
                                         </div>
                                     </div>

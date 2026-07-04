@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Category;
@@ -12,6 +14,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Services\Admin\AdminDashboardProductsData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -53,15 +56,79 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('Tambah kategori')
             ->assertSee('Kelola stok')
             ->assertSee('available@example.test|pass')
-            ->assertDontSee('claimed@example.test|pass')
-            ->assertSee('email@example.com|password', false)
-            ->assertSee('admin-dashboard-action', false)
+            ->assertSee('claimed@example.test|pass')
             ->assertSee('bg-[#ef4444] text-white', false)
             ->assertDontSee('background: #fecaca; color: #dc2626;', false)
             ->assertDontSee('product-action-btn', false)
             ->assertDontSee('@js(', false)
             ->assertDontSee('fi-form', false)
             ->assertDontSee('fi-modal', false);
+    }
+
+    public function test_manage_stock_data_surfaces_reserved_paid_and_inconsistent_history_rows(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $product = Product::factory()->create(['name' => 'Credential Vault', 'stock' => 3, 'reserved_stock' => 1]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ready@example.test|pass']);
+
+        $reservedOrder = Order::factory()->create([
+            'invoice_number' => 'INV-RESERVED',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+        $reservedItem = OrderItem::factory()->create(['order_id' => $reservedOrder->id, 'product_id' => $product->id]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $reservedItem->id, 'secret' => 'reserved@example.test|pass']);
+
+        $paidOrder = Order::factory()->create([
+            'invoice_number' => 'INV-PAID',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $paidOrder->payments()->create(['provider' => 'manual', 'merchant_ref' => 'MR-PAID', 'method' => 'manual', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Paid, 'paid_at' => now()]);
+        $paidItem = OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $product->id]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $paidItem->id, 'secret' => 'paid@example.test|pass']);
+
+        $expiredOrder = Order::factory()->create([
+            'invoice_number' => 'INV-STALE',
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+        ]);
+        $expiredItem = OrderItem::factory()->create(['order_id' => $expiredOrder->id, 'product_id' => $product->id]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $expiredItem->id, 'secret' => 'stale@example.test|pass']);
+
+        $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
+
+        $this->assertSame(1, $payload['availableStockItemCount']);
+        $this->assertSame(['TERSEDIA', 'DIPESAN', 'PAID', 'EXPIRED'], array_column($payload['stockItems'], 'status'));
+        $this->assertSame(['available' => 1, 'reserved' => 1, 'paid' => 1], $payload['stockSummary']);
+        $this->assertSame('INV-RESERVED', $payload['stockItems'][1]['invoice']);
+        $this->assertSame('INV-PAID', $payload['stockItems'][2]['invoice']);
+        $this->assertTrue($payload['stockItems'][3]['repair_needed']);
+    }
+
+    public function test_dashboard_cancel_release_pending_order_restores_credential_stock(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 1]);
+        $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        $order->payments()->create(['provider' => 'manual', 'merchant_ref' => 'MR-CANCEL', 'method' => 'manual', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending]);
+        $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'quantity' => 1]);
+        InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => 1, 'notes' => 'Order reservation', 'created_at' => now()]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $orderItem->id, 'secret' => 'release@example.test|pass']);
+
+        $this->actingAs($admin)
+            ->from(route('admin.orders.show', $order))
+            ->post(route('admin.orders.cancel-release', $order))
+            ->assertRedirect(route('admin.orders.show', $order))
+            ->assertSessionHas('status', 'Order '.$order->invoice_number.' dibatalkan dan stok dilepas.');
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'order.pending_cancelled_released', 'subject_id' => (string) $order->id]);
     }
 
     public function test_support_dashboard_does_not_receive_stock_item_secrets_or_management_urls(): void

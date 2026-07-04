@@ -10,6 +10,14 @@
     <main class="mx-auto max-w-3xl p-4 sm:p-6">
         <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke Penjualan</a>
 
+        @if (session('status'))
+            <x-admin-dashboard.notice tone="success" class="mt-4 rounded-xl text-sm font-bold">{{ session('status') }}</x-admin-dashboard.notice>
+        @endif
+
+        @error('order')
+            <x-admin-dashboard.notice tone="danger" class="mt-4 rounded-xl text-sm font-bold">{{ $message }}</x-admin-dashboard.notice>
+        @enderror
+
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -46,6 +54,13 @@
                     </ul>
                 </x-admin-dashboard.card>
             </div>
+
+            @if ($order->order_status === \App\Enums\OrderStatus::PendingPayment && $order->payment_status === \App\Enums\PaymentStatus::Pending)
+                <form method="POST" action="{{ route('admin.orders.cancel-release', $order) }}" class="mt-5" onsubmit="return confirm('Batalkan order dan lepas stok?')">
+                    @csrf
+                    <x-admin-dashboard.button type="submit" variant="warning">Batalkan & lepas stok</x-admin-dashboard.button>
+                </form>
+            @endif
         </x-admin-dashboard.card>
 
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">

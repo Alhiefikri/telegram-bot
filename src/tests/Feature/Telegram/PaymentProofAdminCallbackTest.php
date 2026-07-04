@@ -366,6 +366,32 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && str_contains((string) ($r['text'] ?? ''), 'buyer@example.test | pass'));
     }
 
+    public function test_telegram_admin_cancel_command_releases_pending_order_without_payment_proof(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 1, 'reserved_stock' => 0]);
+        app(StockAdjustmentService::class)->adjust($product, 1, 'credential', null, null, ['cancel-command@example.test | pass']);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(250, 'checkout-cancel-command', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->messageUpdate(251, '/cancel '.$order->invoice_number, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'order.pending_cancelled_released', 'subject_id' => (string) $order->id]);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '999'
+            && str_contains((string) ($r['text'] ?? ''), 'stok sudah dilepas'));
+    }
+
     public function test_non_admin_cannot_reject_manual_payment_callback(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');

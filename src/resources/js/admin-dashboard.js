@@ -46,6 +46,7 @@ export default function adminDashboard(initialState = {}) {
         manageStockProductStock: 0,
         manageStockItems: [],
         manageStockAvailableCount: 0,
+        manageStockSummary: { available: 0, reserved: 0, paid: 0 },
         manageStockTruncated: false,
         manageStockAddPayload: null,
 
@@ -114,6 +115,7 @@ export default function adminDashboard(initialState = {}) {
                 manageStockProductStock: product.stock,
                 manageStockItems: editableStockItems(product.stockItems),
                 manageStockAvailableCount: product.availableStockItemCount || 0,
+                manageStockSummary: product.stockSummary || { available: product.availableStockItemCount || 0, reserved: 0, paid: 0 },
                 manageStockTruncated: Boolean(product.stockItemsTruncated),
                 manageStockAddPayload: {
                     id: product.id,
@@ -128,6 +130,7 @@ export default function adminDashboard(initialState = {}) {
         closeManageStockModal() {
             this.manageStockModalOpen = false;
             this.manageStockItems = [];
+            this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
             this.manageStockAddPayload = null;
         },
 

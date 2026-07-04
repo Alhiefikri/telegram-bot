@@ -117,6 +117,13 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($text === '/cancel' || str_starts_with($text, '/cancel ')) {
+            $this->session->forget($customer);
+            $this->manualPayments->cancelPendingOrderFromTelegram($customer, $chatId, trim(substr($text, strlen('/cancel'))));
+
+            return;
+        }
+
         if ($text === '/batal') {
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);

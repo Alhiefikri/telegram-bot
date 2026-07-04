@@ -40,6 +40,7 @@ class TelegramCheckoutIntents
             $lines[] = '';
             $lines[] = '⏳ Batas bayar:';
             $lines[] = $this->formatDate($order->expires_at);
+            $lines[] = 'Stok dipegang '.(int) config('orders.pending_payment_ttl_minutes', 5).' menit. Kalau belum bayar/kirim bukti, order otomatis expired dan stok balik.';
         }
 
         $lines[] = '';

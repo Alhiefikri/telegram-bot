@@ -125,6 +125,43 @@ class TelegramManualPaymentIntents
         $this->notifyBuyerPaymentRejected($rejected);
     }
 
+    public function cancelPendingOrderFromTelegram(Customer $admin, string $chatId, string $invoice): void
+    {
+        if (! $this->isTelegramAdmin($admin, $chatId)) {
+            $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
+
+            return;
+        }
+
+        $invoice = trim($invoice);
+        if ($invoice === '') {
+            $this->bot->sendMessage($chatId, "Invoice belum diisi.\n\nGunakan format:\n/cancel INV-xxxx");
+
+            return;
+        }
+
+        $order = Order::query()
+            ->where('invoice_number', $invoice)
+            ->where('order_status', OrderStatus::PendingPayment)
+            ->where('payment_status', PaymentStatus::Pending)
+            ->first();
+
+        if (! $order) {
+            $this->bot->sendMessage($chatId, 'Order pending tidak ditemukan.');
+
+            return;
+        }
+
+        if (! $this->adminOrders->canCancelPendingOrder($order)) {
+            $this->bot->sendMessage($chatId, 'Order sudah diproses atau tidak bisa dibatalkan.');
+
+            return;
+        }
+
+        $cancelled = $this->adminOrders->cancelPendingOrder($order);
+        $this->bot->sendMessage($chatId, "✅ Order dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.");
+    }
+
     public function manualPaymentOrderForCustomer(Customer $customer, string $invoice): ?Order
     {
         return $customer->orders()

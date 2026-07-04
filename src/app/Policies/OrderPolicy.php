@@ -42,6 +42,11 @@ class OrderPolicy
         return $user->role?->canCompleteManualOrders() ?? false;
     }
 
+    public function cancelPending(User $user, Order $order): bool
+    {
+        return $user->role?->canCompleteManualOrders() ?? false;
+    }
+
     public function retrySalesProof(User $user, Order $order): bool
     {
         return $user->role?->canManagePaymentSettings() ?? false;

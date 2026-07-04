@@ -15,6 +15,7 @@ use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\InventoryLedger;
 use App\Services\InvoiceNumberGenerator;
@@ -82,6 +83,23 @@ class Phase4OrderCartDomainTest extends TestCase
         app(OrderStateMachine::class)->cancelPendingOrder($order2);
         app(OrderStateMachine::class)->cancelPendingOrder($order2->fresh());
         $this->assertSame(2, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_default_pending_payment_ttl_is_five_minutes_and_expiry_releases_credential(): void
+    {
+        config()->set('orders.pending_payment_ttl_minutes', 5);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ttl@example.test|pass']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
+
+        $this->assertTrue($order->expires_at->between(now()->addMinutes(4), now()->addMinutes(6)));
+        $this->assertNotNull($stockItem->fresh()->order_item_id);
+        $order->forceFill(['expires_at' => now()->subMinute()])->save();
+        app(OrderStateMachine::class)->expirePendingOrder($order->fresh());
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(1, Product::first()->availableStock());
+        $this->assertNull($stockItem->fresh()->order_item_id);
     }
 
     public function test_paid_after_expired_records_payment_without_mutating_stock(): void

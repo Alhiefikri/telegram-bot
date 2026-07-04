@@ -2,6 +2,8 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -50,19 +52,15 @@ final class AdminDashboardProductsData
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
                     ? ProductStockItem::query()
+                        ->with(['orderItem.order.payments'])
                         ->where('product_id', $product->id)
-                        ->whereNull('order_item_id')
                         ->oldest('id')
                         ->limit(25)
                         ->get()
-                        ->map(fn (ProductStockItem $stockItem): array => [
-                            'id' => $stockItem->id,
-                            'secret' => $stockItem->secret,
-                            'update_url' => route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]),
-                            'delete_url' => route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]),
-                        ])
+                        ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
                         ->all()
                     : [];
+                $stockSummary = $this->stockSummary($stockItems);
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
                 $updateUrl = route('admin.products.update', ['product' => $product]);
 
@@ -81,7 +79,7 @@ final class AdminDashboardProductsData
                     'reserved_stock' => $product->reserved_stock,
                     'available_stock' => $availableStock,
                     'available_stock_item_count' => $availableStockItemCount,
-                    'stock_items_truncated' => $availableStockItemCount > count($stockItems),
+                    'stock_items_truncated' => ProductStockItem::where('product_id', $product->id)->count() > count($stockItems),
                     'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
                     'status_label' => $product->is_active ? 'Aktif' : 'Pause',
@@ -118,12 +116,78 @@ final class AdminDashboardProductsData
                         'stockUrl' => $stockUrl,
                         'stock' => $product->stock,
                         'availableStockItemCount' => $availableStockItemCount,
-                        'stockItemsTruncated' => $availableStockItemCount > count($stockItems),
+                        'stockSummary' => $stockSummary,
+                        'stockItemsTruncated' => ProductStockItem::where('product_id', $product->id)->count() > count($stockItems),
                         'stockItems' => $stockItems,
                     ],
                 ];
             })
             ->all();
+    }
+
+    private function stockItemPayload(ProductStockItem $stockItem, Product $product): array
+    {
+        $order = $stockItem->orderItem?->order;
+        $payment = $order?->payments?->sortByDesc('paid_at')->first();
+        $status = $this->stockItemStatus($order, $payment);
+        $available = $stockItem->order_item_id === null;
+
+        return [
+            'id' => $stockItem->id,
+            'secret' => $stockItem->secret,
+            'status' => $status,
+            'invoice' => $order?->invoice_number,
+            'reserved_at' => $order?->created_at?->toDateTimeString(),
+            'expires_at' => $order?->expires_at?->toDateTimeString(),
+            'paid_at' => $payment?->paid_at?->toDateTimeString(),
+            'metadata' => $this->stockItemMetadata($order, $payment, $status),
+            'repair_needed' => $stockItem->order_item_id !== null && in_array($status, ['EXPIRED', 'CANCELLED'], true),
+            'editable' => $available,
+            'update_url' => $available ? route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]) : null,
+            'delete_url' => $available ? route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]) : null,
+            'cancel_release_url' => $status === 'DIPESAN' && $order ? route('admin.orders.cancel-release', $order) : null,
+        ];
+    }
+
+    private function stockItemStatus($order, $payment): string
+    {
+        if (! $order) {
+            return 'TERSEDIA';
+        }
+
+        if ($order->payment_status === PaymentStatus::Paid || $payment?->status === PaymentStatus::Paid) {
+            return 'PAID';
+        }
+
+        return match ($order->order_status) {
+            OrderStatus::PendingPayment => 'DIPESAN',
+            OrderStatus::Expired => 'EXPIRED',
+            OrderStatus::Cancelled => 'CANCELLED',
+            default => strtoupper($order->payment_status->value),
+        };
+    }
+
+    private function stockItemMetadata($order, $payment, string $status): ?string
+    {
+        if (! $order) {
+            return null;
+        }
+
+        return match ($status) {
+            'DIPESAN' => $order->invoice_number.' · expire '.$order->expires_at?->diffForHumans(),
+            'PAID' => $order->invoice_number.' · paid '.$payment?->paid_at?->format('d M H:i'),
+            'EXPIRED', 'CANCELLED' => $order->invoice_number.' · perlu repair',
+            default => $order->invoice_number,
+        };
+    }
+
+    private function stockSummary(array $stockItems): array
+    {
+        return [
+            'available' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'TERSEDIA')),
+            'reserved' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'DIPESAN')),
+            'paid' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'PAID')),
+        ];
     }
 
     private function productStatusBadge(bool $isActive): array

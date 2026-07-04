@@ -27,6 +27,28 @@ class AdminOrderOperations
             && $payment->status === PaymentStatus::Pending;
     }
 
+    public function canCancelPendingOrder(Order $order): bool
+    {
+        $order->loadMissing('payments');
+
+        return $order->order_status === OrderStatus::PendingPayment
+            && $order->payment_status === PaymentStatus::Pending
+            && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Pending);
+    }
+
+    public function cancelPendingOrder(Order $order, ?User $user = null, ?string $ip = null): Order
+    {
+        try {
+            $cancelledOrder = $this->orders->cancelPendingOrder($order);
+        } catch (InvalidOrderTransition $exception) {
+            throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
+        }
+
+        $this->audit->log('order.pending_cancelled_released', $cancelledOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Cancelled->value, 'payment_status' => PaymentStatus::Failed->value], $user, $ip);
+
+        return $cancelledOrder->fresh(['payments', 'customer', 'orderItems']);
+    }
+
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
         try {
