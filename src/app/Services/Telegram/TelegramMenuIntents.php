@@ -27,17 +27,18 @@ class TelegramMenuIntents
 
         $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId);
         $bannerReference = config('services.telegram.welcome_banner_url');
-        $captionOptions = ['show_caption_above_media' => true];
 
         if (is_string($bannerReference) && trim($bannerReference) !== '') {
-            $this->bot->sendPhotoReference($chatId, trim($bannerReference), $caption, $replyMarkup, $captionOptions);
+            $this->bot->sendPhotoReference($chatId, trim($bannerReference));
+            $this->bot->sendMessage($chatId, $caption, $replyMarkup);
 
             return;
         }
 
         $bannerPath = resource_path('images/banner-welcome.jpg');
         if (is_file($bannerPath) && is_readable($bannerPath)) {
-            $this->bot->sendPhoto($chatId, file_get_contents($bannerPath), 'banner-welcome.jpg', $caption, $replyMarkup, $captionOptions);
+            $this->bot->sendPhoto($chatId, file_get_contents($bannerPath), 'banner-welcome.jpg');
+            $this->bot->sendMessage($chatId, $caption, $replyMarkup);
 
             return;
         }
@@ -54,7 +55,7 @@ class TelegramMenuIntents
     {
         $keyboard = [
             [['text' => '🛍️ Lihat Produk'], ['text' => '📦 Pesanan']],
-            [['text' => '👤 Akun Saya'], ['text' => '💬 Support']],
+            [['text' => '💬 Support']],
         ];
 
         if ($customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
@@ -65,13 +66,11 @@ class TelegramMenuIntents
             $keyboard[] = [['text' => '📣 Broadcast Info']];
         }
 
-        $keyboard[] = [['text' => '☰ Menu']];
-
         return [
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'is_persistent' => true,
-            'input_field_placeholder' => 'Pilih menu atau ketik /produk',
+            'input_field_placeholder' => 'Pilih tombol atau ketik /produk',
         ];
     }
 
@@ -80,7 +79,7 @@ class TelegramMenuIntents
      */
     private function timeAwareGreeting(): array
     {
-        $hour = now()->hour;
+        $hour = now('Asia/Jakarta')->hour;
 
         return match (true) {
             $hour >= 5 && $hour < 11 => ['🌅', 'Selamat pagi'],

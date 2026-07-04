@@ -112,10 +112,10 @@ class CommunityGateTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
             && $r['chat_id'] === '12345'
             && $r['message_id'] === 77);
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendPhoto')
-            && str_contains($r['caption'] ?? '', 'Selamat')
-            && str_contains($r['caption'] ?? '', 'Ayu')
-            && str_contains($r['caption'] ?? '', 'welcome ke LHIE STORE'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'] ?? '', 'Selamat')
+            && str_contains($r['text'] ?? '', 'Ayu')
+            && str_contains($r['text'] ?? '', 'welcome ke LHIE STORE'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'Menu utama'));
     }
@@ -136,10 +136,10 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(36, 'verify-delete-fails', 'community_gate:verify', ['first_name' => 'Ayu']))->assertOk();
 
         $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendPhoto')
-            && str_contains($r['caption'] ?? '', 'Selamat')
-            && str_contains($r['caption'] ?? '', 'Ayu')
-            && str_contains($r['caption'] ?? '', 'welcome ke LHIE STORE'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'] ?? '', 'Selamat')
+            && str_contains($r['text'] ?? '', 'Ayu')
+            && str_contains($r['text'] ?? '', 'welcome ke LHIE STORE'));
     }
 
     public function test_leaving_channel_blocks_later_store_flow_again(): void

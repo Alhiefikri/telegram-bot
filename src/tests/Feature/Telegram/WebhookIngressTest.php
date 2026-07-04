@@ -50,7 +50,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, TelegramUpdate::first()->processed_at);
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
     }
 
     public function test_duplicate_direct_job_does_not_send_twice(): void
@@ -64,7 +64,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, $update->fresh()->processed_at);
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
     }
 
     public function test_recovery_command_redispatches_only_unprocessed_stored_updates(): void
@@ -159,20 +159,23 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('/start', $joined);
     }
 
-    public function test_start_welcome_uses_time_aware_greeting_above_banner_media(): void
+    public function test_start_welcome_uses_wib_time_and_sends_banner_before_message(): void
     {
-        Carbon::setTestNow('2026-07-04 21:15:00');
+        Carbon::setTestNow(Carbon::parse('2026-07-04 14:15:00', 'UTC'));
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(210, '/start', from: ['first_name' => 'Fikri']))->assertOk();
 
-        Http::assertSent(function ($request): bool {
-            return str_ends_with($request->url(), '/sendPhoto')
-                && $request->data()['photo'] === 'telegram-banner-file-id'
-                && $request->data()['show_caption_above_media'] === true
-                && str_contains($request->data()['caption'], '🌙 Selamat malam, Fikri');
-        });
+        $recorded = Http::recorded();
+        $welcomePhotoIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
+            && $record[0]->data()['photo'] === 'telegram-banner-file-id');
+        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendMessage')
+            && str_contains((string) ($record[0]->data()['text'] ?? ''), '🌙 Selamat malam, Fikri'));
+
+        $this->assertIsInt($welcomePhotoIndex);
+        $this->assertIsInt($welcomeMessageIndex);
+        $this->assertLessThan($welcomeMessageIndex, $welcomePhotoIndex);
     }
 
     public function test_start_welcome_uses_local_banner_when_banner_url_is_not_configured(): void
@@ -183,9 +186,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(211, '/start', from: ['first_name' => 'Fikri']))->assertOk();
 
-        Http::assertSent(function ($request): bool {
-            return str_ends_with($request->url(), '/sendPhoto');
-        });
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
     }
 
     private function assertLog(array $logs, string $event, callable $predicate): void

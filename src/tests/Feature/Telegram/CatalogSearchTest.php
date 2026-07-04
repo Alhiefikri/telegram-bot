@@ -25,8 +25,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Menu utama')
             && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
             && ($r['reply_markup']['keyboard'][0][1]['text'] ?? null) === '📦 Pesanan'
-            && ($r['reply_markup']['keyboard'][1][0]['text'] ?? null) === '👤 Akun Saya'
-            && ($r['reply_markup']['keyboard'][1][1]['text'] ?? null) === '💬 Support'
+            && ($r['reply_markup']['keyboard'][1][0]['text'] ?? null) === '💬 Support'
+            && ! str_contains(json_encode($r->data()), '☰ Menu')
+            && ! str_contains(json_encode($r->data()), 'Akun Saya')
             && ! str_contains(json_encode($r->data()), 'Admin Dashboard')
             && ! str_contains(json_encode($r->data()), 'Broadcast Info'));
     }
@@ -39,12 +40,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(110, '/start', ['first_name' => 'Ayu']))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
-            && $r['photo'] === 'banner-file-id'
-            && str_contains($r['caption'], 'Selamat pagi, Ayu')
-            && str_contains($r['caption'], 'Tempat belanja produk digital')
-            && ! str_contains($r['caption'], 'BANNER PLACEHOLDER')
-            && ! str_contains($r['caption'], '[BANNER:'));
+        $recorded = Http::recorded();
+        $welcomePhotoIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
+            && $record[0]['photo'] === 'banner-file-id');
+        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendMessage')
+            && str_contains((string) ($record[0]['text'] ?? ''), 'Selamat pagi, Ayu')
+            && str_contains((string) ($record[0]['text'] ?? ''), 'Tempat belanja produk digital')
+            && ! str_contains((string) ($record[0]['text'] ?? ''), 'BANNER PLACEHOLDER')
+            && ! str_contains((string) ($record[0]['text'] ?? ''), '[BANNER:'));
+
+        $this->assertIsInt($welcomePhotoIndex);
+        $this->assertIsInt($welcomeMessageIndex);
+        $this->assertLessThan($welcomeMessageIndex, $welcomePhotoIndex);
     }
 
     public function test_katalog_lists_active_categories_uncategorized_and_empty_state(): void
@@ -88,7 +95,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Menu utama')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk');
+            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
+            && ! str_contains(json_encode($r->data()), '☰ Menu')
+            && ! str_contains(json_encode($r->data()), 'Akun Saya'));
     }
 
     public function test_lihat_produk_command_alias_opens_product_catalog(): void
