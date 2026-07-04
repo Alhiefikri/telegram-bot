@@ -121,7 +121,7 @@ jobs:
           git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
           git reset --hard "origin/$DEPLOY_BRANCH"
 
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env config >/dev/null
+          ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans
 
           for attempt in $(seq 1 36); do

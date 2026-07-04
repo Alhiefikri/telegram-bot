@@ -28,6 +28,10 @@ Do not commit or paste secrets, private chat IDs, private user IDs, Telegram fil
   - `DOGFOOD_PAKASIR_PENDING_ORDER_ID`
   - `DOGFOOD_PAKASIR_PENDING_AMOUNT`
 
+## Secret Output Guard
+
+Use `./scripts/safe-compose-config.sh --project <dogfood-project> --env-file <env-file>` when you need Compose validation for a production-like run. Do not capture or paste plain `docker compose ... config` output; it expands `APP_KEY`, Telegram, Pakasir, and database values into the artifact stream.
+
 ## Safe Preflight
 
 Run these checks before any flow that sends real Telegram messages:

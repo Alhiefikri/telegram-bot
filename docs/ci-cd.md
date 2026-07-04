@@ -36,7 +36,7 @@ Configure these in GitHub repository Settings → Secrets and variables → Acti
 - `PRODUCTION_SSH_PRIVATE_KEY`: private deploy key allowed to SSH to the VPS.
 - `PRODUCTION_PATH`: absolute path of the checked-out repo on the VPS, for example `/home/alhiefikri/github/telegram-bot`.
 
-Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and payment credentials should stay in the VPS `.env`, not in the workflow file.
+Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and payment credentials must stay in the VPS `.env`, not in the workflow file. The deploy workflow validates Compose with `./scripts/safe-compose-config.sh`, which uses `docker compose config --quiet`; do not run or paste plain `docker compose ... config` output for production-like environments because resolved Compose output includes secret values.
 
 ## Recommended GitHub environment protection
 
