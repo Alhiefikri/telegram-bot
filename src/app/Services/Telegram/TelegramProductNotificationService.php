@@ -19,7 +19,7 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
-        $availableStock = max(0, $product->stock - $product->reserved_stock);
+        $availableStock = $product->availableStock();
         if ($availableStock < 1) {
             return $this->skippedResult();
         }
@@ -42,7 +42,7 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
-        $availableStock = $product->stock - $product->reserved_stock;
+        $availableStock = $product->availableStock();
         if ($availableStock < 1) {
             return $this->skippedResult();
         }

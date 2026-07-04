@@ -119,6 +119,39 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertInventoryInvariants($product);
     }
 
+    public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void
+    {
+        $numericHigher = $this->stockedProduct(stock: 5, secrets: ['credential-a', 'credential-b']);
+        $credentialsHigher = $this->stockedProduct(stock: 1, secrets: ['credential-c', 'credential-d', 'credential-e']);
+
+        $this->assertSame(2, $numericHigher->fresh()->availableStock());
+        $this->assertSame(1, $credentialsHigher->fresh()->availableStock());
+    }
+
+    public function test_cart_rejects_managed_product_when_numeric_stock_exceeds_credentials(): void
+    {
+        $product = $this->stockedProduct(stock: 2, secrets: ['only-credential']);
+        $firstCustomer = Customer::factory()->create();
+        $secondCustomer = Customer::factory()->create();
+
+        $firstCart = app(CartService::class)->activeCartFor($firstCustomer);
+        app(CartService::class)->setItemQuantity($firstCart, $product, 1);
+        app(OrderCheckoutService::class)->checkout($firstCart);
+
+        $secondCart = app(CartService::class)->activeCartFor($secondCustomer);
+
+        $this->expectException(\App\Exceptions\InsufficientStock::class);
+        app(CartService::class)->setItemQuantity($secondCart, $product->fresh(), 1);
+    }
+
+    public function test_managed_stock_adjustment_requires_matching_credential_rows(): void
+    {
+        $product = $this->stockedProduct(stock: 1, secrets: ['managed-credential']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        app(StockAdjustmentService::class)->adjust($product, 1, 'numeric-only mismatch');
+    }
+
     public function test_admin_adds_stock_twice_without_losing_submitted_stock_lines(): void
     {
         $product = $this->stockedProduct(stock: 0, secrets: []);
@@ -244,15 +277,17 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     {
         $product = $product->fresh();
         $this->assertNotNull($product);
-        $availableStock = $product->stock - $product->reserved_stock;
+        $numericAvailable = max(0, $product->stock - $product->reserved_stock);
 
         $this->assertGreaterThanOrEqual(0, $product->stock);
         $this->assertGreaterThanOrEqual(0, $product->reserved_stock);
         $this->assertGreaterThanOrEqual($product->reserved_stock, $product->stock);
-        $this->assertSame($availableStock, $product->stock - $product->reserved_stock);
 
         $stockItems = ProductStockItem::where('product_id', $product->id)->get();
-        $this->assertSame($availableStock, $stockItems->whereNull('order_item_id')->count());
+        $expectedAvailable = $stockItems->isNotEmpty()
+            ? min($numericAvailable, $stockItems->whereNull('order_item_id')->count())
+            : $numericAvailable;
+        $this->assertSame($expectedAvailable, $product->availableStock());
         $this->assertSame(0, $stockItems->whereNotNull('order_item_id')->filter(fn (ProductStockItem $item): bool => $item->order_item_id === null)->count());
         $this->assertSame(0, $stockItems->whereNull('order_item_id')->filter(fn (ProductStockItem $item): bool => $item->order_item_id !== null)->count());
 

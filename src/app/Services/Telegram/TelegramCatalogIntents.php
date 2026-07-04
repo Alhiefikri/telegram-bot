@@ -28,7 +28,7 @@ class TelegramCatalogIntents
     public function sendStockChoices(string $chatId, Product $product, int $availableStock): void
     {
         $keyboard = [];
-        if ($product->isAvailable()) {
+        if ($availableStock > 0) {
             $keyboard[] = [[
                 'text' => '🧾 Beli Sekarang - Rp'.number_format($product->price_amount, 0, ',', '.'),
                 'callback_data' => 'buy:'.$product->id,
@@ -43,16 +43,16 @@ class TelegramCatalogIntents
             '🛍️ '.$product->name,
             '━━━━━━━━━━━━━━',
             '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
-            $product->isAvailable() ? '✅ Status: Ready' : '❌ Status: Stok kosong',
+            $availableStock > 0 ? '✅ Status: Ready' : '❌ Status: Stok kosong',
         ];
-        if ($product->isAvailable()) {
+        if ($availableStock > 0) {
             $lines[] = '📦 Stok: '.$availableStock;
         }
         $lines[] = '';
         $lines[] = '📝 Detail produk';
         $lines[] = $this->descriptionText($product);
         $lines[] = '';
-        $lines[] = $product->isAvailable()
+        $lines[] = $availableStock > 0
             ? 'Kalau cocok, langsung gas checkout di bawah.'
             : 'Stoknya lagi habis nih. Cek produk lain dulu ya, atau tunggu restock berikutnya.';
 

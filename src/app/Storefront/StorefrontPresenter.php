@@ -43,7 +43,7 @@ class StorefrontPresenter
 
     public function stockAvailable(Product $product): int
     {
-        return max(0, (int) $product->stock - (int) $product->reserved_stock);
+        return $product->availableStock();
     }
 
     public function idr(float|int $amount): string

@@ -47,12 +47,28 @@ class Product extends Model
 
     public function availableStock(): int
     {
-        return $this->stock - $this->reserved_stock;
+        $numericAvailable = max(0, $this->stock - $this->reserved_stock);
+
+        if (! $this->isCredentialManaged()) {
+            return $numericAvailable;
+        }
+
+        return min($numericAvailable, $this->availableStockItemCount());
     }
 
     public function isAvailable(): bool
     {
         return $this->availableStock() > 0;
+    }
+
+    public function isCredentialManaged(): bool
+    {
+        return $this->stockItems()->exists();
+    }
+
+    public function availableStockItemCount(): int
+    {
+        return $this->stockItems()->whereNull('order_item_id')->count();
     }
 
     public function isPublicVisible(): bool

@@ -22,7 +22,7 @@ class StockAdjustmentService
         if ($delta === 0) {
             throw new InvalidArgumentException('Stock adjustment quantity must not be zero.');
         }
-        if ($stockItems !== [] && count($stockItems) !== $delta) {
+        if ($stockItems !== [] && ($delta < 1 || count($stockItems) !== $delta)) {
             throw new InvalidArgumentException('Stock item count must match positive stock adjustment.');
         }
 
@@ -30,6 +30,9 @@ class StockAdjustmentService
             /** @var Product $locked */
             $locked = Product::query()->whereKey($product->getKey())->lockForUpdate()->firstOrFail();
             $old = ['stock' => $locked->stock, 'reserved_stock' => $locked->reserved_stock];
+            if ($locked->isCredentialManaged() && $stockItems === []) {
+                throw new InvalidArgumentException('Credential-managed products must be adjusted through matching stock item rows.');
+            }
             $newStock = $locked->stock + $delta;
 
             if ($newStock < 0 || $newStock < $locked->reserved_stock) {

@@ -28,7 +28,7 @@ class TelegramCartIntents
                 ->where('is_active', true)
                 ->firstOrFail();
 
-            if (($product->stock - $product->reserved_stock) < $quantity) {
+            if ($product->availableStock() < $quantity) {
                 $this->bot->sendMessage($chatId, 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.');
 
                 return false;

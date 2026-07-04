@@ -47,6 +47,7 @@ final class AdminDashboardProductsData
             ->map(function (Product $product) use ($availableStockCounts, $includeManageableStockItems): array {
                 $descriptionSections = $this->descriptionSections->decode($product->description);
                 $availableStockItemCount = (int) ($availableStockCounts[$product->id] ?? 0);
+                $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
                     ? ProductStockItem::query()
                         ->where('product_id', $product->id)
@@ -78,7 +79,7 @@ final class AdminDashboardProductsData
                     'price' => Money::idr($product->price_amount),
                     'stock' => $product->stock,
                     'reserved_stock' => $product->reserved_stock,
-                    'available_stock' => max(0, $product->stock - $product->reserved_stock),
+                    'available_stock' => $availableStock,
                     'available_stock_item_count' => $availableStockItemCount,
                     'stock_items_truncated' => $availableStockItemCount > count($stockItems),
                     'stock_items' => $stockItems,

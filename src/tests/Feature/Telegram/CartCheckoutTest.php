@@ -25,7 +25,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $product = Product::factory()->create(['name' => 'Kopi', 'description' => 'Kopi premium siap kirim.', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
-        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'kopi@example.test | password: Secret-222']);
+        foreach (range(1, 5) as $index) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => "kopi-{$index}@example.test | password: Secret-222"]);
+        }
 
         $this->postTelegramWebhook($this->callbackUpdate(13, 'cb1', 'product:'.$product->id))->assertOk();
         $this->assertSame(0, CartItem::count());

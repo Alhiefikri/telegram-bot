@@ -26,12 +26,12 @@ class EloquentInventoryLedger implements InventoryLedger
      */
     public function reserveOrderItem(Order $order, Product $product, int $quantity): void
     {
-        $availableBefore = $product->stock - $product->reserved_stock;
+        $availableBefore = $product->availableStock();
         $product->increment('reserved_stock', $quantity);
         $product->refresh();
         InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => $quantity, 'notes' => 'Order reservation', 'created_at' => now()]);
 
-        if ($availableBefore > 0 && ($product->stock - $product->reserved_stock) <= 0) {
+        if ($availableBefore > 0 && $product->availableStock() <= 0) {
             DB::afterCommit(fn () => $this->notifications->notifyOutOfStock($product->fresh()));
         }
     }

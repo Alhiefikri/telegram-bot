@@ -553,18 +553,17 @@ class ProductionConcurrencyTest extends TestCase
     {
         $product = $product->fresh();
         $this->assertNotNull($product);
-        $availableStock = $product->stock - $product->reserved_stock;
+        $numericAvailable = max(0, $product->stock - $product->reserved_stock);
 
         $this->assertGreaterThanOrEqual(0, $product->stock);
         $this->assertGreaterThanOrEqual(0, $product->reserved_stock);
         $this->assertGreaterThanOrEqual($product->reserved_stock, $product->stock);
-        $this->assertSame($availableStock, $product->stock - $product->reserved_stock);
 
         $stockItems = ProductStockItem::where('product_id', $product->id)->get();
         $unclaimed = $stockItems->whereNull('order_item_id');
         $claimed = $stockItems->whereNotNull('order_item_id');
 
-        $this->assertSame($availableStock, $unclaimed->count());
+        $this->assertSame(min($numericAvailable, $unclaimed->count()), $product->availableStock());
         $this->assertSame($product->reserved_stock, $claimed->count());
         foreach ($claimed as $item) {
             $this->assertNotNull($item->order_item_id);

@@ -181,6 +181,8 @@ class ExampleTest extends TestCase
             'is_active' => true,
         ]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'claude-user@example.test | password: Secret-333']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'claude-user-2@example.test | password: Secret-444']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'claude-user-3@example.test | password: Secret-555']);
         Product::factory()->create(['name' => 'Produk Nonaktif Rahasia', 'is_active' => false]);
 
         $this->get('/')

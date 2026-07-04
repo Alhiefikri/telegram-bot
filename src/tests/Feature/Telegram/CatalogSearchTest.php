@@ -114,7 +114,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         $category = Category::factory()->create(['name' => 'Games', 'description' => 'Voucher game']);
         $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'price_amount' => 15000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
-        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'akun-diamond@example.test | password: Secret-123']);
+        foreach (range(1, 3) as $index) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => "akun-diamond-{$index}@example.test | password: Secret-123"]);
+        }
         $emptyProduct = Product::factory()->create(['name' => 'Diamond Habis', 'category_id' => $category->id, 'stock' => 1, 'reserved_stock' => 1]);
         Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
 
@@ -312,7 +314,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             'reserved_stock' => 1,
             'is_active' => true,
         ]);
-        ProductStockItem::create(['product_id' => $ready->id, 'secret' => 'canva@example.test | password: Secret-000']);
+        ProductStockItem::create(['product_id' => $ready->id, 'secret' => 'canva-1@example.test | password: Secret-000']);
+        ProductStockItem::create(['product_id' => $ready->id, 'secret' => 'canva-2@example.test | password: Secret-000']);
         ProductStockItem::create(['product_id' => $reserved->id, 'secret' => 'claude@example.test | password: Secret-111']);
 
         app(TelegramProductNotificationService::class)->notifyProductCreated($ready);
