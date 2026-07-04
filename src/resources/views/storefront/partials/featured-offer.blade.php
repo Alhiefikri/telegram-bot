@@ -46,14 +46,14 @@
                             <div class="pt-4 grid gap-3 sm:max-w-md">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredStock }}</span>
-                                    <span class="inline-flex rounded-full border-2 border-red-700 bg-red-600 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white shadow-[3px_3px_0_var(--sf-shadow)]">Promo terbatas</span>
+                                    <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Rekomendasi aktif</span>
                                 </div>
-                                <div class="animate-pulse rounded-xl border-[3px] border-red-700 bg-red-50 p-4 text-red-700 shadow-[6px_6px_0_var(--sf-shadow)]">
-                                    <div class="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em]">
-                                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Promo berakhir dalam
+                                <div class="rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-[var(--sf-ink)] shadow-[6px_6px_0_var(--sf-shadow)]">
+                                    <div class="flex items-center gap-2 text-[11px] font-black">
+                                        <svg class="h-4 w-4 shrink-0 text-[var(--sf-accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        Slot cek stok diperbarui
                                     </div>
-                                    <div class="mt-1 font-display text-4xl font-black leading-none tracking-tight text-red-700 sm:text-5xl" x-text="timeDisplay">15:00</div>
+                                    <div class="mt-1 font-display text-4xl font-black leading-none tracking-tight text-[var(--sf-ink)] sm:text-5xl" x-text="timeDisplay">15:00</div>
                                 </div>
                             </div>
                         </div>
@@ -76,41 +76,3 @@
     @endif
 </section>
 
-<script>
-document.addEventListener('alpine:init', () => {
-    Alpine.data('fomoTimer', () => ({
-        timeRemaining: 15 * 60,
-        timeDisplay: '15:00',
-        init() {
-            let savedTime = localStorage.getItem('fomo_timer');
-            let savedTimestamp = localStorage.getItem('fomo_timestamp');
-            let now = Math.floor(Date.now() / 1000);
-
-            if (savedTime && savedTimestamp) {
-                let elapsed = now - parseInt(savedTimestamp);
-                this.timeRemaining = parseInt(savedTime) - elapsed;
-                if (this.timeRemaining <= 0) {
-                    this.timeRemaining = 15 * 60;
-                }
-            }
-
-            this.updateDisplay();
-
-            setInterval(() => {
-                this.timeRemaining--;
-                if (this.timeRemaining <= 0) {
-                    this.timeRemaining = 15 * 60;
-                }
-                this.updateDisplay();
-                localStorage.setItem('fomo_timer', this.timeRemaining);
-                localStorage.setItem('fomo_timestamp', Math.floor(Date.now() / 1000));
-            }, 1000);
-        },
-        updateDisplay() {
-            let m = Math.floor(this.timeRemaining / 60).toString().padStart(2, '0');
-            let s = (this.timeRemaining % 60).toString().padStart(2, '0');
-            this.timeDisplay = `${m}:${s}`;
-        }
-    }))
-})
-</script>

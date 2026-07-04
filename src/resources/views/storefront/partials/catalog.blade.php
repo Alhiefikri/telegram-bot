@@ -1,26 +1,28 @@
 <section id="products" class="relative border-y-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] py-20">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
     <div class="relative z-10 mx-auto max-w-6xl px-5 sm:px-6">
-    <div class="mx-auto mb-12 max-w-2xl text-center">
-        <span class="neo-chip inline-flex px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em]">{{ $copy['catalog']['eyebrow'] }}</span>
-        <h2 class="mt-5 font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['catalog']['title'] }}</h2>
-        <p class="mx-auto mt-3 max-w-md text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['catalog']['body'] }}</p>
-        <p class="mt-4 text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-muted)]">{{ $catalogProducts->count() }} produk publik</p>
-    </div>
-
-    <div class="relative mx-auto mb-10 max-w-xl">
-        <form action="{{ url('/') }}#products" method="GET" class="relative">
-            <input type="text" name="q" value="{{ $search }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-14 w-full pl-12 pr-16 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none">
-            <div class="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--sf-ink)]">
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+        <div class="mx-auto mb-12 max-w-2xl text-center">
+            <div class="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
+                <span>✦</span>
+                <span>Katalog aktif · {{ $catalogProducts->count() }} produk publik</span>
             </div>
-            @if($search !== '')
-                <a href="{{ url('/') }}#products" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-black text-[var(--sf-accent)] transition-colors hover:text-[var(--sf-ink)]">Clear</a>
-            @endif
-        </form>
-    </div>
+            <h2 class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['catalog']['title'] }}</h2>
+            <p class="mx-auto mt-3 max-w-md text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['catalog']['body'] }}</p>
+        </div>
+
+        <div class="relative mx-auto mb-10 max-w-xl">
+            <form action="{{ url('/') }}#products" method="GET" class="relative">
+                <input type="text" name="q" value="{{ $search }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-14 w-full pl-12 pr-16 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none">
+                <div class="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--sf-ink)]">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                @if($search !== '')
+                    <a href="{{ url('/') }}#products" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-black text-[var(--sf-accent)] transition-colors hover:text-[var(--sf-ink)]">Clear</a>
+                @endif
+            </form>
+        </div>
 
     @if ($categories->isNotEmpty())
         @if ($categoriesWithProducts->isNotEmpty())

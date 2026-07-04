@@ -73,7 +73,7 @@
                                     <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">+</button>
                                 </div>
                                 <div class="sm:col-span-2 flex items-center justify-between border-t-2 border-dashed border-[var(--sf-border)] pt-3 text-sm font-black text-[var(--sf-ink)]">
-                                    <span>Total produk</span>
+                                    <span>Keranjang</span>
                                     <span x-text="formatIdr(selectedTotal())">Rp0</span>
                                 </div>
                             </div>

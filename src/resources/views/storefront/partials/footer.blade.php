@@ -30,7 +30,7 @@
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Bantuan</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
                 <li><a href="{{ $supportDestination }}" class="font-black text-[var(--sf-accent)] hover:text-[var(--sf-ink)]">Support Telegram</a></li>
-                <li><a href="https://warungai.id" class="hover:text-[var(--sf-accent)]">warungai.id</a></li>
+                <li><a href="{{ $storefront->telegramBotHref() }}" class="hover:text-[var(--sf-accent)]">Bot Telegram</a></li>
                 <li><span>08.00 - 23.00 WIB</span></li>
             </ul>
         </div>

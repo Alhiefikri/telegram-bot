@@ -155,7 +155,7 @@ return [
 
     'support' => [
         'eyebrow' => 'Siap belanja?',
-        'title' => 'Pilih di marketplace, lanjutkan di Telegram.',
+        'title' => 'Pilih di katalog, lanjutkan di Telegram.',
         'body' => 'Gunakan katalog sementara ini untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
         'primary_cta' => 'Chat Support',
         'secondary_cta' => 'Login Admin',

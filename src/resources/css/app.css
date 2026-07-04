@@ -79,7 +79,7 @@
         --sf-success: #107a48;
         --sf-warning: #9a5b00;
         --sf-shadow: #0b1220;
-        --sf-grid: rgba(11, 18, 32, 0.08);
+        --sf-grid: rgba(11, 18, 32, 0.06);
     }
 
     html {
@@ -121,8 +121,8 @@
 @layer utilities {
     .storefront-shell {
         background:
-            radial-gradient(circle at 12% 8%, rgba(255, 228, 92, 0.5) 0 1.25rem, transparent 1.3rem),
-            radial-gradient(circle at 92% 14%, rgb(var(--sf-accent-rgb) / 0.16) 0 1.8rem, transparent 1.85rem),
+            radial-gradient(circle at 12% 8%, rgba(255, 228, 92, 0.45) 0 1.05rem, transparent 1.1rem),
+            radial-gradient(circle at 92% 14%, rgb(var(--sf-accent-rgb) / 0.13) 0 1.45rem, transparent 1.5rem),
             linear-gradient(var(--sf-grid) 1px, transparent 1px),
             linear-gradient(90deg, var(--sf-grid) 1px, transparent 1px),
             var(--sf-paper);
@@ -135,17 +135,17 @@
         z-index: -1;
         pointer-events: none;
         content: "";
-        opacity: 0.32;
+        opacity: 0.4;
         background-image:
-            linear-gradient(115deg, transparent 0 47%, rgba(11, 18, 32, 0.055) 47% 48%, transparent 48% 100%),
-            radial-gradient(circle at 72% 34%, rgb(var(--sf-accent-rgb) / 0.13), transparent 18rem);
+            radial-gradient(circle at 75% 30%, rgb(var(--sf-accent-rgb) / 0.09), transparent 18rem),
+            radial-gradient(circle at 18% 74%, rgba(53, 212, 134, 0.08), transparent 14rem);
     }
 
     .bg-grid-pattern {
         background-image:
-            linear-gradient(rgba(17, 17, 17, 0.08) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(17, 17, 17, 0.08) 1px, transparent 1px);
-        background-size: 18px 18px;
+            linear-gradient(rgba(11, 18, 32, 0.07) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(11, 18, 32, 0.07) 1px, transparent 1px);
+        background-size: 24px 24px;
     }
 
     .neo-panel {
@@ -279,9 +279,9 @@
         justify-content: center;
         font-size: 2rem;
         line-height: 1;
-        filter: drop-shadow(3px 3px 0 rgba(17, 17, 17, 0.16));
-        animation: ai-icon-float 7.5s ease-in-out infinite;
-        will-change: transform;
+        opacity: 0.78;
+        filter: drop-shadow(3px 3px 0 rgba(17, 17, 17, 0.14));
+        animation: ai-icon-float 8s ease-in-out infinite;
     }
 
     .floating-ai-icon:nth-child(2n) {

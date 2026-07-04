@@ -8,7 +8,7 @@
 
 @if ($context === 'featured')
     <div class="relative flex aspect-square w-full mx-auto flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] {{ $coverTheme['bg'] }} p-6 text-center text-white shadow-[7px_7px_0_var(--sf-shadow)]">
-        <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-20"></div>
+        <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-15"></div>
 
         @if ($imageUrl)
             <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="absolute inset-0 h-full w-full object-cover">
@@ -28,7 +28,7 @@
     </div>
 @else
     <div class="relative flex aspect-[4/3] w-full flex-col items-center justify-center overflow-hidden bg-[#f3eee3] p-4 text-white">
-        <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
+        <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-20"></div>
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
@@ -49,8 +49,12 @@
                 <span class="rounded-md border-2 border-[var(--sf-border)] px-2 py-0.5 text-[8px] font-black uppercase tracking-wider shadow-[3px_3px_0_var(--sf-shadow)] {{ $coverTheme['badge_bg'] }}">
                     {{ $coverTheme['badge'] }}
                 </span>
-            @elseif(!$imageUrl && !$isAvailable)
-                 <div></div>
+            @elseif (!$imageUrl && !$isAvailable)
+                <div class="stock-empty-stamp">
+                    <span>STOK HABIS</span>
+                    <small>Restock segera</small>
+                </div>
+
             @endif
 
             @if($isPopular)

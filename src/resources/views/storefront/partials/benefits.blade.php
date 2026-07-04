@@ -1,6 +1,6 @@
 <section id="features" class="relative mx-auto max-w-6xl border-y-[3px] border-[var(--sf-border)] px-5 py-20 sm:px-6">
     <div class="mx-auto mb-14 max-w-2xl text-center">
-        <span class="neo-chip inline-flex px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em]">Kenapa ini aman dibaca</span>
+        <span class="neo-chip inline-flex px-4 py-2 text-[11px] font-black tracking-[0.08em] text-[var(--sf-ink)]">✦ Trust order</span>
         <h2 class="mt-5 font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Mengapa memilih Lhie Store?</h2>
         <p class="mx-auto mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Katalognya jelas, stoknya terbaca, dan proses order tetap dibantu manusia di Telegram.</p>
     </div>

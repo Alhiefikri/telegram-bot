@@ -17,7 +17,7 @@
     ];
 @endphp
 
-<button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($productPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $product->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $product->category_id ?? 'lainnya' }}">
+<a href="{{ route('storefront.products.show', $product) }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($productPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $product->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $product->category_id ?? 'lainnya' }}">
     <article class="neo-panel h-full overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover flex flex-col relative">
         @include('storefront.components.product-cover', [
             'product' => $product,
@@ -51,10 +51,10 @@
                     @endif
                 </div>
 
-                <span class="neo-button inline-flex h-10 items-center justify-center px-3 text-[11px] font-black text-white transition-colors {{ $isAvailable ? 'bg-[var(--sf-accent)] hover:bg-[var(--sf-accent-deep)]' : 'bg-[var(--sf-muted)]' }}">
-                    {{ $isAvailable ? 'Beli' : 'Habis' }}
+                <span class="neo-button inline-flex h-10 items-center justify-center px-3 text-[11px] font-black transition-colors {{ $isAvailable ? 'bg-[var(--sf-accent)] text-white hover:bg-[var(--sf-accent-deep)]' : 'bg-[var(--sf-surface-warm)] text-[var(--sf-ink)]' }}">
+                    {{ $isAvailable ? 'Beli' : 'Tanya stok' }}
                 </span>
             </div>
         </div>
     </article>
-</button>
+</a>

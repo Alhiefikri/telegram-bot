@@ -264,6 +264,108 @@ function initPaymentActions() {
     });
 }
 
+export function storefrontModal() {
+    return {
+        productModalOpen: false,
+        selectedProduct: null,
+        quantity: 1,
+        notes: '',
+        openProductModal(product) {
+            this.selectedProduct = product;
+            this.quantity = 1;
+            this.notes = '';
+            this.productModalOpen = true;
+            document.body.style.overflow = 'hidden';
+        },
+        closeProductModal() {
+            this.productModalOpen = false;
+            window.setTimeout(() => {
+                this.selectedProduct = null;
+            }, 300);
+            document.body.style.overflow = '';
+        },
+        checkoutManual() {
+            if (!this.selectedProduct || !this.selectedProduct.isAvailable) {
+                return;
+            }
+
+            const url = new URL(
+                this.selectedProduct.paymentUrl || `/produk/${this.selectedProduct.id}/bayar`,
+                window.location.origin,
+            );
+            const requestedQuantity = Number.parseInt(this.quantity, 10) || 1;
+            const availableStock = Number.parseInt(this.selectedProduct.stock, 10) || 1;
+
+            url.searchParams.set('qty', Math.max(1, Math.min(requestedQuantity, availableStock)));
+            window.location.href = url.toString();
+        },
+        decreaseQuantity() {
+            this.quantity = Math.max(1, this.quantity - 1);
+        },
+        increaseQuantity() {
+            if (!this.selectedProduct) {
+                return;
+            }
+
+            this.quantity = Math.min(Number.parseInt(this.selectedProduct.stock, 10) || 1, this.quantity + 1);
+        },
+        selectedTotal() {
+            if (!this.selectedProduct) {
+                return 0;
+            }
+
+            return (Number.parseInt(this.selectedProduct.price_amount, 10) || 0) * (Number.parseInt(this.quantity, 10) || 1);
+        },
+        formatIdr(amount) {
+            return `Rp${Number.parseInt(amount, 10).toLocaleString('id-ID')}`;
+        },
+    };
+}
+
+export function fomoTimer() {
+    return {
+        timeRemaining: 15 * 60,
+        timeDisplay: '15:00',
+        init() {
+            const savedTime = localStorage.getItem('fomo_timer');
+            const savedTimestamp = localStorage.getItem('fomo_timestamp');
+            const now = Math.floor(Date.now() / 1000);
+
+            if (savedTime && savedTimestamp) {
+                const elapsed = now - Number.parseInt(savedTimestamp, 10);
+
+                this.timeRemaining = Number.parseInt(savedTime, 10) - elapsed;
+                if (this.timeRemaining <= 0) {
+                    this.timeRemaining = 15 * 60;
+                }
+            }
+
+            this.updateDisplay();
+
+            window.setInterval(() => {
+                this.timeRemaining -= 1;
+                if (this.timeRemaining <= 0) {
+                    this.timeRemaining = 15 * 60;
+                }
+                this.updateDisplay();
+                localStorage.setItem('fomo_timer', this.timeRemaining);
+                localStorage.setItem('fomo_timestamp', Math.floor(Date.now() / 1000));
+            }, 1000);
+        },
+        updateDisplay() {
+            const minutes = Math.floor(this.timeRemaining / 60).toString().padStart(2, '0');
+            const seconds = (this.timeRemaining % 60).toString().padStart(2, '0');
+
+            this.timeDisplay = `${minutes}:${seconds}`;
+        },
+    };
+}
+
+export function registerStorefrontAlpine(Alpine) {
+    Alpine.data('storefrontModal', storefrontModal);
+    Alpine.data('fomoTimer', fomoTimer);
+}
+
 export default function initStorefront() {
     const boot = () => {
         document.body.classList.add('js-enabled');

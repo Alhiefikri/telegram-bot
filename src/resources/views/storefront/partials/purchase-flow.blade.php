@@ -1,8 +1,8 @@
 <section id="cara-beli" class="relative mx-auto mt-10 max-w-6xl border-t-[3px] border-[var(--sf-border)] px-5 py-28 sm:px-6">
     <div class="mb-16 max-w-2xl">
-        <span class="neo-chip inline-flex px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em]">{{ $copy['payment_flow']['eyebrow'] }}</span>
-        <h2 class="mt-5 font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Belanja akun AI dalam tiga langkah.</h2>
-        <p class="mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Pilih produk dari katalog, hubungi support untuk instruksi pembayaran, lalu tunggu akses digital dikirim setelah konfirmasi.</p>
+        <div class="mb-4 inline-flex rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">Cara beli</div>
+        <h2 class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['payment_flow']['title'] }}</h2>
+        <p class="mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['payment_flow']['body'] }}</p>
     </div>
 
     <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
