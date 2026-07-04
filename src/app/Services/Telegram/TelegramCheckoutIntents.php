@@ -9,6 +9,7 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
+use Carbon\CarbonInterface;
 use chillerlan\QRCode\Output\QROutputInterface;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
@@ -149,7 +150,7 @@ class TelegramCheckoutIntents
         $order->loadMissing('orderItems');
         $paymentUrl = $this->pakasir->hostedPaymentUrl($payment);
         $payableAmount = $transaction->totalPayment() ?? $payment->amount;
-        $expiry = $transaction->expiresAt() ?: $payment->provider_expires_at ?: $order->expires_at;
+        $expiry = $this->earliestDate($transaction->expiresAt(), $payment->provider_expires_at, $payment->expired_at, $order->expires_at);
 
         $lines = [
             '✅ Checkout Pakasir QRIS siap',
@@ -179,6 +180,23 @@ class TelegramCheckoutIntents
             implode("\n", $lines),
             ['inline_keyboard' => [[['text' => '💳 Bayar via Website', 'url' => $paymentUrl]]]],
         );
+    }
+
+    private function earliestDate(?CarbonInterface ...$dates): ?CarbonInterface
+    {
+        $earliest = null;
+
+        foreach ($dates as $date) {
+            if ($date === null) {
+                continue;
+            }
+
+            if ($earliest === null || $date->lt($earliest)) {
+                $earliest = $date;
+            }
+        }
+
+        return $earliest;
     }
 
     private function pakasirCheckoutFlow(): string

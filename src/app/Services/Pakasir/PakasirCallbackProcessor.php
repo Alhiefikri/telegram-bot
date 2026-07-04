@@ -6,9 +6,11 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderStateMachine;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Throwable;
@@ -28,7 +30,15 @@ class PakasirCallbackProcessor
         $event = $this->events->log(PaymentEventType::Callback, $payload, $payment, $transaction);
 
         $this->validatePayload($transaction, $payment);
-        $this->verifyWithPakasir($payment);
+        $verifiedTransaction = $this->verifyWithPakasir($payment);
+        $this->syncProviderExpiry($payment, $verifiedTransaction);
+
+        if ($payment->fresh()->status === PaymentStatus::Paid) {
+            $event->update(['processed_at' => now()]);
+
+            return $event->fresh();
+        }
+
         $this->applyPaid($event);
 
         return $event->fresh();
@@ -44,8 +54,13 @@ class PakasirCallbackProcessor
         if ($payment->provider !== 'pakasir'
             || $payment->status !== PaymentStatus::Pending
             || ! $transaction
-            || ! $this->transactionMatchesPayment($transaction, $payment)
-            || ! $transaction->isCompleted()) {
+            || ! $this->transactionMatchesPayment($transaction, $payment)) {
+            return $event;
+        }
+
+        $this->syncProviderExpiry($payment, $transaction);
+
+        if (! $transaction->isCompleted()) {
             return $event;
         }
 
@@ -60,8 +75,8 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Unknown Pakasir payment.');
         }
 
-        if ($payment->status !== PaymentStatus::Pending || $payment->provider !== 'pakasir') {
-            throw new UnprocessableEntityHttpException('Pakasir payment is not pending.');
+        if ($payment->provider !== 'pakasir' || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Paid], true)) {
+            throw new UnprocessableEntityHttpException('Pakasir payment cannot be verified.');
         }
 
         if (! $transaction || $transaction->amount() !== $payment->amount) {
@@ -86,7 +101,7 @@ class PakasirCallbackProcessor
         }
     }
 
-    private function verifyWithPakasir(Payment $payment): void
+    private function verifyWithPakasir(Payment $payment): PakasirTransaction
     {
         try {
             $response = $this->client->transactionDetail($payment);
@@ -101,6 +116,8 @@ class PakasirCallbackProcessor
             || ! $transaction->isCompleted()) {
             throw new UnprocessableEntityHttpException('Pakasir verification mismatch.');
         }
+
+        return $transaction;
     }
 
     private function applyPaid(PaymentEvent $event): void
@@ -124,11 +141,42 @@ class PakasirCallbackProcessor
             ->first();
     }
 
+    private function syncProviderExpiry(Payment $payment, PakasirTransaction $transaction): void
+    {
+        $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
+        if ($providerExpiresAt === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($payment, $providerExpiresAt): void {
+            $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->first();
+            $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            $paymentUpdates = ['provider_expires_at' => $providerExpiresAt];
+
+            if ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at)) {
+                $paymentUpdates['expired_at'] = $providerExpiresAt;
+            }
+
+            $lockedPayment->update($paymentUpdates);
+
+            if ($order && ($order->expires_at === null || $providerExpiresAt->lt($order->expires_at))) {
+                $order->update(['expires_at' => $providerExpiresAt]);
+            }
+
+            $payment->refresh();
+        });
+    }
+
     private function transactionMatchesPayment(PakasirTransaction $transaction, Payment $payment): bool
     {
+        $expectedMethod = is_string($payment->provider_payment_method) && trim($payment->provider_payment_method) !== ''
+            ? strtolower($payment->provider_payment_method)
+            : null;
+
         return $transaction->project() === config('services.pakasir.slug')
             && $transaction->amount() === $payment->amount
-            && $transaction->orderId() === $payment->merchant_ref;
+            && $transaction->orderId() === $payment->merchant_ref
+            && ($expectedMethod === null || $transaction->paymentMethod() === $expectedMethod);
     }
 
     private function ensureConfigured(): void

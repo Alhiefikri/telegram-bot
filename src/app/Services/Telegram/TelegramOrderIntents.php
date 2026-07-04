@@ -7,10 +7,14 @@ use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use Illuminate\Support\Facades\RateLimiter;
+use Throwable;
 
 class TelegramOrderIntents
 {
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor) {}
 
     public function sendOrderHistory(Customer $customer, string $chatId): void
     {
@@ -41,6 +45,11 @@ class TelegramOrderIntents
         }
 
         $payment = $order->payments->first();
+        $refreshNotice = $this->refreshPendingPakasirPayment($customer, $order, $payment);
+        if ($refreshNotice !== null) {
+            $order = $order->fresh(['orderItems.stockItems', 'payments' => fn ($query) => $query->latest()]);
+            $payment = $order->payments->first();
+        }
         $paymentStatus = $payment?->status ?? $order->payment_status;
         $lines = [
             '🧾 Detail Pesanan',
@@ -66,6 +75,10 @@ class TelegramOrderIntents
         }
         if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true) && ($payment?->expired_at || $order->expires_at)) {
             $lines[] = 'Berakhir: '.$this->formatDate($payment?->expired_at ?? $order->expires_at);
+        }
+        if ($refreshNotice !== null) {
+            $lines[] = '';
+            $lines[] = $refreshNotice;
         }
         $accountLines = $this->accountSecretLines($order, $paymentStatus);
         if ($accountLines !== []) {
@@ -94,6 +107,43 @@ class TelegramOrderIntents
         }
 
         return 'Kalau butuh bantuan, hubungi admin toko lewat /support.';
+    }
+
+    private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string
+    {
+        if (! $payment
+            || $payment->provider !== 'pakasir'
+            || $payment->status !== PaymentStatus::Pending
+            || $order->order_status !== OrderStatus::PendingPayment
+            || blank($payment->merchant_ref)
+            || ! filled(config('services.pakasir.slug'))
+            || ! filled(config('services.pakasir.api_key'))) {
+            return null;
+        }
+
+        $key = 'pakasir:status-refresh:'.$customer->id.':'.$payment->id;
+        $maxAttempts = max(1, (int) config('services.pakasir.status_refresh_rate_limit_per_minute', 3));
+        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+            $seconds = RateLimiter::availableIn($key);
+
+            return "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.";
+        }
+
+        RateLimiter::hit($key, 60);
+
+        try {
+            $event = $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+        } catch (Throwable $e) {
+            report($e);
+
+            return 'Status pembayaran belum bisa dicek ke Pakasir sekarang. Coba lagi nanti.';
+        }
+
+        if ($event->processed_at !== null) {
+            return 'Status pembayaran dicek ulang ke Pakasir dan sudah terverifikasi.';
+        }
+
+        return 'Status pembayaran sudah dicek ke Pakasir. Belum ada pembayaran selesai.';
     }
 
     private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array

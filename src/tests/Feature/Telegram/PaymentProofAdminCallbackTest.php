@@ -479,7 +479,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
 
         $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
-        $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
 
         $sent = 0;
         Http::assertSent(function ($r) use (&$sent) {

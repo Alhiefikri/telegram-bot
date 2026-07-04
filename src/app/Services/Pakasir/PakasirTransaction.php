@@ -2,6 +2,7 @@
 
 namespace App\Services\Pakasir;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 
 class PakasirTransaction
@@ -44,8 +45,31 @@ class PakasirTransaction
         return Arr::get($this->payload, 'status');
     }
 
+    public function paymentMethod(): ?string
+    {
+        $value = Arr::get($this->payload, 'payment_method');
+
+        return is_string($value) && trim($value) !== '' ? strtolower($value) : null;
+    }
+
+    public function expiresAt(): ?CarbonImmutable
+    {
+        $value = Arr::get($this->payload, 'expired_at');
+
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return CarbonImmutable::parse($this->normalizeTimestamp($value));
+    }
+
     public function isCompleted(): bool
     {
         return strcasecmp((string) $this->status(), 'completed') === 0;
+    }
+
+    private function normalizeTimestamp(string $value): string
+    {
+        return preg_replace('/\.(\d{6})\d+(Z|[+-]\d{2}:\d{2})$/', '.$1$2', $value) ?? $value;
     }
 }

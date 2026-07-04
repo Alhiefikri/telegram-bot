@@ -68,11 +68,11 @@ class PakasirWebhookTest extends TestCase
         Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
         Queue::assertPushed(PublishSalesProofPost::class, 1);
 
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
 
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(2, PaymentEvent::count());
-        $this->assertSame(1, PaymentEvent::whereNotNull('processed_at')->count());
+        $this->assertSame(2, PaymentEvent::whereNotNull('processed_at')->count());
         Queue::assertPushed(SendTelegramReceipt::class, 1);
         Queue::assertPushed(PublishSalesProofPost::class, 1);
     }
@@ -93,7 +93,7 @@ class PakasirWebhookTest extends TestCase
 
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
 
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
         $this->assertSame('77', SalesProofPost::firstOrFail()->telegram_message_id);
@@ -127,6 +127,23 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(5, PaymentEvent::count());
         $this->assertSame(0, PaymentEvent::whereNotNull('processed_at')->count());
         $this->assertNull(PaymentEvent::where('merchant_ref', 'UNKNOWN')->firstOrFail()->payment_id);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_native_qris_callback_fails_closed_when_transaction_detail_method_mismatches(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $payment->update(['provider_payment_method' => 'qris']);
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount, ['payment_method' => 'hosted']);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount, ['payment_method' => 'qris']))->assertUnprocessable();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
         Queue::assertNothingPushed();
     }
 
@@ -265,6 +282,30 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
         $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
+    }
+
+    public function test_reconcile_pending_native_qris_tightens_expiry_then_local_expiry_releases_stock(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        $providerExpiry = now()->subMinute()->startOfSecond();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir', now()->addHour());
+        $payment = $order->payments()->firstOrFail();
+        $payment->update(['provider_payment_method' => 'qris']);
+        $this->fakeDetail($payment->merchant_ref, $payment->amount, [
+            'status' => 'pending',
+            'payment_method' => 'qris',
+            'expired_at' => $providerExpiry->utc()->toAtomString(),
+        ]);
+
+        $this->artisan('pakasir:reconcile')->assertSuccessful();
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertTrue($payment->fresh()->expired_at?->equalTo($providerExpiry));
+        $this->assertTrue($order->fresh()->expires_at?->equalTo($providerExpiry));
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
     }
 
     public function test_reconcile_command_reports_api_failures_without_mutating_order(): void

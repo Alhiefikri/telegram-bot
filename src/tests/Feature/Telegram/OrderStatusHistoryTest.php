@@ -8,7 +8,10 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
+use App\Models\Product;
 use App\Services\CartService;
+use App\Services\OrderCheckoutService;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -95,6 +98,61 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Canva Pro x 2')
             && str_contains($r['text'], 'hosted')
             && str_contains($r['text'], 'Selesaikan pembayaran'));
+    }
+
+    public function test_order_detail_refreshes_pending_pakasir_payment_from_transaction_detail(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $payment->update(['provider_payment_method' => 'qris']);
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => [
+                'project' => 'sedulur-digital',
+                'order_id' => $payment->merchant_ref,
+                'amount' => $payment->amount,
+                'status' => 'completed',
+                'payment_method' => 'qris',
+            ]]),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(211, '/order '.$order->invoice_number))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Detail Pesanan')
+            && str_contains($r['text'], 'Pembayaran sudah diterima'));
+    }
+
+    public function test_order_detail_status_refresh_is_rate_limited_per_payment(): void
+    {
+        config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 1);
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => [
+                'project' => 'sedulur-digital',
+                'order_id' => $payment->merchant_ref,
+                'amount' => $payment->amount,
+                'status' => 'pending',
+            ]]),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(212, '/order '.$order->invoice_number))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(213, '/order '.$order->invoice_number))->assertOk();
+
+        $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
+        $this->assertSame(1, PaymentEvent::count());
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Cek status pembayaran dibatasi sementara'));
     }
 
     public function test_order_cannot_access_other_customer_order(): void

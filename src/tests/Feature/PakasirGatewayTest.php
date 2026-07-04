@@ -136,6 +136,29 @@ class PakasirGatewayTest extends TestCase
         $this->assertArrayNotHasKey('api_key', $event->raw_payload['payment']);
     }
 
+    public function test_native_qris_provider_expiry_tightens_local_order_expiry(): void
+    {
+        $providerExpiry = now()->addMinutes(15)->startOfSecond();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.EXPIRY';
+        Http::fake(fn ($request) => Http::response([
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => $request['order_id'],
+                'amount' => $request['amount'],
+                'payment_method' => 'qris',
+                'payment_number' => $paymentNumber,
+                'expired_at' => $providerExpiry->utc()->toAtomString(),
+            ],
+        ], 200));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->addHour());
+        $payment = $order->payments()->firstOrFail();
+
+        app(PakasirClient::class)->createQrisTransaction($payment);
+
+        $this->assertTrue($payment->fresh()->expired_at?->equalTo($providerExpiry));
+        $this->assertTrue($order->fresh()->expires_at?->equalTo($providerExpiry));
+    }
+
     public function test_native_qris_service_returns_persisted_transaction_without_duplicate_provider_create(): void
     {
         $paymentNumber = '00020101021226610016ID.CO.QRIS.IDEMPOTENT92';
