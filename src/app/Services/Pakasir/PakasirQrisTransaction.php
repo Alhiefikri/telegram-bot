@@ -115,13 +115,13 @@ readonly class PakasirQrisTransaction
 
     private function intField(string $key): int
     {
-        $value = Arr::get($this->payment, $key);
+        $integer = PakasirInteger::parse(Arr::get($this->payment, $key));
 
-        if (! is_int($value) && ! (is_string($value) && ctype_digit($value))) {
+        if ($integer === null) {
             throw new UnexpectedValueException("Pakasir QRIS create response is missing {$key}.");
         }
 
-        return (int) $value;
+        return $integer;
     }
 
     private function nullableIntField(string $key): ?int
@@ -132,11 +132,13 @@ readonly class PakasirQrisTransaction
             return null;
         }
 
-        if (! is_int($value) && ! (is_string($value) && ctype_digit($value))) {
+        $integer = PakasirInteger::parse($value);
+
+        if ($integer === null) {
             throw new UnexpectedValueException("Pakasir QRIS create response has invalid {$key}.");
         }
 
-        return (int) $value;
+        return $integer;
     }
 
     private function normalizeTimestamp(string $value): string

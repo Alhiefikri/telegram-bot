@@ -30,9 +30,9 @@ class PakasirTransaction
         return Arr::get($this->payload, 'project');
     }
 
-    public function amount(): int
+    public function amount(): ?int
     {
-        return (int) Arr::get($this->payload, 'amount');
+        return PakasirInteger::parsePositive(Arr::get($this->payload, 'amount'));
     }
 
     public function orderId(): mixed

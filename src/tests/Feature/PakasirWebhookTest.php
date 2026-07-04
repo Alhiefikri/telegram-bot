@@ -130,6 +130,62 @@ class PakasirWebhookTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_digit_string_amounts_are_accepted_for_callback_and_transaction_detail_verification(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $amount = (string) $payment->amount;
+        $this->fakeProviderDetail($payment->merchant_ref, $amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $amount))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
+    }
+
+    public function test_malformed_callback_amounts_fail_closed_before_paid_transition(): void
+    {
+        Queue::fake();
+
+        foreach ($this->malformedAmountCases(10000) as $case => $amount) {
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+            $payment = $order->payments()->firstOrFail();
+            $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+
+            $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $amount))->assertUnprocessable();
+
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status, "{$case} marked payment paid");
+            $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status, "{$case} advanced order status");
+            $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count(), "{$case} created sale inventory movement");
+            $this->assertSame(0, PaymentEvent::where('merchant_ref', $payment->merchant_ref)->whereNotNull('processed_at')->count(), "{$case} processed a payment event");
+        }
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_malformed_transaction_detail_amounts_fail_closed_during_callback_verification(): void
+    {
+        Queue::fake();
+
+        foreach ($this->malformedAmountCases(10000) as $case => $amount) {
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+            $payment = $order->payments()->firstOrFail();
+            $this->fakeProviderDetail($payment->merchant_ref, $amount);
+
+            $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
+
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status, "{$case} marked payment paid");
+            $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status, "{$case} advanced order status");
+            $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count(), "{$case} created sale inventory movement");
+            $event = PaymentEvent::where('merchant_ref', $payment->merchant_ref)->firstOrFail();
+            $this->assertNull($event->processed_at, "{$case} processed callback event");
+        }
+
+        Queue::assertNothingPushed();
+    }
+
     public function test_native_qris_callback_fails_closed_when_transaction_detail_method_mismatches(): void
     {
         Queue::fake();
@@ -284,6 +340,19 @@ class PakasirWebhookTest extends TestCase
         $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
     }
 
+    public function test_reconcile_command_skips_malformed_transaction_detail_amount_without_mutating_order(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount, ['amount' => $payment->amount.'.00']);
+
+        $this->artisan('pakasir:reconcile')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertNull(PaymentEvent::firstOrFail()->processed_at);
+    }
+
     public function test_reconcile_pending_native_qris_tightens_expiry_then_local_expiry_releases_stock(): void
     {
         config()->set('services.telegram.token', 'bot-token');
@@ -359,7 +428,7 @@ class PakasirWebhookTest extends TestCase
             && str_contains($request['text'], 'Rp7.000'));
     }
 
-    private function payload(string $orderId, int $amount, array $overrides = []): array
+    private function payload(string $orderId, mixed $amount, array $overrides = []): array
     {
         return array_merge([
             'amount' => $amount,
@@ -371,7 +440,7 @@ class PakasirWebhookTest extends TestCase
         ], $overrides);
     }
 
-    private function fakeDetail(string $orderId, int $amount, array $overrides = []): void
+    private function fakeDetail(string $orderId, mixed $amount, array $overrides = []): void
     {
         Http::fake([
             'https://app.pakasir.com/api/transactiondetail*' => Http::response([
@@ -386,13 +455,13 @@ class PakasirWebhookTest extends TestCase
         ]);
     }
 
-    private function fakeProviderDetail(string $orderId, int $amount, array $overrides = []): void
+    private function fakeProviderDetail(string $orderId, mixed $amount, array $overrides = []): void
     {
         $this->app->bind(PakasirProviderAdapter::class, fn () => new class($orderId, $amount, $overrides) implements PakasirProviderAdapter
         {
             public function __construct(
                 private readonly string $orderId,
-                private readonly int $amount,
+                private readonly mixed $amount,
                 private readonly array $overrides,
             ) {}
 
@@ -418,6 +487,24 @@ class PakasirWebhookTest extends TestCase
                 ];
             }
         });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function malformedAmountCases(int $expectedAmount): array
+    {
+        return [
+            'decimal string' => $expectedAmount.'.00',
+            'mixed string' => $expectedAmount.' paid',
+            'array' => [$expectedAmount],
+            'empty string' => '',
+            'null' => null,
+            'zero integer' => 0,
+            'zero digit string' => '0',
+            'negative integer' => -$expectedAmount,
+            'negative string' => '-'.$expectedAmount,
+        ];
     }
 
     private function cartWithProduct(int $stock = 10, int $quantity = 1): Cart

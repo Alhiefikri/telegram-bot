@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirInteger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -35,8 +36,7 @@ class PakasirWebhookController extends Controller
     {
         if (
             blank($payload['order_id'] ?? null)
-            || ! is_numeric($payload['amount'] ?? null)
-            || (int) $payload['amount'] <= 0
+            || PakasirInteger::parsePositive($payload['amount'] ?? null) === null
             || ! array_key_exists('project', $payload)
             || blank($payload['status'] ?? null)
         ) {
@@ -46,8 +46,13 @@ class PakasirWebhookController extends Controller
 
     private function replayFingerprint(array $payload): string
     {
+        $amount = PakasirInteger::parsePositive($payload['amount'] ?? null);
+        if ($amount === null) {
+            throw new UnprocessableEntityHttpException('Invalid Pakasir callback payload.');
+        }
+
         $stablePayload = [
-            'amount' => (int) $payload['amount'],
+            'amount' => $amount,
             'order_id' => (string) $payload['order_id'],
             'project' => $payload['project'],
             'status' => strtolower((string) $payload['status']),
