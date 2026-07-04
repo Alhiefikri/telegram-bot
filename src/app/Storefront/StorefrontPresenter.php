@@ -106,9 +106,9 @@ class StorefrontPresenter
         return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya ingin tanya ketersediaan akun {$product->name} di Lhie Store.");
     }
 
-    public function paymentConfirmationLink(Product $product, string $orderId, int $total): string
+    public function checkoutSupportLink(Product $product, int $quantity, int $subtotal): string
     {
-        return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya sudah scan QRIS untuk order {$orderId} produk {$product->name} senilai {$this->idr($total)}. Saya akan kirim bukti pembayaran.");
+        return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya ingin checkout {$product->name} x{$quantity} via Telegram/Admin. Estimasi produk {$this->idr($subtotal)}. Saya belum transfer; mohon dibuatkan order dan instruksi pembayaran resmi.");
     }
 
     public function descriptionSnippet(Product $product): string

@@ -74,7 +74,7 @@
                             <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                                 @if ($isAvailable)
                                     <a href="{{ route('storefront.products.payment', $product) }}" class="neo-button inline-flex h-12 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
-                                        Beli Sekarang
+                                        Checkout via Admin
                                     </a>
                                 @else
                                     <span class="neo-button inline-flex h-12 flex-1 items-center justify-center bg-[#d69aae] px-5 text-sm font-black text-white">

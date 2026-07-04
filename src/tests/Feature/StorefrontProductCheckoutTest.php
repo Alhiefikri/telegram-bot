@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\InventoryMovement;
+use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -81,7 +84,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee(route('storefront.products.payment', $product), false);
     }
 
-    public function test_payment_page_uses_static_lhie_qris_and_total_amount(): void
+    public function test_payment_route_is_support_handoff_not_payable_qris_checkout(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
@@ -92,21 +95,24 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get(route('storefront.products.payment', $product).'?qty=2')
             ->assertOk()
-            ->assertSee('Scan QRIS untuk Bayar')
-            ->assertSee('/qr-lhie.jpg', false)
+            ->assertSee('Checkout via Telegram Admin')
             ->assertSee('CapCut Pro × 2')
-            ->assertSee('Harga satuan')
+            ->assertSee('Estimasi produk')
             ->assertSee('Rp60.000')
             ->assertSee('Rp120.000')
-            ->assertSee('+ Rp401')
-            ->assertSee('Rp120.401')
-            ->assertSee('Menunggu pembayaran')
-            ->assertSee('Hubungi Admin @alhie02')
+            ->assertSee('Belum ada order dibuat')
             ->assertSee('https://t.me/alhie02?text=', false)
-            ->assertSee('CapCut Pro');
+            ->assertDontSee('Scan QRIS untuk Bayar')
+            ->assertDontSee('/qr-lhie.jpg', false)
+            ->assertDontSee('Order ID')
+            ->assertDontSee('Total Bayar');
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, InventoryMovement::count());
     }
 
-    public function test_legacy_manual_checkout_url_redirects_to_qris_payment_page(): void
+    public function test_legacy_manual_checkout_url_redirects_to_support_handoff_page(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',

@@ -268,7 +268,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Beli Sekarang', $featuredHtml);
+        $this->assertStringContainsString('Pesan via Admin', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -297,7 +297,7 @@ class ExampleTest extends TestCase
 
         $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
         $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
-        $this->assertStringNotContainsString('Beli Sekarang', $featuredHtml);
+        $this->assertStringNotContainsString('Pesan via Admin', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
     }

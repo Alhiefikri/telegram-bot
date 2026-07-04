@@ -52,7 +52,7 @@
                 </div>
 
                 <span class="neo-button inline-flex h-10 items-center justify-center px-3 text-[11px] font-black transition-colors {{ $isAvailable ? 'bg-[var(--sf-accent)] text-white hover:bg-[var(--sf-accent-deep)]' : 'bg-[var(--sf-surface-warm)] text-[var(--sf-ink)]' }}">
-                    {{ $isAvailable ? 'Beli' : 'Tanya stok' }}
+                    {{ $isAvailable ? 'Pesan via Admin' : 'Tanya stok' }}
                 </span>
             </div>
         </div>

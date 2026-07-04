@@ -7,7 +7,7 @@ Lhie Store is a hybrid storefront and Telegram commerce product. The public webs
 Primary UI surfaces:
 
 - Public storefront homepage/catalog shell: `src/resources/views/storefront.blade.php`
-- Storefront pages: product detail, payment/QRIS checkout, login guide
+- Storefront pages: product detail, Telegram admin checkout handoff, login guide
 - Storefront modal and components: product modal, product cards, product cover, QRIS card, brand mark
 - Admin login page
 - Admin dashboard: stats, products, sales, broadcasts, store channels, product/stock modals

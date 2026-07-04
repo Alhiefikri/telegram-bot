@@ -5,15 +5,14 @@
     $storefront = app(StorefrontPresenter::class);
     $brand = $storefront->brand();
     $copy = config('storefront');
-    $qris = $copy['qris'];
     $homeUrl = route('storefront.home');
-    $pageTitle = 'Scan QRIS untuk Bayar | '.$brand;
-    $pageDescription = 'Scan QRIS Lhie Store untuk pembayaran sementara produk '.$product->name.'.';
+    $pageTitle = 'Checkout via Telegram Admin | '.$brand;
+    $pageDescription = 'Lanjutkan checkout produk '.$product->name.' melalui Telegram admin agar order, payment, stok, dan receipt tercatat resmi.';
     $canonicalUrl = route('storefront.products.payment', $product);
     $supportHref = $storefront->supportHref();
     $supportDestination = $storefront->supportDestination();
     $adminUsername = $storefront->adminTelegramUsername();
-    $paymentConfirmationLink = $storefront->paymentConfirmationLink($product, $orderId, $total);
+    $checkoutSupportLink = $storefront->checkoutSupportLink($product, $quantity, $subtotal);
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
@@ -33,94 +32,53 @@
                 <div class="mx-auto mt-6 max-w-xl text-center">
                     <div class="mx-auto grid h-16 w-16 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent-soft)] shadow-[6px_6px_0_var(--sf-shadow)]">
                         <svg class="h-8 w-8 text-[var(--sf-accent)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                            <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" />
-                            <path d="M14 14h2v2h-2zM18 14h2v6h-6v-2h4zM14 20h2" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h6m-8 8 3-3h8a4 4 0 0 0 4-4V7a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v6a4 4 0 0 0 4 4" />
                         </svg>
                     </div>
-                    <h1 class="mt-5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Scan QRIS untuk Bayar</h1>
-                    <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Bayar langsung ke QRIS sementara Lhie Store, lalu kirim bukti ke bot/admin.</p>
+                    <h1 class="mt-5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Checkout via Telegram Admin</h1>
+                    <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Halaman ini bukan halaman pembayaran. Admin akan membuat order resmi dulu, lalu memberi instruksi pembayaran yang tercatat di sistem.</p>
                 </div>
 
                 <div class="neo-panel mt-6 bg-[var(--sf-surface)] p-5">
                     <dl class="space-y-3 text-sm font-bold">
                         <div class="flex items-center justify-between gap-4">
-                            <dt class="text-[var(--sf-muted)]">Order ID</dt>
-                            <dd class="font-black text-[var(--sf-accent)]">{{ $orderId }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between gap-4">
-                            <dt class="text-[var(--sf-muted)]">Paket</dt>
+                            <dt class="text-[var(--sf-muted)]">Produk</dt>
                             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $product->name }} × {{ $quantity }}</dd>
                         </div>
                         <div class="flex items-center justify-between gap-4">
                             <dt class="text-[var(--sf-muted)]">Harga satuan</dt>
                             <dd class="font-black text-[var(--sf-ink)]">{{ $storefront->idr($product->price_amount) }}</dd>
                         </div>
-                        <div class="flex items-center justify-between gap-4 border-t-2 border-dashed border-[var(--sf-border)] pt-3">
-                            <dt class="text-[var(--sf-muted)]">Subtotal</dt>
-                            <dd class="font-black text-[var(--sf-ink)]">{{ $storefront->idr($subtotal) }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between gap-4">
-                            <dt class="text-[var(--sf-muted)]">Biaya QRIS</dt>
-                            <dd class="font-black text-[var(--sf-ink)]">+ {{ $storefront->idr($qrisFee) }}</dd>
-                        </div>
                         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">
-                            <dt class="font-black text-[var(--sf-ink)]">Total Bayar</dt>
-                            <dd class="font-display text-2xl font-black text-[var(--sf-ink)]">{{ $storefront->idr($total) }}</dd>
+                            <dt class="font-black text-[var(--sf-ink)]">Estimasi produk</dt>
+                            <dd class="font-display text-2xl font-black text-[var(--sf-ink)]">{{ $storefront->idr($subtotal) }}</dd>
                         </div>
                     </dl>
                 </div>
 
-                <section class="neo-panel mt-5 overflow-hidden bg-[var(--sf-surface)]" aria-label="QRIS pembayaran">
-                    <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-white">
-                        <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider">
-                            <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-white bg-white text-[var(--sf-accent)]">QR</span>
-                            <span>Lhie payment - QRIS</span>
-                        </div>
-                        <span class="rounded-full border-2 border-white px-2 py-0.5 text-[10px] font-black">{{ now()->format('H:i') }}</span>
-                    </div>
-
-                    <div class="payment-qris-stage relative bg-[var(--sf-surface)] px-4 py-8">
-                        <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-30"></div>
-                        <div class="relative mx-auto max-w-sm">
-                            <div class="payment-qris-corners" aria-hidden="true"></div>
-                            <div class="payment-qris-poster">
-                                <img src="{{ $qris['asset'] }}" alt="QRIS Lhie Store untuk pembayaran" class="w-full object-contain">
-                            </div>
-                        </div>
-
-                        <div class="relative mt-5 text-center">
-                            <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--sf-muted)]">Didukung oleh</p>
-                            <div class="mt-2 flex flex-wrap justify-center gap-1.5">
-                                @foreach (['GoPay', 'OVO', 'DANA', 'ShopeePay', 'm-Bank'] as $wallet)
-                                    <span class="rounded border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">{{ $wallet }}</span>
-                                @endforeach
-                            </div>
+                <section class="neo-panel mt-5 bg-[var(--sf-surface)] p-5" aria-label="Alur checkout resmi">
+                    <div class="flex items-center gap-3">
+                        <span class="grid h-10 w-10 shrink-0 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-display text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">!</span>
+                        <div>
+                            <h2 class="font-display text-xl font-black text-[var(--sf-ink)]">Belum ada order dibuat</h2>
+                            <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Jangan transfer dari halaman ini. Pembayaran valid hanya setelah admin/bot membuat order, payment pending, reservasi stok, dan instruksi resmi.</p>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-2 border-t-[3px] border-[var(--sf-border)] bg-white p-3">
-                        <a href="{{ $qris['asset'] }}" download class="neo-button inline-flex h-10 items-center justify-center bg-white text-xs font-black text-[var(--sf-ink)]">QR</a>
-                        <button type="button" class="neo-button inline-flex h-10 items-center justify-center bg-white text-xs font-black text-[var(--sf-ink)]" data-copy-text="{{ $storefront->idr($total) }}">Nominal</button>
-                        <button type="button" class="neo-button inline-flex h-10 items-center justify-center bg-white text-xs font-black text-[var(--sf-ink)]" data-share-text="Order {{ $orderId }} - {{ $product->name }} x{{ $quantity }} - {{ $storefront->idr($total) }}">Bagikan</button>
-                    </div>
+                    <ol class="mt-5 grid gap-3 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
+                        <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3"><strong class="text-[var(--sf-ink)]">1.</strong> Buka Telegram admin dari tombol di bawah.</li>
+                        <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3"><strong class="text-[var(--sf-ink)]">2.</strong> Admin mencatat checkout lewat flow resmi agar order, payment, stok, dan receipt durable.</li>
+                        <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3"><strong class="text-[var(--sf-ink)]">3.</strong> Ikuti instruksi pembayaran resmi yang dikirim setelah order pending dibuat.</li>
+                    </ol>
                 </section>
 
-                <details class="neo-panel mt-4 bg-[var(--sf-surface)] p-4">
-                    <summary class="cursor-pointer text-sm font-black text-[var(--sf-ink)]">Cara Bayar (3 langkah)</summary>
-                    <ol class="mt-4 space-y-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                        <li>1. Scan QRIS di atas dari aplikasi bank atau e-wallet.</li>
-                        <li>2. Masukkan nominal persis: <strong class="text-[var(--sf-ink)]">{{ $storefront->idr($total) }}</strong>.</li>
-                        <li>3. Kirim bukti bayar ke bot/admin agar pesanan diproses.</li>
-                    </ol>
-                </details>
-
                 <div class="neo-panel mt-4 bg-[var(--sf-accent-soft)] p-4 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                    <p class="font-black text-[var(--sf-ink)]">Menunggu pembayaran...</p>
-                    <p>Status otomatis belum terhubung untuk QR sementara ini. Gunakan tombol di bawah untuk konfirmasi.</p>
+                    <p class="font-black text-[var(--sf-ink)]">Role halaman: handoff support</p>
+                    <p>Web storefront hanya membantu memilih produk. Checkout produksi tetap melewati modul order/payment/inventory supaya Paid Order Proof Event dan receipt tidak bisa terlewati.</p>
                 </div>
 
-                <a href="{{ $paymentConfirmationLink }}" target="_blank" rel="noopener noreferrer" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center bg-[#2d9cff] px-5 text-sm font-black text-white">
-                    Hubungi Admin {{ '@'.$adminUsername }}
+                <a href="{{ $checkoutSupportLink }}" target="_blank" rel="noopener noreferrer" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center bg-[#2d9cff] px-5 text-sm font-black text-white">
+                    Buka Telegram Admin {{ '@'.$adminUsername }}
                 </a>
             </section>
         </main>
