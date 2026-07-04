@@ -39,10 +39,42 @@ class Product extends Model
      */
     public function scopeStorefrontOrder(Builder $query): Builder
     {
+        $productsTable = $query->getModel()->getTable();
+        $stockItemsTable = $this->stockItems()->getRelated()->getTable();
+
         return $query
-            ->orderByRaw('CASE WHEN stock > reserved_stock THEN 0 ELSE 1 END')
+            ->orderByRaw(
+                "CASE WHEN {$productsTable}.stock > {$productsTable}.reserved_stock
+                    AND (
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM {$stockItemsTable}
+                            WHERE {$stockItemsTable}.product_id = {$productsTable}.id
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM {$stockItemsTable}
+                            WHERE {$stockItemsTable}.product_id = {$productsTable}.id
+                                AND {$stockItemsTable}.order_item_id IS NULL
+                        )
+                    )
+                THEN 0 ELSE 1 END"
+            )
             ->orderBy('name')
             ->orderBy('id');
+    }
+
+    /**
+     * @param  Builder<Product>  $query
+     * @return Builder<Product>
+     */
+    public function scopeAvailableForPurchase(Builder $query): Builder
+    {
+        return $query
+            ->whereColumn('stock', '>', 'reserved_stock')
+            ->where(fn (Builder $query) => $query
+                ->whereDoesntHave('stockItems')
+                ->orWhereHas('stockItems', fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')));
     }
 
     public function availableStock(): int

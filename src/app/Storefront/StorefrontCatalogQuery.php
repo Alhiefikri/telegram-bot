@@ -25,7 +25,7 @@ class StorefrontCatalogQuery
             ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->publicVisible()
-            ->whereColumn('stock', '>', 'reserved_stock')
+            ->availableForPurchase()
             ->storefrontOrder()
             ->first();
 

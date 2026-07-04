@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
+use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Storefront\StorefrontCatalogQuery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -73,6 +75,72 @@ class StorefrontCatalogQueryTest extends TestCase
 
         $this->assertNotNull($featuredProduct);
         $this->assertSame('Canva Ready', $featuredProduct->name);
+    }
+
+    public function test_featured_product_skips_credential_managed_product_without_unclaimed_credentials(): void
+    {
+        $managedExhausted = Product::factory()->create([
+            'name' => 'Akun Managed Kosong',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $claimedItem = OrderItem::factory()->create(['product_id' => $managedExhausted->id]);
+        ProductStockItem::create([
+            'product_id' => $managedExhausted->id,
+            'order_item_id' => $claimedItem->id,
+            'secret' => 'claimed@example.test|pass',
+        ]);
+
+        Product::factory()->create([
+            'name' => 'Canva Ready',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $featuredProduct = app(StorefrontCatalogQuery::class)->get(null)['featuredProduct'];
+
+        $this->assertNotNull($featuredProduct);
+        $this->assertSame('Canva Ready', $featuredProduct->name);
+    }
+
+    public function test_products_order_credential_managed_products_by_available_product_invariant(): void
+    {
+        $managedNumericOnly = Product::factory()->create([
+            'name' => 'A Managed Numeric Only',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $claimedItem = OrderItem::factory()->create(['product_id' => $managedNumericOnly->id]);
+        ProductStockItem::create([
+            'product_id' => $managedNumericOnly->id,
+            'order_item_id' => $claimedItem->id,
+            'secret' => 'claimed@example.test|pass',
+        ]);
+
+        $managedReady = Product::factory()->create([
+            'name' => 'Z Managed Ready',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $managedReady->id,
+            'secret' => 'ready@example.test|pass',
+        ]);
+
+        Product::factory()->create([
+            'name' => 'B Numeric Empty',
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $products = app(StorefrontCatalogQuery::class)->get(null)['products'];
+
+        $this->assertSame(['Z Managed Ready', 'A Managed Numeric Only', 'B Numeric Empty'], $products->pluck('name')->all());
     }
 
     public function test_storefront_controller_normalizes_array_search_parameters(): void
