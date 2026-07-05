@@ -41,7 +41,6 @@
         <div class="mt-4 flex items-center gap-4 md:mt-0">
             <span>QR Manual</span>
             <span>QRIS</span>
-            <span>Pakasir</span>
         </div>
     </div>
 </footer>

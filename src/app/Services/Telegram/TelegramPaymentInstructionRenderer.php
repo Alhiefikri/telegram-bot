@@ -64,9 +64,9 @@ class TelegramPaymentInstructionRenderer
 
         if ($fallback) {
             $lines = [
-                '⚠️ Fallback checkout Pakasir',
+                '⚠️ Checkout QRIS dialihkan',
                 'QRIS langsung belum bisa dibuat otomatis. Order tetap pending dan stok tetap dipegang.',
-                'Gunakan QR/link website Pakasir di bawah untuk lanjut bayar.',
+                'Gunakan QR/link website di bawah untuk lanjut bayar.',
                 '',
             ];
         }
@@ -89,7 +89,7 @@ class TelegramPaymentInstructionRenderer
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($paymentUrl),
-            filename: 'pakasir-'.$payment->merchant_ref.'.png',
+            filename: 'qris-checkout-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
             replyMarkup: $this->paymentActions($order, $paymentUrl),
         );
@@ -103,7 +103,7 @@ class TelegramPaymentInstructionRenderer
 
         $lines = array_merge($this->pakasirOrderHeaderLines($order), [
             '💰 Total produk: '.$this->formatRupiah($order->total_amount),
-            '🏷️ Biaya QRIS: '.($transaction->fee() === null ? 'Belum dikirim Pakasir' : $this->formatRupiah($transaction->fee())),
+            '🏷️ Biaya QRIS: '.($transaction->fee() === null ? 'Belum tersedia' : $this->formatRupiah($transaction->fee())),
             '💳 Total bayar QRIS: '.$this->formatRupiah($payableAmount),
         ]);
 
@@ -121,7 +121,7 @@ class TelegramPaymentInstructionRenderer
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($transaction->paymentNumber()),
-            filename: 'pakasir-qris-'.$payment->merchant_ref.'.png',
+            filename: 'qris-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
             replyMarkup: $this->paymentActions($order, $paymentUrl),
         );

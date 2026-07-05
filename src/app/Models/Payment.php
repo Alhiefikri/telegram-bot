@@ -55,8 +55,7 @@ class Payment extends Model
     {
         return Attribute::make(
             get: fn (): string => match (true) {
-                $this->providerName() === 'pakasir' && $this->isNativePakasirQris() => 'Pakasir native QRIS',
-                $this->providerName() === 'pakasir' => 'Pakasir hosted',
+                $this->providerName() === 'pakasir' => 'QRIS',
                 default => $this->localPaymentMethodLabel(),
             },
         );

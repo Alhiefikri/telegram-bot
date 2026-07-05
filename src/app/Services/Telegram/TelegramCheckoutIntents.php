@@ -157,7 +157,7 @@ class TelegramCheckoutIntents
 
     public function pakasirUnavailableCustomerMessage(): string
     {
-        return "Pakasir otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi Pakasir sebelum pembayaran otomatis dipakai lagi.";
+        return "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi pembayaran otomatis sebelum fitur ini dipakai lagi.";
     }
 
     public function manualPaymentMethod(): string

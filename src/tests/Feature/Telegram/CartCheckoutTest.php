@@ -463,8 +463,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'provider' => 'pakasir',
         ]);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Pakasir otomatis sedang tidak tersedia')
-            && str_contains((string) ($r['text'] ?? ''), 'dialihkan ke QR manual'));
+            && str_contains((string) ($r['text'] ?? ''), 'Pembayaran otomatis sedang tidak tersedia')
+            && str_contains((string) ($r['text'] ?? ''), 'dialihkan ke QR manual')
+            && ! str_contains((string) ($r['text'] ?? ''), 'Pakasir'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && str_contains($r->body(), 'Bayar via: QR Manual')
             && str_contains($r->body(), 'Fallback Product'));
@@ -506,8 +507,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
         ]);
         Queue::assertPushedOn('telegram-outbound', SendManualCheckoutNotifications::class, fn (SendManualCheckoutNotifications $job): bool => $job->orderId === $order->id);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Pakasir otomatis sedang tidak tersedia')
-            && str_contains((string) ($r['text'] ?? ''), 'dialihkan ke QR manual'));
+            && str_contains((string) ($r['text'] ?? ''), 'Pembayaran otomatis sedang tidak tersedia')
+            && str_contains((string) ($r['text'] ?? ''), 'dialihkan ke QR manual')
+            && ! str_contains((string) ($r['text'] ?? ''), 'Pakasir'));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
     }
 
@@ -538,8 +540,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'provider' => 'pakasir',
         ]);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Pakasir otomatis sedang tidak tersedia')
-            && str_contains($r['text'], 'dialihkan ke QR manual'));
+            && str_contains($r['text'], 'Pembayaran otomatis sedang tidak tersedia')
+            && str_contains($r['text'], 'dialihkan ke QR manual')
+            && ! str_contains($r['text'], 'Pakasir'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && str_contains($r->body(), 'Bayar via: QR Manual')
             && str_contains($r->body(), 'Fallback Account'));
@@ -634,6 +637,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Tidak perlu buka browser', $photoBody);
         $this->assertStringContainsString('Bayar via Website', $photoBody);
         $this->assertStringContainsString('app.pakasir.test\\/pay\\/sedulur-digital\\/30000', $photoBody);
+        $this->assertStringNotContainsString('Pakasir', $photoBody);
         $this->assertStringContainsString('Cek Pembayaran', $photoBody);
         $this->assertStringContainsString('order:'.$order->invoice_number, $photoBody);
         $this->assertStringContainsString('Batalkan Order', $photoBody);
@@ -704,8 +708,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/api/transactioncreate/qris'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && str_contains($r->body(), 'qr-source:'.$hostedUrl)
-            && str_contains($r->body(), 'Fallback checkout Pakasir')
+            && str_contains($r->body(), 'Checkout QRIS dialihkan')
+            && str_contains($r->body(), 'Gunakan QR/link website di bawah untuk lanjut bayar.')
             && str_contains($r->body(), 'Order tetap pending')
+            && ! str_contains($r->body(), 'Pakasir')
             && str_contains($r->body(), 'Bayar via Website')
             && str_contains($r->body(), $hostedUrl));
     }

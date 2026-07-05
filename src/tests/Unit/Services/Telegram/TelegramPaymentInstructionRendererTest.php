@@ -54,7 +54,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
 
         $this->assertSame([$paymentUrl], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentUrl, $instruction->photoContents);
-        $this->assertSame('pakasir-PKS-HOSTED-103.png', $instruction->filename);
+        $this->assertSame('qris-checkout-PKS-HOSTED-103.png', $instruction->filename);
         $this->assertPakasirActions($instruction, $order, $paymentUrl);
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
@@ -64,6 +64,8 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '⏳ Order aktif sampai: 04 Jul 2026 16:30 WIB',
         ]);
         $this->assertStringContainsString('📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.', $instruction->caption());
+        $this->assertStringNotContainsString('Pakasir', $instruction->caption());
+        $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
     }
 
     public function test_native_qris_instruction_uses_payment_number_qr_payable_caption_pieces_and_buyer_actions(): void
@@ -94,7 +96,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
 
         $this->assertSame([$paymentNumber], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentNumber, $instruction->photoContents);
-        $this->assertSame('pakasir-qris-PKS-QRIS-103.png', $instruction->filename);
+        $this->assertSame('qris-PKS-QRIS-103.png', $instruction->filename);
         $this->assertPakasirActions($instruction, $order, $paymentUrl);
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
@@ -106,6 +108,8 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '⏳ Batas bayar QRIS: 04 Jul 2026 15:45 WIB',
         ]);
         $this->assertStringContainsString('🌐 Kalau QR tidak bisa discan, tap tombol Bayar via Website sebagai fallback.', $instruction->caption());
+        $this->assertStringNotContainsString('Pakasir', $instruction->caption());
+        $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
     }
 
     public function test_manual_instruction_uses_manual_qr_file_proof_upload_caption_and_no_website_button(): void

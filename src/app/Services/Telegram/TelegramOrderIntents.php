@@ -136,14 +136,14 @@ class TelegramOrderIntents
         } catch (Throwable $e) {
             report($e);
 
-            return 'Status pembayaran belum bisa dicek ke Pakasir sekarang. Coba lagi nanti.';
+            return 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.';
         }
 
         if ($event->processed_at !== null) {
-            return 'Status pembayaran dicek ulang ke Pakasir dan sudah terverifikasi.';
+            return 'Status pembayaran dicek ulang dan sudah terverifikasi.';
         }
 
-        return 'Status pembayaran sudah dicek ke Pakasir. Belum ada pembayaran selesai.';
+        return 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.';
     }
 
     private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array

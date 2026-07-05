@@ -143,7 +143,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee(route('admin.orders.sales-proof.retry', $failedOrder), false);
     }
 
-    public function test_admin_order_detail_names_pakasir_hosted_fallback_payment(): void
+    public function test_admin_order_detail_shows_generic_qris_for_pakasir_hosted_payment(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         $order = Order::factory()->create(['invoice_number' => 'INV-PAKASIR-HOSTED']);
@@ -158,10 +158,11 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertOk()
             ->assertSee('Detail Order')
             ->assertSee('INV-PAKASIR-HOSTED')
-            ->assertSee('Pakasir hosted · pending · belum paid');
+            ->assertSee('QRIS · pending · belum paid')
+            ->assertDontSee('Pakasir hosted · pending · belum paid');
     }
 
-    public function test_admin_order_detail_names_pakasir_native_qris_payment(): void
+    public function test_admin_order_detail_shows_generic_qris_for_pakasir_native_payment(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         $order = Order::factory()->create(['invoice_number' => 'INV-PAKASIR-NATIVE']);
@@ -180,8 +181,9 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertOk()
             ->assertSee('Detail Order')
             ->assertSee('INV-PAKASIR-NATIVE')
-            ->assertSee('Pakasir native QRIS · pending · belum paid')
-            ->assertDontSee('hosted · pending · belum paid');
+            ->assertSee('QRIS · pending · belum paid')
+            ->assertDontSee('Pakasir native QRIS · pending · belum paid')
+            ->assertDontSee('Pakasir hosted · pending · belum paid');
     }
 
     public function test_admin_surfaces_late_paid_released_order_as_manual_support_needed(): void

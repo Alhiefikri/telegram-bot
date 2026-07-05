@@ -98,8 +98,10 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Detail Pesanan')
             && str_contains($r['text'], 'Canva Pro x 2')
-            && str_contains($r['text'], 'hosted')
-            && str_contains($r['text'], 'Selesaikan pembayaran'));
+            && str_contains($r['text'], 'Pembayaran: QRIS (pending)')
+            && str_contains($r['text'], 'Selesaikan pembayaran')
+            && ! str_contains($r['text'], 'hosted')
+            && ! str_contains($r['text'], 'Pakasir'));
     }
 
     public function test_order_command_from_supergroup_prompts_private_chat_without_leaking_paid_order_details(): void
@@ -161,7 +163,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && ! $this->requestBodyContainsAny($r, $sensitiveValues));
     }
 
-    public function test_order_detail_names_pakasir_native_qris_instead_of_raw_hosted_method(): void
+    public function test_order_detail_names_pakasir_payment_as_generic_qris_instead_of_raw_hosted_method(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
@@ -182,8 +184,9 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Detail Pesanan')
-            && str_contains($r['text'], 'Pembayaran: Pakasir native QRIS (pending)')
-            && ! str_contains($r['text'], 'Pembayaran: hosted'));
+            && str_contains($r['text'], 'Pembayaran: QRIS (pending)')
+            && ! str_contains($r['text'], 'Pembayaran: hosted')
+            && ! str_contains($r['text'], 'Pakasir'));
     }
 
     public function test_order_detail_refreshes_pending_pakasir_payment_from_transaction_detail(): void
