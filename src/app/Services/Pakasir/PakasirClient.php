@@ -8,6 +8,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 use UnexpectedValueException;
 
@@ -43,18 +44,28 @@ class PakasirClient implements PakasirProviderAdapter
     {
         $this->readiness->verification()->assertReady('Pakasir transaction detail cannot be requested.');
 
-        return $this->timed('transactionDetail', fn () => $this->http()
-            ->retry(
-                $this->transactionDetailMaxAttempts(),
-                fn (int $attempt): int => $this->transactionDetailRetryDelayMilliseconds($attempt),
-                fn (Throwable $exception): bool => $this->shouldRetryTransactionDetail($exception),
-            )
-            ->get($this->baseUrl().'/api/transactiondetail', [
-                'project' => config('services.pakasir.slug'),
-                'amount' => $payment->amount,
-                'order_id' => $payment->merchant_ref,
-                'api_key' => config('services.pakasir.api_key'),
-            ])->throw()->json());
+        try {
+            $response = $this->timed('transactionDetail', fn () => $this->http()
+                ->retry(
+                    $this->transactionDetailMaxAttempts(),
+                    fn (int $attempt): int => $this->transactionDetailRetryDelayMilliseconds($attempt),
+                    fn (Throwable $exception): bool => $this->shouldRetryTransactionDetail($exception),
+                )
+                ->get($this->baseUrl().'/api/transactiondetail', [
+                    'project' => config('services.pakasir.slug'),
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'api_key' => config('services.pakasir.api_key'),
+                ])->throw()->json());
+        } catch (ConnectionException|RequestException $exception) {
+            throw $this->providerRequestException('Pakasir transaction detail request failed', $exception);
+        }
+
+        if (! is_array($response)) {
+            throw new UnexpectedValueException('Pakasir transaction detail response is not valid JSON.');
+        }
+
+        return $response;
     }
 
     public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
@@ -79,6 +90,14 @@ class PakasirClient implements PakasirProviderAdapter
         $transaction->assertMatches($payment, $project);
 
         return $transaction;
+    }
+
+    private function providerRequestException(string $message, ConnectionException|RequestException $exception): RuntimeException
+    {
+        $status = $exception instanceof RequestException ? $exception->response?->status() : null;
+        $detail = $status === null ? $exception::class : 'HTTP '.$status;
+
+        return new RuntimeException($message.': '.$detail.'.');
     }
 
     private function baseUrl(): string

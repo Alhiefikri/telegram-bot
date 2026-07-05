@@ -465,6 +465,48 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(0, PaymentEvent::count());
     }
 
+    public function test_reconcile_command_redacts_transaction_detail_url_secrets_from_failures_without_mutating_order(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $secret = 'SECRET-issue-108';
+        $providerUrl = 'https://app.pakasir.com/api/transactiondetail?project=warung-ai&amount='
+            .$payment->amount.'&order_id='.$payment->merchant_ref.'&api_key='.$secret;
+
+        $this->app->bind(PakasirProviderAdapter::class, fn () => new class($providerUrl) implements PakasirProviderAdapter
+        {
+            public function __construct(private readonly string $providerUrl) {}
+
+            public function hostedPaymentUrl(Payment $payment): string
+            {
+                return 'https://fake-pakasir.test/pay/'.$payment->merchant_ref;
+            }
+
+            public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
+            {
+                throw new \BadMethodCallException('QRIS create is not used by this test.');
+            }
+
+            public function transactionDetail(Payment $payment): array
+            {
+                throw new \RuntimeException('Pakasir Transaction Detail transport failure: GET '.$this->providerUrl);
+            }
+        });
+
+        $exitCode = Artisan::call('pakasir:reconcile');
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('Pakasir reconciliation failed payment '.$payment->id, $output);
+        $this->assertStringContainsString('pakasir:reconcile completed with partial failures: processed=0 skipped=0 failed=1', $output);
+        $this->assertStringNotContainsString($secret, $output);
+        $this->assertStringNotContainsString('api_key', $output);
+        $this->assertStringNotContainsString($providerUrl, $output);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(0, PaymentEvent::count());
+    }
+
     public function test_reconcile_command_fails_safely_when_api_key_is_missing(): void
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');

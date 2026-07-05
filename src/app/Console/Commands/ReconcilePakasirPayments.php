@@ -5,9 +5,11 @@ namespace App\Console\Commands;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirPayloadSanitizer;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use Illuminate\Console\Command;
+use Throwable;
 
 class ReconcilePakasirPayments extends Command
 {
@@ -45,9 +47,9 @@ class ReconcilePakasirPayments extends Command
                         }
 
                         $processed++;
-                    } catch (\Throwable $e) {
+                    } catch (Throwable $e) {
                         $failed++;
-                        $this->error('Pakasir reconciliation failed payment '.$payment->id.': '.$e->getMessage());
+                        $this->error('Pakasir reconciliation failed payment '.$payment->id.': '.$this->safeExceptionMessage($e));
                     }
                 }
             });
@@ -69,5 +71,14 @@ class ReconcilePakasirPayments extends Command
         $this->info('pakasir:reconcile completed cleanly: '.$summary);
 
         return self::SUCCESS;
+    }
+
+    private function safeExceptionMessage(Throwable $exception): string
+    {
+        $message = PakasirPayloadSanitizer::redactText($exception->getMessage(), [
+            (string) config('services.pakasir.api_key', ''),
+        ]);
+
+        return trim($message) === '' ? $exception::class : $message;
     }
 }
