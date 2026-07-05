@@ -6,11 +6,12 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
 class TelegramWebhookIngress
 {
+    public function __construct(private readonly TelegramUpdateShapeValidator $updateShapes) {}
+
     public function receive(Request $request): TelegramWebhookIngressResult
     {
         $startedAt = DogfoodTiming::now();
@@ -27,7 +28,7 @@ class TelegramWebhookIngress
         $validated = $request->validate(['update_id' => ['required', 'integer', 'min:1']]);
         $payload = $request->all();
 
-        if (! Arr::has($payload, 'message') && ! Arr::has($payload, 'callback_query')) {
+        if (! $this->updateShapes->supports($payload)) {
             return new TelegramWebhookIngressResult(['message' => 'Unsupported update type'], 422);
         }
 

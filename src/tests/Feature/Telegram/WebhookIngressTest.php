@@ -3,6 +3,8 @@
 namespace Tests\Feature\Telegram;
 
 use App\Jobs\ProcessTelegramUpdate;
+use App\Models\Customer;
+use App\Models\Order;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
@@ -24,6 +26,60 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramUpdate::count());
         Bus::assertDispatched(ProcessTelegramUpdate::class);
+    }
+
+    public function test_supported_callback_update_is_accepted_and_dispatches_job(): void
+    {
+        Bus::fake();
+
+        $this->postTelegramWebhook($this->callbackUpdate(302, 'callback-302', 'katalog'))->assertOk();
+
+        $this->assertSame(1, TelegramUpdate::count());
+        Bus::assertDispatched(ProcessTelegramUpdate::class);
+    }
+
+    public function test_malformed_message_updates_are_rejected_before_persistence_or_dispatch(): void
+    {
+        Bus::fake();
+
+        $missingFromId = $this->messageUpdate(401, '/start');
+        unset($missingFromId['message']['from']['id']);
+
+        $missingChatId = $this->messageUpdate(402, '/start');
+        unset($missingChatId['message']['chat']['id']);
+
+        foreach ([
+            'missing message.from.id' => $missingFromId,
+            'missing message.chat.id' => $missingChatId,
+        ] as $case => $payload) {
+            $this->assertMalformedTelegramPayloadRejected($payload, $case);
+        }
+    }
+
+    public function test_malformed_callback_updates_are_rejected_before_persistence_or_dispatch(): void
+    {
+        Bus::fake();
+
+        $missingFromId = $this->callbackUpdate(501, 'callback-501', 'katalog');
+        unset($missingFromId['callback_query']['from']['id']);
+
+        $missingMessageChatId = $this->callbackUpdate(502, 'callback-502', 'katalog');
+        unset($missingMessageChatId['callback_query']['message']['chat']['id']);
+
+        $missingCallbackId = $this->callbackUpdate(503, 'callback-503', 'katalog');
+        unset($missingCallbackId['callback_query']['id']);
+
+        $missingCallbackData = $this->callbackUpdate(504, 'callback-504', 'katalog');
+        unset($missingCallbackData['callback_query']['data']);
+
+        foreach ([
+            'missing callback_query.from.id' => $missingFromId,
+            'missing callback_query.message.chat.id' => $missingMessageChatId,
+            'missing callback_query.id' => $missingCallbackId,
+            'missing callback_query.data' => $missingCallbackData,
+        ] as $case => $payload) {
+            $this->assertMalformedTelegramPayloadRejected($payload, $case);
+        }
     }
 
     public function test_missing_webhook_secret_outside_local_or_testing_returns_configured_error(): void
@@ -225,6 +281,18 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(211, '/start', from: ['first_name' => 'Fikri']))->assertOk();
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+    }
+
+    private function assertMalformedTelegramPayloadRejected(array $payload, string $case): void
+    {
+        $this->postTelegramWebhook($payload)
+            ->assertUnprocessable()
+            ->assertExactJson(['message' => 'Unsupported update type']);
+
+        $this->assertSame(0, Customer::count(), "{$case} created a customer");
+        $this->assertSame(0, TelegramUpdate::count(), "{$case} stored a Telegram update");
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
+        $this->assertSame(0, Order::count(), "{$case} created an order");
     }
 
     private function assertLog(array $logs, string $event, callable $predicate): void
