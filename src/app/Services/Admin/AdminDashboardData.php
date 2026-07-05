@@ -114,11 +114,19 @@ final class AdminDashboardData
             $setting->last_test_success === false => ['label' => 'Test failed', 'hint' => $setting->last_test_error ?: 'Periksa akses bot ke channel.', 'tone' => 'rose'],
             default => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
         };
+        $channelFeaturesEnabled = (bool) ($setting->community_gate_enabled || $setting->sales_proof_enabled);
 
         return [
             'setting' => $setting,
             'status' => $status,
+            'details' => [
+                'chat_id_label' => $setting->telegram_chat_id ?: 'Belum ada',
+                'last_tested_label' => $setting->last_tested_at?->format('Y-m-d H:i') ?: 'Belum pernah',
+                'message_id_label' => $setting->last_test_message_id ?: '-',
+                'last_test_error' => $setting->last_test_error,
+            ],
             'ready' => $ready,
+            'show_setup_warning' => $channelFeaturesEnabled && ! $ready,
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'update_url' => route('admin.store-channel.update'),
             'test_url' => route('admin.store-channel.test'),

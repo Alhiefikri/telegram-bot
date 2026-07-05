@@ -14,19 +14,18 @@
 
                     <form method="POST" action="{{ $storeChannel['update_url'] }}" class="mt-4 space-y-3">
                         @csrf
-                        <x-admin-dashboard.field-label>Username channel (@channel)</x-admin-dashboard.field-label>
-                        <x-admin-dashboard.input name="channel_username" value="{{ old('channel_username', $storeChannel['setting']->channel_username) }}" placeholder="@lhie_store" />
-                        <x-admin-dashboard.field-label>Link channel publik</x-admin-dashboard.field-label>
-                        <x-admin-dashboard.input name="channel_link" value="{{ old('channel_link', $storeChannel['setting']->channel_link) }}" placeholder="https://t.me/lhie_store" />
-                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-xl text-xs font-semibold">
-                            <p>Resolved chat ID: <strong>{{ $storeChannel['setting']->telegram_chat_id ?: 'Belum ada' }}</strong></p>
-                            <p>Last test: <strong>{{ $storeChannel['setting']->last_tested_at?->format('Y-m-d H:i') ?: 'Belum pernah' }}</strong></p>
-                            <p>Message ID: <strong>{{ $storeChannel['setting']->last_test_message_id ?: '-' }}</strong></p>
-                            @if($storeChannel['setting']->last_test_error)<p class="text-red-600">Reason: {{ $storeChannel['setting']->last_test_error }}</p>@endif
-                        </x-admin-dashboard.card>
-                        <label class="flex items-center gap-2 text-sm font-bold"><input type="checkbox" name="community_gate_enabled" value="1" @checked(old('community_gate_enabled', $storeChannel['setting']->community_gate_enabled))> Community Gate</label>
-                        <label class="flex items-center gap-2 text-sm font-bold"><input type="checkbox" name="sales_proof_enabled" value="1" @checked(old('sales_proof_enabled', $storeChannel['setting']->sales_proof_enabled))> Sales Proof Post</label>
-                        @if(($storeChannel['setting']->community_gate_enabled || $storeChannel['setting']->sales_proof_enabled) && ! $storeChannel['ready'])
+                        <x-admin-dashboard.field-label for="store-channel-username">Username channel (@channel)</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="store-channel-username" name="channel_username" value="{{ old('channel_username', $storeChannel['setting']->channel_username) }}" placeholder="@lhie_store" />
+                        <x-admin-dashboard.field-label for="store-channel-link">Link channel publik</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="store-channel-link" name="channel_link" value="{{ old('channel_link', $storeChannel['setting']->channel_link) }}" placeholder="https://t.me/lhie_store" />
+                        <x-admin-dashboard.telegram-status :details="$storeChannel['details']" />
+                        <x-admin-dashboard.checkbox name="community_gate_enabled" :checked="old('community_gate_enabled', $storeChannel['setting']->community_gate_enabled)">
+                            Community Gate
+                        </x-admin-dashboard.checkbox>
+                        <x-admin-dashboard.checkbox name="sales_proof_enabled" :checked="old('sales_proof_enabled', $storeChannel['setting']->sales_proof_enabled)">
+                            Sales Proof Post
+                        </x-admin-dashboard.checkbox>
+                        @if($storeChannel['show_setup_warning'])
                             <x-admin-dashboard.notice tone="warning" class="text-xs">Warning: toggle aktif tetapi setup channel belum ready.</x-admin-dashboard.notice>
                         @endif
                         @if($storeChannel['can_manage'])
@@ -36,7 +35,10 @@
                         @endif
                     </form>
                     @if($storeChannel['can_manage'])
-                        <form method="POST" action="{{ $storeChannel['test_url'] }}" class="mt-3">@csrf<x-admin-dashboard.button variant="purple" class="w-full" type="submit">Test Channel</x-admin-dashboard.button></form>
+                        <form method="POST" action="{{ $storeChannel['test_url'] }}" class="mt-3">
+                            @csrf
+                            <x-admin-dashboard.button variant="purple" class="w-full" type="submit">Test Channel</x-admin-dashboard.button>
+                        </form>
                     @endif
                 </x-admin-dashboard.card>
             </div>

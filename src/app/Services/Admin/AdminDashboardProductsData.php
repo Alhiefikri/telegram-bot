@@ -120,7 +120,7 @@ final class AdminDashboardProductsData
 
     private function orderedStockItems(Product $product): array
     {
-        $stockItemsTable = (new ProductStockItem())->getTable();
+        $stockItemsTable = (new ProductStockItem)->getTable();
 
         return ProductStockItem::query()
             ->with(['orderItem.order.payments'])

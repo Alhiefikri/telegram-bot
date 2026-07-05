@@ -172,5 +172,4 @@ class TelegramCheckoutIntents
             'name' => 'LHIE STORE',
         ];
     }
-
 }

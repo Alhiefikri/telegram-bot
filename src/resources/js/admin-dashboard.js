@@ -64,6 +64,19 @@ const editableStockItems = (items = []) => [...items]
     .sort((first, second) => (stockGroupRank(first.status) - stockGroupRank(second.status)) || (Number(first.id) - Number(second.id)))
     .map((item, index) => ({ ...item, editing: false, displayIndex: index + 1, groupKey: stockGroupFor(item.status).key }));
 
+export function salesFilter() {
+    return {
+        salesFilter: 'all',
+        isSalesFilterActive(key) {
+            return this.salesFilter === key;
+        },
+        orderVisible(element) {
+            return this.salesFilter === 'all'
+                || element.dataset.orderFilterGroups.split(' ').includes(this.salesFilter);
+        },
+    };
+}
+
 export default function adminDashboard(initialState = {}) {
     return {
         activeTab: initialState.activeTab ?? 'stats',

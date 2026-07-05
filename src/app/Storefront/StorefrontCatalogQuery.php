@@ -7,8 +7,10 @@ use App\Models\Product;
 
 class StorefrontCatalogQuery
 {
+    public function __construct(private readonly StorefrontPresenter $storefront) {}
+
     /**
-     * @return array{categories: mixed, products: mixed, featuredProduct: Product|null, search: string}
+     * @return array<string, mixed>
      */
     public function get(?string $rawSearch): array
     {
@@ -40,11 +42,11 @@ class StorefrontCatalogQuery
             ->limit(24)
             ->get();
 
-        return [
+        return array_merge([
             'categories' => $categories,
             'products' => $products,
             'featuredProduct' => $featuredProduct,
             'search' => $search,
-        ];
+        ], $this->storefront->homeViewData($categories, $products));
     }
 }

@@ -137,9 +137,12 @@
                             </template>
                         </div>
 
-                        <x-admin-dashboard.card border="dashed" shadow="none" x-show="manageStockItems.length === 0" class="rounded-[0.6rem] p-4 text-center text-sm font-bold text-neo-ink">
-                            Belum ada akun tersedia. Tambahkan stok baru.
-                        </x-admin-dashboard.card>
+                        <x-admin-dashboard.empty-state
+                            title="Belum ada akun tersedia."
+                            body="Tambahkan stok baru."
+                            x-show="manageStockItems.length === 0"
+                            class="rounded-neo-md p-4 text-sm font-bold text-neo-ink"
+                        />
 
                         <x-admin-dashboard.button type="button" variant="primary" class="mt-4 w-full" x-on:click="openStockModalFromManage()">
                             ➕ Tambah stok baru

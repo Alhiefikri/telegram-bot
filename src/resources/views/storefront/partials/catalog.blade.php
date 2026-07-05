@@ -38,10 +38,11 @@
             </div>
         @endif
     @else
-        <div class="neo-panel mx-auto mb-10 max-w-md border-dashed bg-[var(--sf-surface)] p-6 text-center">
-            <p class="font-display font-black text-[var(--sf-ink)]">{{ $copy['catalog']['empty_category_title'] }}</p>
-            <p class="mt-2 text-xs font-semibold leading-5 text-[var(--sf-muted)]">{{ $copy['catalog']['empty_category_body'] }}</p>
-        </div>
+        <x-storefront.empty-state
+            :title="$copy['catalog']['empty_category_title']"
+            :body="$copy['catalog']['empty_category_body']"
+            class="mb-10 p-6"
+        />
     @endif
 
     @if ($popularProducts->isEmpty())
@@ -61,13 +62,11 @@
                 'isPopular' => $popularProducts->contains('id', $product->id),
             ])
         @empty
-            <div class="neo-panel reveal-item col-span-full mx-auto max-w-md bg-[var(--sf-surface)] p-8 py-16 text-center">
-                <svg class="mx-auto h-10 w-10 text-[var(--sf-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-                </svg>
-                <h3 class="mt-4 font-display text-sm font-black text-[var(--sf-ink)]">{{ $copy['catalog']['empty_title'] }}</h3>
-                <p class="mt-2 text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['catalog']['empty_body'] }}</p>
-            </div>
+            <x-storefront.empty-state
+                :title="$copy['catalog']['empty_title']"
+                :body="$copy['catalog']['empty_body']"
+                class="reveal-item col-span-full py-16"
+            />
         @endforelse
     </div>
     </div>

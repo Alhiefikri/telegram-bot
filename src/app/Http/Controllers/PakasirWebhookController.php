@@ -43,5 +43,4 @@ class PakasirWebhookController extends Controller
             throw new UnprocessableEntityHttpException('Invalid Pakasir callback payload.');
         }
     }
-
 }

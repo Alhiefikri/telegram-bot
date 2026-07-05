@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
+use App\Exceptions\InsufficientStock;
 use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -140,7 +141,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         $secondCart = app(CartService::class)->activeCartFor($secondCustomer);
 
-        $this->expectException(\App\Exceptions\InsufficientStock::class);
+        $this->expectException(InsufficientStock::class);
         app(CartService::class)->setItemQuantity($secondCart, $product->fresh(), 1);
     }
 

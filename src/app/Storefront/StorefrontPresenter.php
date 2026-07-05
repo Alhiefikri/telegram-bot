@@ -84,6 +84,90 @@ class StorefrontPresenter
         return $products->filter(fn (Product $product) => $this->stockAvailable($product) > 0)->take(3);
     }
 
+    /**
+     * @param  Collection<int, Product>  $products
+     */
+    public function homeViewData(Collection $categories, Collection $products): array
+    {
+        $copy = config('storefront');
+        $brand = $this->brand();
+
+        return [
+            'storefront' => $this,
+            'brand' => $brand,
+            'copy' => $copy,
+            'pageTitle' => str_replace(':brand', $brand, $copy['meta']['title']),
+            'pageDescription' => $copy['meta']['description'],
+            'canonicalUrl' => url('/'),
+            'supportHref' => $this->supportHref(),
+            'supportDestination' => $this->supportDestination(),
+            'categoriesWithProducts' => $this->categoriesWithProducts($categories, $products),
+            'catalogProducts' => $products,
+            'popularProducts' => $this->popularProducts($products),
+        ];
+    }
+
+    public function productPageViewData(Product $product, int $stock): array
+    {
+        $brand = $this->brand();
+
+        return [
+            'storefront' => $this,
+            'brand' => $brand,
+            'copy' => config('storefront'),
+            'homeUrl' => route('storefront.home'),
+            'pageTitle' => $product->name.' | '.$brand,
+            'pageDescription' => $this->descriptionSnippet($product),
+            'canonicalUrl' => route('storefront.products.show', $product),
+            'supportHref' => $this->supportHref(),
+            'supportDestination' => $this->supportDestination(),
+            'product' => $product,
+            'stock' => $stock,
+            'isAvailable' => $stock > 0,
+        ];
+    }
+
+    public function paymentPageViewData(Product $product, int $quantity, int $subtotal): array
+    {
+        $brand = $this->brand();
+
+        return [
+            'storefront' => $this,
+            'brand' => $brand,
+            'copy' => config('storefront'),
+            'homeUrl' => route('storefront.home'),
+            'pageTitle' => 'Checkout via Telegram Admin | '.$brand,
+            'pageDescription' => 'Lanjutkan checkout produk '.$product->name.' melalui Telegram admin agar order, payment, stok, dan receipt tercatat resmi.',
+            'canonicalUrl' => route('storefront.products.payment', $product),
+            'supportHref' => $this->supportHref(),
+            'supportDestination' => $this->supportDestination(),
+            'adminUsername' => $this->adminTelegramUsername(),
+            'checkoutSupportLink' => $this->checkoutSupportLink($product, $quantity, $subtotal),
+            'product' => $product,
+            'subtotal' => $subtotal,
+            'quantity' => $quantity,
+        ];
+    }
+
+    public function productModalPayload(Product $product, ?int $stock = null): array
+    {
+        $stock ??= $this->stockAvailable($product);
+
+        return [
+            'id' => $product->id,
+            'name' => $product->name,
+            'descriptionSnippet' => $this->descriptionSnippet($product),
+            'description' => $product->description,
+            'price_amount' => $product->price_amount,
+            'fake_discount_price' => $product->fake_discount_price,
+            'stock' => $stock,
+            'isAvailable' => $stock > 0,
+            'paymentUrl' => route('storefront.products.payment', $product),
+            'coverTheme' => $this->productCover($product),
+            'imageUrl' => $this->publicStorageUrl($product->image_path),
+        ];
+    }
+
     public function productCover(Product $product): array
     {
         return $this->coverForName($product->name);

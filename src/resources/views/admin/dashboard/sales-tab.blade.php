@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PENJUALAN TAB (Pesanan)                            ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-cloak x-show="activeTab === 'penjualan'" x-data="{ salesFilter: 'all' }" class="mt-4 space-y-4">
+            <div x-cloak x-show="activeTab === 'penjualan'" x-data="salesFilter()" class="mt-4 space-y-4">
 
                 <div>
                     <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">🛒 Penjualan Saya</h2>
@@ -12,17 +12,7 @@
                 <div class="overflow-x-auto pb-1" aria-label="Filter penjualan">
                     <div class="flex min-w-max items-center gap-2">
                         @foreach ($salesFilters as $filter)
-                            <button
-                                type="button"
-                                x-on:click="salesFilter = @js($filter['key'])"
-                                x-bind:class="salesFilter === @js($filter['key']) ? 'filter-pill-active' : ''"
-                                x-bind:aria-pressed="salesFilter === @js($filter['key'])"
-                                class="filter-pill"
-                                data-sales-filter="{{ $filter['key'] }}"
-                            >
-                                <span>{{ $filter['label'] }}</span>
-                                <span class="filter-pill-count">{{ $filter['count'] }}</span>
-                            </button>
+                            <x-admin-dashboard.filter-pill :filter="$filter" />
                         @endforeach
                     </div>
                 </div>
@@ -37,7 +27,7 @@
                             class="rounded-[1.125rem]"
                             data-order-status="{{ $order['order_status'] }}"
                             data-order-filter-groups="{{ implode(' ', $order['filter_groups']) }}"
-                            x-show="salesFilter === 'all' || $el.dataset.orderFilterGroups.split(' ').includes(salesFilter)"
+                            x-show="orderVisible($el)"
                         >
                             {{-- Invoice + status --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
@@ -76,43 +66,10 @@
                                 <span class="text-xs font-bold text-brand-muted">{{ $order['item_count'] }} item</span>
                                 <a href="{{ $order['detail_url'] }}" class="text-xs font-bold text-neo-ink underline">Detail order</a>
                             </div>
-                            {{-- Sales Proof status + retry --}}
-                            @php($proof = $order['sales_proof'])
-                            <x-admin-dashboard.card tone="slate" padding="sm" shadow="none" class="mt-3 rounded-lg border">
-                                <div class="flex items-start justify-between gap-3">
-                                    <div class="min-w-0">
-                                        <p class="text-[9px] font-bold uppercase text-brand-muted">Sales Proof Post</p>
-                                        <p class="mt-1 text-xs font-bold text-neo-ink">{{ $proof['label'] }}</p>
-                                    </div>
-                                    <x-admin-dashboard.badge :tone="$proof['tone']">
-                                        {{ $proof['status'] }}
-                                    </x-admin-dashboard.badge>
-                                </div>
-
-                                @if ($proof['message_id'])
-                                    <p class="mt-2 break-words text-xs font-semibold text-brand-slate-dark">Telegram message ID: {{ $proof['message_id'] }}</p>
-                                @endif
-
-                                @if ($proof['last_error'])
-                                    <p class="mt-2 break-words text-xs font-semibold text-[#dc2626]">Error: {{ $proof['last_error'] }}</p>
-                                @endif
-
-                                @if ($proof['status'] !== 'none')
-                                    <p class="mt-2 text-[10px] font-bold uppercase text-brand-muted">Attempts: {{ $proof['attempts'] }}</p>
-                                @endif
-
-                                @if ($proof['can_retry'])
-                                    <form method="POST" action="{{ $proof['retry_url'] }}" class="mt-3">
-                                        @csrf
-                                        <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full justify-center text-xs">Retry Sales Proof Post</x-admin-dashboard.button>
-                                    </form>
-                                @endif
-                            </x-admin-dashboard.card>
+                            <x-admin-dashboard.sales-proof-card :proof="$order['sales_proof']" compact class="mt-3" />
                         </x-admin-dashboard.card>
                     @empty
-                        <x-admin-dashboard.card border="dashed" shadow="none" class="rounded-xl p-6 text-center">
-                            <p class="font-display text-sm font-bold text-brand-muted">Belum ada order.</p>
-                        </x-admin-dashboard.card>
+                        <x-admin-dashboard.empty-state title="Belum ada order." />
                     @endforelse
                 </div>
             </div>

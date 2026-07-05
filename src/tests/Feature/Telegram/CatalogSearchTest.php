@@ -7,8 +7,8 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramProductNotificationService;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
 class CatalogSearchTest extends TelegramBotTestSupport

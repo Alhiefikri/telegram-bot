@@ -6,10 +6,10 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Carbon;
 use Mockery;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -24,6 +24,25 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramUpdate::count());
         Bus::assertDispatched(ProcessTelegramUpdate::class);
+    }
+
+    public function test_missing_webhook_secret_outside_local_or_testing_returns_configured_error(): void
+    {
+        $originalEnvironment = app()->environment();
+        $originalConfigEnvironment = config('app.env');
+
+        try {
+            config()->set('services.telegram.webhook_secret', '');
+            config()->set('app.env', 'production');
+            app()->detectEnvironment(fn () => 'production');
+
+            $this->postTelegramWebhook($this->messageUpdate(301, '/start'), '')
+                ->assertStatus(500)
+                ->assertExactJson(['message' => 'Telegram webhook secret is not configured.']);
+        } finally {
+            config()->set('app.env', $originalConfigEnvironment);
+            app()->detectEnvironment(fn () => $originalEnvironment);
+        }
     }
 
     public function test_duplicate_unprocessed_webhook_post_is_redispatched_and_invalid_payload_is_rejected(): void

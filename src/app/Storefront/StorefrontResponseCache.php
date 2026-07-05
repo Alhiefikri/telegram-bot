@@ -107,7 +107,6 @@ class StorefrontResponseCache
         return view('storefront', $this->catalogQuery->get($search))->render();
     }
 
-
     private function deleteStaticHomepage(): void
     {
         try {

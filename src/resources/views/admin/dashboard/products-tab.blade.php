@@ -62,9 +62,7 @@
 
                         @include('admin.dashboard.product-card')
                     @empty
-                        <x-admin-dashboard.card border="dashed" shadow="none" class="rounded-xl p-6 text-center">
-                            <p class="font-display text-sm font-bold text-brand-muted">Belum ada produk.</p>
-                        </x-admin-dashboard.card>
+                        <x-admin-dashboard.empty-state title="Belum ada produk." />
                     @endforelse
                 </div>
 

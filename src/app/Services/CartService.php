@@ -113,5 +113,4 @@ class CartService
 
         return $lockedCart;
     }
-
 }
