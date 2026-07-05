@@ -8,85 +8,74 @@
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
         @vite(['resources/css/app.css', 'resources/js/app.js'])
-        <style>
-            body {
-                min-height: 100vh;
-                background-color: #fff6cf;
-                background-image:
-                    radial-gradient(circle at top left, rgba(123, 209, 10, 0.26), transparent 26%),
-                    radial-gradient(circle at top right, rgba(219, 63, 152, 0.18), transparent 22%),
-                    repeating-linear-gradient(135deg, transparent, transparent 22px, rgba(5,5,5,0.04) 22px, rgba(5,5,5,0.04) 24px);
-                font-family: 'Plus Jakarta Sans', sans-serif;
-            }
-        </style>
     </head>
-    <body class="flex min-h-full items-center justify-center px-4 py-10 text-neo-ink antialiased">
+    <body class="admin-page admin-login-page flex min-h-full items-center justify-center px-4 py-10 text-neo-ink antialiased">
         <main class="w-full max-w-md">
-            <section class="rounded-[2rem] border-[4px] border-neo-ink bg-white p-6 shadow-[8px_8px_0_0_#050505]">
-                <div class="mb-6 rounded-[1.25rem] border-[3px] border-neo-ink bg-[#f2da3d] p-4 shadow-[4px_4px_0_0_#050505]">
+            <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="rounded-neo-5xl border-4 bg-white p-6 shadow-neo-3xl">
+                <div class="mb-6 rounded-neo-3xl border-[3px] border-neo-ink bg-neo-yellow p-4 shadow-neo-md">
                     <p class="font-display text-[11px] font-black uppercase tracking-[0.24em] text-neo-ink/70">Blade-only Admin /// Neobrutal</p>
                     <h1 class="mt-2 font-display text-3xl font-black uppercase leading-none text-neo-ink">LHIE STORE</h1>
                     <p class="mt-2 text-sm font-bold text-neo-ink/70">Masuk ke dashboard neobrutalisme. CRUD tetap di halaman ini.</p>
                 </div>
 
                 @if ($errors->any())
-                    <div class="mb-4 rounded-[1rem] border-[3px] border-neo-ink bg-[#fecaca] p-3 text-sm font-bold text-[#991b1b] shadow-[3px_3px_0_0_#050505]">
+                    <x-admin-dashboard.notice tone="danger" class="mb-4">
                         {{ $errors->first() }}
-                    </div>
+                    </x-admin-dashboard.notice>
                 @endif
 
                 <form method="POST" action="{{ route('admin.login.store') }}" class="space-y-4">
                     @csrf
 
                     <div>
-                        <label for="email" class="font-display text-xs font-black uppercase tracking-wider text-neo-ink">Username / email admin</label>
-                        <input
+                        <x-admin-dashboard.field-label for="email">Username / email admin</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input
                             id="email"
                             name="email"
-                            type="text"
                             value="{{ old('email') }}"
                             autocomplete="username"
                             autofocus
-                            class="mt-2 w-full rounded-[1rem] border-[3px] border-neo-ink bg-white px-4 py-3 text-sm font-bold text-neo-ink outline-none transition focus:shadow-[0_0_0_4px_rgba(135,88,222,0.18)]"
+                            class="mt-2"
                             placeholder="username"
-                        >
+                        />
                     </div>
 
-                    <div x-data="{ showPassword: false }">
-                        <label for="password" class="font-display text-xs font-black uppercase tracking-wider text-neo-ink">Password</label>
+                    <div x-data="passwordReveal()">
+                        <x-admin-dashboard.field-label for="password">Password</x-admin-dashboard.field-label>
                         <div class="relative mt-2">
-                            <input
+                            <x-admin-dashboard.input
                                 id="password"
                                 name="password"
-                                :type="showPassword ? 'text' : 'password'"
                                 type="password"
+                                x-bind:type="inputType"
                                 autocomplete="current-password"
-                                class="w-full rounded-[1rem] border-[3px] border-neo-ink bg-white px-4 py-3 pr-32 text-sm font-bold text-neo-ink outline-none transition focus:shadow-[0_0_0_4px_rgba(135,88,222,0.18)]"
+                                class="pr-32"
                                 placeholder="••••••••"
-                            >
-                            <button
+                            />
+                            <x-admin-dashboard.button
                                 type="button"
-                                class="absolute bottom-2 right-2 top-2 inline-flex min-w-24 items-center justify-center rounded-[0.75rem] border-[2px] border-neo-ink bg-[#f2da3d] px-3 font-display text-[11px] font-black uppercase tracking-wide text-neo-ink shadow-[2px_2px_0_0_#050505] transition hover:-translate-y-0.5 focus:outline-none focus:shadow-[0_0_0_4px_rgba(135,88,222,0.22)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                                variant="warning"
+                                size="sm"
+                                class="absolute bottom-2 right-2 top-2 min-h-0 min-w-24 px-3 py-0 text-[11px]"
                                 aria-controls="password"
-                                :aria-label="showPassword ? 'Sembunyikan password' : 'Lihat password'"
-                                :aria-pressed="showPassword.toString()"
-                                @click="showPassword = ! showPassword"
+                                x-bind:aria-label="buttonLabel"
+                                x-bind:aria-pressed="showPassword.toString()"
+                                x-on:click="toggle()"
                             >
-                                <span x-text="showPassword ? 'Sembunyikan' : 'Lihat'">Lihat</span>
-                            </button>
+                                <span x-text="buttonText">Lihat</span>
+                            </x-admin-dashboard.button>
                         </div>
                     </div>
 
-                    <label class="flex items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-[#ede5fa] px-4 py-3 text-sm font-bold text-neo-ink shadow-[3px_3px_0_0_#050505]">
-                        <input type="checkbox" name="remember" value="1" class="h-5 w-5 rounded-none border-neo-ink text-[#8758de]">
+                    <x-admin-dashboard.checkbox name="remember" :checked="old('remember')">
                         Ingat sesi admin
-                    </label>
+                    </x-admin-dashboard.checkbox>
 
-                    <button type="submit" class="inline-flex min-h-12 w-full items-center justify-center rounded-[1rem] border-[3px] border-neo-ink bg-[#7BD10A] px-5 py-3 font-display text-sm font-black uppercase tracking-wide text-neo-ink shadow-[5px_5px_0_0_#050505] transition hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#050505]">
+                    <x-admin-dashboard.button type="submit" variant="primary" class="w-full">
                         Masuk Dashboard
-                    </button>
+                    </x-admin-dashboard.button>
                 </form>
-            </section>
+            </x-admin-dashboard.card>
         </main>
     </body>
 </html>
