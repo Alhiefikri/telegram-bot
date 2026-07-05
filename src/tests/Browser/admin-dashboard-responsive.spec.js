@@ -67,6 +67,27 @@ test('lets admins reveal and hide the password field from an accessible control'
     await expect(page.getByRole('button', { name: 'Lihat password' })).toBeVisible();
 });
 
+test('serializes the visible admin password field before submitting bogus credentials', async ({ page }) => {
+    const bogusEmail = 'missing-admin@example.test';
+    const filledPassword = 'definitely-wrong-password';
+
+    await page.goto(`${baseUrl}/admin/login`);
+    await page.getByLabel('Username / email admin').fill(bogusEmail);
+    await page.locator('input[type="password"]:visible').fill(filledPassword);
+
+    const serializedPayload = await page.locator('form').evaluate((form) => (
+        new URLSearchParams(new FormData(form)).toString()
+    ));
+
+    expect(serializedPayload).toContain(`email=${encodeURIComponent(bogusEmail)}`);
+    expect(serializedPayload).toContain(`password=${encodeURIComponent(filledPassword)}`);
+
+    await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
+
+    await expect(page.getByText('Email atau password admin tidak cocok.')).toBeVisible();
+    await expect(page.getByText('Password admin wajib diisi.')).toHaveCount(0);
+});
+
 test('renders the compact admin dashboard at desktop width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installClipboardProbe(page);

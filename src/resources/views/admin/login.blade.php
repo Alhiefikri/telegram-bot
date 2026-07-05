@@ -32,9 +32,11 @@
                         <x-admin-dashboard.input
                             id="email"
                             name="email"
+                            type="text"
                             value="{{ old('email') }}"
                             autocomplete="username"
                             autofocus
+                            required
                             class="mt-2"
                             placeholder="username"
                         />
@@ -47,8 +49,9 @@
                                 id="password"
                                 name="password"
                                 type="password"
-                                x-bind:type="inputType"
+                                x-ref="password"
                                 autocomplete="current-password"
+                                required
                                 class="pr-32"
                                 placeholder="••••••••"
                             />

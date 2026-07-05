@@ -7,9 +7,6 @@ Alpine.data('adminDashboard', adminDashboard);
 Alpine.data('salesFilter', salesFilter);
 Alpine.data('passwordReveal', () => ({
     showPassword: false,
-    get inputType() {
-        return this.showPassword ? 'text' : 'password';
-    },
     get buttonText() {
         return this.showPassword ? 'Sembunyikan' : 'Lihat';
     },
@@ -18,6 +15,12 @@ Alpine.data('passwordReveal', () => ({
     },
     toggle() {
         this.showPassword = ! this.showPassword;
+        this.syncPasswordFieldType();
+    },
+    syncPasswordFieldType() {
+        if (this.$refs.password) {
+            this.$refs.password.type = this.showPassword ? 'text' : 'password';
+        }
     },
 }));
 registerStorefrontAlpine(Alpine);

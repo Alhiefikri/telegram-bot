@@ -60,7 +60,7 @@ test.describe('Docker production-like smoke', () => {
 
 async function login(page) {
     await page.goto(`${baseUrl}/admin/login`, { waitUntil: 'domcontentloaded' });
-    await page.locator('input[type="email"]').fill(adminEmail);
+    await page.getByLabel('Username / email admin').fill(adminEmail);
     await page.locator('input[type="password"]').fill(adminPassword);
     await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
     await page.waitForURL(`${baseUrl}/admin`, { timeout: 10_000 });
