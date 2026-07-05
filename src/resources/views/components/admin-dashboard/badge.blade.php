@@ -16,13 +16,13 @@
 <span
     {{ $attributes
         ->class([
-        'inline-flex items-center gap-1.5 rounded-full border-[3px] border-neo-ink px-2.5 py-0.5 text-[10px] font-black uppercase leading-5 shadow-[2px_2px_0_0_#050505]',
-        'bg-[#e8ffd4] text-[#166534]' => ! $background && $tone === 'emerald',
-        'bg-[#fef9c3] text-[#92400e]' => ! $background && $tone === 'amber',
-        'bg-[#d4f6fb] text-[#0e7490]' => ! $background && $tone === 'blue',
-        'bg-[#fecaca] text-[#dc2626]' => ! $background && $tone === 'rose',
-        'bg-[#ede5fa] text-[#8758de]' => ! $background && $tone === 'purple',
-        'bg-[#f1f5f9] text-[#64748b]' => ! $background && ! in_array($tone, ['emerald', 'amber', 'blue', 'rose', 'purple'], true),
+        'inline-flex items-center gap-1.5 rounded-full border-[3px] border-neo-ink px-2.5 py-0.5 text-[10px] font-black uppercase leading-5 shadow-neo-xs',
+        'bg-neo-success-soft text-neo-success-text' => ! $background && $tone === 'emerald',
+        'bg-neo-warning-soft text-neo-warning-text' => ! $background && $tone === 'amber',
+        'bg-neo-info-soft text-neo-info-text' => ! $background && $tone === 'blue',
+        'bg-neo-danger-soft text-neo-danger-strong' => ! $background && $tone === 'rose',
+        'bg-neo-purple-soft text-neo-purple' => ! $background && $tone === 'purple',
+        'bg-[#f1f5f9] text-brand-muted' => ! $background && ! in_array($tone, ['emerald', 'amber', 'blue', 'rose', 'purple'], true),
     ])
         ->merge($style ? ['style' => $style.';'] : []) }}
 >
