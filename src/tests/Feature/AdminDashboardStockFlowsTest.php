@@ -249,6 +249,46 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame(2, $product->fresh()->stock);
     }
 
+    public function test_add_stock_validation_does_not_flash_stock_item_secret_to_old_input(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create(['stock' => 2]);
+        $submittedSecret = 'leaked-add-stock-secret-'.str_repeat('x', 5001);
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => $submittedSecret,
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertSessionHasErrors(['stock_items'], null, 'stockAdjustment');
+
+        $oldInput = session()->getOldInput();
+
+        $this->assertSame($product->id, $oldInput['stock_product_id'] ?? null);
+        $this->assertArrayNotHasKey('stock_items', $oldInput);
+        $this->assertStringNotContainsString($submittedSecret, (string) json_encode($oldInput));
+    }
+
+    public function test_edit_stock_item_validation_does_not_flash_secret_to_old_input(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'old@example.test|pass']);
+        $submittedSecret = 'leaked-edit-stock-secret-'.str_repeat('x', 5001);
+
+        $this->from('/admin?tab=produk')
+            ->patch(route('admin.products.stock-items.update', [$product, $stockItem]), [
+                'secret' => $submittedSecret,
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['secret'], null, 'stockItemUpdate');
+
+        $oldInput = session()->getOldInput();
+
+        $this->assertArrayNotHasKey('secret', $oldInput);
+        $this->assertStringNotContainsString($submittedSecret, (string) json_encode($oldInput));
+    }
+
     public function test_admin_can_edit_available_stock_item_without_changing_counts(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

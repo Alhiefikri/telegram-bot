@@ -42,7 +42,7 @@ class UpdateProductStockItemRequest extends FormRequest
 
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
     {
-        return app(AdminProductDashboardFormProtocol::class)->stockItemUpdateValidationErrors($this, $validator);
+        return app(AdminProductDashboardFormProtocol::class)->stockItemUpdateValidationErrors($this, $validator, $this->product());
     }
 
     private function product(): Product

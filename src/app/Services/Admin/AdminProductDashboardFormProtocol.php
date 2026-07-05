@@ -50,15 +50,15 @@ class AdminProductDashboardFormProtocol
     {
         return $this->productTabRedirect()
             ->withErrors($errors, self::STOCK_ADJUSTMENT_BAG)
-            ->withInput($request->only(['stock_items']) + ['stock_product_id' => $product->id]);
+            ->withInput(['stock_product_id' => $product->id]);
     }
 
-    public function stockItemUpdateValidationErrors(Request $request, Validator $validator): RedirectResponse
+    public function stockItemUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
     {
         return redirect()
             ->back()
             ->withErrors($validator, self::STOCK_ITEM_UPDATE_BAG)
-            ->withInput($request->only(['secret']));
+            ->withInput(['stock_item_product_id' => $product->id]);
     }
 
     public function productCreated(string $productName): RedirectResponse
