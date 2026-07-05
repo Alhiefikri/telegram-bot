@@ -56,6 +56,8 @@ return [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
         'api_base_url' => env('TELEGRAM_API_BASE_URL', 'https://api.telegram.org'),
+        'http_timeout_seconds' => (float) env('TELEGRAM_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
         'payment_mode' => env('TELEGRAM_PAYMENT_MODE', 'manual'),
         'admin_contact_url' => env('TELEGRAM_ADMIN_CONTACT_URL'),
         'admin_username' => env('TELEGRAM_ADMIN_USERNAME'),

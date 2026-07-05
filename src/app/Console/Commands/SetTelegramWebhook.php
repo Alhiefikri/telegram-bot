@@ -2,8 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Telegram\TelegramBotApiRequestFactory;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Str;
 
 class SetTelegramWebhook extends Command
@@ -12,12 +13,11 @@ class SetTelegramWebhook extends Command
 
     protected $description = 'Set the Telegram webhook to APP_URL/api/webhook/telegram.';
 
-    public function handle(): int
+    public function handle(TelegramBotApiRequestFactory $requests): int
     {
         $token = trim((string) config('services.telegram.token'));
         $secret = trim((string) config('services.telegram.webhook_secret'));
         $appUrl = rtrim(trim((string) config('app.url')), '/');
-        $apiBaseUrl = rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/');
 
         if ($token === '') {
             $this->warn('Telegram bot token is empty. Webhook setup skipped.');
@@ -45,11 +45,17 @@ class SetTelegramWebhook extends Command
             return self::SUCCESS;
         }
 
-        $response = Http::post($apiBaseUrl.'/bot'.$token.'/setWebhook', [
-            'url' => $webhookUrl,
-            'secret_token' => $secret,
-            'allowed_updates' => ['message', 'callback_query'],
-        ]);
+        try {
+            $response = $requests->request()->post($requests->url('setWebhook'), [
+                'url' => $webhookUrl,
+                'secret_token' => $secret,
+                'allowed_updates' => ['message', 'callback_query'],
+            ]);
+        } catch (ConnectionException) {
+            $this->error('Telegram webhook setup failed: request failed');
+
+            return self::FAILURE;
+        }
 
         if (! $response->ok() || data_get($response->json(), 'ok') !== true) {
             $this->error('Telegram webhook setup failed: '.($response->json('description') ?: $response->body()));

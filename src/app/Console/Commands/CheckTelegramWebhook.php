@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Telegram\TelegramBotApiRequestFactory;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -13,13 +13,12 @@ class CheckTelegramWebhook extends Command
 
     protected $description = 'Verify Telegram webhook registration without printing secrets or private URLs.';
 
-    public function handle(): int
+    public function handle(TelegramBotApiRequestFactory $requests): int
     {
         $maxPending = (int) $this->option('max-pending');
         $token = trim((string) config('services.telegram.token'));
         $secret = trim((string) config('services.telegram.webhook_secret'));
         $appUrl = rtrim(trim((string) config('app.url')), '/');
-        $apiBaseUrl = rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/');
         $target = $appUrl.'/api/webhook/telegram';
         $healthy = true;
 
@@ -48,7 +47,7 @@ class CheckTelegramWebhook extends Command
         }
 
         try {
-            $response = Http::timeout(15)->get($apiBaseUrl.'/bot'.$token.'/getWebhookInfo');
+            $response = $requests->request()->get($requests->url('getWebhookInfo'));
         } catch (Throwable) {
             $this->error('Telegram webhook: request failed');
 

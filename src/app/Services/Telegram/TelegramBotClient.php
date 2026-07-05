@@ -3,20 +3,27 @@
 namespace App\Services\Telegram;
 
 use App\Support\DogfoodTiming;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class TelegramBotClient
 {
+    private readonly TelegramBotApiRequestFactory $requests;
+
+    public function __construct(?TelegramBotApiRequestFactory $requests = null)
+    {
+        $this->requests = $requests ?? new TelegramBotApiRequestFactory();
+    }
+
     public function getChat(int|string $chatId): array
     {
-        return $this->timed('getChat', fn () => Http::post($this->url('getChat'), ['chat_id' => $chatId])->throw()->json());
+        return $this->timed('getChat', fn () => $this->requests->request()->post($this->requests->url('getChat'), ['chat_id' => $chatId])->throw()->json());
     }
 
     public function getChatMember(int|string $chatId, int|string $userId): array
     {
-        return $this->timed('getChatMember', fn () => Http::post($this->url('getChatMember'), ['chat_id' => $chatId, 'user_id' => $userId])->throw()->json());
+        return $this->timed('getChatMember', fn () => $this->requests->request()->post($this->requests->url('getChatMember'), ['chat_id' => $chatId, 'user_id' => $userId])->throw()->json());
     }
 
     public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
@@ -26,12 +33,12 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        return $this->timed('sendMessage', fn () => Http::post($this->url('sendMessage'), $payload)->throw()->json());
+        return $this->timed('sendMessage', fn () => $this->requests->request()->post($this->requests->url('sendMessage'), $payload)->throw()->json());
     }
 
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): void
     {
-        $request = Http::attach('photo', $photoContents, $filename);
+        $request = $this->requests->request()->attach('photo', $photoContents, $filename);
         $payload = array_merge(['chat_id' => $chatId], $options);
 
         if ($caption !== null && $caption !== '') {
@@ -42,7 +49,7 @@ class TelegramBotClient
             $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
         }
 
-        $this->timed('sendPhoto', fn () => $request->post($this->url('sendPhoto'), $payload)->throw());
+        $this->timed('sendPhoto', fn () => $request->post($this->requests->url('sendPhoto'), $payload)->throw());
     }
 
     public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): void
@@ -57,13 +64,13 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        $this->timed('sendPhotoReference', fn () => Http::post($this->url('sendPhoto'), $payload)->throw());
+        $this->timed('sendPhotoReference', fn () => $this->requests->request()->post($this->requests->url('sendPhoto'), $payload)->throw());
     }
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
         try {
-            $this->timed('answerCallbackQuery', fn () => Http::post($this->url('answerCallbackQuery'), array_filter([
+            $this->timed('answerCallbackQuery', fn () => $this->requests->request()->post($this->requests->url('answerCallbackQuery'), array_filter([
                 'callback_query_id' => $callbackQueryId,
                 'text' => $text,
                 'show_alert' => $text !== null,
@@ -79,13 +86,7 @@ class TelegramBotClient
 
     public function deleteMessage(int|string $chatId, int|string $messageId): void
     {
-        $this->timed('deleteMessage', fn () => Http::post($this->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw());
-    }
-
-    private function url(string $method): string
-    {
-        return rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/')
-            .'/bot'.config('services.telegram.token').'/'.$method;
+        $this->timed('deleteMessage', fn () => $this->requests->request()->post($this->requests->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw());
     }
 
     private function timed(string $operation, callable $callback): mixed
@@ -98,6 +99,8 @@ class TelegramBotClient
             $status = is_object($result) && method_exists($result, 'status') ? $result->status() : 200;
 
             return $result;
+        } catch (ConnectionException $e) {
+            throw $this->requests->transportException($operation, $e);
         } catch (RequestException $e) {
             $status = $e->response?->status();
             throw $e;
