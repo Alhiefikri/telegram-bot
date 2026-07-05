@@ -14,6 +14,22 @@ class PaymentEventFactory extends Factory
 
     public function definition(): array
     {
-        return ['payment_id' => Payment::factory(), 'provider' => 'pakasir', 'event_type' => PaymentEventType::Callback, 'merchant_ref' => 'MR-'.fake()->numerify('########'), 'provider_reference' => null, 'provider_status' => 'completed', 'raw_payload' => ['status' => 'completed'], 'signature' => null, 'received_at' => now(), 'processed_at' => null];
+        $receivedAt = now();
+
+        return [
+            'payment_id' => Payment::factory(),
+            'provider' => 'pakasir',
+            'event_type' => PaymentEventType::Callback,
+            'merchant_ref' => 'MR-'.fake()->numerify('########'),
+            'provider_reference' => null,
+            'provider_status' => 'completed',
+            'raw_payload' => ['status' => 'completed'],
+            'signature' => null,
+            'idempotency_key' => null,
+            'received_count' => 1,
+            'received_at' => $receivedAt,
+            'last_received_at' => $receivedAt,
+            'processed_at' => null,
+        ];
     }
 }

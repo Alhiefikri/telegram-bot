@@ -29,6 +29,10 @@ class PakasirCallbackProcessor
         $payment = $this->findPayment($transaction);
         $event = $this->events->log(PaymentEventType::Callback, $payload, $payment, $transaction);
 
+        if ($event->processed_at !== null && $payment?->fresh()->status === PaymentStatus::Paid) {
+            return $event->fresh();
+        }
+
         $this->validatePayload($transaction, $payment);
         $verifiedTransaction = $this->verifyWithPakasir($payment);
         $this->syncProviderExpiry($payment, $verifiedTransaction);

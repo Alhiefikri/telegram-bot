@@ -24,6 +24,7 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -46,37 +47,59 @@ class PakasirWebhookTest extends TestCase
         ]);
     }
 
-    public function test_verified_completed_callback_marks_paid_logs_event_and_dispatches_receipt_once(): void
+    public function test_identical_completed_callback_replays_coalesce_to_one_processed_event_and_once_only_fulfillment(): void
     {
         Queue::fake();
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
-        $payload = $this->payload($payment->merchant_ref, $payment->amount);
+        $firstDeliveryAt = Carbon::parse('2026-07-05 10:00:00', config('app.timezone'));
+        Carbon::setTestNow($firstDeliveryAt);
 
-        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+        try {
+            $payload = $this->payload($payment->merchant_ref, $payment->amount);
 
-        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
-        $event = PaymentEvent::firstOrFail();
-        $this->assertSame('pakasir', $event->provider);
-        $this->assertSame(PaymentEventType::Callback, $event->event_type);
-        $this->assertSame($payment->merchant_ref, $event->merchant_ref);
-        $this->assertSame('completed', $event->provider_status);
-        $this->assertSame($payload, $event->raw_payload);
-        $this->assertNotNull($event->processed_at);
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
-        Queue::assertPushed(PublishSalesProofPost::class, 1);
+            $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
 
-        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
+            $firstEvent = PaymentEvent::query()
+                ->where('event_type', PaymentEventType::Callback)
+                ->firstOrFail();
+            $firstReceivedAt = $firstEvent->received_at->copy();
+            $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+            $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+            $this->assertSame('pakasir', $firstEvent->provider);
+            $this->assertSame($payment->id, $firstEvent->payment_id);
+            $this->assertSame($payment->merchant_ref, $firstEvent->merchant_ref);
+            $this->assertSame('completed', $firstEvent->provider_status);
+            $this->assertSame($payload, $firstEvent->raw_payload);
+            $this->assertNotNull($firstEvent->processed_at);
+            $this->assertSame(1, $firstEvent->received_count);
 
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
-        $this->assertSame(2, PaymentEvent::count());
-        $this->assertSame(2, PaymentEvent::whereNotNull('processed_at')->count());
-        Queue::assertPushed(SendTelegramReceipt::class, 1);
-        Queue::assertPushed(PublishSalesProofPost::class, 1);
+            foreach ([5, 10, 15] as $secondsAfterFirstDelivery) {
+                Carbon::setTestNow($firstDeliveryAt->copy()->addSeconds($secondsAfterFirstDelivery));
+
+                $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+            }
+
+            $event = PaymentEvent::query()
+                ->where('event_type', PaymentEventType::Callback)
+                ->firstOrFail();
+            $this->assertSame($firstEvent->id, $event->id);
+            $this->assertTrue($event->received_at->equalTo($firstReceivedAt));
+            $this->assertSame(4, $event->received_count);
+            $this->assertNotNull($event->last_received_at);
+            $this->assertTrue(Carbon::parse($event->last_received_at)->greaterThan($firstReceivedAt));
+            $this->assertNotNull($event->processed_at);
+            $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
+            $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+            Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+            Queue::assertPushed(SendTelegramReceipt::class, 1);
+            Queue::assertPushed(PublishSalesProofPost::class, 1);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_verified_completed_callback_after_local_expiry_marks_late_paid_without_fulfillment(): void
@@ -330,13 +353,14 @@ class PakasirWebhookTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_completed_retry_after_pending_provider_detail_requeries_pakasir_and_processes_payment(): void
+    public function test_identical_callback_replay_after_pending_provider_detail_reuses_unprocessed_event_and_processes_it(): void
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
         Queue::fake();
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
-        $payload = $this->payload($payment->merchant_ref, $payment->amount);
+        $firstDeliveryAt = Carbon::parse('2026-07-05 10:30:00', config('app.timezone'));
+        Carbon::setTestNow($firstDeliveryAt);
         $detailStatuses = ['pending', 'completed'];
         Http::fake([
             'https://app.pakasir.com/api/transactiondetail*' => function () use ($payment, &$detailStatuses) {
@@ -352,23 +376,45 @@ class PakasirWebhookTest extends TestCase
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
 
-        $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
+        try {
+            $payload = $this->payload($payment->merchant_ref, $payment->amount);
 
-        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
-        $this->assertSame(1, PaymentEvent::count());
-        $this->assertSame(0, PaymentEvent::whereNotNull('processed_at')->count());
-        Queue::assertNothingPushed();
+            $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
 
-        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+            $unprocessedEvent = PaymentEvent::query()
+                ->where('event_type', PaymentEventType::Callback)
+                ->firstOrFail();
+            $firstReceivedAt = $unprocessedEvent->received_at->copy();
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+            $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+            $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
+            $this->assertNull($unprocessedEvent->processed_at);
+            $this->assertSame(1, $unprocessedEvent->received_count);
+            Queue::assertNothingPushed();
 
-        $this->assertCount(2, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
-        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
-        $this->assertSame(2, PaymentEvent::count());
-        $this->assertSame(1, PaymentEvent::whereNotNull('processed_at')->count());
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+            Carbon::setTestNow($firstDeliveryAt->copy()->addSeconds(5));
+
+            $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+
+            $event = PaymentEvent::query()
+                ->where('event_type', PaymentEventType::Callback)
+                ->firstOrFail();
+            $this->assertCount(2, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
+            $this->assertSame($unprocessedEvent->id, $event->id);
+            $this->assertTrue($event->received_at->equalTo($firstReceivedAt));
+            $this->assertSame(2, $event->received_count);
+            $this->assertNotNull($event->last_received_at);
+            $this->assertTrue(Carbon::parse($event->last_received_at)->greaterThan($firstReceivedAt));
+            $this->assertNotNull($event->processed_at);
+            $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+            $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+            $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
+            $this->assertSame(1, PaymentEvent::query()->whereNotNull('processed_at')->count());
+            Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_noisy_pakasir_payload_is_rejected_before_audit_logging_or_provider_lookup(): void

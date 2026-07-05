@@ -118,7 +118,7 @@ Pakasir adalah provider otomatis di bawah `TELEGRAM_PAYMENT_MODE=pakasir`. Defau
 
 Kedua flow membuat payment pending lokal lebih dulu. Hosted checkout tidak membutuhkan transaksi native. Native QRIS memanggil Pakasir setelah commit lokal; jika create gagal, order tetap pending dan customer menerima hosted fallback.
 
-Callback/webhook Pakasir adalah untrusted intake. Sistem hanya menandai paid setelah Transaction Detail API dengan API-key verification cocok terhadap `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan payment method bila tersedia. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`.
+Callback/webhook Pakasir adalah untrusted intake. Sistem hanya menandai paid setelah Transaction Detail API dengan API-key verification cocok terhadap `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan payment method bila tersedia. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`; replay callback Pakasir yang identik di-coalesce ke satu event dengan `idempotency_key`, `received_count`, dan `last_received_at` karena Pakasir tidak menyediakan ID event webhook terpisah.
 
 - `PAID`: payment menjadi `paid`, order masuk `processing`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
 - `EXPIRED`: order pending menjadi `expired`, payment menjadi `expired`, dan reservasi stok dilepas.
@@ -321,7 +321,7 @@ Hal penting:
 
 - gunakan HTTPS di staging/production;
 - callback Pakasir adalah intake tidak tepercaya; paid hanya diterapkan setelah Transaction Detail API cocok dengan `merchant_ref`, amount, project, status `completed`, dan payment method bila tersedia;
-- endpoint memiliki rate limiter `pakasir-webhook` dan replay cache;
+- endpoint memiliki rate limiter `pakasir-webhook`; callback Pakasir valid yang identik tidak disimpan tanpa batas, tetapi di-coalesce berdasarkan hash payload ter-sanitasi;
 - jangan menaruh API key, bot token, chat ID privat, URL privat, atau raw `payment_number` QRIS di komentar issue, log, screenshot, atau payload admin.
 
 Untuk validasi staging Pakasir native QRIS sebelum production cutover, siapkan environment disposable dengan `TELEGRAM_PAYMENT_MODE=pakasir`, `PAKASIR_CHECKOUT_FLOW=api_qris`, credential Pakasir staging/sandbox, dan bot Telegram test. Buat checkout dari Store Bot staging, ambil UUID payment atau `merchant_ref` dari admin/database, lalu jalankan:

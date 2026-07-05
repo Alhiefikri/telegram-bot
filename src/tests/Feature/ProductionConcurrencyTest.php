@@ -169,7 +169,8 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
-        $this->assertSame(2, PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->count());
+        $processedCallbackEvent = PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->sole();
+        $this->assertGreaterThanOrEqual(2, $processedCallbackEvent->received_count);
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
