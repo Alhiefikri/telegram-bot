@@ -4,7 +4,7 @@ WORKDIR /app
 COPY src/composer.json src/composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --no-scripts --optimize-autoloader --ignore-platform-req=ext-intl
 
-FROM node:24-alpine AS assets
+FROM node:24-slim AS assets
 
 WORKDIR /app
 COPY src/package.json src/package-lock.json ./
