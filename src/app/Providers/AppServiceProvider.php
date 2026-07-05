@@ -76,11 +76,13 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('pakasir-webhook', function (Request $request) {
-            $payload = $request->all();
-            $orderId = Arr::get($payload, 'order_id');
-            $key = is_scalar($orderId) && trim((string) $orderId) !== '' ? (string) $orderId : $request->ip();
+            $limit = (int) config('services.pakasir.webhook_rate_limit_per_minute', 30);
+            $source = $request->ip() ?: 'unknown';
 
-            return Limit::perMinute((int) config('services.pakasir.webhook_rate_limit_per_minute', 30))->by('pakasir:'.$key);
+            return [
+                Limit::perMinute($limit)->by('pakasir:webhook:global'),
+                Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source),
+            ];
         });
 
     }

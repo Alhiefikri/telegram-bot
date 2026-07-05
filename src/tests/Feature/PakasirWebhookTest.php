@@ -313,6 +313,23 @@ class PakasirWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_unknown_pakasir_callbacks_with_rotating_order_ids_share_webhook_rate_limit(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 1);
+        Queue::fake();
+        Http::fake();
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.111']);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload('issue-111-unknown-a', 10000))->assertUnprocessable();
+        $this->assertLessThanOrEqual(1, PaymentEvent::count());
+
+        $this->postJson('/api/webhook/pakasir', $this->payload('issue-111-unknown-b', 10000))->assertTooManyRequests();
+
+        $this->assertLessThanOrEqual(1, PaymentEvent::count());
+        Http::assertNothingSent();
+        Queue::assertNothingPushed();
+    }
+
     public function test_completed_retry_after_pending_provider_detail_requeries_pakasir_and_processes_payment(): void
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
