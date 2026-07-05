@@ -230,7 +230,7 @@ class TelegramCallbackRouter
                 'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
             ], fn () => $paymentMode === 'pakasir'
-                ? $this->checkout->checkout($cart, 'hosted', 'pakasir')
+                ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir')
                 : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual'));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.");

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -90,25 +91,25 @@ class ValidatePakasirNativeQris extends Command
 
     private function validateConfiguration(array &$report, PakasirProviderReadiness $pakasirReadiness): void
     {
-        $paymentMode = (string) config('services.telegram.payment_mode', 'manual');
-        $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
-        $checkoutFlowLabel = is_scalar($checkoutFlow) ? (string) $checkoutFlow : get_debug_type($checkoutFlow);
-        $readiness = $pakasirReadiness->checkout();
+        $setting = ManualPaymentSetting::current();
+        $paymentMode = (string) ($setting?->payment_mode ?: 'manual');
+        $checkoutFlow = (string) ($setting?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
+        $readiness = $pakasirReadiness->checkout($checkoutFlow);
 
         if ($paymentMode !== 'pakasir') {
-            $this->addCheck($report, 'fail', 'TELEGRAM_PAYMENT_MODE=pakasir', "Configured value is {$paymentMode}.");
+            $this->addCheck($report, 'fail', 'dashboard payment_mode=pakasir', "Configured dashboard value is {$paymentMode}.");
         } else {
-            $this->addCheck($report, 'pass', 'TELEGRAM_PAYMENT_MODE=pakasir');
+            $this->addCheck($report, 'pass', 'dashboard payment_mode=pakasir');
         }
 
         if ($checkoutFlow !== PakasirCheckoutFlow::API_QRIS) {
-            $this->addCheck($report, 'fail', 'PAKASIR_CHECKOUT_FLOW=api_qris', "Configured value is {$checkoutFlowLabel}.");
+            $this->addCheck($report, 'fail', 'dashboard pakasir_checkout_flow=api_qris', "Configured dashboard value is {$checkoutFlow}.");
         } else {
-            $this->addCheck($report, 'pass', 'PAKASIR_CHECKOUT_FLOW=api_qris');
+            $this->addCheck($report, 'pass', 'dashboard pakasir_checkout_flow=api_qris');
         }
 
-        if ($checkoutFlowMessage = $readiness->invalidMessage('PAKASIR_CHECKOUT_FLOW')) {
-            $this->addCheck($report, 'fail', 'PAKASIR_CHECKOUT_FLOW valid', $checkoutFlowMessage);
+        if ($checkoutFlowMessage = $readiness->invalidMessage('pakasir_checkout_flow')) {
+            $this->addCheck($report, 'fail', 'dashboard pakasir_checkout_flow valid', $checkoutFlowMessage);
         }
 
         foreach (['PAKASIR_SLUG', 'PAKASIR_API_KEY'] as $label) {

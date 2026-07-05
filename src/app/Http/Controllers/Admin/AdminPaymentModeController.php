@@ -16,10 +16,13 @@ class AdminPaymentModeController extends Controller
     public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger, PakasirProviderReadiness $pakasirReadiness): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
+        $validated = $request->validated();
+        $mode = (string) $validated['payment_mode'];
+        $checkoutFlow = $mode === 'pakasir'
+            ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
+            : null;
 
-        $mode = (string) $request->validated('payment_mode');
-
-        [$setting, $oldMode] = DB::transaction(function () use ($mode): array {
+        [$setting, $oldValues] = DB::transaction(function () use ($mode, $checkoutFlow): array {
             $setting = ManualPaymentSetting::query()
                 ->where('is_active', true)
                 ->oldest('id')
@@ -33,25 +36,44 @@ class AdminPaymentModeController extends Controller
                     ->first() ?? new ManualPaymentSetting;
             }
 
-            $oldMode = $setting->exists ? $setting->payment_mode : null;
+            $oldValues = $setting->exists
+                ? [
+                    'payment_mode' => $setting->payment_mode,
+                    'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
+                ]
+                : [
+                    'payment_mode' => null,
+                    'pakasir_checkout_flow' => null,
+                ];
+
             $setting->payment_mode = $mode;
+            if ($checkoutFlow !== null) {
+                $setting->pakasir_checkout_flow = $checkoutFlow;
+            } elseif (! $setting->exists || blank($setting->pakasir_checkout_flow)) {
+                $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
+            }
             $setting->is_active = true;
             $setting->save();
 
-            return [$setting, $oldMode];
+            return [$setting, $oldValues];
         }, 5);
+
+        $newValues = [
+            'payment_mode' => $setting->payment_mode,
+            'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
+        ];
 
         $auditLogger->log(
             'payment_mode.updated',
             $setting,
-            ['payment_mode' => $oldMode],
-            ['payment_mode' => $mode],
+            $oldValues,
+            $newValues,
             $user,
             $request->ip(),
         );
 
         $label = match ($mode) {
-            'pakasir' => $pakasirReadiness->checkout()->checkoutFlow() === PakasirCheckoutFlow::API_QRIS
+            'pakasir' => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
                 ? 'Pakasir native QRIS diaktifkan. QR payment_number dikirim di Telegram dengan fallback hosted Pakasir.'
                 : 'Pakasir hosted diaktifkan. Checkout baru memakai QR/link website Pakasir.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.',

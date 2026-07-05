@@ -2,8 +2,6 @@
 
 namespace App\Support;
 
-use RuntimeException;
-
 final class PakasirCheckoutFlow
 {
     public const HOSTED = 'hosted';
@@ -18,17 +16,6 @@ final class PakasirCheckoutFlow
         return [self::HOSTED, self::API_QRIS];
     }
 
-    public static function configured(): string
-    {
-        $flow = config('services.pakasir.checkout_flow', self::HOSTED);
-
-        if (! self::isAllowed($flow)) {
-            throw new RuntimeException(self::validationMessage());
-        }
-
-        return $flow;
-    }
-
     public static function isAllowed(mixed $flow): bool
     {
         return is_string($flow) && in_array($flow, self::allowed(), true);
@@ -36,6 +23,6 @@ final class PakasirCheckoutFlow
 
     public static function validationMessage(): string
     {
-        return 'PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris.';
+        return 'pakasir_checkout_flow must be one of: hosted, api_qris.';
     }
 }

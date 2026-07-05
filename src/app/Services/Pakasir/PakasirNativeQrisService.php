@@ -3,6 +3,7 @@
 namespace App\Services\Pakasir;
 
 use App\Models\Order;
+use App\Support\PakasirCheckoutFlow;
 use App\Models\Payment;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +18,7 @@ class PakasirNativeQrisService
 
     public function ensureCreated(Payment $payment): PakasirQrisTransaction
     {
-        $this->readiness->verification()->assertReady('Pakasir native QRIS cannot be created.');
+        $this->readiness->verification(PakasirCheckoutFlow::API_QRIS)->assertReady('Pakasir native QRIS cannot be created.');
 
         $payment->refresh();
         if ($this->hasPersistedQris($payment)) {

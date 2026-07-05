@@ -116,37 +116,60 @@
                     @error('payment_mode', 'paymentMode')
                         <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                     @enderror
+                    @error('pakasir_checkout_flow', 'paymentMode')
+                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
 
                     @if ($paymentControl['can_manage'])
-                        <div class="mt-3 grid grid-cols-2 gap-2">
+                        <div class="mt-3 grid gap-2 md:grid-cols-3">
                             <form method="POST" action="{{ $paymentControl['update_url'] }}">
                                 @csrf
                                 <input type="hidden" name="payment_mode" value="manual">
                                 <x-admin-dashboard.button
                                     type="submit"
-                                    :variant="$paymentControl['mode'] === 'manual' ? 'warning' : 'neutral'"
+                                    :variant="$paymentControl['requested_mode'] === 'manual' ? 'warning' : 'neutral'"
                                     size="sm"
-                                    class="w-full text-xs"
+                                    class="w-full text-[11px]"
                                 >
-                                    QR Manual /payment
+                                    QR Manual
                                 </x-admin-dashboard.button>
                             </form>
 
                             <form method="POST" action="{{ $paymentControl['update_url'] }}">
                                 @csrf
                                 <input type="hidden" name="payment_mode" value="pakasir">
+                                <input type="hidden" name="pakasir_checkout_flow" value="hosted">
                                 <x-admin-dashboard.button
                                     type="submit"
-                                    :variant="$paymentControl['mode'] === 'pakasir' ? 'purple' : 'neutral'"
+                                    :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'hosted' ? 'primary' : 'neutral'"
                                     size="sm"
-                                    class="w-full text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                                    class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
                                     :disabled="! $paymentControl['can_enable_pakasir']"
                                     title="{{ $paymentControl['pakasir_guard_message'] }}"
                                 >
-                                    Pakasir {{ $paymentControl['checkout_flow_label'] }}
+                                    Hosted Pakasir
+                                </x-admin-dashboard.button>
+                            </form>
+
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}">
+                                @csrf
+                                <input type="hidden" name="payment_mode" value="pakasir">
+                                <input type="hidden" name="pakasir_checkout_flow" value="api_qris">
+                                <x-admin-dashboard.button
+                                    type="submit"
+                                    :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'api_qris' ? 'purple' : 'neutral'"
+                                    size="sm"
+                                    class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="! $paymentControl['can_enable_pakasir']"
+                                    title="{{ $paymentControl['pakasir_guard_message'] }}"
+                                >
+                                    QR Native Pakasir
                                 </x-admin-dashboard.button>
                             </form>
                         </div>
+                        <p class="mt-2 text-[11px] font-semibold text-brand-muted">
+                            Mode aktif dipilih di dashboard. Environment hanya dipakai untuk kredensial dan endpoint provider.
+                        </p>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             Hanya owner/admin yang bisa mengubah mode pembayaran.

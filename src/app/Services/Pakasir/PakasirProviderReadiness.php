@@ -6,13 +6,13 @@ use App\Support\PakasirCheckoutFlow;
 
 final class PakasirProviderReadiness
 {
-    public function checkout(): PakasirProviderReadinessReport
+    public function checkout(?string $checkoutFlow = null): PakasirProviderReadinessReport
     {
         $invalid = $this->invalidBasePaymentConfiguration();
-        $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
+        $checkoutFlow ??= PakasirCheckoutFlow::HOSTED;
 
         if (! PakasirCheckoutFlow::isAllowed($checkoutFlow)) {
-            $invalid['PAKASIR_CHECKOUT_FLOW'] = PakasirCheckoutFlow::validationMessage();
+            $invalid['pakasir_checkout_flow'] = PakasirCheckoutFlow::validationMessage();
             $checkoutFlow = PakasirCheckoutFlow::HOSTED;
         }
 
@@ -23,22 +23,22 @@ final class PakasirProviderReadiness
         );
     }
 
-    public function verification(): PakasirProviderReadinessReport
+    public function verification(?string $checkoutFlow = null): PakasirProviderReadinessReport
     {
         return new PakasirProviderReadinessReport(
-            checkoutFlow: $this->configuredCheckoutFlowOrHosted(),
+            checkoutFlow: $this->configuredCheckoutFlowOrHosted($checkoutFlow),
             missing: $this->missingBasePaymentConfiguration(),
             invalid: $this->invalidBasePaymentConfiguration(),
         );
     }
 
-    public function effectivePaymentMode(string $requestedMode): string
+    public function effectivePaymentMode(string $requestedMode, ?string $checkoutFlow = null): string
     {
         if ($requestedMode !== 'pakasir') {
             return 'manual';
         }
 
-        return $this->checkout()->isReady() ? 'pakasir' : 'manual';
+        return $this->checkout($checkoutFlow)->isReady() ? 'pakasir' : 'manual';
     }
 
     /**
@@ -78,9 +78,9 @@ final class PakasirProviderReadiness
         return $invalid;
     }
 
-    private function configuredCheckoutFlowOrHosted(): string
+    private function configuredCheckoutFlowOrHosted(?string $checkoutFlow = null): string
     {
-        $checkoutFlow = config('services.pakasir.checkout_flow', PakasirCheckoutFlow::HOSTED);
+        $checkoutFlow ??= PakasirCheckoutFlow::HOSTED;
 
         return PakasirCheckoutFlow::isAllowed($checkoutFlow) ? $checkoutFlow : PakasirCheckoutFlow::HOSTED;
     }

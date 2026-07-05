@@ -9,6 +9,7 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Support\PakasirCheckoutFlow;
 use App\Support\DogfoodTiming;
 use Throwable;
 
@@ -104,9 +105,16 @@ class TelegramCheckoutIntents
         DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
     }
 
+    public function pakasirPaymentMethod(): string
+    {
+        return $this->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
+            ? PakasirCheckoutFlow::API_QRIS
+            : PakasirCheckoutFlow::HOSTED;
+    }
+
     private function pakasirCheckoutFlow(): string
     {
-        return $this->pakasirReadiness->checkout()->checkoutFlow();
+        return $this->pakasirReadiness->checkout($this->requestedPakasirCheckoutFlow())->checkoutFlow();
     }
 
     public function notifyAdminAboutManualOrder(Order $order): void
@@ -144,15 +152,25 @@ class TelegramCheckoutIntents
 
     public function paymentMode(): string
     {
-        return $this->pakasirReadiness->effectivePaymentMode($this->requestedPaymentMode());
+        return $this->pakasirReadiness->effectivePaymentMode(
+            $this->requestedPaymentMode(),
+            $this->requestedPakasirCheckoutFlow(),
+        );
     }
 
     public function requestedPaymentMode(): string
     {
         $settings = ManualPaymentSetting::current();
-        $mode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
+        $mode = (string) ($settings?->payment_mode ?: 'manual');
 
         return $mode === 'pakasir' ? 'pakasir' : 'manual';
+    }
+
+    private function requestedPakasirCheckoutFlow(): string
+    {
+        $settings = ManualPaymentSetting::current();
+
+        return (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
     }
 
     public function pakasirUnavailableCustomerMessage(): string

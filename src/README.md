@@ -114,7 +114,7 @@ Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order 
 
 ### 3.4 Pakasir payment
 
-Pakasir adalah provider otomatis di bawah `TELEGRAM_PAYMENT_MODE=pakasir`. Default rollout `PAKASIR_CHECKOUT_FLOW=hosted` mengirim customer ke hosted-link checkout Pakasir. Mode `api_qris` membuat native QRIS via API, mengirim QR `payment_number` langsung di Telegram, dan tetap menyertakan hosted checkout sebagai fallback sekaligus rollback cepat ke hosted.
+Pakasir adalah provider otomatis yang dipilih dari Admin Dashboard, bukan dari environment. Owner/admin memilih QR Manual, Pakasir hosted, atau Pakasir native QRIS; environment hanya menyimpan kredensial/endpoint Pakasir. Hosted mengirim customer ke hosted-link checkout Pakasir. Native QRIS membuat transaksi QRIS via API, mengirim QR `payment_number` langsung di Telegram, dan tetap menyertakan hosted checkout sebagai fallback sekaligus rollback cepat ke hosted/manual dari dashboard.
 
 Kedua flow membuat payment pending lokal lebih dulu. Hosted checkout tidak membutuhkan transaksi native. Native QRIS memanggil Pakasir setelah commit lokal; jika create gagal, order tetap pending dan customer menerima hosted fallback.
 
@@ -324,13 +324,13 @@ Hal penting:
 - endpoint memiliki rate limiter `pakasir-webhook`; callback Pakasir valid yang identik tidak disimpan tanpa batas, tetapi di-coalesce berdasarkan hash payload ter-sanitasi;
 - jangan menaruh API key, bot token, chat ID privat, URL privat, atau raw `payment_number` QRIS di komentar issue, log, screenshot, atau payload admin.
 
-Untuk validasi staging Pakasir native QRIS sebelum production cutover, siapkan environment disposable dengan `TELEGRAM_PAYMENT_MODE=pakasir`, `PAKASIR_CHECKOUT_FLOW=api_qris`, credential Pakasir staging/sandbox, dan bot Telegram test. Buat checkout dari Store Bot staging, ambil UUID payment atau `merchant_ref` dari admin/database, lalu jalankan:
+Untuk validasi staging Pakasir native QRIS sebelum production cutover, siapkan environment disposable dengan credential Pakasir staging/sandbox dan bot Telegram test, lalu pilih `QR Native Pakasir` dari Admin Dashboard. Buat checkout dari Store Bot staging, ambil UUID payment atau `merchant_ref` dari admin/database, lalu jalankan:
 
 ```bash
 php artisan pakasir:validate-native-qris <payment-uuid-or-merchant-ref> --create --reconcile
 ```
 
-Command ini menghasilkan report redacted: config native aktif, create QRIS idempotent, QR source berupa `payment_number` non-URL, fee/`total_payment`/expiry ada dan konsisten, hosted fallback terbentuk untuk payment yang sama, Transaction Detail cocok dengan amount original, reconciliation bisa menandai paid saat detail `completed`, dan payload tersimpan tidak berisi raw `payment_number`. Gunakan `--json` jika report perlu dilampirkan sebagai artefak internal; audit dulu agar tidak ada secret.
+Command ini menghasilkan report redacted: dashboard sudah memilih native QRIS, create QRIS idempotent, QR source berupa `payment_number` non-URL, fee/`total_payment`/expiry ada dan konsisten, hosted fallback terbentuk untuk payment yang sama, Transaction Detail cocok dengan amount original, reconciliation bisa menandai paid saat detail `completed`, dan payload tersimpan tidak berisi raw `payment_number`. Gunakan `--json` jika report perlu dilampirkan sebagai artefak internal; audit dulu agar tidak ada secret.
 
 Pertanyaan provider yang sengaja menguji duplicate endpoint harus dijalankan hanya di staging disposable:
 
@@ -490,9 +490,9 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
 - [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
-- [ ] `TELEGRAM_PAYMENT_MODE=manual` adalah default operasional; owner/admin bisa mengganti mode lewat panel "Mode pembayaran" di `/admin`.
+- [ ] Payment mode default tetap QR manual; owner/admin bisa memilih QR Manual, Hosted Pakasir, atau QR Native Pakasir lewat panel "Mode pembayaran" di `/admin`.
 - [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`; dashboard menolak aktivasi Pakasir tanpa slug/API key.
-- [ ] `PAKASIR_CHECKOUT_FLOW=hosted` untuk rollout aman; gunakan `api_qris` hanya setelah staging membuktikan native QRIS dengan `php artisan pakasir:validate-native-qris <payment> --create --reconcile`, dan rollback cepat ke hosted bila perlu.
+- [ ] Gunakan `QR Native Pakasir` hanya setelah staging membuktikan native QRIS dengan `php artisan pakasir:validate-native-qris <payment> --create --reconcile`; rollback cepat dari dashboard ke `Hosted Pakasir` atau `QR Manual`.
 - [ ] `PAKASIR_REDIRECT_URL` opsional; kosongkan jika tidak butuh return URL khusus.
 - [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
@@ -546,7 +546,7 @@ Langkah cek:
 Kemungkinan penyebab:
 
 - `PAKASIR_SLUG` atau `PAKASIR_API_KEY` salah/kosong sehingga Transaction Detail API tidak bisa memverifikasi payment.
-- `PAKASIR_CHECKOUT_FLOW` tidak sesuai rencana rollout (`hosted` atau `api_qris`).
+- Pilihan dashboard `pakasir_checkout_flow` tidak sesuai rencana rollout (`hosted` atau `api_qris`).
 - `order_id`/`merchant_ref`, nominal, project/slug, status, atau payment method dari callback/detail tidak cocok dengan payment internal.
 - callback ditolak oleh throttle `pakasir-webhook`, shape gate, atau replay cache payload gagal.
 

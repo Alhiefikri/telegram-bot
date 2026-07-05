@@ -21,7 +21,6 @@ class AdminDashboardPaymentModeTest extends TestCase
         config()->set('services.pakasir.slug', 'sedulur-digital');
         config()->set('services.pakasir.api_key', 'pakasir-key');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
 
         $setting = ManualPaymentSetting::create([
             'payment_mode' => 'pakasir',
@@ -33,7 +32,13 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertOk()
             ->assertSee('Mode pembayaran')
             ->assertSee('Pakasir hosted aktif')
-            ->assertSee('QR Manual /payment');
+            ->assertSee('QR Manual')
+            ->assertSee('Hosted Pakasir')
+            ->assertSee('QR Native Pakasir')
+            ->assertSee('name="payment_mode" value="manual"', false)
+            ->assertSee('name="payment_mode" value="pakasir"', false)
+            ->assertSee('name="pakasir_checkout_flow" value="hosted"', false)
+            ->assertSee('name="pakasir_checkout_flow" value="api_qris"', false);
 
         $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
@@ -55,11 +60,50 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('QR manual LHIE STORE');
     }
 
+    public function test_owner_can_switch_dashboard_to_native_qris_pakasir_flow(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        config()->set('services.pakasir.slug', 'sedulur-digital');
+        config()->set('services.pakasir.api_key', 'pakasir-key');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'pakasir_checkout_flow' => 'hosted',
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+
+        $this->post(route('admin.payment-mode.update'), [
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'id' => $setting->id,
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'is_active' => true,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'payment_mode.updated',
+            'subject_type' => ManualPaymentSetting::class,
+            'subject_id' => (string) $setting->id,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Pakasir native QRIS aktif')
+            ->assertSee('QR payment_number dikirim di Telegram');
+    }
+
     public function test_saved_pakasir_mode_is_reported_unready_and_effectively_manual_when_config_missing(): void
     {
         config()->set('services.pakasir.slug', '');
         config()->set('services.pakasir.api_key', '');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
 
         $this->actingAs(User::factory()->create([
@@ -85,7 +129,6 @@ class AdminDashboardPaymentModeTest extends TestCase
         config()->set('services.pakasir.slug', 'warung-ai');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'inline_qris');
 
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Admin,
@@ -93,13 +136,14 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         ManualPaymentSetting::create([
             'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'inline_qris',
             'is_active' => true,
         ]);
 
         $this->get('/admin')
             ->assertOk()
             ->assertSee('Manual /payment aktif — Pakasir belum siap')
-            ->assertSee('Mode Pakasir belum siap. PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris. Checkout baru akan memakai QR manual sampai diperbaiki.')
+            ->assertSee('Mode Pakasir belum siap. pakasir_checkout_flow must be one of: hosted, api_qris. Checkout baru akan memakai QR manual sampai diperbaiki.')
             ->assertDontSee('Pakasir hosted aktif');
     }
 

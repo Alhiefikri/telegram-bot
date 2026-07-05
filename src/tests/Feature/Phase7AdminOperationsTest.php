@@ -49,11 +49,12 @@ class Phase7AdminOperationsTest extends TestCase
         config()->set('services.pakasir.slug', 'warung-ai');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'api_qris');
+        config()->set('services.pakasir.checkout_flow', 'hosted');
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
             'is_active' => true,
         ]);
 
@@ -74,7 +75,7 @@ class Phase7AdminOperationsTest extends TestCase
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
         $this->from('/admin?tab=stats')
-            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir', 'pakasir_checkout_flow' => 'hosted'])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors([
                 'payment_mode' => 'Mode Pakasir belum bisa diaktifkan. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment.',
@@ -88,15 +89,15 @@ class Phase7AdminOperationsTest extends TestCase
         config()->set('services.pakasir.slug', 'warung-ai');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'inline_qris');
+        config()->set('services.pakasir.checkout_flow', 'hosted');
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
         $this->from('/admin?tab=stats')
-            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir', 'pakasir_checkout_flow' => 'inline_qris'])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors([
-                'payment_mode' => 'Mode Pakasir belum bisa diaktifkan. PAKASIR_CHECKOUT_FLOW must be one of: hosted, api_qris.',
+                'pakasir_checkout_flow' => 'Jenis pembayaran Pakasir tidak valid.',
             ], null, 'paymentMode');
 
         $this->assertDatabaseCount('manual_payment_settings', 0);

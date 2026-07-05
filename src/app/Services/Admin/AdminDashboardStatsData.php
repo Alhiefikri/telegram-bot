@@ -100,9 +100,10 @@ final class AdminDashboardStatsData
     private function paymentControl(User $user): array
     {
         $settings = ManualPaymentSetting::current();
-        $requestedMode = (string) ($settings?->payment_mode ?: config('services.telegram.payment_mode', 'manual'));
+        $requestedMode = (string) ($settings?->payment_mode ?: 'manual');
         $requestedMode = $requestedMode === 'pakasir' ? 'pakasir' : 'manual';
-        $readiness = $this->pakasirReadiness->checkout();
+        $requestedCheckoutFlow = (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
+        $readiness = $this->pakasirReadiness->checkout($requestedCheckoutFlow);
         $checkoutFlow = $readiness->checkoutFlow();
         $isPakasirConfigured = $readiness->isReady();
         $isPakasirEnabled = $requestedMode === 'pakasir' && $isPakasirConfigured;
@@ -133,6 +134,7 @@ final class AdminDashboardStatsData
             'mode' => $isPakasirEnabled ? 'pakasir' : 'manual',
             'requested_mode' => $requestedMode,
             'checkout_flow' => $checkoutFlow,
+            'requested_checkout_flow' => $requestedCheckoutFlow,
             'checkout_flow_label' => $pakasirFlowLabel,
             'is_pakasir_enabled' => $isPakasirEnabled,
             'is_pakasir_configured' => $isPakasirConfigured,
@@ -145,7 +147,7 @@ final class AdminDashboardStatsData
             'label' => $label,
             'hint' => $hint,
             'tone' => $isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber',
-            'source' => $settings ? 'dashboard_setting' : 'env_default',
+            'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'update_url' => route('admin.payment-mode.update'),
             'status_badge' => [

@@ -12,7 +12,7 @@ Official Pakasir docs: <https://pakasir.com/p/docs>
 
 Required Pakasir behavior:
 
-- Hosted URL remains: `https://app.pakasir.com/pay/{slug}/{amount}?order_id={order_id}` with optional `redirect` and `qris_only=1`.
+- Hosted URL remains: `https://app.pakasir.com/pay/{slug}/{amount}?order_id={order_id}` with optional `redirect`.
 - Native QRIS create uses `POST https://app.pakasir.com/api/transactioncreate/qris`.
 - Request body uses configured project slug/API key plus internal payment `merchant_ref` and `amount`.
 - Response `payment.payment_number` is a QR string. The app must render it into a QR image.
@@ -27,13 +27,13 @@ Required Pakasir behavior:
 - `OrderCheckoutService` creates local order/payment and reserves stock in a DB transaction. Pakasir API calls must stay outside this transaction.
 - `TelegramCheckoutIntents::sendPakasirPaymentInstructions()` currently renders a QR from the hosted URL. Native mode must render from Pakasir `payment_number` instead.
 - `Payment` lacks first-class fields for provider payload, fee, total payment, provider method, provider expiry, and QRIS payment number.
-- `ManualPaymentSetting.payment_mode` can switch the dashboard to Pakasir; enabling Pakasir must validate Pakasir credentials/config.
+- `ManualPaymentSetting.payment_mode` and `ManualPaymentSetting.pakasir_checkout_flow` switch the dashboard between QR manual, Pakasir hosted, and Pakasir native QRIS; enabling Pakasir still validates provider credentials/config.
 
 ## Target customer flow
 
 1. Customer checks out in the Store Bot.
 2. App creates local order/payment and reserves stock.
-3. If `PAKASIR_CHECKOUT_FLOW=api_qris`, app creates Pakasir QRIS transaction after the local DB commit.
+3. If the dashboard payment setting stores `pakasir_checkout_flow=api_qris`, app creates Pakasir QRIS transaction after the local DB commit.
 4. Bot sends a QRIS image generated from `payment.payment_number`.
 5. Bot caption shows invoice, items, product total, Pakasir fee/total payment if returned, and expiry.
 6. Bot includes fallback button to hosted Pakasir page.
@@ -43,20 +43,21 @@ Required Pakasir behavior:
 
 ## Configuration plan
 
-Keep provider-level mode:
+Keep provider credentials and endpoints in environment:
 
 ```env
-TELEGRAM_PAYMENT_MODE=pakasir
+PAKASIR_SLUG=
+PAKASIR_API_KEY=
+PAKASIR_BASE_URL=https://app.pakasir.com
 ```
 
-Add checkout-flow mode:
+Select the customer payment mode in Admin Dashboard, not environment:
 
-```env
-PAKASIR_CHECKOUT_FLOW=hosted
-# allowed: hosted, api_qris
-```
+- QR Manual: `manual_payment_settings.payment_mode=manual`
+- Pakasir hosted: `payment_mode=pakasir`, `pakasir_checkout_flow=hosted`
+- Pakasir native QRIS: `payment_mode=pakasir`, `pakasir_checkout_flow=api_qris`
 
-Default must be `hosted` so deploys do not change customer behavior until staging proves native QRIS.
+Default must stay QR Manual/hosted fallback so deploys do not change customer behavior until staging proves native QRIS.
 
 HTTP guardrails:
 
@@ -137,13 +138,13 @@ Keep issue bodies concise. Each issue should include the files to inspect, expli
 
 ## Rollout summary
 
-1. Ship code with `PAKASIR_CHECKOUT_FLOW=hosted`.
+1. Ship code with dashboard default `pakasir_checkout_flow=hosted`.
 2. Validate hosted flow still works.
-3. Enable `api_qris` only in staging first.
+3. Enable native QRIS only from the dashboard in staging first.
 4. Prove amount/fee/expiry semantics.
 5. Run a small live transaction only if sandbox cannot prove provider behavior.
-6. Enable production by changing `PAKASIR_CHECKOUT_FLOW=api_qris`.
-7. Roll back instantly with `PAKASIR_CHECKOUT_FLOW=hosted`.
+6. Enable production by choosing `QR Native Pakasir` in the dashboard.
+7. Roll back instantly by choosing `Hosted Pakasir` or `QR Manual` in the dashboard.
 
 Production deploy source remains manual GitHub Actions deploy from `main`. Production Compose project must remain `telegram-bot-prod`.
 

@@ -2,15 +2,23 @@
 
 namespace App\Models;
 
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['payment_mode', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'instructions', 'is_active'])]
+#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'instructions', 'is_active'])]
 class ManualPaymentSetting extends Model
 {
     protected function casts(): array
     {
         return ['is_active' => 'boolean'];
+    }
+
+    public function pakasirCheckoutFlow(): string
+    {
+        return PakasirCheckoutFlow::isAllowed($this->pakasir_checkout_flow)
+            ? $this->pakasir_checkout_flow
+            : PakasirCheckoutFlow::HOSTED;
     }
 
     public static function current(): ?self

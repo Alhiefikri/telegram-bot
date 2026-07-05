@@ -20,16 +20,10 @@ class PakasirClient implements PakasirProviderAdapter
     {
         $this->readiness->verification()->assertReady('Pakasir hosted payment URL cannot be created.');
 
-        $query = [
+        $query = array_filter([
             'order_id' => $payment->merchant_ref,
             'redirect' => config('services.pakasir.redirect_url'),
-        ];
-
-        if ((bool) config('services.pakasir.qris_only')) {
-            $query['qris_only'] = 1;
-        }
-
-        $query = array_filter($query, fn ($value) => $value !== null && $value !== '');
+        ], fn ($value) => $value !== null && $value !== '');
 
         return sprintf(
             '%s/pay/%s/%d?%s',

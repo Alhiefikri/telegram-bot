@@ -48,7 +48,7 @@ class PakasirGatewayTest extends TestCase
         $url = app(PakasirClient::class)->hostedPaymentUrl($payment);
 
         $this->assertSame(
-            'https://app.pakasir.com/pay/warung-ai/10000?order_id='.$payment->merchant_ref.'&redirect=https%3A%2F%2Fexample.test%2Fpayment%2Freturn&qris_only=1',
+            'https://app.pakasir.com/pay/warung-ai/10000?order_id='.$payment->merchant_ref.'&redirect=https%3A%2F%2Fexample.test%2Fpayment%2Freturn',
             $url,
         );
         $this->assertStringNotContainsString('api_key', $url);
@@ -412,35 +412,34 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame(0, PaymentEvent::count());
     }
 
-    public function test_production_validation_requires_slug_and_api_key_when_pakasir_mode_is_active(): void
+    public function test_production_validation_allows_missing_pakasir_credentials_until_dashboard_enables_pakasir(): void
     {
         config([
             'app.env' => 'production',
+            'app.debug' => false,
             'app.key' => 'base64:test-key',
             'app.url' => 'https://example.test',
             'services.telegram.token' => 'telegram-token',
             'services.telegram.webhook_secret' => 'telegram-secret',
-            'services.telegram.payment_mode' => 'pakasir',
             'services.pakasir.slug' => '',
             'services.pakasir.api_key' => '',
         ]);
         app()->detectEnvironment(fn () => 'production');
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Missing required production configuration: PAKASIR_SLUG, PAKASIR_API_KEY');
-
         (new AppServiceProvider(app()))->boot();
+
+        $this->assertTrue(true);
     }
 
-    public function test_production_validation_requires_https_pakasir_base_url_when_pakasir_mode_is_active(): void
+    public function test_production_validation_requires_https_pakasir_base_url_when_configured(): void
     {
         config([
             'app.env' => 'production',
+            'app.debug' => false,
             'app.key' => 'base64:test-key',
             'app.url' => 'https://example.test',
             'services.telegram.token' => 'telegram-token',
             'services.telegram.webhook_secret' => 'telegram-secret',
-            'services.telegram.payment_mode' => 'pakasir',
             'services.pakasir.slug' => 'warung-ai',
             'services.pakasir.api_key' => 'pakasir-secret',
             'services.pakasir.base_url' => 'http://app.pakasir.test',

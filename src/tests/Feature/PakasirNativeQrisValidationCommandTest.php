@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
@@ -18,17 +19,15 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_requires_native_staging_config_before_touching_payment_or_provider(): void
+    public function test_requires_native_dashboard_setting_before_touching_payment_or_provider(): void
     {
-        config()->set('services.telegram.payment_mode', 'manual');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
         config()->set('services.pakasir.slug', 'staging-store');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
 
         $this->artisan('pakasir:validate-native-qris', ['payment' => 'missing-payment'])
-            ->expectsOutputToContain('FAIL TELEGRAM_PAYMENT_MODE=pakasir - Configured value is manual.')
-            ->expectsOutputToContain('FAIL PAKASIR_CHECKOUT_FLOW=api_qris - Configured value is hosted.')
+            ->expectsOutputToContain('FAIL dashboard payment_mode=pakasir - Configured dashboard value is manual.')
+            ->expectsOutputToContain('FAIL dashboard pakasir_checkout_flow=api_qris - Configured dashboard value is hosted.')
             ->doesntExpectOutputToContain('pakasir-secret')
             ->assertFailed();
 
@@ -218,13 +217,16 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 
     private function configureNativePakasir(): void
     {
-        config()->set('services.telegram.payment_mode', 'pakasir');
-        config()->set('services.pakasir.checkout_flow', 'api_qris');
         config()->set('services.pakasir.slug', 'staging-store');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
         config()->set('services.pakasir.redirect_url', null);
-        config()->set('services.pakasir.qris_only', false);
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'is_active' => true,
+        ]);
     }
 
     private function pendingPakasirPayment(int $amount, string $merchantRef): Payment

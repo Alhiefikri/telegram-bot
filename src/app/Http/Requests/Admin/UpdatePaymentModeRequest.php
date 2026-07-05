@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
@@ -28,6 +29,7 @@ class UpdatePaymentModeRequest extends FormRequest
     {
         return [
             'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir'])],
+            'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === 'pakasir'), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
         ];
     }
 
@@ -39,6 +41,8 @@ class UpdatePaymentModeRequest extends FormRequest
         return [
             'payment_mode.required' => 'Pilih mode pembayaran.',
             'payment_mode.in' => 'Mode pembayaran tidak valid.',
+            'pakasir_checkout_flow.required' => 'Pilih jenis pembayaran Pakasir.',
+            'pakasir_checkout_flow.in' => 'Jenis pembayaran Pakasir tidak valid.',
         ];
     }
 
@@ -53,7 +57,8 @@ class UpdatePaymentModeRequest extends FormRequest
                     return;
                 }
 
-                $readiness = app(PakasirProviderReadiness::class)->checkout();
+                $checkoutFlow = (string) ($this->input('pakasir_checkout_flow') ?: PakasirCheckoutFlow::HOSTED);
+                $readiness = app(PakasirProviderReadiness::class)->checkout($checkoutFlow);
 
                 if (! $readiness->isReady()) {
                     $validator->errors()->add(

@@ -30,7 +30,6 @@ The command supplies safe dogfood defaults when the environment does not provide
 - `POSTGRES_PASSWORD=dogfood_password`
 - `TELEGRAM_BOT_TOKEN=benchmark-token`
 - `TELEGRAM_WEBHOOK_SECRET=benchmark-secret`
-- `TELEGRAM_PAYMENT_MODE=manual`
 - `APP_OPTIMIZE=true`
 - `SESSION_DRIVER=cookie`
 - `DOGFOOD_TIMING_ENABLED=true`

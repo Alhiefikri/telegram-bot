@@ -123,30 +123,12 @@ class AppServiceProvider extends ServiceProvider
             'TELEGRAM_WEBHOOK_SECRET' => config('services.telegram.webhook_secret'),
         ];
 
-        $pakasirReadiness = null;
-
-        if (config('services.telegram.payment_mode') === 'pakasir') {
-            $pakasirReadiness = $this->app->make(PakasirProviderReadiness::class)->checkout();
-            foreach ($pakasirReadiness->missing() as $label) {
-                $required[$label] = null;
-            }
-        }
-
-        $missing = array_keys(array_filter($required, fn ($value) => blank($value)));
-
-        if ($missing !== []) {
-            throw new RuntimeException('Missing required production configuration: '.implode(', ', $missing));
-        }
-
-        if ($pakasirReadiness !== null && $pakasirReadiness->invalid() !== []) {
-            throw new RuntimeException('Invalid production Pakasir configuration: '.implode(' ', $pakasirReadiness->invalid()));
-        }
-
         if ((bool) config('app.debug')) {
             throw new RuntimeException('APP_DEBUG must be false in production.');
         }
 
-        if (config('services.telegram.payment_mode') === 'pakasir' && ! str_starts_with((string) config('services.pakasir.base_url'), 'https://')) {
+        $pakasirBaseUrl = (string) config('services.pakasir.base_url', '');
+        if (! blank($pakasirBaseUrl) && ! str_starts_with($pakasirBaseUrl, 'https://')) {
             throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
         }
 

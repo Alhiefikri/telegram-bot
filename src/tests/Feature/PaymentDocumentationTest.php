@@ -20,16 +20,17 @@ class PaymentDocumentationTest extends TestCase
         $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
     }
 
-    public function test_env_examples_are_manual_first_while_pakasir_credentials_remain_available(): void
+    public function test_env_examples_keep_pakasir_credentials_without_mode_or_flow_switches(): void
     {
         $rootEnvExample = file_get_contents(base_path('../.env.example'));
         $appEnvExample = file_get_contents(base_path('.env.example'));
 
         foreach ([$rootEnvExample, $appEnvExample] as $envExample) {
-            $this->assertStringContainsString('TELEGRAM_PAYMENT_MODE=manual', $envExample);
+            $this->assertStringNotContainsString('TELEGRAM_PAYMENT_MODE=', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_QRIS_ONLY=', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_CHECKOUT_FLOW=', $envExample);
             $this->assertStringContainsString('PAKASIR_SLUG=', $envExample);
             $this->assertStringContainsString('PAKASIR_API_KEY=', $envExample);
-            $this->assertStringContainsString('PAKASIR_CHECKOUT_FLOW=hosted', $envExample);
             $this->assertMatchesRegularExpression('/^PAKASIR_REDIRECT_URL=$/m', $envExample);
             $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=https://example.com/thanks', $envExample);
             $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=${APP_URL}', $envExample);
