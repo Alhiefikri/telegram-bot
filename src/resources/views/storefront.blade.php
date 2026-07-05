@@ -1,19 +1,3 @@
-@php
-    use App\Storefront\StorefrontPresenter;
-
-    /** @var StorefrontPresenter $storefront */
-    $storefront = app(StorefrontPresenter::class);
-    $brand = $storefront->brand();
-    $copy = config('storefront');
-    $pageTitle = str_replace(':brand', $brand, $copy['meta']['title']);
-    $pageDescription = $copy['meta']['description'];
-    $canonicalUrl = url('/');
-    $supportHref = $storefront->supportHref();
-    $supportDestination = $storefront->supportDestination();
-    $categoriesWithProducts = $storefront->categoriesWithProducts($categories, $products);
-    $catalogProducts = $products;
-    $popularProducts = $storefront->popularProducts($products);
-@endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>

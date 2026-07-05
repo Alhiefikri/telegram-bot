@@ -26,10 +26,10 @@ class StorefrontProductPaymentController extends Controller
         $quantity = max(1, min((int) $request->integer('qty', 1), $availableStock));
         $subtotal = (int) $product->price_amount * $quantity;
 
-        return view('storefront.payment', [
-            'product' => $product,
-            'subtotal' => $subtotal,
-            'quantity' => $quantity,
-        ]);
+        return view('storefront.payment', $this->storefront->paymentPageViewData(
+            product: $product,
+            quantity: $quantity,
+            subtotal: $subtotal,
+        ));
     }
 }

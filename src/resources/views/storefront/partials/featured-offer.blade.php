@@ -2,19 +2,7 @@
     @if ($featuredProduct)
         @php
             $featuredStock = $storefront->stockAvailable($featuredProduct);
-            $featuredPayload = [
-                'id' => $featuredProduct->id,
-                'name' => $featuredProduct->name,
-                'descriptionSnippet' => $storefront->descriptionSnippet($featuredProduct),
-                'description' => $featuredProduct->description,
-                'price_amount' => $featuredProduct->price_amount,
-                'fake_discount_price' => $featuredProduct->fake_discount_price,
-                'stock' => $featuredStock,
-                'isAvailable' => $featuredStock > 0,
-                'paymentUrl' => route('storefront.products.payment', $featuredProduct),
-                'coverTheme' => $storefront->productCover($featuredProduct),
-                'imageUrl' => $storefront->publicStorageUrl($featuredProduct->image_path),
-            ];
+            $featuredPayload = $storefront->productModalPayload($featuredProduct, $featuredStock);
         @endphp
 
         <div class="neo-panel relative w-full overflow-hidden bg-[var(--sf-surface)] p-6 text-[var(--sf-ink)] sm:p-8" x-data="fomoTimer()">

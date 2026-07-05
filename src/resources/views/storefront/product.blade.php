@@ -1,18 +1,3 @@
-@php
-    use App\Storefront\StorefrontPresenter;
-
-    /** @var StorefrontPresenter $storefront */
-    $storefront = app(StorefrontPresenter::class);
-    $brand = $storefront->brand();
-    $copy = config('storefront');
-    $homeUrl = route('storefront.home');
-    $pageTitle = $product->name.' | '.$brand;
-    $pageDescription = $storefront->descriptionSnippet($product);
-    $canonicalUrl = route('storefront.products.show', $product);
-    $supportHref = $storefront->supportHref();
-    $supportDestination = $storefront->supportDestination();
-    $isAvailable = $stock > 0;
-@endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
@@ -29,9 +14,9 @@
                 </a>
 
                 @if (session('storefront_notice'))
-                    <div class="neo-panel mt-6 bg-[var(--sf-accent-soft)] p-4 text-sm font-black text-[var(--sf-ink)]">
+                    <x-storefront.notice class="mt-6">
                         {{ session('storefront_notice') }}
-                    </div>
+                    </x-storefront.notice>
                 @endif
 
                 <div class="mt-6 grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
@@ -47,12 +32,12 @@
                         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-40"></div>
                         <div class="relative z-10">
                             <div class="mb-5 flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]">
+                                <x-storefront.badge class="font-display text-sm normal-case">
                                     {{ $storefront->idr($product->price_amount) }}
-                                </span>
-                                <span class="rounded-full border-2 border-[var(--sf-border)] {{ $isAvailable ? 'bg-white text-[var(--sf-ink)]' : 'bg-[#c94856] text-white' }} px-3 py-1 text-xs font-black">
+                                </x-storefront.badge>
+                                <x-storefront.badge :tone="$isAvailable ? 'surface' : 'danger'" class="text-xs normal-case">
                                     {{ $isAvailable ? 'Stok: '.$stock : 'Stok habis' }}
-                                </span>
+                                </x-storefront.badge>
                             </div>
 
                             <h1 class="font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $product->name }}</h1>
@@ -73,18 +58,18 @@
 
                             <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                                 @if ($isAvailable)
-                                    <a href="{{ route('storefront.products.payment', $product) }}" class="neo-button inline-flex h-12 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
+                                    <x-storefront.button :href="route('storefront.products.payment', $product)" class="flex-1">
                                         Checkout via Admin
-                                    </a>
+                                    </x-storefront.button>
                                 @else
-                                    <span class="neo-button inline-flex h-12 flex-1 items-center justify-center bg-[#d69aae] px-5 text-sm font-black text-white">
+                                    <x-storefront.button variant="danger" class="flex-1 cursor-not-allowed opacity-80" disabled>
                                         Habis
-                                    </span>
+                                    </x-storefront.button>
                                 @endif
 
-                                <a href="{{ $storefront->productSupportLink($product) }}" class="neo-button inline-flex h-12 flex-1 items-center justify-center bg-[var(--sf-surface)] px-5 text-sm font-black text-[var(--sf-ink)]">
+                                <x-storefront.button :href="$storefront->productSupportLink($product)" variant="secondary" class="flex-1">
                                     Tanya Admin
-                                </a>
+                                </x-storefront.button>
                             </div>
                         </div>
                     </article>

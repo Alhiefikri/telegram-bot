@@ -14,9 +14,9 @@ class StorefrontProductController extends Controller
     {
         abort_unless($product->isPublicVisible(), 404);
 
-        return view('storefront.product', [
-            'product' => $product,
-            'stock' => $this->storefront->stockAvailable($product),
-        ]);
+        return view('storefront.product', $this->storefront->productPageViewData(
+            product: $product,
+            stock: $this->storefront->stockAvailable($product),
+        ));
     }
 }

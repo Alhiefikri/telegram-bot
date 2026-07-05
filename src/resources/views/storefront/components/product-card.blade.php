@@ -2,19 +2,7 @@
     $stock = $storefront->stockAvailable($product);
     $isAvailable = $stock > 0;
     $descriptionSnippet = $storefront->descriptionSnippet($product);
-    $productPayload = [
-        'id' => $product->id,
-        'name' => $product->name,
-        'descriptionSnippet' => $descriptionSnippet,
-        'description' => $product->description,
-        'price_amount' => $product->price_amount,
-        'fake_discount_price' => $product->fake_discount_price,
-        'stock' => $stock,
-        'isAvailable' => $isAvailable,
-        'paymentUrl' => route('storefront.products.payment', $product),
-        'coverTheme' => $storefront->productCover($product),
-        'imageUrl' => $storefront->publicStorageUrl($product->image_path),
-    ];
+    $productPayload = $storefront->productModalPayload($product, $stock);
 @endphp
 
 <a href="{{ route('storefront.products.show', $product) }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($productPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $product->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $product->category_id ?? 'lainnya' }}">

@@ -1,19 +1,3 @@
-@php
-    use App\Storefront\StorefrontPresenter;
-
-    /** @var StorefrontPresenter $storefront */
-    $storefront = app(StorefrontPresenter::class);
-    $brand = $storefront->brand();
-    $copy = config('storefront');
-    $homeUrl = route('storefront.home');
-    $pageTitle = 'Checkout via Telegram Admin | '.$brand;
-    $pageDescription = 'Lanjutkan checkout produk '.$product->name.' melalui Telegram admin agar order, payment, stok, dan receipt tercatat resmi.';
-    $canonicalUrl = route('storefront.products.payment', $product);
-    $supportHref = $storefront->supportHref();
-    $supportDestination = $storefront->supportDestination();
-    $adminUsername = $storefront->adminTelegramUsername();
-    $checkoutSupportLink = $storefront->checkoutSupportLink($product, $quantity, $subtotal);
-@endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
@@ -39,7 +23,7 @@
                     <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Halaman ini bukan halaman pembayaran. Admin akan membuat order resmi dulu, lalu memberi instruksi pembayaran yang tercatat di sistem.</p>
                 </div>
 
-                <div class="neo-panel mt-6 bg-[var(--sf-surface)] p-5">
+                <x-storefront.panel class="mt-6">
                     <dl class="space-y-3 text-sm font-bold">
                         <div class="flex items-center justify-between gap-4">
                             <dt class="text-[var(--sf-muted)]">Produk</dt>
@@ -54,9 +38,9 @@
                             <dd class="font-display text-2xl font-black text-[var(--sf-ink)]">{{ $storefront->idr($subtotal) }}</dd>
                         </div>
                     </dl>
-                </div>
+                </x-storefront.panel>
 
-                <section class="neo-panel mt-5 bg-[var(--sf-surface)] p-5" aria-label="Alur checkout resmi">
+                <x-storefront.panel as="section" class="mt-5" aria-label="Alur checkout resmi">
                     <div class="flex items-center gap-3">
                         <span class="grid h-10 w-10 shrink-0 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-display text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">!</span>
                         <div>
@@ -70,17 +54,16 @@
                         <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3"><strong class="text-[var(--sf-ink)]">2.</strong> Admin mencatat checkout lewat flow resmi agar order, payment, stok, dan receipt durable.</li>
                         <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3"><strong class="text-[var(--sf-ink)]">3.</strong> Ikuti instruksi pembayaran resmi yang dikirim setelah order pending dibuat.</li>
                     </ol>
-                </section>
+                </x-storefront.panel>
 
-                <div class="neo-panel mt-4 bg-[var(--sf-accent-soft)] p-4 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
+                <x-storefront.notice class="mt-4 font-semibold text-[var(--sf-muted)]">
                     <p class="font-black text-[var(--sf-ink)]">Role halaman: handoff support</p>
                     <p>Web storefront hanya membantu memilih produk. Checkout produksi tetap melewati modul order/payment/inventory supaya Paid Order Proof Event dan receipt tidak bisa terlewati.</p>
-                </div>
+                </x-storefront.notice>
 
-                <a href="{{ $checkoutSupportLink }}" target="_blank" rel="noopener noreferrer" data-telegram-link data-icon="telegram" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center gap-2 bg-[#2d9cff] px-5 text-sm font-black text-white">
-                    @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                    <span>Buka Telegram Admin {{ '@'.$adminUsername }}</span>
-                </a>
+                <x-storefront.telegram-link :href="$checkoutSupportLink" variant="blue" class="mt-4 w-full">
+                    Buka Telegram Admin {{ '@'.$adminUsername }}
+                </x-storefront.telegram-link>
             </section>
         </main>
 
