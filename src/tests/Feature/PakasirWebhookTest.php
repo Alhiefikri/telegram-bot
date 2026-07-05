@@ -23,6 +23,7 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -273,21 +274,45 @@ class PakasirWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_replayed_matching_pakasir_payload_does_not_repeat_provider_lookup_or_event_logging(): void
+    public function test_completed_retry_after_pending_provider_detail_requeries_pakasir_and_processes_payment(): void
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
         Queue::fake();
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
         $payment = $order->payments()->firstOrFail();
-        $this->fakeDetail($payment->merchant_ref, $payment->amount, ['status' => 'pending']);
         $payload = $this->payload($payment->merchant_ref, $payment->amount);
+        $detailStatuses = ['pending', 'completed'];
+        Http::fake([
+            'https://app.pakasir.com/api/transactiondetail*' => function () use ($payment, &$detailStatuses) {
+                return Http::response([
+                    'transaction' => [
+                        'project' => 'warung-ai',
+                        'amount' => $payment->amount,
+                        'order_id' => $payment->merchant_ref,
+                        'status' => array_shift($detailStatuses) ?? 'completed',
+                    ],
+                ], 200);
+            },
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
 
         $this->postJson('/api/webhook/pakasir', $payload)->assertUnprocessable();
-        $this->postJson('/api/webhook/pakasir', array_merge($payload, ['completed_at' => now()->addSecond()->toISOString()]))->assertAccepted();
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
         $this->assertSame(1, PaymentEvent::count());
-        Http::assertSentCount(1);
+        $this->assertSame(0, PaymentEvent::whereNotNull('processed_at')->count());
+        Queue::assertNothingPushed();
+
+        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
+
+        $this->assertCount(2, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(2, PaymentEvent::count());
+        $this->assertSame(1, PaymentEvent::whereNotNull('processed_at')->count());
+        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
     }
 
     public function test_noisy_pakasir_payload_is_rejected_before_audit_logging_or_provider_lookup(): void
@@ -361,11 +386,18 @@ class PakasirWebhookTest extends TestCase
         $this->assertNotNull($event->processed_at);
     }
 
-    public function test_pakasir_reconciliation_is_scheduled_when_configured(): void
+    public function test_pakasir_reconciliation_is_scheduled_every_minute_ahead_of_pending_order_expiry(): void
     {
-        $this->artisan('schedule:list')
-            ->expectsOutputToContain('pakasir:reconcile --chunk=100')
-            ->assertSuccessful();
+        $exitCode = Artisan::call('schedule:list');
+        $output = Artisan::output();
+
+        $reconcilePattern = '/^\s*\* \* \* \* \*\s+php artisan pakasir:reconcile --chunk=100\b/m';
+        $expirePendingPattern = '/^\s*\* \* \* \* \*\s+php artisan orders:expire-pending\b/m';
+
+        $this->assertSame(0, $exitCode);
+        $this->assertSame(1, preg_match($reconcilePattern, $output, $reconcileMatches, PREG_OFFSET_CAPTURE));
+        $this->assertSame(1, preg_match($expirePendingPattern, $output, $expirePendingMatches, PREG_OFFSET_CAPTURE));
+        $this->assertLessThan($expirePendingMatches[0][1], $reconcileMatches[0][1]);
     }
 
     public function test_reconcile_command_skips_mismatches_without_mutating_order(): void

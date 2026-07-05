@@ -52,16 +52,29 @@
                         >
                     </div>
 
-                    <div>
+                    <div x-data="{ showPassword: false }">
                         <label for="password" class="font-display text-xs font-black uppercase tracking-wider text-neo-ink">Password</label>
-                        <input
-                            id="password"
-                            name="password"
-                            type="password"
-                            autocomplete="current-password"
-                            class="mt-2 w-full rounded-[1rem] border-[3px] border-neo-ink bg-white px-4 py-3 text-sm font-bold text-neo-ink outline-none transition focus:shadow-[0_0_0_4px_rgba(135,88,222,0.18)]"
-                            placeholder="••••••••"
-                        >
+                        <div class="relative mt-2">
+                            <input
+                                id="password"
+                                name="password"
+                                :type="showPassword ? 'text' : 'password'"
+                                type="password"
+                                autocomplete="current-password"
+                                class="w-full rounded-[1rem] border-[3px] border-neo-ink bg-white px-4 py-3 pr-32 text-sm font-bold text-neo-ink outline-none transition focus:shadow-[0_0_0_4px_rgba(135,88,222,0.18)]"
+                                placeholder="••••••••"
+                            >
+                            <button
+                                type="button"
+                                class="absolute bottom-2 right-2 top-2 inline-flex min-w-24 items-center justify-center rounded-[0.75rem] border-[2px] border-neo-ink bg-[#f2da3d] px-3 font-display text-[11px] font-black uppercase tracking-wide text-neo-ink shadow-[2px_2px_0_0_#050505] transition hover:-translate-y-0.5 focus:outline-none focus:shadow-[0_0_0_4px_rgba(135,88,222,0.22)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                                aria-controls="password"
+                                :aria-label="showPassword ? 'Sembunyikan password' : 'Lihat password'"
+                                :aria-pressed="showPassword.toString()"
+                                @click="showPassword = ! showPassword"
+                            >
+                                <span x-text="showPassword ? 'Sembunyikan' : 'Lihat'">Lihat</span>
+                            </button>
+                        </div>
                     </div>
 
                     <label class="flex items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-[#ede5fa] px-4 py-3 text-sm font-bold text-neo-ink shadow-[3px_3px_0_0_#050505]">

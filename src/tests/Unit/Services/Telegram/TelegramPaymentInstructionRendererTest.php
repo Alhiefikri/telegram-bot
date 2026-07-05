@@ -19,17 +19,28 @@ class TelegramPaymentInstructionRendererTest extends TestCase
 
     private RecordingQrCodeRenderer $qrCodes;
 
+    private string $originalTimezone;
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        config(['app.timezone' => 'Asia/Jakarta']);
+        $this->originalTimezone = date_default_timezone_get();
+        config()->set('app.timezone', 'Asia/Jakarta');
+        date_default_timezone_set('Asia/Jakarta');
 
         $this->qrCodes = new RecordingQrCodeRenderer;
         $this->instance(TelegramQrCodeRenderer::class, $this->qrCodes);
     }
 
-    public function test_hosted_pakasir_instruction_uses_hosted_url_qr_shared_caption_pieces_and_website_button(): void
+    protected function tearDown(): void
+    {
+        date_default_timezone_set($this->originalTimezone);
+
+        parent::tearDown();
+    }
+
+    public function test_hosted_pakasir_instruction_uses_hosted_url_qr_shared_caption_pieces_and_buyer_actions(): void
     {
         $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
         $order = $this->orderWithItems($expiresAt);
@@ -44,9 +55,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertSame([$paymentUrl], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentUrl, $instruction->photoContents);
         $this->assertSame('pakasir-PKS-HOSTED-103.png', $instruction->filename);
-        $this->assertSame([
-            'inline_keyboard' => [[['text' => '💳 Bayar via Website', 'url' => $paymentUrl]]],
-        ], $instruction->replyMarkup);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl);
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
             '📦 Produk: Sourdough Starter x2, Kefir Kit',
@@ -57,7 +66,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.', $instruction->caption());
     }
 
-    public function test_native_qris_instruction_uses_payment_number_qr_payable_caption_pieces_and_website_fallback_button(): void
+    public function test_native_qris_instruction_uses_payment_number_qr_payable_caption_pieces_and_buyer_actions(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
         $payment = Payment::factory()->for($order)->create([
@@ -86,9 +95,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertSame([$paymentNumber], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentNumber, $instruction->photoContents);
         $this->assertSame('pakasir-qris-PKS-QRIS-103.png', $instruction->filename);
-        $this->assertSame([
-            'inline_keyboard' => [[['text' => '💳 Bayar via Website', 'url' => $paymentUrl]]],
-        ], $instruction->replyMarkup);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl);
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
             '📦 Produk: Sourdough Starter x2, Kefir Kit',
@@ -164,8 +171,44 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     private function assertCaptionIncludes(TelegramPaymentInstruction $instruction, array $expectedLines): void
     {
         foreach ($expectedLines as $expectedLine) {
-            $this->assertContains($expectedLine, $instruction->captionLines());
+            $this->assertContains($expectedLine, $instruction->captionLines(), "Caption lines:\n".$instruction->caption());
         }
+    }
+
+    private function assertPakasirActions(TelegramPaymentInstruction $instruction, Order $order, string $paymentUrl): void
+    {
+        $rows = $instruction->replyMarkup['inline_keyboard'] ?? [];
+        $buttons = array_merge(...$rows);
+
+        $this->assertTrue(
+            $this->hasButton($buttons, fn (array $button): bool => ($button['url'] ?? null) === $paymentUrl
+                && str_contains((string) ($button['text'] ?? ''), 'Bayar via Website')),
+            'Expected a Pakasir website payment button.',
+        );
+        $this->assertTrue(
+            $this->hasButton($buttons, fn (array $button): bool => ($button['callback_data'] ?? null) === 'order:'.$order->invoice_number
+                && str_contains((string) ($button['text'] ?? ''), 'Cek Pembayaran')),
+            'Expected a check-payment button that refreshes the order detail.',
+        );
+        $this->assertTrue(
+            $this->hasButton($buttons, fn (array $button): bool => ($button['callback_data'] ?? null) === 'buyer:cancel-pending:'.$order->id
+                && str_contains((string) ($button['text'] ?? ''), 'Batalkan Order')),
+            'Expected a buyer cancel-pending button.',
+        );
+    }
+
+    /**
+     * @param list<array{text?: string, url?: string, callback_data?: string}> $buttons
+     */
+    private function hasButton(array $buttons, callable $predicate): bool
+    {
+        foreach ($buttons as $button) {
+            if ($predicate($button)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

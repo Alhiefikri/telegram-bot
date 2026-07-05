@@ -48,7 +48,6 @@ return [
         'qris_only' => env('PAKASIR_QRIS_ONLY', false),
         'checkout_flow' => env('PAKASIR_CHECKOUT_FLOW', 'hosted'),
         'webhook_rate_limit_per_minute' => env('PAKASIR_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
-        'webhook_replay_ttl_minutes' => env('PAKASIR_WEBHOOK_REPLAY_TTL_MINUTES', 10),
         'status_refresh_rate_limit_per_minute' => env('PAKASIR_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
     ],
 

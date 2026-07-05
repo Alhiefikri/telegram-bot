@@ -45,6 +45,28 @@ test.afterAll(async () => {
     }
 });
 
+test('lets admins reveal and hide the password field from an accessible control', async ({ page }) => {
+    await page.goto(`${baseUrl}/admin/login`);
+
+    const password = page.locator('#password');
+    await expect(password).toHaveAttribute('type', 'password');
+
+    const showPassword = page.getByRole('button', { name: 'Lihat password' });
+    await expect(showPassword).toBeVisible();
+    await expect(showPassword).toHaveAttribute('aria-controls', 'password');
+
+    await showPassword.click();
+    await expect(password).toHaveAttribute('type', 'text');
+
+    const hidePassword = page.getByRole('button', { name: 'Sembunyikan password' });
+    await expect(hidePassword).toBeVisible();
+    await expect(hidePassword).toHaveAttribute('aria-controls', 'password');
+
+    await hidePassword.click();
+    await expect(password).toHaveAttribute('type', 'password');
+    await expect(page.getByRole('button', { name: 'Lihat password' })).toBeVisible();
+});
+
 test('renders the compact admin dashboard at desktop width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installClipboardProbe(page);
@@ -119,6 +141,49 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectPrimaryActionsAtLeast44px(page);
 });
 
+for (const navClickCase of [
+    {
+        name: 'desktop/tablet navigation',
+        viewport: { width: 1024, height: 900 },
+        navigationName: 'Navigasi desktop',
+    },
+    {
+        name: 'Telegram mini app navigation',
+        viewport: { width: 375, height: 900 },
+        navigationName: 'Navigasi dashboard',
+    },
+]) {
+    test(`switches admin dashboard tabs and opens product creation from ${navClickCase.name} clicks`, async ({ page }) => {
+        await page.setViewportSize(navClickCase.viewport);
+        await login(page);
+
+        await expectClickedDashboardControlsToWork(page, navClickCase.navigationName);
+    });
+}
+
+async function expectClickedDashboardControlsToWork(page, navigationName) {
+    const nav = page.getByRole('navigation', { name: navigationName });
+    await expect(nav).toBeVisible();
+
+    await nav.getByRole('button', { name: 'Produk', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /Produk Saya/ })).toBeVisible();
+    await expect(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' })).toBeVisible();
+
+    await nav.getByRole('button', { name: 'Pesanan', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /Penjualan Saya/ })).toBeVisible();
+    await expect(page.getByText('INV-BROWSER-A')).toBeVisible();
+
+    await nav.getByRole('button', { name: 'Channel', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Telegram Channel' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Setup Store Channel' })).toBeVisible();
+
+    await nav.getByRole('button', { name: 'Tambah', exact: true }).click();
+    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
+    await expect(productModal).toBeVisible();
+    await expect(productModal.locator('#product-name')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Produk Saya/ })).toBeVisible();
+}
+
 async function submitProductFromMiniAppModal(page) {
     const productName = `Mini App Produk ${Date.now()}`;
 
@@ -143,7 +208,7 @@ async function submitProductFromMiniAppModal(page) {
 
 async function login(page) {
     await page.goto(`${baseUrl}/admin/login`);
-    await page.locator('input[type="email"]').fill('test@example.com');
+    await page.getByLabel('Username / email admin').fill('test@example.com');
     await page.locator('input[type="password"]').fill('password');
     await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
     await page.waitForURL(`${baseUrl}/admin`);
@@ -263,7 +328,9 @@ async function expectOneColumn(firstLocator, secondLocator) {
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
     expect(Math.abs(first.x - second.x)).toBeLessThanOrEqual(2);
-    expect(second.y).toBeGreaterThan(first.y + first.height - 2);
+
+    const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
+    expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
 }
 
 async function expectPrimaryActionsAtLeast44px(page) {

@@ -121,8 +121,11 @@ class Phase8HardeningTest extends TestCase
         $nginx = file_get_contents(base_path('../nginx/default.conf'));
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
 
+        $this->assertStringContainsString('resolver 127.0.0.11 valid=10s ipv6=off;', $nginx);
+        $this->assertStringContainsString('set $php_upstream app:9000;', $nginx);
         $this->assertStringContainsString('location = /', $nginx);
-        $this->assertStringContainsString('fastcgi_pass app:9000;', $nginx);
+        $this->assertStringContainsString('fastcgi_pass $php_upstream;', $nginx);
+        $this->assertStringNotContainsString('fastcgi_pass app:9000;', $nginx);
         $this->assertStringContainsString('fastcgi_param REQUEST_URI /;', $nginx);
         $this->assertStringNotContainsString('try_files /storefront/index.html /index.php?$query_string;', $nginx);
         $this->assertStringContainsString('rm -f public/storefront/index.html', $entrypoint);

@@ -85,6 +85,7 @@ class TelegramPaymentInstructionRenderer
         $lines[] = '📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.';
         $lines[] = '';
         $lines[] = '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
+        $lines[] = 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($paymentUrl),
@@ -116,6 +117,7 @@ class TelegramPaymentInstructionRenderer
         $lines[] = '🌐 Kalau QR tidak bisa discan, tap tombol Bayar via Website sebagai fallback.';
         $lines[] = '';
         $lines[] = '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
+        $lines[] = 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($transaction->paymentNumber()),
@@ -196,6 +198,7 @@ class TelegramPaymentInstructionRenderer
         return [
             'inline_keyboard' => [
                 [['text' => '💳 Bayar via Website', 'url' => $paymentUrl]],
+                [['text' => '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
                 [['text' => '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
             ],
         ];

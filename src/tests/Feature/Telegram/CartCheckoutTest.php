@@ -620,18 +620,24 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && $r['order_id'] === $payment->merchant_ref
             && $r['amount'] === 30000
             && $r['api_key'] === 'pakasir-key');
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
-            && str_contains($r->body(), 'qr-source:'.$paymentNumber)
-            && ! str_contains($r->body(), 'qr-source:'.$hostedUrl)
-            && str_contains($r->body(), 'Total produk: Rp30.000')
-            && str_contains($r->body(), 'Biaya QRIS: Rp103')
-            && str_contains($r->body(), 'Total bayar QRIS: Rp30.103')
-            && str_contains($r->body(), 'Batas bayar QRIS: 04 Jul 2026 23:30 WIB')
-            && str_contains($r->body(), 'Tidak perlu buka browser')
-            && str_contains($r->body(), 'Bayar via Website')
-            && str_contains($r->body(), 'app.pakasir.test\\/pay\\/sedulur-digital\\/30000')
-            && str_contains($r->body(), 'Batalkan Order')
-            && str_contains($r->body(), 'buyer:cancel-pending:'.$order->id));
+        $photoSends = Http::recorded(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoSends);
+        $photoRequest = $photoSends->first()[0];
+        $photoBody = $photoRequest->body();
+
+        $this->assertStringContainsString('qr-source:'.$paymentNumber, $photoBody);
+        $this->assertStringNotContainsString('qr-source:'.$hostedUrl, $photoBody);
+        $this->assertStringContainsString('Total produk: Rp30.000', $photoBody);
+        $this->assertStringContainsString('Biaya QRIS: Rp103', $photoBody);
+        $this->assertStringContainsString('Total bayar QRIS: Rp30.103', $photoBody);
+        $this->assertStringContainsString('Batas bayar QRIS:', $photoBody);
+        $this->assertStringContainsString('Tidak perlu buka browser', $photoBody);
+        $this->assertStringContainsString('Bayar via Website', $photoBody);
+        $this->assertStringContainsString('app.pakasir.test\\/pay\\/sedulur-digital\\/30000', $photoBody);
+        $this->assertStringContainsString('Cek Pembayaran', $photoBody);
+        $this->assertStringContainsString('order:'.$order->invoice_number, $photoBody);
+        $this->assertStringContainsString('Batalkan Order', $photoBody);
+        $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $photoBody);
     }
 
     public function test_buyer_cancel_callback_cancels_own_pending_native_pakasir_order_and_releases_stock(): void

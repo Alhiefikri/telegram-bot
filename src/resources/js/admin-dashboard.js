@@ -1,6 +1,22 @@
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = 'Tidak ada file yang dipilih';
 
+const emptyProductForm = () => ({
+    productModalMode: 'create',
+    productFormMethod: '',
+    productId: null,
+    productName: '',
+    productPrice: '',
+    productFakeDiscountPrice: '',
+    productCategoryId: '',
+    productDescription: '',
+    productFeatures: '',
+    productSpecifications: '',
+    productIsActive: true,
+    productImageUrl: '',
+    productImageFileName: EMPTY_IMAGE_FILE_NAME,
+});
+
 const STOCK_GROUPS = [
     {
         key: 'ready',
