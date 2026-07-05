@@ -66,13 +66,29 @@ class AppServiceProvider extends ServiceProvider
         }
 
         RateLimiter::for('telegram', function (Request $request) {
+            $limit = (int) config('services.telegram.webhook_rate_limit_per_minute', 120);
+
+            if (! $this->hasTrustedTelegramWebhookSecret($request)) {
+                $source = $request->ip() ?: 'unknown';
+
+                return [
+                    Limit::perMinute($limit)->by('telegram:webhook:bad-secret:global'),
+                    Limit::perMinute($limit)->by('telegram:webhook:bad-secret:source:'.$source),
+                ];
+            }
+
             $payload = $request->all();
-            $key = Arr::get($payload, 'message.from.id')
+            $identity = Arr::get($payload, 'message.from.id')
                 ?? Arr::get($payload, 'callback_query.from.id')
                 ?? Arr::get($payload, 'message.chat.id')
-                ?? $request->ip();
+                ?? $request->ip()
+                ?? 'unknown';
 
-            return Limit::perMinute((int) config('services.telegram.webhook_rate_limit_per_minute', 120))->by('telegram:'.$key);
+            if (! is_scalar($identity)) {
+                $identity = $request->ip() ?: 'unknown';
+            }
+
+            return Limit::perMinute($limit)->by('telegram:webhook:identity:'.(string) $identity);
         });
 
         RateLimiter::for('pakasir-webhook', function (Request $request) {
@@ -85,6 +101,14 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+    }
+
+    private function hasTrustedTelegramWebhookSecret(Request $request): bool
+    {
+        $secret = (string) config('services.telegram.webhook_secret');
+
+        return $secret === ''
+            || hash_equals($secret, (string) $request->header('X-Telegram-Bot-Api-Secret-Token'));
     }
 
     private function validateProductionConfiguration(): void

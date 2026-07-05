@@ -115,6 +115,25 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(121, '/start'))->assertTooManyRequests();
     }
 
+    public function test_bad_secret_webhook_requests_from_same_ip_share_rate_limit_before_payload_identity(): void
+    {
+        config()->set('services.telegram.webhook_rate_limit_per_minute', 1);
+        Bus::fake();
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.113']);
+
+        $this->postTelegramWebhook(
+            $this->messageUpdate(113001, '/start', ['id' => 9001], 9101),
+            'bad-secret-one'
+        )->assertForbidden();
+        $this->postTelegramWebhook(
+            $this->messageUpdate(113002, '/start', ['id' => 9002], 9102),
+            'bad-secret-two'
+        )->assertTooManyRequests();
+
+        $this->assertSame(0, TelegramUpdate::count());
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
+    }
+
     public function test_dogfood_timing_is_disabled_by_default(): void
     {
         Log::spy();
