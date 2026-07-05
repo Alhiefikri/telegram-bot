@@ -13,11 +13,15 @@ class TelegramCommunityGate
 
     public function __construct(private TelegramBotClient $bot, private TelegramMenuIntents $menu) {}
 
-    public function allows(Customer $customer, string $chatId): bool
+    public function allows(Customer $customer): bool
     {
         $setting = StoreChannelSetting::current();
-        if (! $this->enabledWithValidSetup($setting)) {
+        if (! $setting->community_gate_enabled) {
             return true;
+        }
+
+        if (! $this->hasValidatedSetup($setting)) {
+            return false;
         }
 
         return $this->isMember((string) $setting->telegram_chat_id, (int) $customer->telegram_id);
@@ -25,7 +29,7 @@ class TelegramCommunityGate
 
     public function ensureAllowedOrPrompt(Customer $customer, string $chatId): bool
     {
-        if ($this->allows($customer, $chatId)) {
+        if ($this->allows($customer)) {
             return true;
         }
 
@@ -36,7 +40,7 @@ class TelegramCommunityGate
 
     public function verify(Customer $customer, string $chatId): bool
     {
-        if (! $this->allows($customer, $chatId)) {
+        if (! $this->allows($customer)) {
             $this->sendOrReusePrompt($customer, $chatId);
 
             return false;
@@ -61,10 +65,9 @@ class TelegramCommunityGate
         return true;
     }
 
-    private function enabledWithValidSetup(StoreChannelSetting $setting): bool
+    private function hasValidatedSetup(StoreChannelSetting $setting): bool
     {
-        return $setting->community_gate_enabled
-            && filled($setting->telegram_chat_id)
+        return filled($setting->telegram_chat_id)
             && $setting->last_test_success === true;
     }
 
@@ -73,8 +76,8 @@ class TelegramCommunityGate
         try {
             $member = $this->bot->getChatMember($channelChatId, $telegramUserId);
         } catch (Throwable) {
-            // Treat membership lookup failures as invalid Store Channel setup and fail open.
-            return true;
+            // Community gate is an access-control boundary: when Telegram cannot prove membership, fail closed.
+            return false;
         }
 
         $status = (string) ($member['result']['status'] ?? '');
@@ -100,7 +103,7 @@ class TelegramCommunityGate
         }
         $keyboard[0][] = ['text' => '✅ Saya Sudah Join', 'callback_data' => self::VERIFY_CALLBACK];
 
-        $message = $this->bot->sendMessage($chatId, "🔒 Join channel dulu ya\n━━━━━━━━━━━━━━\nBiar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu gabung ke Store Channel dulu.\n\nKalau sudah join, tekan tombol “Saya sudah join”.", [
+        $message = $this->bot->sendMessage($chatId, "🔒 Join channel dulu ya\n━━━━━━━━━━━━━━\nBiar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu join channel Store Channel dulu.\n\nKalau sudah join tapi status kamu belum bisa dicek, tekan tombol “Saya sudah join” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.", [
             'inline_keyboard' => $keyboard,
         ]);
 

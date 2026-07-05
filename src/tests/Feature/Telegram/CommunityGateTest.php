@@ -38,15 +38,35 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
-    public function test_members_are_allowed_and_invalid_setup_fails_open(): void
+    public function test_invalid_validated_channel_setup_fails_closed_with_retry_guidance(): void
     {
-        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'community_gate_enabled' => true, 'telegram_chat_id' => null, 'last_test_success' => false]);
-        $this->fakeTelegramHttp();
+        foreach ([
+            'missing chat id' => ['telegram_chat_id' => null, 'last_test_success' => true, 'update_id' => 10],
+            'failed validation' => ['telegram_chat_id' => '-100123', 'last_test_success' => false, 'update_id' => 11],
+        ] as $case => $setup) {
+            StoreChannelSetting::query()->delete();
+            TelegramCommunityGatePrompt::query()->delete();
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'community_gate_enabled' => true,
+                'telegram_chat_id' => $setup['telegram_chat_id'],
+                'last_test_success' => $setup['last_test_success'],
+            ]);
+            $this->fakeTelegramHttp();
 
-        $this->postTelegramWebhook($this->messageUpdate(10, '/katalog'))->assertOk();
+            $this->postTelegramWebhook($this->messageUpdate($setup['update_id'], '/katalog', [], $setup['update_id']))->assertOk();
 
-        $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Produk'));
+            $this->assertSame(1, TelegramCommunityGatePrompt::count(), "{$case} should create a community gate prompt.");
+            $this->assertSame(0, $this->sentCount('/sendMessage', 'Produk'), "{$case} should not send catalog or product copy.");
+            Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+                && $r['chat_id'] === (string) $setup['update_id']
+                && str_contains($r['text'] ?? '', 'belum bisa dicek')
+                && str_contains($r['text'] ?? '', 'join channel')
+                && str_contains($r['text'] ?? '', 'coba lagi')
+                && str_contains($r['text'] ?? '', 'nanti')
+                && str_contains(json_encode($r->data()), 'Saya Sudah Join')
+                && str_contains(json_encode($r->data()), 'community_gate:verify'));
+        }
     }
 
     public function test_member_administrator_creator_and_restricted_member_statuses_are_allowed(): void
@@ -69,7 +89,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_get_chat_member_failure_fails_open_to_avoid_bad_setup_lockout(): void
+    public function test_get_chat_member_failure_fails_closed_with_retry_guidance(): void
     {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
@@ -88,8 +108,15 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(20, '/katalog'))->assertOk();
 
-        $this->assertSame(0, TelegramCommunityGatePrompt::count());
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'] ?? '', 'Produk'));
+        $this->assertSame(1, TelegramCommunityGatePrompt::count());
+        $this->assertSame(0, $this->sentCount('/sendMessage', 'Produk'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'] ?? '', 'belum bisa dicek')
+            && str_contains($r['text'] ?? '', 'join channel')
+            && str_contains($r['text'] ?? '', 'coba lagi')
+            && str_contains($r['text'] ?? '', 'nanti')
+            && str_contains(json_encode($r->data()), 'Saya Sudah Join')
+            && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
     public function test_successful_verification_deletes_prompt_and_sends_welcome_menu(): void
