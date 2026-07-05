@@ -10,9 +10,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AuthorizeAdminAccess
 {
-    public function __construct(private readonly AdminAccessAuthorizerInterface $adminAccess)
-    {
-    }
+    public function __construct(private readonly AdminAccessAuthorizerInterface $adminAccess) {}
 
     public function handle(Request $request, Closure $next): Response
     {

@@ -13,7 +13,7 @@ class TelegramPaymentInstructionRenderer
     public function __construct(private TelegramQrCodeRenderer $qrCodes) {}
 
     /**
-     * @param array{label: string, name: string} $paymentOption
+     * @param  array{label: string, name: string}  $paymentOption
      */
     public function manual(Order $order, array $paymentOption, string $supportUsername): TelegramPaymentInstruction
     {

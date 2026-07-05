@@ -166,7 +166,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     }
 
     /**
-     * @param list<string> $expectedLines
+     * @param  list<string>  $expectedLines
      */
     private function assertCaptionIncludes(TelegramPaymentInstruction $instruction, array $expectedLines): void
     {
@@ -198,7 +198,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     }
 
     /**
-     * @param list<array{text?: string, url?: string, callback_data?: string}> $buttons
+     * @param  list<array{text?: string, url?: string, callback_data?: string}>  $buttons
      */
     private function hasButton(array $buttons, callable $predicate): bool
     {

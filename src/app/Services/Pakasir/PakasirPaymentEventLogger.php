@@ -35,5 +35,4 @@ class PakasirPaymentEventLogger
             'received_at' => now(),
         ]);
     }
-
 }

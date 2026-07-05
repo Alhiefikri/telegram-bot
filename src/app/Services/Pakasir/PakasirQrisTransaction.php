@@ -145,5 +145,4 @@ readonly class PakasirQrisTransaction
     {
         return preg_replace('/\.(\d{6})\d+(Z|[+-]\d{2}:\d{2})$/', '.$1$2', $value) ?? $value;
     }
-
 }

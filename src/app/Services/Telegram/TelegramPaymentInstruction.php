@@ -5,8 +5,8 @@ namespace App\Services\Telegram;
 final readonly class TelegramPaymentInstruction
 {
     /**
-     * @param list<string> $captionLines
-     * @param array<string, mixed> $replyMarkup
+     * @param  list<string>  $captionLines
+     * @param  array<string, mixed>  $replyMarkup
      */
     public function __construct(
         public string $photoContents,
