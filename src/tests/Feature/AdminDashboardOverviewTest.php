@@ -206,7 +206,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame(route('storefront.home'), $data['statsTab']['storeLink']['url']);
         $this->assertSame('manual', $data['statsTab']['paymentControl']['mode']);
         $this->assertFalse($data['statsTab']['paymentControl']['is_pakasir_enabled']);
-        $this->assertSame('NONAKTIF', $data['statsTab']['paymentControl']['status_badge']['label']);
+        $this->assertSame('MANUAL', $data['statsTab']['paymentControl']['status_badge']['label']);
         $this->assertTrue($data['statsTab']['paymentControl']['can_manage']);
         $this->assertSame(['gmv', 'saldo', 'orders', 'sales_proof_posts', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
         $this->assertSame(['blue', 'emerald', 'amber', 'emerald', 'emerald'], array_column($data['statsTab']['cards'], 'tone'));

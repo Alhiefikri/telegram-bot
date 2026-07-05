@@ -123,7 +123,7 @@ final class AdminDashboardStatsData
         };
         $statusBadge = match (true) {
             $isPakasirRequestedButUnavailable => 'PAKASIR BELUM SIAP',
-            ! $isPakasirEnabled => 'NONAKTIF',
+            ! $isPakasirEnabled => 'MANUAL',
             $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'NATIVE QRIS',
             default => 'HOSTED',
         };
