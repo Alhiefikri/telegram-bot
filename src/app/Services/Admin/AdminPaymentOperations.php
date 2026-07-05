@@ -14,6 +14,12 @@ use InvalidArgumentException;
 
 class AdminPaymentOperations
 {
+    private const RECONCILABLE_PAYMENT_STATUSES = [
+        PaymentStatus::Pending,
+        PaymentStatus::Expired,
+        PaymentStatus::Failed,
+    ];
+
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly PakasirProviderAdapter $pakasirClient,
@@ -24,7 +30,7 @@ class AdminPaymentOperations
     public function canReconcile(Payment $payment): bool
     {
         return $payment->provider === 'pakasir'
-            && $payment->status === PaymentStatus::Pending
+            && in_array($payment->status, self::RECONCILABLE_PAYMENT_STATUSES, true)
             && filled($payment->merchant_ref)
             && $this->pakasirReadiness->verification()->isReady();
     }
@@ -32,12 +38,12 @@ class AdminPaymentOperations
     public function reconcile(Payment $payment, ?User $user = null, ?string $ip = null): PaymentEvent
     {
         if (! $this->canReconcile($payment)) {
-            throw new InvalidArgumentException('Only supported pending payments with provider identifiers can be reconciled.');
+            throw new InvalidArgumentException('Only supported Pakasir payments with provider identifiers can be reconciled.');
         }
 
         $event = match ($payment->provider) {
             'pakasir' => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
-            default => throw new InvalidArgumentException('Only supported pending payments with provider identifiers can be reconciled.'),
+            default => throw new InvalidArgumentException('Only supported Pakasir payments with provider identifiers can be reconciled.'),
         };
         $this->audit->log('payment.manually_reconciled', $payment, null, ['payment_event_id' => $event->id], $user, $ip);
 

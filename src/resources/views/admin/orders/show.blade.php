@@ -55,6 +55,12 @@
                 </x-admin-dashboard.card>
             </div>
 
+            @if ($paymentAttention)
+                <x-admin-dashboard.notice :tone="$paymentAttention['tone']" class="mt-5 rounded-xl text-sm font-bold">
+                    <span class="uppercase">{{ $paymentAttention['label'] }}:</span> {{ $paymentAttention['message'] }}
+                </x-admin-dashboard.notice>
+            @endif
+
             @if ($canCancelRelease)
                 <form method="POST" action="{{ route('admin.orders.cancel-release', $order) }}" class="mt-5" onsubmit="return confirm('Batalkan order dan lepas stok?')">
                     @csrf

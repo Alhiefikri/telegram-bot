@@ -44,6 +44,7 @@ return [
         'transaction_detail_max_attempts' => (int) env('PAKASIR_TRANSACTION_DETAIL_MAX_ATTEMPTS', 3),
         'transaction_detail_retry_delay_ms' => (int) env('PAKASIR_TRANSACTION_DETAIL_RETRY_DELAY_MS', 250),
         'transaction_detail_retry_max_delay_ms' => (int) env('PAKASIR_TRANSACTION_DETAIL_RETRY_MAX_DELAY_MS', 1000),
+        'reconcile_released_lookback_hours' => (int) env('PAKASIR_RECONCILE_RELEASED_LOOKBACK_HOURS', 72),
         'redirect_url' => env('PAKASIR_REDIRECT_URL'),
         'qris_only' => env('PAKASIR_QRIS_ONLY', false),
         'checkout_flow' => env('PAKASIR_CHECKOUT_FLOW', 'hosted'),

@@ -66,6 +66,11 @@
                                 <span class="text-xs font-bold text-brand-muted">{{ $order['item_count'] }} item</span>
                                 <a href="{{ $order['detail_url'] }}" class="text-xs font-bold text-neo-ink underline">Detail order</a>
                             </div>
+                            @if ($order['payment_attention'])
+                                <x-admin-dashboard.notice :tone="$order['payment_attention']['tone']" class="mt-3 rounded-xl text-xs">
+                                    <span class="font-black uppercase">{{ $order['payment_attention']['label'] }}:</span> {{ $order['payment_attention']['message'] }}
+                                </x-admin-dashboard.notice>
+                            @endif
                             <x-admin-dashboard.sales-proof-card :proof="$order['sales_proof']" compact class="mt-3" />
                         </x-admin-dashboard.card>
                     @empty

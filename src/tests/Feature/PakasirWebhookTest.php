@@ -19,6 +19,7 @@ use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
@@ -76,6 +77,44 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(2, PaymentEvent::whereNotNull('processed_at')->count());
         Queue::assertPushed(SendTelegramReceipt::class, 1);
         Queue::assertPushed(PublishSalesProofPost::class, 1);
+    }
+
+    public function test_verified_completed_callback_after_local_expiry_marks_late_paid_without_fulfillment(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir', now()->subMinute());
+        $payment = $order->payments()->firstOrFail();
+
+        app(OrderStateMachine::class)->expirePendingOrder($order);
+
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
+
+        $payment->refresh();
+        $order->refresh();
+        $product = Product::firstOrFail();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertNotNull($payment->paid_at);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Expired, $order->order_status);
+        $this->assertSame(2, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, SalesProofPost::count());
+        $event = PaymentEvent::firstOrFail();
+        $this->assertSame(PaymentEventType::Callback, $event->event_type);
+        $this->assertNotNull($event->processed_at);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        Queue::assertNotPushed(PublishSalesProofPost::class);
     }
 
     public function test_sales_proof_post_is_sent_once_and_privacy_safe_for_pakasir_paid_order(): void
@@ -384,6 +423,63 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame('completed', $event->provider_status);
         $this->assertSame('completed', $event->raw_payload['transaction']['status']);
         $this->assertNotNull($event->processed_at);
+    }
+
+    public function test_reconcile_command_marks_cancelled_payment_late_paid_without_fulfillment(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        app(OrderStateMachine::class)->cancelPendingOrder($order);
+
+        $this->assertSame(PaymentStatus::Failed, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+
+        $this->artisan('pakasir:reconcile')
+            ->expectsOutputToContain('pakasir:reconcile completed cleanly: processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $payment->refresh();
+        $order->refresh();
+        $product = Product::firstOrFail();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertNotNull($payment->paid_at);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->order_status);
+        $this->assertSame(2, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, SalesProofPost::count());
+        $event = PaymentEvent::firstOrFail();
+        $this->assertSame(PaymentEventType::Reconciliation, $event->event_type);
+        $this->assertNotNull($event->processed_at);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        Queue::assertNotPushed(PublishSalesProofPost::class);
+    }
+
+    public function test_reconcile_command_does_not_poll_old_released_payments_indefinitely(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        app(OrderStateMachine::class)->cancelPendingOrder($order);
+        $payment->forceFill(['updated_at' => now()->subHours(73)])->save();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+
+        $this->artisan('pakasir:reconcile')
+            ->expectsOutputToContain('pakasir:reconcile completed cleanly: processed=0 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Failed, $payment->fresh()->status);
+        $this->assertSame(0, PaymentEvent::count());
+        Http::assertNothingSent();
     }
 
     public function test_pakasir_reconciliation_is_scheduled_every_minute_ahead_of_pending_order_expiry(): void

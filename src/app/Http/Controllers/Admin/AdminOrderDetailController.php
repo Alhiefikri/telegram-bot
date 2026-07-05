@@ -30,6 +30,7 @@ class AdminOrderDetailController extends Controller
             'statusLabel' => $order->order_status->value.' / '.$order->payment_status->value,
             'itemLabels' => $order->orderItems->map(fn ($item): string => $item->product_name.' × '.$item->quantity)->all(),
             'paymentLabels' => $order->payments->map(fn ($payment): string => $payment->payment_method_label.' · '.$payment->status->value.' · '.($payment->paid_at?->format('d M Y H:i') ?? 'belum paid'))->all(),
+            'paymentAttention' => $salesData->paymentAttention($order),
             'canCancelRelease' => $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending,
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
         ]);

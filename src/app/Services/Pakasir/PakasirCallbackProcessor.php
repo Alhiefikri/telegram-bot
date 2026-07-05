@@ -51,8 +51,7 @@ class PakasirCallbackProcessor
         $transaction = PakasirTransaction::fromPayload($payload);
         $event = $this->events->log(PaymentEventType::Reconciliation, $payload, $payment, $transaction);
 
-        if ($payment->provider !== 'pakasir'
-            || $payment->status !== PaymentStatus::Pending
+        if (! $this->isReconciliationCandidate($payment)
             || ! $transaction
             || ! $this->transactionMatchesPayment($transaction, $payment)) {
             return $event;
@@ -75,7 +74,7 @@ class PakasirCallbackProcessor
             throw new UnprocessableEntityHttpException('Unknown Pakasir payment.');
         }
 
-        if ($payment->provider !== 'pakasir' || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Paid], true)) {
+        if (! $this->isVerifiablePayment($payment)) {
             throw new UnprocessableEntityHttpException('Pakasir payment cannot be verified.');
         }
 
@@ -174,6 +173,27 @@ class PakasirCallbackProcessor
             && $transaction->amount() === $payment->amount
             && $transaction->orderId() === $payment->merchant_ref
             && ($expectedMethod === null || $transaction->paymentMethod() === $expectedMethod);
+    }
+
+    private function isVerifiablePayment(Payment $payment): bool
+    {
+        return $payment->provider === 'pakasir'
+            && in_array($payment->status, [
+                PaymentStatus::Pending,
+                PaymentStatus::Paid,
+                PaymentStatus::Expired,
+                PaymentStatus::Failed,
+            ], true);
+    }
+
+    private function isReconciliationCandidate(Payment $payment): bool
+    {
+        return $payment->provider === 'pakasir'
+            && in_array($payment->status, [
+                PaymentStatus::Pending,
+                PaymentStatus::Expired,
+                PaymentStatus::Failed,
+            ], true);
     }
 
     private function ensureConfigured(): void

@@ -13,9 +13,14 @@ use Throwable;
 
 class ReconcilePakasirPayments extends Command
 {
+    private const RELEASED_PAYMENT_STATUSES = [
+        PaymentStatus::Expired->value,
+        PaymentStatus::Failed->value,
+    ];
+
     protected $signature = 'pakasir:reconcile {--chunk=100}';
 
-    protected $description = 'Reconcile pending Pakasir payments from Pakasir transaction detail.';
+    protected $description = 'Reconcile pending or locally released Pakasir payments from Pakasir transaction detail.';
 
     public function handle(PakasirProviderAdapter $client, PakasirCallbackProcessor $processor, PakasirProviderReadiness $pakasirReadiness): int
     {
@@ -30,10 +35,18 @@ class ReconcilePakasirPayments extends Command
             return self::FAILURE;
         }
 
+        $releasedCutoff = now()->subHours($this->releasedLookbackHours());
+
         Payment::query()
             ->where('provider', 'pakasir')
-            ->where('status', PaymentStatus::Pending)
             ->whereNotNull('merchant_ref')
+            ->where(function ($query) use ($releasedCutoff): void {
+                $query
+                    ->where('status', PaymentStatus::Pending->value)
+                    ->orWhere(fn ($query) => $query
+                        ->whereIn('status', self::RELEASED_PAYMENT_STATUSES)
+                        ->where('updated_at', '>=', $releasedCutoff));
+            })
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($payments) use ($client, $processor, &$processed, &$skipped, &$failed): void {
                 foreach ($payments as $payment) {
@@ -80,5 +93,10 @@ class ReconcilePakasirPayments extends Command
         ]);
 
         return trim($message) === '' ? $exception::class : $message;
+    }
+
+    private function releasedLookbackHours(): int
+    {
+        return max(1, (int) config('services.pakasir.reconcile_released_lookback_hours', 72));
     }
 }

@@ -60,6 +60,7 @@ final class AdminDashboardSalesData
                     'payment_status' => $order->payment_status->value,
                     'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
                     'payment_status_tone' => $paymentStatusTone,
+                    'payment_attention' => $this->paymentAttention($order),
                     'price' => Money::idr($order->total_amount),
                     'earning' => Money::idr($paidAmount),
                     'earning_amount' => $paidAmount,
@@ -70,6 +71,19 @@ final class AdminDashboardSalesData
                 ];
             })
             ->all();
+    }
+
+    public function paymentAttention(Order $order): ?array
+    {
+        if (! $this->isLatePaidReleasedOrder($order)) {
+            return null;
+        }
+
+        return [
+            'label' => 'Late paid',
+            'message' => 'Perlu refund/support manual.',
+            'tone' => 'warning',
+        ];
     }
 
     private function salesFilters(array $statusCounts): array
@@ -256,5 +270,11 @@ final class AdminDashboardSalesData
             OrderStatus::Cancelled, OrderStatus::Expired => 'rose',
             default => 'slate',
         };
+    }
+
+    private function isLatePaidReleasedOrder(Order $order): bool
+    {
+        return $order->payment_status === PaymentStatus::Paid
+            && in_array($order->order_status, [OrderStatus::Cancelled, OrderStatus::Expired], true);
     }
 }

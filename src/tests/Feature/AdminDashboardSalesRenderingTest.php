@@ -184,6 +184,41 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertDontSee('hosted · pending · belum paid');
     }
 
+    public function test_admin_surfaces_late_paid_released_order_as_manual_support_needed(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create([
+            'invoice_number' => 'INV-LATE-PAID',
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Paid,
+            'created_at' => Carbon::parse('2026-07-05 12:00:00'),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => null,
+            'product_name' => 'Late Paid Product',
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'pakasir',
+            'method' => 'hosted',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => Carbon::parse('2026-07-05 12:30:00'),
+        ]);
+
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee('INV-LATE-PAID')
+            ->assertSee('Late paid')
+            ->assertSee('Perlu refund/support manual');
+
+        $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('INV-LATE-PAID')
+            ->assertSee('Late paid')
+            ->assertSee('Perlu refund/support manual');
+    }
+
     public function test_sales_proof_manual_retry_uses_publisher_path_without_changing_order_state(): void
     {
         $this->actingAs(User::factory()->create([
