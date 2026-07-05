@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Http\Client\RequestException;
 
@@ -45,9 +46,9 @@ class StoreChannelSetupVerifier
                     ? 'Bot cannot access channel: '.$description
                     : 'Test failed: '.$description);
 
-            return ['success' => false, 'chat_id' => null, 'message_id' => null, 'error' => $error];
+            return ['success' => false, 'chat_id' => null, 'message_id' => null, 'error' => TelegramBotApiRedactor::redactText($error)];
         } catch (\Throwable $e) {
-            return ['success' => false, 'chat_id' => null, 'message_id' => null, 'error' => 'Test failed: '.$e->getMessage()];
+            return ['success' => false, 'chat_id' => null, 'message_id' => null, 'error' => TelegramBotApiRedactor::redactText('Test failed: '.$e->getMessage())];
         }
     }
 

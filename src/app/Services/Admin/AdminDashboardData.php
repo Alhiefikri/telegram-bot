@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
+use App\Services\Telegram\TelegramBotApiRedactor;
 
 final class AdminDashboardData
 {
@@ -103,15 +104,16 @@ final class AdminDashboardData
     private function storeChannelTab(User $user): array
     {
         $setting = StoreChannelSetting::current();
+        $lastTestError = $setting->last_test_error === null ? null : TelegramBotApiRedactor::redactText((string) $setting->last_test_error);
         $configured = (bool) ($setting->channel_username || $setting->channel_link);
         $ready = $configured && $setting->telegram_chat_id && $setting->last_test_success === true;
         $status = match (true) {
             ! $configured => ['label' => 'Not configured', 'hint' => 'Isi username/link channel lalu jalankan Test Channel.', 'tone' => 'slate'],
             $ready => ['label' => 'Ready', 'hint' => 'Bot dapat mengakses dan mengirim pesan ke channel.', 'tone' => 'emerald'],
             $setting->last_test_success === null => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
-            $setting->last_test_success === false && str_contains(strtolower((string) $setting->last_test_error), 'cannot post') => ['label' => 'Bot cannot post', 'hint' => $setting->last_test_error ?: 'Pastikan bot menjadi admin channel dan boleh mengirim pesan.', 'tone' => 'rose'],
-            $setting->last_test_success === false && str_contains(strtolower((string) $setting->last_test_error), 'cannot access') => ['label' => 'Bot cannot access', 'hint' => $setting->last_test_error ?: 'Pastikan bot sudah ditambahkan ke channel.', 'tone' => 'rose'],
-            $setting->last_test_success === false => ['label' => 'Test failed', 'hint' => $setting->last_test_error ?: 'Periksa akses bot ke channel.', 'tone' => 'rose'],
+            $setting->last_test_success === false && str_contains(strtolower((string) $lastTestError), 'cannot post') => ['label' => 'Bot cannot post', 'hint' => $lastTestError ?: 'Pastikan bot menjadi admin channel dan boleh mengirim pesan.', 'tone' => 'rose'],
+            $setting->last_test_success === false && str_contains(strtolower((string) $lastTestError), 'cannot access') => ['label' => 'Bot cannot access', 'hint' => $lastTestError ?: 'Pastikan bot sudah ditambahkan ke channel.', 'tone' => 'rose'],
+            $setting->last_test_success === false => ['label' => 'Test failed', 'hint' => $lastTestError ?: 'Periksa akses bot ke channel.', 'tone' => 'rose'],
             default => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
         };
         $channelFeaturesEnabled = (bool) ($setting->community_gate_enabled || $setting->sales_proof_enabled);
@@ -123,7 +125,7 @@ final class AdminDashboardData
                 'chat_id_label' => $setting->telegram_chat_id ?: 'Belum ada',
                 'last_tested_label' => $setting->last_tested_at?->format('Y-m-d H:i') ?: 'Belum pernah',
                 'message_id_label' => $setting->last_test_message_id ?: '-',
-                'last_test_error' => $setting->last_test_error,
+                'last_test_error' => $lastTestError,
             ],
             'ready' => $ready,
             'show_setup_warning' => $channelFeaturesEnabled && ! $ready,

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AuditLog;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -86,6 +87,56 @@ class AdminStoreChannelTest extends TestCase
             'last_test_success' => false,
         ]);
         $this->assertStringContainsString('Bot cannot access channel', StoreChannelSetting::first()->last_test_error);
+    }
+
+    public function test_test_channel_failure_redacts_telegram_bot_token_from_session_database_and_audit_log(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        StoreChannelSetting::create(['channel_username' => '@lhie_store']);
+        config()->set('services.telegram.token', 'SECRET-issue-109');
+
+        $botApiUrl = 'https://api.telegram.org/botSECRET-issue-109/getChat';
+        $rawToken = 'SECRET-issue-109';
+        $rawBotSegment = '/botSECRET-issue-109/';
+
+        Http::preventStrayRequests();
+        Http::fake([
+            $botApiUrl => Http::response([
+                'ok' => false,
+                'description' => "Forbidden: {$botApiUrl} leaked from /botSECRET-issue-109/getChat",
+            ], 403),
+        ]);
+
+        $this->post(route('admin.store-channel.test'))
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']))
+            ->assertSessionHas('error');
+
+        $sessionError = (string) session('error');
+        $storedError = (string) StoreChannelSetting::firstOrFail()->last_test_error;
+        $auditPayload = json_encode(
+            AuditLog::query()->where('action', 'store_channel.tested')->firstOrFail()->new_values,
+            JSON_THROW_ON_ERROR
+        );
+
+        foreach ([
+            'session error' => $sessionError,
+            'stored error' => $storedError,
+            'audit payload' => $auditPayload,
+        ] as $surface => $value) {
+            $this->assertStringContainsString('Bot cannot access channel', $value, "{$surface} dropped the actionable Telegram failure.");
+            $this->assertStringNotContainsString($rawToken, $value, "{$surface} leaked the raw Telegram bot token.");
+            $this->assertStringNotContainsString($rawBotSegment, $value, "{$surface} leaked the raw Telegram bot URL segment.");
+            $this->assertStringNotContainsString($botApiUrl, $value, "{$surface} leaked the full Telegram Bot API URL.");
+        }
+
+        $dashboardContent = $this->get(route('admin.dashboard', ['tab' => 'telegram-channel']))
+            ->assertOk()
+            ->assertSee('Bot cannot access channel')
+            ->getContent();
+
+        $this->assertStringNotContainsString($rawToken, $dashboardContent, 'dashboard leaked the raw Telegram bot token.');
+        $this->assertStringNotContainsString($rawBotSegment, $dashboardContent, 'dashboard leaked the raw Telegram bot URL segment.');
+        $this->assertStringNotContainsString($botApiUrl, $dashboardContent, 'dashboard leaked the full Telegram Bot API URL.');
     }
 
     public function test_configured_channel_shows_needs_test_before_first_test(): void

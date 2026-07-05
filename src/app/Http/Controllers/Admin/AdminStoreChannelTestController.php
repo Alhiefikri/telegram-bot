@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StoreChannelSetting;
 use App\Services\AuditLogger;
 use App\Services\StoreChannelSetupVerifier;
+use App\Services\Telegram\TelegramBotApiRedactor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,9 @@ class AdminStoreChannelTestController extends Controller
             ->where('singleton_key', StoreChannelSetting::SINGLETON_KEY)
             ->first() ?? StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY]);
         $result = $verifier->test($setting);
+        if ($result['error'] !== null) {
+            $result['error'] = TelegramBotApiRedactor::redactText($result['error']);
+        }
 
         $setting = DB::transaction(function () use ($setting, $result): StoreChannelSetting {
             $locked = StoreChannelSetting::query()->whereKey($setting->id)->lockForUpdate()->firstOrFail();
