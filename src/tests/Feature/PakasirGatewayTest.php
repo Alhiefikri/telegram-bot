@@ -17,6 +17,7 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -79,6 +80,41 @@ class PakasirGatewayTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactiondetail?project=warung-ai&amount=10000&order_id='.$payment->merchant_ref.'&api_key=pakasir-secret');
     }
 
+    public function test_transaction_detail_uses_configured_timeouts_and_retries_transient_failure(): void
+    {
+        config()->set('services.pakasir.http_timeout_seconds', 4.5);
+        config()->set('services.pakasir.http_connect_timeout_seconds', 1.5);
+        config()->set('services.pakasir.transaction_detail_max_attempts', 2);
+        config()->set('services.pakasir.transaction_detail_retry_delay_ms', 0);
+        config()->set('services.pakasir.transaction_detail_retry_max_delay_ms', 0);
+        $attempts = 0;
+        $attemptOptions = [];
+
+        Http::fake(function ($_, array $options) use (&$attempts, &$attemptOptions) {
+            $attempts++;
+            $attemptOptions[] = $options;
+
+            if ($attempts === 1) {
+                return Http::response(['message' => 'temporary provider failure'], 500);
+            }
+
+            return Http::response(['transaction' => ['status' => 'completed']], 200);
+        });
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        $response = app(PakasirClient::class)->transactionDetail($payment);
+
+        $this->assertSame(['transaction' => ['status' => 'completed']], $response);
+        $this->assertSame(2, $attempts);
+        $this->assertCount(2, $attemptOptions);
+        foreach ($attemptOptions as $options) {
+            $this->assertSame(4.5, $options['timeout']);
+            $this->assertSame(1.5, $options['connect_timeout']);
+        }
+        Http::assertSentCount(2);
+    }
+
     public function test_creates_qris_transaction_posts_to_pakasir_without_mutating_local_payment_state(): void
     {
         $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
@@ -114,6 +150,50 @@ class PakasirGatewayTest extends TestCase
             && $request['order_id'] === $payment->merchant_ref
             && $request['amount'] === 10000
             && $request['api_key'] === 'pakasir-secret');
+
+        $payment->refresh();
+        $this->assertNull($payment->provider_payload);
+        $this->assertNull($payment->provider_fee);
+        $this->assertNull($payment->provider_total_payment);
+        $this->assertNull($payment->provider_payment_method);
+        $this->assertNull($payment->provider_payment_number);
+        $this->assertNull($payment->provider_payment_number_hash);
+        $this->assertNull($payment->provider_created_at);
+        $this->assertNull($payment->provider_expires_at);
+        $this->assertSame(0, PaymentEvent::count());
+    }
+
+    public function test_qris_transaction_create_uses_configured_timeouts_without_automatic_retry(): void
+    {
+        config()->set('services.pakasir.http_timeout_seconds', 6.0);
+        config()->set('services.pakasir.http_connect_timeout_seconds', 2.0);
+        config()->set('services.pakasir.transaction_detail_max_attempts', 3);
+        config()->set('services.pakasir.transaction_detail_retry_delay_ms', 0);
+        config()->set('services.pakasir.transaction_detail_retry_max_delay_ms', 0);
+        $attempts = 0;
+        $attemptOptions = [];
+
+        Http::fake(function ($_, array $options) use (&$attempts, &$attemptOptions) {
+            $attempts++;
+            $attemptOptions[] = $options;
+
+            return Http::response(['message' => 'provider unavailable'], 500);
+        });
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        try {
+            app(PakasirClient::class)->createQrisTransaction($payment);
+            $this->fail('Expected Pakasir QRIS create to fail without retrying.');
+        } catch (RequestException $exception) {
+            $this->assertSame(500, $exception->response?->status());
+        }
+
+        $this->assertSame(1, $attempts);
+        $this->assertCount(1, $attemptOptions);
+        $this->assertSame(6.0, $attemptOptions[0]['timeout']);
+        $this->assertSame(2.0, $attemptOptions[0]['connect_timeout']);
+        Http::assertSentCount(1);
 
         $payment->refresh();
         $this->assertNull($payment->provider_payload);

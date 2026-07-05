@@ -58,6 +58,18 @@ PAKASIR_CHECKOUT_FLOW=hosted
 
 Default must be `hosted` so deploys do not change customer behavior until staging proves native QRIS.
 
+HTTP guardrails:
+
+```env
+PAKASIR_HTTP_TIMEOUT_SECONDS=10
+PAKASIR_HTTP_CONNECT_TIMEOUT_SECONDS=3
+PAKASIR_TRANSACTION_DETAIL_MAX_ATTEMPTS=3
+PAKASIR_TRANSACTION_DETAIL_RETRY_DELAY_MS=250
+PAKASIR_TRANSACTION_DETAIL_RETRY_MAX_DELAY_MS=1000
+```
+
+`PAKASIR_HTTP_TIMEOUT_SECONDS` and `PAKASIR_HTTP_CONNECT_TIMEOUT_SECONDS` bound every Pakasir API call. Transaction Detail may retry transient GET failures with exponential backoff. Native QRIS create (`transactioncreate/qris`) intentionally does not use automatic retries until duplicate-create behavior is proven in staging.
+
 Recommended env cleanup:
 
 ```env
