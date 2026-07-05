@@ -10,8 +10,10 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -98,6 +100,65 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Canva Pro x 2')
             && str_contains($r['text'], 'hosted')
             && str_contains($r['text'], 'Selesaikan pembayaran'));
+    }
+
+    public function test_order_command_from_supergroup_prompts_private_chat_without_leaking_paid_order_details(): void
+    {
+        $this->fakeTelegramHttp();
+        $privateChatId = 12345;
+        $groupChatId = -1001122334455;
+        $invoice = 'INV-ISSUE-112-CMD';
+        $productName = 'Issue 112 Vault Product';
+        $credential = 'issue112-command@example.test | password: Secret-112-CMD';
+        $customer = Customer::factory()->create(['telegram_id' => $privateChatId]);
+        $this->paidCompletedOrderWithCredential($customer, $invoice, $productName, $credential);
+        $sensitiveValues = [$invoice, 'paid', 'Pembayaran sudah diterima', $productName, $credential, 'Secret-112-CMD'];
+
+        $this->postTelegramWebhook($this->messageUpdate(
+            216,
+            '/order '.$invoice,
+            ['id' => $privateChatId, 'first_name' => 'Issue112 Buyer'],
+            $groupChatId,
+            'supergroup',
+        ))->assertOk();
+
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) ($r['chat_id'] ?? '') === (string) $groupChatId
+            && $this->requestBodyContainsAny($r, $sensitiveValues));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) ($r['chat_id'] ?? '') === (string) $groupChatId
+            && str_contains(strtolower((string) ($r['text'] ?? '')), 'chat pribadi')
+            && ! $this->requestBodyContainsAny($r, $sensitiveValues));
+    }
+
+    public function test_order_callback_from_group_is_answered_privately_without_sending_sensitive_order_details(): void
+    {
+        $this->fakeTelegramHttp();
+        $privateChatId = 12345;
+        $groupChatId = -445566;
+        $invoice = 'INV-ISSUE-112-CB';
+        $productName = 'Issue 112 Callback Product';
+        $credential = 'issue112-callback@example.test | password: Secret-112-CB';
+        $customer = Customer::factory()->create(['telegram_id' => $privateChatId]);
+        $this->paidCompletedOrderWithCredential($customer, $invoice, $productName, $credential);
+        $sensitiveValues = [$invoice, 'paid', 'Pembayaran sudah diterima', $productName, $credential, 'Secret-112-CB'];
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            217,
+            'cb-issue-112-order',
+            'order:'.$invoice,
+            ['id' => $privateChatId, 'first_name' => 'Issue112 Buyer'],
+            $groupChatId,
+            'group',
+        ))->assertOk();
+
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) ($r['chat_id'] ?? '') === (string) $groupChatId
+            && $this->requestBodyContainsAny($r, $sensitiveValues));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && ($r['callback_query_id'] ?? null) === 'cb-issue-112-order'
+            && str_contains(strtolower((string) ($r['text'] ?? '')), 'chat pribadi')
+            && ! $this->requestBodyContainsAny($r, $sensitiveValues));
     }
 
     public function test_order_detail_names_pakasir_native_qris_instead_of_raw_hosted_method(): void
@@ -222,5 +283,46 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(210, '/order INV-CAN'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], 'checkout ulang lewat /produk'));
+    }
+
+    private function paidCompletedOrderWithCredential(Customer $customer, string $invoiceNumber, string $productName, string $secret): Order
+    {
+        $product = Product::factory()->create(['name' => $productName, 'stock' => 1, 'reserved_stock' => 1, 'price_amount' => 25000]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => $invoiceNumber,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 25000,
+        ]);
+        $item = OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $productName,
+            'quantity' => 1,
+            'subtotal' => 25000,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $item->id, 'secret' => $secret]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'manual',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        return $order;
+    }
+
+    private function requestBodyContainsAny(Request $request, array $needles): bool
+    {
+        $body = strtolower(json_encode($request->data()) ?: '');
+
+        foreach ($needles as $needle) {
+            if ($needle !== '' && str_contains($body, strtolower($needle))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

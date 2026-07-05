@@ -46,7 +46,7 @@ abstract class TelegramBotTestSupport extends TestCase
         ]);
     }
 
-    protected function messageUpdate(int $id, string $text, array $from = [], int $chatId = 12345): array
+    protected function messageUpdate(int $id, string $text, array $from = [], int $chatId = 12345, string $chatType = 'private'): array
     {
         $fromId = $from['id'] ?? $chatId;
 
@@ -54,14 +54,14 @@ abstract class TelegramBotTestSupport extends TestCase
             'update_id' => $id,
             'message' => [
                 'message_id' => $id,
-                'chat' => ['id' => $chatId],
+                'chat' => ['id' => $chatId, 'type' => $chatType],
                 'from' => array_merge(['id' => $fromId, 'first_name' => 'Tester'], $from),
                 'text' => $text,
             ],
         ];
     }
 
-    protected function callbackUpdate(int $id, string $callbackId, string $data, array $from = [], int $chatId = 12345): array
+    protected function callbackUpdate(int $id, string $callbackId, string $data, array $from = [], int $chatId = 12345, string $chatType = 'private'): array
     {
         $fromId = $from['id'] ?? $chatId;
 
@@ -70,7 +70,7 @@ abstract class TelegramBotTestSupport extends TestCase
             'callback_query' => [
                 'id' => $callbackId,
                 'from' => array_merge(['id' => $fromId, 'first_name' => 'Tester'], $from),
-                'message' => ['chat' => ['id' => $chatId]],
+                'message' => ['chat' => ['id' => $chatId, 'type' => $chatType]],
                 'data' => $data,
             ],
         ];

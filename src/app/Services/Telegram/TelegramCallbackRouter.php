@@ -31,9 +31,10 @@ class TelegramCallbackRouter
         private TelegramCheckoutIntents $checkoutIntents,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramCommunityGate $communityGate,
+        private TelegramChatPrivacyGuard $chatPrivacy,
     ) {}
 
-    public function route(Customer $customer, string $chatId, string $id, string $data): void
+    public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private'): void
     {
         if ($data === TelegramCommunityGate::VERIFY_CALLBACK) {
             $this->session->forget($customer);
@@ -54,6 +55,12 @@ class TelegramCallbackRouter
 
         if (preg_match('/^admin:reject-payment:([^\s:]+)$/', $data, $matches)) {
             $this->manualPayments->rejectManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
+
+        if (! $this->chatPrivacy->isPrivate($chatType) && ! $this->isNonPrivateSafeCallback($data)) {
+            $this->chatPrivacy->denyCallback($id);
 
             return;
         }
@@ -166,6 +173,13 @@ class TelegramCallbackRouter
         }
 
         $this->bot->answerCallbackQuery($id, 'Aksi ini belum dikenali.');
+    }
+
+    private function isNonPrivateSafeCallback(string $data): bool
+    {
+        return in_array($data, ['katalog', 'back:categories', 'balance'], true)
+            || preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $data) === 1
+            || preg_match('/^product:([1-9][0-9]*)$/', $data) === 1;
     }
 
     private function cancelPendingOrder(Customer $customer, string $chatId, string $id, string $orderId): void

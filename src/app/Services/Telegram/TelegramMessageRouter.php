@@ -19,11 +19,19 @@ class TelegramMessageRouter
         private TelegramAdminAccess $adminAccess,
         private TelegramBroadcastService $broadcast,
         private TelegramCommunityGate $communityGate,
+        private TelegramChatPrivacyGuard $chatPrivacy,
     ) {}
 
-    public function route(Customer $customer, string $chatId, array $message): void
+    public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
     {
         $text = trim((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
+        $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
+        if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
+            $this->session->forget($customer);
+            $this->chatPrivacy->denyMessage($chatId);
+
+            return;
+        }
 
         if ($text === '/start') {
             $this->session->forget($customer);
@@ -167,7 +175,14 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($productId = $this->session->getSelectedProductId($customer)) {
+        $productId = $this->session->getSelectedProductId($customer);
+        if ($productId !== null && ! $isPrivateChat) {
+            $this->chatPrivacy->denyMessage($chatId);
+
+            return;
+        }
+
+        if ($productId !== null) {
             if (ctype_digit($text) && $this->cart->addProductToCart($customer, $chatId, (int) $productId, (int) $text)) {
                 $this->session->forget($customer);
 
@@ -183,5 +198,12 @@ class TelegramMessageRouter
 
         $this->session->forget($customer);
         $this->bot->sendMessage($chatId, "Aku belum paham perintah itu 😅\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.");
+    }
+
+    private function isPrivateOnlyCommand(string $text): bool
+    {
+        return in_array($text, ['/akun', '👤 Akun Saya', '/batal', '/payment', '/status', '/pesanan', '📦 Pesanan', '/riwayat', '/order'], true)
+            || str_starts_with($text, '/payment ')
+            || str_starts_with($text, '/order ');
     }
 }

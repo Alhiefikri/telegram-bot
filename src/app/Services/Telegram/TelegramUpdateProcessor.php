@@ -25,11 +25,11 @@ class TelegramUpdateProcessor
         if ($message = Arr::get($payload, 'message')) {
             $customer = $this->customers->resolve(Arr::get($message, 'from', []));
             $update->update(['customer_id' => $customer->id]);
-            $this->messages->route($customer, (string) Arr::get($message, 'chat.id'), $message);
+            $this->messages->route($customer, (string) Arr::get($message, 'chat.id'), $message, (string) Arr::get($message, 'chat.type', 'private'));
         } elseif ($callback = Arr::get($payload, 'callback_query')) {
             $customer = $this->customers->resolve(Arr::get($callback, 'from', []));
             $update->update(['customer_id' => $customer->id]);
-            $this->callbacks->route($customer, (string) Arr::get($callback, 'message.chat.id'), (string) Arr::get($callback, 'id'), (string) Arr::get($callback, 'data'));
+            $this->callbacks->route($customer, (string) Arr::get($callback, 'message.chat.id'), (string) Arr::get($callback, 'id'), (string) Arr::get($callback, 'data'), (string) Arr::get($callback, 'message.chat.type', 'private'));
         }
     }
 }
