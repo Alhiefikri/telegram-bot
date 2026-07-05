@@ -400,7 +400,7 @@ SH);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
     }
 
-    public function test_production_deploy_workflow_gates_release_readiness_and_image_provenance(): void
+    public function test_production_deploy_workflow_gates_release_readiness_image_provenance_and_post_deploy_safeguards(): void
     {
         $workflow = base_path('../.github/workflows/deploy-production.yml');
 
@@ -416,6 +416,21 @@ SH);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=0', $contents);
+        foreach ([
+            'app health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
+            'scheduler health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
+            'failed jobs check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null',
+            'queue depth check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null',
+            'Telegram webhook check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0 </dev/null',
+        ] as $contract => $command) {
+            $this->assertStringContainsString($command, $contents, $contract);
+        }
+
+        $this->assertStringContainsString('duplicate_projects="$(', $contents);
+        $this->assertStringContainsString('docker ps --filter label=com.docker.compose.project --format', $contents);
+        $this->assertStringContainsString('awk -v expected="$COMPOSE_PROJECT_NAME"', $contents);
+        $this->assertStringContainsString('$0 ~ /^telegram-bot/ && $0 != expected', $contents);
+        $this->assertStringContainsString('Unexpected Telegram Bot Compose project(s) running:', $contents);
     }
 
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void

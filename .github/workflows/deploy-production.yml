@@ -126,7 +126,7 @@ jobs:
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans
 
           for attempt in $(seq 1 36); do
-            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor; then
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null; then
               break
             fi
 
@@ -140,7 +140,7 @@ jobs:
           done
 
           for attempt in $(seq 1 36); do
-            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180; then
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null; then
               break
             fi
 
@@ -153,9 +153,24 @@ jobs:
             sleep 5
           done
 
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0 </dev/null
 
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
+
+          duplicate_projects="$(
+            docker ps --filter label=com.docker.compose.project --format '{{.Label "com.docker.compose.project"}}' \
+              | sort -u \
+              | awk -v expected="$COMPOSE_PROJECT_NAME" '$0 ~ /^telegram-bot/ && $0 != expected'
+          )"
+
+          if [ -n "$duplicate_projects" ]; then
+            echo "Unexpected Telegram Bot Compose project(s) running:"
+            printf '%s\n' "$duplicate_projects"
+            docker ps --filter label=com.docker.compose.project --format 'table {{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Status}}\t{{.Ports}}'
+            exit 1
+          fi
+
+          echo "No duplicate Telegram Bot Compose projects running."
           REMOTE

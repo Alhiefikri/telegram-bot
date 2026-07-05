@@ -26,7 +26,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
   - Builds the production image on the VPS after checking out `origin/main`, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This is the explicit image provenance decision: the VPS rebuild is the gated release artifact because production secrets and the deploy host stay local to the VPS, while the GitHub Actions image build remains a CI parity check and is not deployed.
-  - Verifies app health, scheduler heartbeat, failed jobs, queue depth, and Telegram webhook external registration after deploy.
+  - Verifies app health, scheduler heartbeat, failed jobs, queue depth, Telegram webhook external registration, and absence of duplicate running Telegram Bot Compose projects after deploy.
 
 ## Required GitHub secrets
 
@@ -69,5 +69,6 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 - `php artisan ops:check-failed-jobs --max=0`
 - `php artisan ops:check-queue-depth --max=0`
 - `php artisan ops:check-telegram-webhook --max-pending=0`
+- Running Docker containers with Compose label `com.docker.compose.project` must not include another `telegram-bot*` project besides `telegram-bot-prod`.
 
 The Telegram webhook check verifies only booleans/counts: Telegram API success, HTTPS target, webhook secret configured, webhook URL configured, webhook URL matching `APP_URL/api/webhook/telegram`, `pending_update_count`, and whether Telegram reports a last error. It must not print the bot token, webhook secret, or full private webhook URL.
