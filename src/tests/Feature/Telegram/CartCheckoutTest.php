@@ -14,11 +14,8 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
-use App\Services\Pakasir\PakasirNativeQrisService;
-use App\Services\Pakasir\PakasirProviderAdapter;
-use App\Services\Pakasir\PakasirProviderReadiness;
-use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -580,7 +577,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.payment_mode', 'pakasir');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'api_qris']);
-        $this->bindCheckoutIntentsWithInspectableQr();
+        $this->bindInspectableQrRenderer();
         $paymentNumber = '00020101021226610016ID.CO.QRIS.NATIVE92';
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
@@ -638,7 +635,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.payment_mode', 'pakasir');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'api_qris']);
-        $this->bindCheckoutIntentsWithInspectableQr();
+        $this->bindInspectableQrRenderer();
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => Http::response(['message' => 'provider down'], 500),
         ]);
@@ -684,11 +681,11 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
     }
 
-    private function bindCheckoutIntentsWithInspectableQr(): void
+    private function bindInspectableQrRenderer(): void
     {
-        $this->app->bind(TelegramCheckoutIntents::class, fn ($app) => new class($app->make(TelegramBotClient::class), $app->make(PakasirProviderAdapter::class), $app->make(PakasirNativeQrisService::class), $app->make(PakasirProviderReadiness::class)) extends TelegramCheckoutIntents
+        $this->app->instance(TelegramQrCodeRenderer::class, new class extends TelegramQrCodeRenderer
         {
-            public function qrPng(string $content): string
+            public function png(string $content): string
             {
                 return 'qr-source:'.$content;
             }
