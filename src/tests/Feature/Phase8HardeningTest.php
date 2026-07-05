@@ -191,6 +191,27 @@ class Phase8HardeningTest extends TestCase
             ->assertFailed();
     }
 
+    public function test_telegram_webhook_check_redacts_transport_failure_messages(): void
+    {
+        config()->set('app.url', 'https://store.example.com');
+        config()->set('services.telegram.token', 'SECRET-issue-107');
+        config()->set('services.telegram.webhook_secret', 'webhook-secret-issue-107');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        Http::fake([
+            'https://api.telegram.org/botSECRET-issue-107/getWebhookInfo' => Http::failedConnection(
+                'cURL error 6: Could not resolve host while requesting https://api.telegram.org/botSECRET-issue-107/getWebhookInfo'
+            ),
+        ]);
+
+        $this->artisan('ops:check-telegram-webhook --max-pending=0')
+            ->expectsOutput('Telegram webhook: request failed')
+            ->doesntExpectOutputToContain('SECRET-issue-107')
+            ->doesntExpectOutputToContain('https://api.telegram.org/botSECRET-issue-107/getWebhookInfo')
+            ->doesntExpectOutputToContain('/botSECRET-issue-107/')
+            ->assertFailed();
+    }
+
     public function test_restore_drill_script_is_safe_and_supports_required_formats(): void
     {
         $script = base_path('../scripts/restore-db.sh');

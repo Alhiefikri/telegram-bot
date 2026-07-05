@@ -49,8 +49,8 @@ class CheckTelegramWebhook extends Command
 
         try {
             $response = Http::timeout(15)->get($apiBaseUrl.'/bot'.$token.'/getWebhookInfo');
-        } catch (Throwable $e) {
-            $this->error('Telegram webhook: request failed - '.$e->getMessage());
+        } catch (Throwable) {
+            $this->error('Telegram webhook: request failed');
 
             return self::FAILURE;
         }
