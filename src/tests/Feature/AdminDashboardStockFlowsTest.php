@@ -65,20 +65,10 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertDontSee('fi-modal', false);
     }
 
-    public function test_manage_stock_data_surfaces_reserved_paid_and_inconsistent_history_rows(): void
+    public function test_manage_stock_data_orders_mixed_rows_by_status_group_with_paid_history_last(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        $product = Product::factory()->create(['name' => 'Credential Vault', 'stock' => 3, 'reserved_stock' => 1]);
-        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ready@example.test|pass']);
-
-        $reservedOrder = Order::factory()->create([
-            'invoice_number' => 'INV-RESERVED',
-            'order_status' => OrderStatus::PendingPayment,
-            'payment_status' => PaymentStatus::Pending,
-            'expires_at' => now()->addMinutes(5),
-        ]);
-        $reservedItem = OrderItem::factory()->create(['order_id' => $reservedOrder->id, 'product_id' => $product->id]);
-        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $reservedItem->id, 'secret' => 'reserved@example.test|pass']);
+        $product = Product::factory()->create(['name' => 'Credential Vault', 'stock' => 4, 'reserved_stock' => 1]);
 
         $paidOrder = Order::factory()->create([
             'invoice_number' => 'INV-PAID',
@@ -97,14 +87,27 @@ class AdminDashboardStockFlowsTest extends TestCase
         $expiredItem = OrderItem::factory()->create(['order_id' => $expiredOrder->id, 'product_id' => $product->id]);
         ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $expiredItem->id, 'secret' => 'stale@example.test|pass']);
 
+        $reservedOrder = Order::factory()->create([
+            'invoice_number' => 'INV-RESERVED',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+        $reservedItem = OrderItem::factory()->create(['order_id' => $reservedOrder->id, 'product_id' => $product->id]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $reservedItem->id, 'secret' => 'reserved@example.test|pass']);
+
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ready@example.test|pass']);
+
         $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
 
         $this->assertSame(1, $payload['availableStockItemCount']);
-        $this->assertSame(['TERSEDIA', 'DIPESAN', 'PAID', 'EXPIRED'], array_column($payload['stockItems'], 'status'));
+        $this->assertSame(['TERSEDIA', 'DIPESAN', 'EXPIRED', 'PAID'], array_column($payload['stockItems'], 'status'));
+        $this->assertSame(['ready@example.test|pass', 'reserved@example.test|pass', 'stale@example.test|pass', 'paid@example.test|pass'], array_column($payload['stockItems'], 'secret'));
         $this->assertSame(['available' => 1, 'reserved' => 1, 'paid' => 1], $payload['stockSummary']);
         $this->assertSame('INV-RESERVED', $payload['stockItems'][1]['invoice']);
-        $this->assertSame('INV-PAID', $payload['stockItems'][2]['invoice']);
-        $this->assertTrue($payload['stockItems'][3]['repair_needed']);
+        $this->assertSame('INV-STALE', $payload['stockItems'][2]['invoice']);
+        $this->assertTrue($payload['stockItems'][2]['repair_needed']);
+        $this->assertSame('INV-PAID', $payload['stockItems'][3]['invoice']);
     }
 
     public function test_dashboard_cancel_release_pending_order_restores_credential_stock(): void

@@ -59,6 +59,8 @@ COPY src/ ./
 COPY --from=vendor /app/vendor ./vendor
 COPY --from=assets /app/public/build ./public/build
 COPY --from=assets /app/public/build /opt/lhiestore-public-build
+RUN mkdir -p /opt/lhiestore-public-storefront \
+    && cp -R public/storefront/. /opt/lhiestore-public-storefront/
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint-laravel
 COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel

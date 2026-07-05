@@ -1,47 +1,78 @@
 const ACTIVE_CATEGORY_CLASSES = ['neo-filter-active'];
 const INACTIVE_CATEGORY_CLASSES = ['neo-filter-inactive'];
 
-function toggleMobileMenu(menu, iconTop, iconBottom, forceClosed = null) {
-    const shouldOpen = forceClosed === null ? menu.classList.contains('hidden') : !forceClosed;
+function toggleMobileMenu(menu, iconTop, iconMiddle, iconBottom, menuButton, backdrop, forceClosed = null) {
+    const isClosed = menu.classList.contains('hidden') || menu.getAttribute('aria-hidden') !== 'false';
+    const shouldOpen = forceClosed === null ? isClosed : ! forceClosed;
 
     if (shouldOpen) {
         menu.classList.remove('hidden');
-        window.setTimeout(() => {
-            menu.classList.remove('opacity-0', 'scale-95');
-            menu.classList.add('opacity-100', 'scale-100');
-        }, 10);
-        iconTop?.classList.add('rotate-45', 'translate-y-1');
-        iconBottom?.classList.add('-rotate-45', '-translate-y-[3px]');
+        backdrop?.classList.remove('hidden');
+        menu.setAttribute('aria-hidden', 'false');
+        menuButton?.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('overflow-hidden');
+
+        window.requestAnimationFrame(() => {
+            menu.classList.remove('-translate-x-full');
+            menu.classList.add('translate-x-0');
+            backdrop?.classList.remove('opacity-0');
+            backdrop?.classList.add('opacity-100');
+        });
+
+        iconTop?.classList.add('rotate-45', 'translate-y-[9px]');
+        iconMiddle?.classList.add('opacity-0');
+        iconBottom?.classList.add('-rotate-45', '-translate-y-[9px]');
         return;
     }
 
-    menu.classList.add('opacity-0', 'scale-95');
-    menu.classList.remove('opacity-100', 'scale-100');
+    menu.classList.add('-translate-x-full');
+    menu.classList.remove('translate-x-0');
+    backdrop?.classList.add('opacity-0');
+    backdrop?.classList.remove('opacity-100');
+    menu.setAttribute('aria-hidden', 'true');
+    menuButton?.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('overflow-hidden');
+
     window.setTimeout(() => {
         menu.classList.add('hidden');
-    }, 200);
-    iconTop?.classList.remove('rotate-45', 'translate-y-1');
-    iconBottom?.classList.remove('-rotate-45', '-translate-y-[3px]');
+        backdrop?.classList.add('hidden');
+    }, 250);
+
+    iconTop?.classList.remove('rotate-45', 'translate-y-[9px]');
+    iconMiddle?.classList.remove('opacity-0');
+    iconBottom?.classList.remove('-rotate-45', '-translate-y-[9px]');
 }
 
 function initMobileMenu() {
     const menuButton = document.getElementById('mobile-menu-btn');
+    const closeButton = document.getElementById('mobile-menu-close');
     const menuIconTop = document.getElementById('menu-icon-1');
-    const menuIconBottom = document.getElementById('menu-icon-2');
+    const menuIconMiddle = document.getElementById('menu-icon-2');
+    const menuIconBottom = document.getElementById('menu-icon-3');
     const mobileMenu = document.getElementById('mobile-menu');
+    const backdrop = document.getElementById('mobile-menu-backdrop');
 
-    if (!menuButton || !mobileMenu) {
+    if (! menuButton || ! mobileMenu) {
         return;
     }
 
+    const closeMenu = () => toggleMobileMenu(mobileMenu, menuIconTop, menuIconMiddle, menuIconBottom, menuButton, backdrop, true);
+
     menuButton.addEventListener('click', () => {
-        toggleMobileMenu(mobileMenu, menuIconTop, menuIconBottom);
+        toggleMobileMenu(mobileMenu, menuIconTop, menuIconMiddle, menuIconBottom, menuButton, backdrop);
     });
 
+    closeButton?.addEventListener('click', closeMenu);
+    backdrop?.addEventListener('click', closeMenu);
+
     mobileMenu.querySelectorAll('a').forEach((link) => {
-        link.addEventListener('click', () => {
-            toggleMobileMenu(mobileMenu, menuIconTop, menuIconBottom, true);
-        });
+        link.addEventListener('click', closeMenu);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeMenu();
+        }
     });
 }
 

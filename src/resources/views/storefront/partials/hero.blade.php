@@ -30,31 +30,23 @@
         </p>
 
         <div class="mx-auto mt-6 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
-            <a href="{{ $storefront->telegramBotHref() }}" class="neo-button inline-flex h-14 items-center justify-center bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
-                {{ $copy['hero']['primary_cta'] }}
+            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
+                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+                <span>{{ $copy['hero']['primary_cta'] }}</span>
             </a>
-            <a href="{{ $supportDestination }}" class="neo-button inline-flex h-14 items-center justify-center bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
-                {{ $copy['hero']['secondary_cta'] }}
+            <a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
+                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+                <span>{{ $copy['hero']['secondary_cta'] }}</span>
             </a>
         </div>
 
-        <div class="mx-auto mt-5 grid max-w-xl gap-3 sm:grid-cols-2">
-            <a href="{{ $storefront->adminLoginHref() }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#d9efff] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
-                <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[#39a8ff] text-white">
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 9h8M8 13h5"/></svg>
-                </span>
-                <span>
-                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Admin</span>
-                    <span class="block text-sm font-black text-[var(--sf-ink)]">Dashboard toko</span>
-                </span>
-            </a>
-
-            <a href="{{ $storefront->telegramBotHref() }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
+        <div class="mx-auto mt-5 grid max-w-sm gap-3">
+            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
                 <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] text-[var(--sf-ink)]">
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 8h6M9 12h3m-7 7 3.4-2.4A4 4 0 0 1 10.7 16H17a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h.5"/></svg>
+                    @include('storefront.components.telegram-icon', ['class' => 'h-5 w-5 shrink-0'])
                 </span>
                 <span>
-                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Bot</span>
+                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Telegram Bot</span>
                     <span class="block text-sm font-black text-[var(--sf-ink)]">Order via Telegram</span>
                 </span>
             </a>

@@ -8,19 +8,17 @@
                 <p class="mt-3 text-sm font-semibold leading-relaxed text-white/90">{{ $copy['support']['body'] }}</p>
             </div>
 
-            <div class="flex w-full shrink-0 flex-col gap-3 sm:w-auto sm:flex-row">
+            <div class="flex w-full shrink-0 flex-col gap-3 sm:w-auto">
                 @if ($supportHref)
-                    <a href="{{ $supportHref }}" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-yellow)] px-6 text-sm font-black text-[var(--sf-ink)]">
-                        {{ $copy['support']['primary_cta'] }}
+                    <a href="{{ $supportHref }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-12 items-center justify-center gap-2 bg-[var(--sf-yellow)] px-6 text-sm font-black text-[var(--sf-ink)]">
+                        @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+                        <span>{{ $copy['support']['primary_cta'] }}</span>
                     </a>
                 @else
                     <span class="inline-flex h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white/20 px-6 text-sm font-black text-white">
                         Support Telegram segera tersedia
                     </span>
                 @endif
-                <a href="{{ $storefront->adminLoginHref() }}" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-surface)] px-6 text-sm font-black text-[var(--sf-ink)]">
-                    {{ $copy['support']['secondary_cta'] }}
-                </a>
             </div>
         </div>
     </div>

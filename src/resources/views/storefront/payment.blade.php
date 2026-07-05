@@ -77,8 +77,9 @@
                     <p>Web storefront hanya membantu memilih produk. Checkout produksi tetap melewati modul order/payment/inventory supaya Paid Order Proof Event dan receipt tidak bisa terlewati.</p>
                 </div>
 
-                <a href="{{ $checkoutSupportLink }}" target="_blank" rel="noopener noreferrer" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center bg-[#2d9cff] px-5 text-sm font-black text-white">
-                    Buka Telegram Admin {{ '@'.$adminUsername }}
+                <a href="{{ $checkoutSupportLink }}" target="_blank" rel="noopener noreferrer" data-telegram-link data-icon="telegram" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center gap-2 bg-[#2d9cff] px-5 text-sm font-black text-white">
+                    @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+                    <span>Buka Telegram Admin {{ '@'.$adminUsername }}</span>
                 </a>
             </section>
         </main>

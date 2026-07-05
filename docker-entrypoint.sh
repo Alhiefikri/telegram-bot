@@ -101,6 +101,12 @@ if [ -d /opt/lhiestore-public-build ]; then
     cp -R /opt/lhiestore-public-build public/build
 fi
 
+if [ -d /opt/lhiestore-public-storefront ]; then
+    mkdir -p public/storefront
+    cp -R /opt/lhiestore-public-storefront/. public/storefront/
+fi
+
+
 
 if [ "${APP_AUTO_MIGRATE:-true}" = "true" ]; then
     artisan migrate --force

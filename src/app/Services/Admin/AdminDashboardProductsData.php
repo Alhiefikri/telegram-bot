@@ -51,14 +51,7 @@ final class AdminDashboardProductsData
                 $availableStockItemCount = (int) ($availableStockCounts[$product->id] ?? 0);
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
-                    ? ProductStockItem::query()
-                        ->with(['orderItem.order.payments'])
-                        ->where('product_id', $product->id)
-                        ->oldest('id')
-                        ->limit(25)
-                        ->get()
-                        ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
-                        ->all()
+                    ? $this->orderedStockItems($product)
                     : [];
                 $stockSummary = $this->stockSummary($stockItems);
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
@@ -122,6 +115,39 @@ final class AdminDashboardProductsData
                     ],
                 ];
             })
+            ->all();
+    }
+
+    private function orderedStockItems(Product $product): array
+    {
+        $stockItemsTable = (new ProductStockItem())->getTable();
+
+        return ProductStockItem::query()
+            ->with(['orderItem.order.payments'])
+            ->leftJoin('order_items', "{$stockItemsTable}.order_item_id", '=', 'order_items.id')
+            ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
+            ->where("{$stockItemsTable}.product_id", $product->id)
+            ->select("{$stockItemsTable}.*")
+            ->orderByRaw(
+                "CASE
+                    WHEN {$stockItemsTable}.order_item_id IS NULL THEN 0
+                    WHEN orders.payment_status = ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM payments
+                            WHERE payments.order_id = orders.id
+                                AND payments.status = ?
+                        )
+                        THEN 3
+                    WHEN orders.order_status = ? THEN 1
+                    ELSE 2
+                END",
+                [PaymentStatus::Paid->value, PaymentStatus::Paid->value, OrderStatus::PendingPayment->value],
+            )
+            ->orderBy("{$stockItemsTable}.id")
+            ->limit(25)
+            ->get()
+            ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
             ->all();
     }
 

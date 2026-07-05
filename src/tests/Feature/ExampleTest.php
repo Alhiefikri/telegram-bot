@@ -26,8 +26,53 @@ class ExampleTest extends TestCase
             ->assertSee('Katalog akun AI premium')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
-            ->assertSee('/admin/login')
+            ->assertDontSee('/admin/login', false)
             ->assertDontSee("Let's get started");
+    }
+
+    public function test_storefront_mobile_menu_exposes_customer_links_without_admin_ctas(): void
+    {
+        $response = $this->get('/')->assertOk();
+
+        $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
+
+        foreach (['Produk', 'Cara Beli', 'Panduan Login', 'FAQ', 'Support', 'Buka Bot Telegram'] as $customerLinkText) {
+            $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
+        }
+
+        $this->assertStringNotContainsString('/admin/login', $mobileMenuHtml);
+        $this->assertStringNotContainsString('Login Admin', $mobileMenuHtml);
+        $this->assertStringNotContainsString('Dashboard toko', $mobileMenuHtml);
+    }
+
+    public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
+    {
+        $this->get('/')
+            ->assertOk()
+            ->assertDontSee('/admin/login', false)
+            ->assertDontSee('>Admin</a>', false)
+            ->assertDontSee('Login Admin')
+            ->assertDontSee('Dashboard toko');
+    }
+
+    public function test_storefront_telegram_destination_ctas_expose_telegram_marker(): void
+    {
+        config([
+            'services.telegram.admin_contact_url' => 'https://t.me/lhiestore_support',
+            'storefront.links.telegram_bot_url' => 'https://t.me/lhiestore_bot?start=landing',
+        ]);
+
+        $html = $this->get('/')->assertOk()->getContent();
+        $telegramLinks = $this->telegramDestinationLinks($html);
+
+        $this->assertNotEmpty($telegramLinks, 'Expected storefront to render Telegram-destination CTAs.');
+
+        foreach ($telegramLinks as $linkHtml) {
+            $this->assertTrue(
+                $this->hasTelegramMarker($linkHtml),
+                'Telegram-destination CTA is missing a visible or semantic Telegram marker: '.$linkHtml,
+            );
+        }
     }
 
     public function test_storefront_uses_host_relative_vite_assets(): void
@@ -81,18 +126,23 @@ class ExampleTest extends TestCase
         Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
-    public function test_login_guide_page_explains_login_security_with_inline_images(): void
+    public function test_login_guide_page_explains_login_security_with_extracted_screenshot_assets(): void
     {
-        $this->get('/panduan-login-akun')
+        $response = $this->get('/panduan-login-akun')
             ->assertOk()
-            ->assertSee('Cara masuk dan amankan akun digital kamu')
-            ->assertSee('Siapkan data login dulu')
-            ->assertSee('Tambahkan MFA di Google Authenticator')
+            ->assertSee('Cara login ChatGPT pakai Outlook/iCloud + MFA')
+            ->assertSee('Data login yang harus disiapkan')
+            ->assertSee('Tambahkan MFA Secret ke Google Authenticator')
             ->assertSee('Checklist keamanan')
-            ->assertSee('storefront/login-guide/page-1.jpg', false)
-            ->assertSee('storefront/login-guide/page-9.jpg', false)
             ->assertDontSee('Download PDF')
             ->assertDontSee('/panduan-login-akun/pdf', false);
+
+        $content = $response->getContent();
+
+        preg_match_all('#storefront/login-guide/(?!page-\d+\.jpg)[^"\']+\.(?:avif|webp|png|jpe?g)#', $content, $assetReferences);
+
+        $this->assertGreaterThanOrEqual(3, count(array_unique($assetReferences[0])), 'Login guide should render multiple extracted screenshot assets instead of full-page PDF screenshots.');
+        $this->assertDoesNotMatchRegularExpression('#storefront/login-guide/page-\d+\.jpg#', $content);
 
         $this->get('/cara-loginoutlook')->assertRedirect('/panduan-login-akun');
     }
@@ -397,6 +447,24 @@ class ExampleTest extends TestCase
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function telegramDestinationLinks(string $html): array
+    {
+        preg_match_all('/<a\b(?=[^>]*\bhref="https:\/\/t\.me\/[^"]*")[^>]*>.*?<\/a>/s', $html, $matches);
+
+        return $matches[0];
+    }
+
+    private function hasTelegramMarker(string $linkHtml): bool
+    {
+        $visibleText = trim((string) preg_replace('/\s+/', ' ', strip_tags($linkHtml)));
+
+        return str_contains(strtolower($visibleText), 'telegram')
+            || preg_match('/\b(?:aria-label|title|class|data-icon)="[^"]*\btelegram\b/i', $linkHtml) === 1;
     }
 
     private function htmlBetween(string $html, string $start, string $end): string

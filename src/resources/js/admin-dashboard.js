@@ -1,25 +1,52 @@
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = 'Tidak ada file yang dipilih';
 
-const emptyProductForm = () => ({
-    productModalMode: 'create',
-    productFormMethod: '',
-    productId: null,
-    productName: '',
-    productPrice: '',
-    productFakeDiscountPrice: '',
-    productCategoryId: '',
-    productDescription: '',
-    productFeatures: '',
-    productSpecifications: '',
-    productIsActive: true,
-    productImageUrl: '',
-    productImageFileName: EMPTY_IMAGE_FILE_NAME,
-    productFeaturesOpen: false,
-    productSpecificationsOpen: false,
-});
+const STOCK_GROUPS = [
+    {
+        key: 'ready',
+        label: 'READY / TERSEDIA',
+        helper: 'Akun belum dipakai. Ini prioritas paling atas untuk diedit, dihapus, atau dikirim.',
+        statuses: ['TERSEDIA'],
+        color: '#38bdf8',
+    },
+    {
+        key: 'reserved',
+        label: 'DIPESAN',
+        helper: 'Sedang ditahan oleh order aktif/pending. Bisa dilepas lewat tombol batal order.',
+        statuses: ['DIPESAN'],
+        color: '#facc15',
+    },
+    {
+        key: 'repair',
+        label: 'PERLU REPAIR',
+        helper: 'Order expired/cancelled masih menempel ke stok. Lepas dulu sebelum dipakai lagi.',
+        statuses: ['EXPIRED', 'CANCELLED'],
+        color: '#fb7185',
+    },
+    {
+        key: 'other',
+        label: 'STATUS LAIN',
+        helper: 'Riwayat status selain ready, dipesan, repair, dan paid.',
+        statuses: [],
+        color: '#c4b5fd',
+    },
+    {
+        key: 'paid',
+        label: 'PAID',
+        helper: 'Sudah terjual/terkonfirmasi. Grup ini sengaja ditaruh paling bawah.',
+        statuses: ['PAID'],
+        color: '#7BD10A',
+    },
+];
 
-const editableStockItems = (items = []) => items.map((item) => ({ ...item, editing: false }));
+const stockGroupFor = (status) => STOCK_GROUPS.find((group) => group.statuses.includes(status))
+    ?? STOCK_GROUPS.find((group) => group.key === 'other');
+
+const stockGroupRank = (status) => STOCK_GROUPS.findIndex((group) => group.key === stockGroupFor(status).key);
+
+const editableStockItems = (items = []) => [...items]
+    .sort((first, second) => (stockGroupRank(first.status) - stockGroupRank(second.status)) || (Number(first.id) - Number(second.id)))
+    .map((item, index) => ({ ...item, editing: false, displayIndex: index + 1, groupKey: stockGroupFor(item.status).key }));
 
 export default function adminDashboard(initialState = {}) {
     return {
@@ -56,6 +83,15 @@ export default function adminDashboard(initialState = {}) {
                 .map((row) => row.trim())
                 .filter(Boolean)
                 .length;
+        },
+
+        manageStockGroups() {
+            return STOCK_GROUPS
+                .map((group) => ({
+                    ...group,
+                    items: this.manageStockItems.filter((item) => item.groupKey === group.key),
+                }))
+                .filter((group) => group.items.length > 0);
         },
 
         openProductForm() {

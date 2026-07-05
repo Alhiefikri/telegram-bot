@@ -23,8 +23,9 @@
 
         <p class="mx-auto mt-5 max-w-sm text-center text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $qris['body'] }}</p>
 
-        <a href="{{ $supportDestination }}" class="neo-button mt-5 inline-flex h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
-            Konfirmasi ke Admin
+        <a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="neo-button mt-5 inline-flex h-12 w-full items-center justify-center gap-2 bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
+            @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+            <span>Konfirmasi ke Admin</span>
         </a>
     </div>
 </aside>

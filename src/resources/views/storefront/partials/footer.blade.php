@@ -29,8 +29,8 @@
         <div>
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Bantuan</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
-                <li><a href="{{ $supportDestination }}" class="font-black text-[var(--sf-accent)] hover:text-[var(--sf-ink)]">Support Telegram</a></li>
-                <li><a href="{{ $storefront->telegramBotHref() }}" class="hover:text-[var(--sf-accent)]">Bot Telegram</a></li>
+                <li><a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="inline-flex items-center gap-2 font-black text-[var(--sf-accent)] hover:text-[var(--sf-ink)]">@include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0']) <span>Support Telegram</span></a></li>
+                <li><a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="inline-flex items-center gap-2 hover:text-[var(--sf-accent)]">@include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0']) <span>Bot Telegram</span></a></li>
                 <li><span>08.00 - 23.00 WIB</span></li>
             </ul>
         </div>
