@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Cart;
@@ -628,7 +629,47 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r->body(), 'Batas bayar QRIS: 04 Jul 2026 23:30 WIB')
             && str_contains($r->body(), 'Tidak perlu buka browser')
             && str_contains($r->body(), 'Bayar via Website')
-            && str_contains($r->body(), 'app.pakasir.test\\/pay\\/sedulur-digital\\/30000'));
+            && str_contains($r->body(), 'app.pakasir.test\\/pay\\/sedulur-digital\\/30000')
+            && str_contains($r->body(), 'Batalkan Order')
+            && str_contains($r->body(), 'buyer:cancel-pending:'.$order->id));
+    }
+
+    public function test_buyer_cancel_callback_cancels_own_pending_native_pakasir_order_and_releases_stock(): void
+    {
+        $this->fakeTelegramHttp();
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $otherBuyer = Customer::factory()->create(['telegram_id' => 67890, 'username' => 'other_buyer']);
+        $product = Product::factory()->create(['name' => 'Cancelable Native QRIS', 'price_amount' => 15000, 'stock' => 1, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cancelable@example.test|pass']);
+        $otherProduct = Product::factory()->create(['name' => 'Other Native QRIS', 'price_amount' => 18000, 'stock' => 1, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $otherProduct->id, 'secret' => 'other@example.test|pass']);
+
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($buyer->carts()->firstOrFail(), 'hosted', 'pakasir');
+        $order->payments()->firstOrFail()->update(['provider_payment_method' => 'qris']);
+
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($otherBuyer), $otherProduct, 1);
+        $otherOrder = app(OrderCheckoutService::class)->checkout($otherBuyer->carts()->firstOrFail(), 'hosted', 'pakasir');
+        $otherOrder->payments()->firstOrFail()->update(['provider_payment_method' => 'qris']);
+
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertSame(1, $otherProduct->fresh()->reserved_stock);
+        $this->assertNotNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+
+        $this->postTelegramWebhook($this->callbackUpdate(21, 'cb-buyer-cancel', 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(PaymentStatus::Failed, $order->payments()->firstOrFail()->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+        $this->assertSame(OrderStatus::PendingPayment, $otherOrder->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $otherOrder->fresh()->payment_status);
+        $this->assertSame(PaymentStatus::Pending, $otherOrder->payments()->firstOrFail()->fresh()->status);
+        $this->assertSame(1, $otherProduct->fresh()->reserved_stock);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'cb-buyer-cancel'
+            && $r['text'] === 'Order dibatalkan dan stok sudah dilepas.');
     }
 
     public function test_pakasir_native_qris_create_failure_sends_hosted_fallback_and_keeps_payment_pending(): void

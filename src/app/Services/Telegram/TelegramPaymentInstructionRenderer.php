@@ -90,7 +90,7 @@ class TelegramPaymentInstructionRenderer
             photoContents: $this->qrCodes->png($paymentUrl),
             filename: 'pakasir-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
-            replyMarkup: $this->websitePaymentButton($paymentUrl),
+            replyMarkup: $this->paymentActions($order, $paymentUrl),
         );
     }
 
@@ -108,6 +108,7 @@ class TelegramPaymentInstructionRenderer
 
         if ($expiry) {
             $lines[] = '⏳ Batas bayar QRIS: '.$this->formatDate($expiry);
+            $lines[] = 'Lewat batas ini order otomatis expired dan stok dilepas. Jangan bayar QR lama; checkout ulang kalau masih mau beli.';
         }
 
         $lines[] = '';
@@ -120,7 +121,7 @@ class TelegramPaymentInstructionRenderer
             photoContents: $this->qrCodes->png($transaction->paymentNumber()),
             filename: 'pakasir-qris-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
-            replyMarkup: $this->websitePaymentButton($paymentUrl),
+            replyMarkup: $this->paymentActions($order, $paymentUrl),
         );
     }
 
@@ -188,15 +189,32 @@ class TelegramPaymentInstructionRenderer
     }
 
     /**
-     * @return array{inline_keyboard: list<list<array{text: string, url: string}>>}
+     * @return array{inline_keyboard: list<list<array{text: string, url?: string, callback_data?: string}>>}
      */
-    private function websitePaymentButton(string $paymentUrl): array
+    private function paymentActions(Order $order, string $paymentUrl): array
     {
-        return ['inline_keyboard' => [[['text' => '💳 Bayar via Website', 'url' => $paymentUrl]]]];
+        return [
+            'inline_keyboard' => [
+                [['text' => '💳 Bayar via Website', 'url' => $paymentUrl]],
+                [['text' => '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+            ],
+        ];
     }
 
     private function formatDate(CarbonInterface $date): string
     {
-        return $date->timezone(config('app.timezone'))->format('d M Y H:i').' WIB';
+        $timezone = (string) config('app.timezone');
+
+        return $date->timezone($timezone)->format('d M Y H:i').' '.$this->timezoneLabel($timezone);
+    }
+
+    private function timezoneLabel(string $timezone): string
+    {
+        return match ($timezone) {
+            'Asia/Jakarta' => 'WIB',
+            'Asia/Makassar', 'Asia/Ujung_Pandang' => 'WITA',
+            'Asia/Jayapura' => 'WIT',
+            default => $timezone,
+        };
     }
 }

@@ -3,7 +3,10 @@
 namespace App\Services\Telegram;
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InvalidOrderTransition;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendManualCheckoutNotifications;
@@ -11,6 +14,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Support\DogfoodTiming;
 
 class TelegramCallbackRouter
@@ -19,6 +23,7 @@ class TelegramCallbackRouter
         private TelegramBotClient $bot,
         private CartService $carts,
         private OrderCheckoutService $checkout,
+        private OrderStateMachine $orderStates,
         private TelegramIntentSession $session,
         private TelegramCatalogIntents $catalog,
         private TelegramCartIntents $cart,
@@ -97,6 +102,12 @@ class TelegramCallbackRouter
             return;
         }
 
+        if (preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $data, $matches)) {
+            $this->cancelPendingOrder($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
+
         if ($data === 'batal') {
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
@@ -155,6 +166,36 @@ class TelegramCallbackRouter
         }
 
         $this->bot->answerCallbackQuery($id, 'Aksi ini belum dikenali.');
+    }
+
+    private function cancelPendingOrder(Customer $customer, string $chatId, string $id, string $orderId): void
+    {
+        $this->session->forget($customer);
+
+        $order = $customer->orders()
+            ->whereKey($orderId)
+            ->where('order_status', OrderStatus::PendingPayment->value)
+            ->where('payment_status', PaymentStatus::Pending->value)
+            ->first();
+
+        if (! $order) {
+            $this->bot->answerCallbackQuery($id, 'Pesanan sudah tidak bisa dibatalkan.');
+            $this->bot->sendMessage($chatId, "Pesanan tidak ditemukan atau sudah tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.");
+
+            return;
+        }
+
+        try {
+            $cancelled = $this->orderStates->cancelPendingOrder($order);
+        } catch (InvalidOrderTransition) {
+            $this->bot->answerCallbackQuery($id, 'Pesanan sudah tidak bisa dibatalkan.');
+            $this->bot->sendMessage($chatId, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.");
+
+            return;
+        }
+
+        $this->bot->answerCallbackQuery($id, 'Order dibatalkan dan stok sudah dilepas.');
+        $this->bot->sendMessage($chatId, "❌ Pesanan dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.");
     }
 
     private function checkout(Customer $customer, string $chatId, string $id): void
