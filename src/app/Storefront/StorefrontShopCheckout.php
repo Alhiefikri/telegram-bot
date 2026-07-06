@@ -11,7 +11,6 @@ use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirNativeQrisService;
-use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Support\Facades\URL;
@@ -24,32 +23,35 @@ class StorefrontShopCheckout
         private readonly OrderCheckoutService $orders,
         private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirProviderReadiness $readiness,
-        private readonly PakasirProviderAdapter $pakasir,
         private readonly OrderStateMachine $orderStates,
     ) {}
 
-    public function start(Product $product, int $quantity, string $displayName, ?string $telegramUsername): StorefrontShopCheckoutResult
+    public function start(StorefrontShopCheckoutInput $input): StorefrontShopCheckoutResult
     {
+        $product = $this->product($input->productId);
+
         $this->assertNativeQrisReady();
 
-        if (! $product->isPublicVisible() || $product->availableStock() < $quantity) {
+        if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
         }
 
+        $buyer = $this->buyerIdentity($input->buyerHandle);
+
         $customer = Customer::create([
             'telegram_id' => null,
-            'first_name' => $displayName,
-            'username' => $telegramUsername,
+            'first_name' => $buyer['display_name'],
+            'username' => $buyer['telegram_username'],
         ]);
 
         $cart = $this->carts->activeCartFor($customer);
-        $this->carts->setItemQuantity($cart, $product, $quantity);
+        $this->carts->setItemQuantity($cart, $product, $input->quantity);
 
         $order = $this->orders->checkout($cart, PakasirCheckoutFlow::API_QRIS, 'pakasir');
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
         try {
-            $transaction = $this->nativeQris->ensureCreated($payment);
+            $this->nativeQris->ensureCreated($payment);
         } catch (Throwable $exception) {
             report($exception);
 
@@ -66,13 +68,41 @@ class StorefrontShopCheckout
         $order->refresh();
 
         return new StorefrontShopCheckoutResult(
-            order: $order,
-            payment: $payment,
-            transaction: $transaction,
-            orderUrl: URL::signedRoute('storefront.shop.orders.show', $order),
-            statusUrl: URL::signedRoute('storefront.shop.orders.status', $order),
-            hostedPaymentUrl: $this->pakasir->hostedPaymentUrl($payment),
+            redirectUrl: URL::signedRoute('storefront.shop.orders.show', $order),
         );
+    }
+
+    private function product(int $productId): Product
+    {
+        $product = Product::query()->whereKey($productId)->first();
+
+        if (! $product) {
+            throw new InvalidCheckout('Produk tidak ditemukan atau sudah tidak tersedia.');
+        }
+
+        return $product;
+    }
+
+    /**
+     * @return array{display_name: string, telegram_username: ?string}
+     */
+    private function buyerIdentity(string $buyerHandle): array
+    {
+        $value = trim($buyerHandle);
+
+        if (preg_match('/^@?[A-Za-z0-9_]{5,32}$/', $value) === 1) {
+            $username = ltrim($value, '@');
+
+            return [
+                'display_name' => $username,
+                'telegram_username' => $username,
+            ];
+        }
+
+        return [
+            'display_name' => $value,
+            'telegram_username' => null,
+        ];
     }
 
     private function assertNativeQrisReady(): void

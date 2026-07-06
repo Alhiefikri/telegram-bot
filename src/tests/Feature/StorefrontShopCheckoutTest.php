@@ -6,7 +6,8 @@ use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Http\Requests\StorefrontShopCheckoutRequest;
+use App\Exceptions\InsufficientStock;
+use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -18,6 +19,8 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\OrderStateMachine;
 use App\Services\Telegram\TelegramQrCodeRenderer;
+use App\Storefront\StorefrontShopCheckout;
+use App\Storefront\StorefrontShopCheckoutInput;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -56,34 +59,140 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertTrue(URL::hasValidSignature(Request::create($statusUrl, 'POST')));
     }
 
-    public function test_buyer_handle_normalizes_telegram_usernames_and_keeps_display_names_separate(): void
+    public function test_checkout_module_normalizes_buyer_identity_from_input_handle(): void
     {
         $cases = [
             'telegram username with at sign' => [
                 'input' => ' @LhieStore_99 ',
-                'expected' => ['display_name' => 'LhieStore_99', 'telegram_username' => 'LhieStore_99'],
+                'expected_first_name' => 'LhieStore_99',
+                'expected_username' => 'LhieStore_99',
             ],
             'telegram username without at sign' => [
                 'input' => 'LhieStore_99',
-                'expected' => ['display_name' => 'LhieStore_99', 'telegram_username' => 'LhieStore_99'],
+                'expected_first_name' => 'LhieStore_99',
+                'expected_username' => 'LhieStore_99',
             ],
             'display name with spaces is not telegram' => [
                 'input' => ' Lia Store ',
-                'expected' => ['display_name' => 'Lia Store', 'telegram_username' => null],
+                'expected_first_name' => 'Lia Store',
+                'expected_username' => null,
             ],
             'display name with dash is not telegram' => [
                 'input' => 'lia-store',
-                'expected' => ['display_name' => 'lia-store', 'telegram_username' => null],
+                'expected_first_name' => 'lia-store',
+                'expected_username' => null,
             ],
         ];
 
-        foreach ($cases as $case => $data) {
-            $request = StorefrontShopCheckoutRequest::create('/shop/checkout', 'POST', [
-                'buyer_handle' => $data['input'],
+        foreach (array_values($cases) as $index => $data) {
+            $this->configurePakasirApiQrisMode();
+            $this->fakePakasirQrisCreate(
+                amount: 15000,
+                paymentNumber: '00020101021226610016ID.CO.QRIS.NORMALIZE'.$index,
+                fee: 103,
+            );
+            $product = Product::factory()->create([
+                'price_amount' => 15000,
+                'stock' => 1,
+                'reserved_stock' => 0,
+                'is_active' => true,
             ]);
 
-            $this->assertSame($data['expected'], $request->buyerHandle(), $case);
+            $result = app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerHandle: $data['input'],
+            ));
+            $order = Order::latest('id')->firstOrFail();
+
+            $this->assertRedirectsToSignedOrderShow($result->redirectUrl, $order);
+            $this->assertDatabaseHas('customers', [
+                'id' => $order->customer_id,
+                'telegram_id' => null,
+                'username' => $data['expected_username'],
+                'first_name' => $data['expected_first_name'],
+            ]);
         }
+    }
+
+    public function test_checkout_module_rejects_products_that_are_not_available_products(): void
+    {
+        $this->configurePakasirApiQrisMode();
+        Http::fake();
+
+        $cases = [
+            'inactive product' => Product::factory()->create([
+                'stock' => 1,
+                'reserved_stock' => 0,
+                'is_active' => false,
+            ]),
+            'insufficient stock' => Product::factory()->create([
+                'stock' => 1,
+                'reserved_stock' => 1,
+                'is_active' => true,
+            ]),
+        ];
+
+        foreach ($cases as $case => $product) {
+            try {
+                app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                    productId: $product->id,
+                    quantity: 1,
+                    buyerHandle: 'Web Buyer',
+                ));
+                $this->fail('Expected checkout to reject '.$case.'.');
+            } catch (InsufficientStock $exception) {
+                $this->assertSame('Stok produk tidak cukup atau tidak tersedia.', $exception->getMessage(), $case);
+            }
+
+            $this->assertNoLocalCheckoutRowsCreated($case);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_checkout_module_preserves_native_qris_readiness_error_before_available_product_validation(): void
+    {
+        Http::fake();
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        try {
+            app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerHandle: 'Web Buyer',
+            ));
+            $this->fail('Expected checkout to reject disabled native QRIS before validating availability.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.', $exception->getMessage());
+        }
+
+        $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS');
+        Http::assertNothingSent();
+    }
+
+    public function test_shop_checkout_maps_missing_product_to_existing_validation_message(): void
+    {
+        $this->configurePakasirApiQrisMode();
+        Http::fake();
+
+        $response = $this
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => 999_999,
+                'quantity' => 1,
+                'buyer_handle' => '@buyer_test',
+            ]);
+
+        $response
+            ->assertRedirect(route('storefront.shop.index'))
+            ->assertInvalid(['product_id' => 'Produk tidak ditemukan atau sudah tidak tersedia.']);
+        $this->assertNoLocalCheckoutRowsCreated('missing product');
+        Http::assertNothingSent();
     }
 
     public function test_shop_route_renders_marketplace_with_ready_modal_and_empty_stock_state(): void
