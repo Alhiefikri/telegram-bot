@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
@@ -273,6 +274,46 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Pesanan tidak ditemukan')
             && ! str_contains($r['text'], 'INV-OTHER-CB'));
+    }
+
+    public function test_order_expired_payment_expiry_is_rendered_in_configured_app_timezone(): void
+    {
+        config()->set('app.timezone', 'Asia/Singapore');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-SG-EXPIRY',
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+            'created_at' => CarbonImmutable::parse('2026-07-04 15:30:00', 'Asia/Singapore'),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_name' => 'Singapore Timezone Fixture',
+            'quantity' => 1,
+            'subtotal' => 125000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'hosted',
+            'provider' => 'pakasir',
+            'status' => PaymentStatus::Expired,
+            'expired_at' => CarbonImmutable::parse('2026-07-04 16:45:00', 'Asia/Singapore'),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(218, '/order INV-SG-EXPIRY'))->assertOk();
+
+        $sentMessages = Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'INV-SG-EXPIRY'));
+        $this->assertCount(1, $sentMessages);
+
+        $text = (string) $sentMessages->first()[0]['text'];
+        $this->assertStringContainsString('Detail Pesanan', $text);
+        $this->assertStringContainsString('Berakhir: 04 Jul 2026 16:45 Asia/Singapore', $text);
+        $this->assertStringContainsString('Dibuat: 04 Jul 2026 15:30 Asia/Singapore', $text);
+        $this->assertStringNotContainsString('08:45', $text);
+        $this->assertStringNotContainsString('WIB', $text);
     }
 
     public function test_order_detail_expired_or_cancelled_instructs_checkout_again(): void

@@ -10,6 +10,7 @@ use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
@@ -167,13 +168,25 @@ class TelegramOrderIntents
         return $lines;
     }
 
-    public function formatDate($date): string
+    public function formatDate(CarbonInterface $date): string
     {
-        return $date->timezone(config('app.timezone'))->format('d M Y H:i').' WIB';
+        $timezone = (string) config('app.timezone');
+
+        return $date->copy()->timezone($timezone)->format('d M Y H:i').' '.$this->timezoneLabel($timezone);
     }
 
-    public function formatShortDate($date): string
+    public function formatShortDate(CarbonInterface $date): string
     {
-        return $date->timezone(config('app.timezone'))->format('d M Y');
+        return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y');
+    }
+
+    private function timezoneLabel(string $timezone): string
+    {
+        return match ($timezone) {
+            'Asia/Jakarta' => 'WIB',
+            'Asia/Makassar', 'Asia/Ujung_Pandang' => 'WITA',
+            'Asia/Jayapura' => 'WIT',
+            default => $timezone,
+        };
     }
 }

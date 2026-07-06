@@ -112,6 +112,41 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
     }
 
+    public function test_native_qris_expiry_from_provider_utc_is_rendered_in_configured_app_timezone(): void
+    {
+        config()->set('app.timezone', 'Asia/Singapore');
+
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 18:00:00', 'Asia/Singapore'));
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-QRIS-SG-103',
+            'amount' => 125000,
+            'expired_at' => CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Singapore'),
+        ]);
+        $paymentNumber = '00020101021226610016SG.QRIS.EXPIRY103';
+        $paymentUrl = 'https://pakasir.example/pay/PKS-QRIS-SG-103?token=native-token';
+        $transaction = PakasirQrisTransaction::fromPayload([
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => 'PKS-QRIS-SG-103',
+                'amount' => 125000,
+                'total_payment' => 125000,
+                'payment_method' => 'qris',
+                'payment_number' => $paymentNumber,
+                'expired_at' => '2026-07-04T08:45:00+00:00',
+            ],
+        ]);
+
+        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl);
+
+        $this->assertContains(
+            '⏳ Batas bayar QRIS: 04 Jul 2026 16:45 Asia/Singapore',
+            $instruction->captionLines(),
+            "Caption lines:\n".$instruction->caption(),
+        );
+        $this->assertStringNotContainsString('08:45', $instruction->caption());
+        $this->assertStringNotContainsString('UTC', $instruction->caption());
+    }
+
     public function test_manual_instruction_uses_manual_qr_file_proof_upload_caption_and_no_website_button(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'));

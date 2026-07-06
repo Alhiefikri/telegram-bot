@@ -71,6 +71,50 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($r->data()), 'payment:'));
     }
 
+    public function test_reselecting_same_quantity_after_product_navigation_resends_checkout_prompt(): void
+    {
+        $this->fakeTelegramHttp();
+        $productA = Product::factory()->create(['name' => 'Kopi A', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        $productB = Product::factory()->create(['name' => 'Kopi B', 'price_amount' => 30000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(2001, 'a-detail-first', 'product:'.$productA->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2002, 'a-buy-first', 'buy:'.$productA->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2003, 'a-qty-first', 'qty:'.$productA->id.':1'))->assertOk();
+
+        $this->postTelegramWebhook($this->callbackUpdate(2004, 'b-detail', 'product:'.$productB->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2005, 'uncategorized', 'category:uncategorized'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2006, 'back-categories', 'back:categories'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2007, 'a-detail-second', 'product:'.$productA->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2008, 'a-buy-second', 'buy:'.$productA->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2009, 'a-qty-second', 'qty:'.$productA->id.':1'))->assertOk();
+
+        $this->assertSame(1, CartItem::count());
+        $cartItem = CartItem::first();
+        $this->assertSame($productA->id, $cartItem->product_id);
+        $this->assertSame(1, $cartItem->quantity);
+        $this->assertSame(CartStatus::Active, $cartItem->cart->status);
+        $this->assertCount(2, $this->cartConfirmationMessagesFor('Kopi A', 1));
+    }
+
+    public function test_stale_quantity_buttons_keep_their_product_id_after_switching_products(): void
+    {
+        $this->fakeTelegramHttp();
+        $productA = Product::factory()->create(['name' => 'Stale A', 'price_amount' => 12000, 'stock' => 4, 'reserved_stock' => 0, 'is_active' => true]);
+        $productB = Product::factory()->create(['name' => 'Fresh B', 'price_amount' => 18000, 'stock' => 4, 'reserved_stock' => 0, 'is_active' => true]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(2010, 'a-buy', 'buy:'.$productA->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2011, 'b-detail', 'product:'.$productB->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2012, 'b-buy', 'buy:'.$productB->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2013, 'stale-a-qty', 'qty:'.$productA->id.':1'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2014, 'fresh-b-qty', 'qty:'.$productB->id.':1'))->assertOk();
+
+        $this->assertSame(2, CartItem::count());
+        $this->assertDatabaseHas('cart_items', ['product_id' => $productA->id, 'quantity' => 1]);
+        $this->assertDatabaseHas('cart_items', ['product_id' => $productB->id, 'quantity' => 1]);
+        $this->assertCount(1, $this->cartConfirmationMessagesFor('Stale A', 1));
+        $this->assertCount(1, $this->cartConfirmationMessagesFor('Fresh B', 1));
+    }
+
     public function test_buy_quantity_choices_are_capped_and_stock_one_only_offers_one_choice(): void
     {
         $this->fakeTelegramHttp();
@@ -698,6 +742,16 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Pilih jumlah')
             && str_contains($r['text'], 'Callback Safe')
             && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
+    }
+
+    private function cartConfirmationMessagesFor(string $productName, int $quantity)
+    {
+        return Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), '🛒 Masuk keranjang')
+            && str_contains((string) ($request['text'] ?? ''), $productName)
+            && str_contains((string) ($request['text'] ?? ''), 'Jumlah: '.$quantity)
+            && str_contains(json_encode($request->data()), 'checkout')
+            && str_contains(json_encode($request->data()), 'Lanjut Checkout'));
     }
 
     private function bindInspectableQrRenderer(): void

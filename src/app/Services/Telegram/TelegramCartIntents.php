@@ -35,10 +35,7 @@ class TelegramCartIntents
             }
 
             $cart = $this->carts->activeCartFor($customer);
-            $cartItem = $this->carts->setItemQuantity($cart, $product, $quantity);
-            if ($cartItem && ! $cartItem->wasRecentlyCreated && ! $cartItem->wasChanged('quantity')) {
-                return true;
-            }
+            $this->carts->setItemQuantity($cart, $product, $quantity);
 
             $subtotal = $product->price_amount * $quantity;
             $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", [

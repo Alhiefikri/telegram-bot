@@ -168,8 +168,8 @@ class FakeSalesProofPostPublisher
 
         return [
             'ready' => $ready,
-            'last_sent_label' => $lastSentAt?->format('Y-m-d H:i') ?? 'Belum pernah',
-            'next_available_label' => $nextAvailableAt?->format('Y-m-d H:i') ?? 'Sekarang',
+            'last_sent_label' => $lastSentAt ? $this->formatDashboardTime($lastSentAt) : 'Belum pernah',
+            'next_available_label' => $nextAvailableAt ? $this->formatDashboardTime($nextAvailableAt) : 'Sekarang',
             'interval_label' => in_array($intervalHours, self::COOLDOWN_HOUR_OPTIONS, true)
                 ? $intervalHours.' jam'
                 : 'Random '.$this->intervalOptionsLabel(),
@@ -231,6 +231,11 @@ class FakeSalesProofPostPublisher
     private function intervalOptionsLabel(): string
     {
         return implode(' / ', array_map(fn (int $hours): string => $hours.' jam', self::COOLDOWN_HOUR_OPTIONS));
+    }
+
+    private function formatDashboardTime(Carbon $time): string
+    {
+        return $time->copy()->timezone((string) config('app.timezone', 'UTC'))->format('Y-m-d H:i');
     }
 
     private function cachedTime(string $key): ?Carbon

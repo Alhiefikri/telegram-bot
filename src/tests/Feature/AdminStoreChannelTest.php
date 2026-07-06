@@ -311,6 +311,55 @@ class AdminStoreChannelTest extends TestCase
         $this->assertNoFakeSalesProofPosts();
     }
 
+    public function test_fake_sales_proof_cooldown_labels_render_in_configured_app_timezone(): void
+    {
+        $previousTimezone = config('app.timezone');
+        config()->set('app.timezone', 'Asia/Singapore');
+
+        $now = Carbon::parse('2026-07-06 08:58:00', 'Asia/Singapore');
+        Carbon::setTestNow($now);
+
+        try {
+            $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+            $product = Product::factory()->create([
+                'name' => 'Timezone Channel Voucher',
+                'is_active' => true,
+                'stock' => 4,
+                'reserved_stock' => 0,
+            ]);
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'telegram_chat_id' => '-100123',
+                'last_test_success' => true,
+                'sales_proof_enabled' => true,
+            ]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 905]])]);
+
+            $this->post(route('admin.store-channel.fake-sales-proof'), [
+                'product_id' => $product->id,
+            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+
+            $content = $this->get(route('admin.dashboard', ['tab' => 'telegram-channel']))
+                ->assertOk()
+                ->getContent();
+
+            $this->assertSame(
+                1,
+                preg_match('/Terakhir<\/p>\s*<p[^>]*>2026-07-06 08:58<\/p>/', $content),
+                'Expected the last fake sales proof timestamp to render in the configured Asia/Singapore timezone.'
+            );
+            $this->assertStringNotContainsString('2026-07-06 00:58', $content, 'Dashboard rendered the cached UTC ISO timestamp instead of local app time.');
+            $this->assertSame(
+                1,
+                preg_match('/Kirim lagi<\/p>\s*<p[^>]*>2026-07-06 (10|11|12|13):58<\/p>/', $content),
+                'Expected the next fake sales proof availability label to keep the 08:58 local wall-clock minutes and add the recorded 2/3/4/5 hour cooldown.'
+            );
+        } finally {
+            Carbon::setTestNow();
+            config()->set('app.timezone', $previousTimezone);
+        }
+    }
+
     public function test_post_rejects_unavailable_fake_sales_proof_product_ids_without_sending(): void
     {
         foreach ([
