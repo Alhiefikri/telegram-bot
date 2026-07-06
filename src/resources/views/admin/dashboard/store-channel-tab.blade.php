@@ -55,13 +55,14 @@
                     </div>
 
                     <p class="mt-2 text-xs font-semibold text-brand-muted">
-                        Pilih produk nyata lalu kirim format “PEMBELIAN SUKSES” ke channel memakai nama random, tanpa membuat data Pesanan dan tanpa mengurangi stok.
+                        Pilih produk nyata lalu kirim manual kapan saja. Auto fake notif tetap jalan sendiri memakai interval random, tanpa membuat data Pesanan dan tanpa mengurangi stok.
                     </p>
 
-                    <div class="mt-3 grid grid-cols-3 gap-2">
-                        <x-admin-dashboard.mini-stat label="Interval" :value="$fakeSalesProof['interval_label']" align="left" />
-                        <x-admin-dashboard.mini-stat label="Terakhir" :value="$fakeSalesProof['last_sent_label']" align="left" />
-                        <x-admin-dashboard.mini-stat label="Kirim lagi" :value="$fakeSalesProof['next_available_label']" align="left" />
+                    <div class="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                        <x-admin-dashboard.mini-stat label="Manual" value="Kapan saja" align="left" />
+                        <x-admin-dashboard.mini-stat label="Manual terakhir" :value="$fakeSalesProof['manual_last_sent_label']" align="left" />
+                        <x-admin-dashboard.mini-stat label="Auto interval" :value="$fakeSalesProof['interval_label']" align="left" />
+                        <x-admin-dashboard.mini-stat label="Auto berikutnya" :value="$fakeSalesProof['next_available_label']" align="left" />
                     </div>
 
                     @if ($fakeSalesProof['disabled_reason'])
@@ -92,7 +93,7 @@
                             </x-admin-dashboard.button>
                         </form>
                         <p class="mt-2 text-[11px] font-semibold text-brand-muted">
-                            Guard aktif: setelah sukses, cooldown dipilih acak {{ $fakeSalesProof['interval_options_label'] }}. Stok produk tidak disentuh.
+                            Manual tidak kena cooldown. Auto dikirim scheduler saat interval acak {{ $fakeSalesProof['interval_options_label'] }} sudah due.
                         </p>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">Hanya owner/admin yang bisa mengirim info pembelian fake.</x-admin-dashboard.notice>

@@ -335,9 +335,7 @@ class AdminStoreChannelTest extends TestCase
             ]);
             Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 905]])]);
 
-            $this->post(route('admin.store-channel.fake-sales-proof'), [
-                'product_id' => $product->id,
-            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
 
             $content = $this->get(route('admin.dashboard', ['tab' => 'telegram-channel']))
                 ->assertOk()
@@ -345,15 +343,12 @@ class AdminStoreChannelTest extends TestCase
 
             $this->assertSame(
                 1,
-                preg_match('/Terakhir<\/p>\s*<p[^>]*>2026-07-06 08:58<\/p>/', $content),
-                'Expected the last fake sales proof timestamp to render in the configured Asia/Singapore timezone.'
+                preg_match('/Auto berikutnya<\/p>\s*<p[^>]*>2026-07-06 (10|11|12|13):58<\/p>/', $content),
+                'Expected the automatic fake sales proof availability label to keep the 08:58 local wall-clock minutes and add the recorded 2/3/4/5 hour cooldown.'
             );
-            $this->assertStringNotContainsString('2026-07-06 00:58', $content, 'Dashboard rendered the cached UTC ISO timestamp instead of local app time.');
-            $this->assertSame(
-                1,
-                preg_match('/Kirim lagi<\/p>\s*<p[^>]*>2026-07-06 (10|11|12|13):58<\/p>/', $content),
-                'Expected the next fake sales proof availability label to keep the 08:58 local wall-clock minutes and add the recorded 2/3/4/5 hour cooldown.'
-            );
+            foreach (['2026-07-06 02:58', '2026-07-06 03:58', '2026-07-06 04:58', '2026-07-06 05:58'] as $utcLabel) {
+                $this->assertStringNotContainsString($utcLabel, $content, 'Dashboard rendered the cached UTC timestamp instead of local app time.');
+            }
         } finally {
             Carbon::setTestNow();
             config()->set('app.timezone', $previousTimezone);
@@ -425,14 +420,14 @@ class AdminStoreChannelTest extends TestCase
         }
     }
 
-    public function test_second_fake_sales_proof_send_before_five_hours_is_blocked_without_sending_again(): void
+    public function test_manual_fake_sales_proof_posts_ignore_automatic_cooldown_and_stay_side_effect_free(): void
     {
         $now = Carbon::parse('2026-07-05 12:00:00');
         Carbon::setTestNow($now);
 
         try {
             $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
-            $product = Product::factory()->create(['name' => 'Cooldown Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 0]);
+            $product = Product::factory()->create(['name' => 'Manual Cooldown Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 0]);
             StoreChannelSetting::create([
                 'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
                 'telegram_chat_id' => '-100123',
@@ -445,17 +440,65 @@ class AdminStoreChannelTest extends TestCase
                 'product_id' => $product->id,
             ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
 
-            Carbon::setTestNow($now->copy()->addHour());
-
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
-            ])
-                ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']))
-                ->assertSessionHas('error');
+            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
 
-            Http::assertSentCount(1);
+            $matchingSends = Http::recorded(function (Request $request) use ($product): bool {
+                $text = (string) ($request['text'] ?? '');
+
+                return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+                    && $request['chat_id'] === '-100123'
+                    && str_contains($text, 'PEMBELIAN SUKSES')
+                    && str_contains($text, $product->name);
+            });
+
+            $this->assertCount(2, $matchingSends);
             $this->assertSame(4, $product->refresh()->stock);
             $this->assertSame(0, $product->reserved_stock);
+            $this->assertNoRealOrderPersistence();
+            $this->assertNoFakeSalesProofPosts();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_auto_fake_sales_proof_command_sends_once_when_due_then_skips_until_random_interval_passes(): void
+    {
+        $now = Carbon::parse('2026-07-05 12:00:00');
+        Carbon::setTestNow($now);
+
+        try {
+            $availableProduct = Product::factory()->create(['name' => 'Auto Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 0]);
+            $inactiveProduct = Product::factory()->create(['name' => 'Inactive Auto Channel Voucher', 'is_active' => false, 'stock' => 4, 'reserved_stock' => 0]);
+            $soldOutProduct = Product::factory()->create(['name' => 'Sold Out Auto Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 4]);
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'telegram_chat_id' => '-100123',
+                'last_test_success' => true,
+                'sales_proof_enabled' => true,
+            ]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 906]])]);
+
+            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
+
+            Carbon::setTestNow($now->copy()->addHour());
+
+            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
+
+            Http::assertSentCount(1);
+            Http::assertSent(function (Request $request) use ($availableProduct, $inactiveProduct, $soldOutProduct): bool {
+                $text = (string) ($request['text'] ?? '');
+
+                return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+                    && $request['chat_id'] === '-100123'
+                    && str_contains($text, 'PEMBELIAN SUKSES')
+                    && str_contains($text, $availableProduct->name)
+                    && ! str_contains($text, $inactiveProduct->name)
+                    && ! str_contains($text, $soldOutProduct->name);
+            });
+            $this->assertSame(4, $availableProduct->refresh()->stock);
+            $this->assertSame(0, $availableProduct->reserved_stock);
             $this->assertNoRealOrderPersistence();
             $this->assertNoFakeSalesProofPosts();
         } finally {

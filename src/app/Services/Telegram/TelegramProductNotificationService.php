@@ -35,7 +35,7 @@ class TelegramProductNotificationService
         ]), '🆕 Produk Baru', $this->productReplyMarkup($product, $availableStock));
     }
 
-    public function notifyStockAdded(Product $product, int $addedQuantity): array
+    public function notifyStockAdded(Product $product, int $addedQuantity, ?int $availableBefore = null): array
     {
         $product = $product->fresh();
         if (! $product || ! $product->is_active || $addedQuantity < 1) {
@@ -43,7 +43,7 @@ class TelegramProductNotificationService
         }
 
         $availableStock = $product->availableStock();
-        if ($availableStock < 1) {
+        if (($availableBefore !== null && $availableBefore > 0) || $availableStock < 1) {
             return $this->skippedResult();
         }
 

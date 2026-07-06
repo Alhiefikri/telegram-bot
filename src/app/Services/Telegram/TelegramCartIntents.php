@@ -12,7 +12,7 @@ class TelegramCartIntents
 {
     public function __construct(private TelegramBotClient $bot, private CartService $carts) {}
 
-    public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity): bool
+    public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity, bool $forceConfirmation = false): bool
     {
         if ($quantity < 1) {
             $this->bot->sendMessage($chatId, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.');
@@ -35,8 +35,12 @@ class TelegramCartIntents
             }
 
             $cart = $this->carts->activeCartFor($customer);
-            $this->carts->setItemQuantity($cart, $product, $quantity);
+            $existingItem = $cart->cartItems()->where('product_id', $product->id)->first();
+            if (! $forceConfirmation && $existingItem && (int) $existingItem->quantity === $quantity) {
+                return true;
+            }
 
+            $this->carts->setItemQuantity($cart, $product, $quantity);
             $subtotal = $product->price_amount * $quantity;
             $this->bot->sendMessage($chatId, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", [
                 'inline_keyboard' => [

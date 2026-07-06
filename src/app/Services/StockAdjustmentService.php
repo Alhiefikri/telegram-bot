@@ -19,6 +19,15 @@ class StockAdjustmentService
      */
     public function adjust(Product $product, int $delta, ?string $notes = null, ?User $user = null, ?string $ip = null, array $stockItems = []): Product
     {
+        return $this->adjustWithAvailability($product, $delta, $notes, $user, $ip, $stockItems)['product'];
+    }
+
+    /**
+     * @param  list<string>  $stockItems
+     * @return array{product: Product, available_before: int, available_after: int}
+     */
+    public function adjustWithAvailability(Product $product, int $delta, ?string $notes = null, ?User $user = null, ?string $ip = null, array $stockItems = []): array
+    {
         if ($delta === 0) {
             throw new InvalidArgumentException('Stock adjustment quantity must not be zero.');
         }
@@ -33,6 +42,7 @@ class StockAdjustmentService
             if ($locked->isCredentialManaged() && $stockItems === []) {
                 throw new InvalidArgumentException('Credential-managed products must be adjusted through matching stock item rows.');
             }
+            $availableBefore = $locked->availableStock();
             $newStock = $locked->stock + $delta;
 
             if ($newStock < 0 || $newStock < $locked->reserved_stock) {
@@ -58,7 +68,13 @@ class StockAdjustmentService
 
             $this->auditLogger->log('product.stock_adjusted', $locked, $old, ['stock' => $newStock, 'reserved_stock' => $locked->reserved_stock, 'delta' => $delta, 'notes' => $notes], $user, $ip);
 
-            return $locked->refresh();
+            $adjusted = $locked->refresh();
+
+            return [
+                'product' => $adjusted,
+                'available_before' => $availableBefore,
+                'available_after' => $adjusted->availableStock(),
+            ];
         });
     }
 }

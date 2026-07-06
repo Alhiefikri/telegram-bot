@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Category;
+use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -16,6 +17,7 @@ use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AdminDashboardStockFlowsTest extends TestCase
@@ -209,6 +211,46 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSeeInOrder(['Canva Pro', 'Stok', '5'])
             ->assertSeeInOrder(['Canva Pro', 'Tersedia', '4'])
             ->assertSeeInOrder(['Canva Pro', 'Dipesan', '1']);
+    }
+
+    public function test_stock_ready_broadcast_only_when_add_stock_transitions_from_zero_to_available(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Stock Ready Throttle Product',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 333]);
+        Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => 'first-ready@example.test|pass',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => 'second-ready@example.test|pass',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $product->refresh();
+
+        $this->assertSame(2, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(2, $product->availableStock());
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+            && (string) $request['chat_id'] === '333'
+            && str_contains((string) $request['text'], '✅ Stok Ready')
+            && str_contains((string) $request['text'], $product->name)
+            && str_contains((string) $request['text'], '📦 Stok: 1'));
     }
 
     public function test_stock_modal_submission_requires_at_least_one_non_empty_row(): void

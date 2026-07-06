@@ -24,8 +24,8 @@ class AdminProductStockController extends Controller
         $itemCount = count($stockItems);
         $notes = "Tambah stok manual dashboard ({$itemCount} item).";
 
-        $adjusted = $stockAdjustment->adjust($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
-        $result = $notifications->notifyStockAdded($adjusted, $itemCount);
+        $adjustment = $stockAdjustment->adjustWithAvailability($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
+        $result = $notifications->notifyStockAdded($adjustment['product'], $itemCount, $adjustment['available_before']);
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, $result);
 
         return $forms->stockAdded($product->name, $itemCount);

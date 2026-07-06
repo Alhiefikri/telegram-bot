@@ -160,8 +160,10 @@ class TelegramCallbackRouter
 
         if (preg_match('/^qty:([1-9][0-9]*):([1-9][0-9]*)$/', $data, $matches)) {
             $this->bot->answerCallbackQuery($id);
+            $productId = (int) $matches[1];
+            $selectedProductId = $this->session->getSelectedProductId($customer);
             $this->session->forget($customer);
-            $this->cart->addProductToCart($customer, $chatId, (int) $matches[1], (int) $matches[2]);
+            $this->cart->addProductToCart($customer, $chatId, $productId, (int) $matches[2], (int) $selectedProductId === $productId);
 
             return;
         }

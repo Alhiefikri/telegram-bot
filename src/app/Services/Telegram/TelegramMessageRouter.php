@@ -183,7 +183,7 @@ class TelegramMessageRouter
         }
 
         if ($productId !== null) {
-            if (ctype_digit($text) && $this->cart->addProductToCart($customer, $chatId, (int) $productId, (int) $text)) {
+            if (ctype_digit($text) && $this->cart->addProductToCart($customer, $chatId, (int) $productId, (int) $text, true)) {
                 $this->session->forget($customer);
 
                 return;
