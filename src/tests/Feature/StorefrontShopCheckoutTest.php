@@ -8,17 +8,12 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
-use App\Models\Cart;
-use App\Models\CartItem;
-use App\Models\Customer;
 use App\Models\InventoryMovement;
-use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\OrderStateMachine;
-use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Support\PakasirCheckoutFlow;
@@ -29,11 +24,15 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\StorefrontCheckoutScenarios;
+use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
 
 class StorefrontShopCheckoutTest extends TestCase
 {
     use RefreshDatabase;
+    use StorefrontCheckoutScenarios;
+    use StorefrontShopAssertions;
 
     public function test_shop_named_route_contracts_are_registered_without_replacing_legacy_product_routes(): void
     {
@@ -85,17 +84,15 @@ class StorefrontShopCheckoutTest extends TestCase
         ];
 
         foreach (array_values($cases) as $index => $data) {
-            $this->configurePakasirApiQrisMode();
-            $this->fakePakasirQrisCreate(
+            $this->pakasirNativeQrisIsReady();
+            $this->providerQrisCreateSucceedsWithProviderTotal(
                 amount: 15000,
                 paymentNumber: '00020101021226610016ID.CO.QRIS.NORMALIZE'.$index,
                 fee: 103,
             );
-            $product = Product::factory()->create([
+            $product = $this->availableProduct([
                 'price_amount' => 15000,
                 'stock' => 1,
-                'reserved_stock' => 0,
-                'is_active' => true,
             ]);
 
             $result = app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
@@ -117,20 +114,16 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_checkout_module_rejects_products_that_are_not_available_products(): void
     {
-        $this->configurePakasirApiQrisMode();
+        $this->pakasirNativeQrisIsReady();
         Http::fake();
 
         $cases = [
-            'inactive product' => Product::factory()->create([
+            'inactive product' => $this->unavailableProduct([
                 'stock' => 1,
                 'reserved_stock' => 0,
                 'is_active' => false,
             ]),
-            'insufficient stock' => Product::factory()->create([
-                'stock' => 1,
-                'reserved_stock' => 1,
-                'is_active' => true,
-            ]),
+            'insufficient stock' => $this->unavailableProduct(),
         ];
 
         foreach ($cases as $case => $product) {
@@ -154,11 +147,7 @@ class StorefrontShopCheckoutTest extends TestCase
     public function test_checkout_module_preserves_native_qris_readiness_error_before_available_product_validation(): void
     {
         Http::fake();
-        $product = Product::factory()->create([
-            'stock' => 1,
-            'reserved_stock' => 1,
-            'is_active' => true,
-        ]);
+        $product = $this->unavailableProduct();
 
         try {
             app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
@@ -177,7 +166,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_maps_missing_product_to_existing_validation_message(): void
     {
-        $this->configurePakasirApiQrisMode();
+        $this->pakasirNativeQrisIsReady();
         Http::fake();
 
         $response = $this
@@ -197,20 +186,15 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_route_renders_marketplace_with_ready_modal_and_empty_stock_state(): void
     {
-        $ready = Product::factory()->create([
+        $ready = $this->availableProduct([
             'name' => 'Claude Pro Ready',
             'description' => 'Akun private siap dari dashboard',
             'price_amount' => 60000,
             'stock' => 1,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
-        $empty = Product::factory()->create([
+        $empty = $this->unavailableProduct([
             'name' => 'ChatGPT Habis',
             'price_amount' => 45000,
-            'stock' => 1,
-            'reserved_stock' => 1,
-            'is_active' => true,
         ]);
 
         $response = $this->get(route('storefront.shop.index'));
@@ -243,11 +227,9 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_modal_keeps_telegram_checkout_action(): void
     {
-        Product::factory()->create([
+        $this->availableProduct([
             'name' => 'CapCut Pro Web',
             'stock' => 3,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
 
         $this->get(route('storefront.shop.index'))
@@ -262,18 +244,20 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
     {
-        $product = Product::factory()->create([
-            'name' => 'GPT Plus Native QRIS',
-            'price_amount' => 15000,
-            'stock' => 4,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'first-account@example.test|first-secret']);
-        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'second-account@example.test|second-secret']);
+        $product = $this->availableProductWithCredentials(
+            secrets: [
+                'first-account@example.test|first-secret',
+                'second-account@example.test|second-secret',
+            ],
+            attributes: [
+                'name' => 'GPT Plus Native QRIS',
+                'price_amount' => 15000,
+                'stock' => 4,
+            ],
+        );
         $paymentNumber = '00020101021226610016ID.CO.QRIS.SHOPCHECKOUTNATIVE99';
 
-        [$response, $order, $payment] = $this->startNativeQrisCheckout(
+        [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 2,
             buyerHandle: '@buyer_test',
@@ -337,15 +321,13 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_accepts_non_telegram_buyer_name(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'Claude Team Web',
             'price_amount' => 20000,
             'stock' => 2,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
 
-        [$response, $order] = $this->startNativeQrisCheckout(
+        [$response, $order] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
             buyerHandle: 'Budi Store',
@@ -365,31 +347,18 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_fails_closed_when_native_qris_is_not_enabled(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'No Native QRIS',
             'stock' => 3,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
         Http::fake();
 
-        $response = $this
-            ->from(route('storefront.shop.index'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'buyer_handle' => '@buyer_test',
-            ]);
+        $response = $this->postStorefrontShopCheckout($product, 1, '@buyer_test');
 
         $response
             ->assertRedirect(route('storefront.shop.index'))
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
-        $this->assertSame(0, Order::count());
-        $this->assertSame(0, Payment::count());
-        $this->assertSame(0, InventoryMovement::count());
-        $this->assertSame(0, Customer::count());
-        $this->assertSame(0, Cart::count());
-        $this->assertSame(0, CartItem::count());
+        $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS');
         $this->assertSame(0, $product->fresh()->reserved_stock);
         Http::assertNothingSent();
     }
@@ -399,46 +368,23 @@ class StorefrontShopCheckoutTest extends TestCase
         $message = 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.';
         $cases = [
             'missing pakasir credentials' => function (): void {
-                config()->set('services.pakasir.slug', null);
-                config()->set('services.pakasir.api_key', null);
-                config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-                ManualPaymentSetting::create([
-                    'payment_mode' => 'pakasir',
-                    'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
-                    'is_active' => true,
-                ]);
+                $this->pakasirNativeQrisHasMissingCredentials();
             },
             'admin payment mode is manual' => function (): void {
-                $this->configurePakasirConfig();
-                ManualPaymentSetting::create([
-                    'payment_mode' => 'manual',
-                    'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
-                    'is_active' => true,
-                ]);
+                $this->manualPaymentModeIsActive();
             },
             'admin pakasir flow is hosted' => function (): void {
-                $this->configurePakasirConfig();
-                ManualPaymentSetting::create([
-                    'payment_mode' => 'pakasir',
-                    'pakasir_checkout_flow' => PakasirCheckoutFlow::HOSTED,
-                    'is_active' => true,
-                ]);
+                $this->pakasirHostedCheckoutIsActive();
             },
         ];
 
         foreach ($cases as $case => $configure) {
-            ManualPaymentSetting::query()->delete();
+            $this->pakasirPaymentSettingsStartEmpty();
             $configure();
-            $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+            $product = $this->availableProduct(['stock' => 3]);
             Http::fake();
 
-            $response = $this
-                ->from(route('storefront.shop.index'))
-                ->post(route('storefront.shop.checkout'), [
-                    'product_id' => $product->id,
-                    'quantity' => 1,
-                    'buyer_handle' => 'Web Buyer',
-                ]);
+            $response = $this->postStorefrontShopCheckout($product, 1, 'Web Buyer');
 
             $response
                 ->assertRedirect(route('storefront.shop.index'))
@@ -452,30 +398,19 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_failed_native_qris_create_releases_reserved_stock_and_credentials(): void
     {
-        $this->configurePakasirApiQrisMode();
-        $product = Product::factory()->create([
-            'name' => 'Credential Native QRIS',
-            'stock' => 1,
-            'reserved_stock' => 0,
-            'price_amount' => 33000,
-            'is_active' => true,
-        ]);
-        $stockItem = ProductStockItem::create([
-            'product_id' => $product->id,
-            'secret' => 'web-checkout@example.test|Secret-123',
-        ]);
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://app.pakasir.test/api/transactioncreate/qris' => Http::response(['message' => 'upstream unavailable'], 500),
-        ]);
+        $this->pakasirNativeQrisIsReady();
+        $product = $this->availableProductWithCredentials(
+            secrets: ['web-checkout@example.test|Secret-123'],
+            attributes: [
+                'name' => 'Credential Native QRIS',
+                'stock' => 1,
+                'price_amount' => 33000,
+            ],
+        );
+        $stockItem = ProductStockItem::where('product_id', $product->id)->firstOrFail();
+        $this->providerQrisCreateFails();
 
-        $response = $this
-            ->from(route('storefront.shop.index'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'buyer_handle' => '@RetryBuyer',
-            ]);
+        $response = $this->postStorefrontShopCheckout($product, 1, '@RetryBuyer');
 
         $response
             ->assertRedirect(route('storefront.shop.index'))
@@ -500,18 +435,15 @@ class StorefrontShopCheckoutTest extends TestCase
     public function test_paid_shop_order_reveals_allocated_account_on_signed_order_page(): void
     {
         Queue::fake();
-        $product = Product::factory()->create([
-            'name' => 'Allocated Account Product',
-            'price_amount' => 42000,
-            'stock' => 1,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-        ProductStockItem::create([
-            'product_id' => $product->id,
-            'secret' => 'account@example.test|pass',
-        ]);
-        [$response, $order, $payment] = $this->startNativeQrisCheckout(
+        $product = $this->availableProductWithCredentials(
+            secrets: ['account@example.test|pass'],
+            attributes: [
+                'name' => 'Allocated Account Product',
+                'price_amount' => 42000,
+                'stock' => 1,
+            ],
+        );
+        [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
             buyerHandle: '@paid_buyer',
@@ -534,31 +466,19 @@ class StorefrontShopCheckoutTest extends TestCase
     public function test_shop_status_endpoint_reconciles_completed_pakasir_payment(): void
     {
         Queue::fake();
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'Status Reconcile Product',
             'price_amount' => 73000,
             'stock' => 1,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
-        [, $order, $payment] = $this->startNativeQrisCheckout(
+        [, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
             buyerHandle: 'Status Buyer',
             paymentNumber: '00020101021226610016ID.CO.QRIS.STATUSPAID99',
             fee: 500,
         );
-        Http::fake([
-            'https://app.pakasir.test/api/transactiondetail*' => Http::response([
-                'transaction' => [
-                    'project' => 'lhie-test',
-                    'order_id' => $payment->merchant_ref,
-                    'amount' => 73000,
-                    'payment_method' => 'qris',
-                    'status' => 'completed',
-                ],
-            ], 200),
-        ]);
+        $this->providerTransactionDetailCompletesPayment($payment);
 
         $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order);
 
@@ -580,85 +500,6 @@ class StorefrontShopCheckoutTest extends TestCase
             && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
     }
 
-    private function startNativeQrisCheckout(Product $product, int $quantity, string $buyerHandle, string $paymentNumber, int $fee = 103): array
-    {
-        $this->configurePakasirApiQrisMode();
-        $this->fakeQrRenderer();
-        $this->fakePakasirQrisCreate(
-            amount: $product->price_amount * $quantity,
-            paymentNumber: $paymentNumber,
-            fee: $fee,
-        );
-
-        $response = $this
-            ->from(route('storefront.shop.index'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
-                'quantity' => $quantity,
-                'buyer_handle' => $buyerHandle,
-            ]);
-
-        $order = Order::with(['customer', 'cart', 'payments', 'orderItems.stockItems'])->firstOrFail();
-        $payment = $order->payments->first();
-        $this->assertNotNull($payment);
-
-        return [$response, $order, $payment];
-    }
-
-    private function fakePakasirQrisCreate(int $amount, string $paymentNumber, int $fee): void
-    {
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://app.pakasir.test/api/transactioncreate/qris' => function (HttpRequest $request) use ($amount, $paymentNumber, $fee) {
-                $this->assertSame('lhie-test', $request['project']);
-                $this->assertSame($amount, $request['amount']);
-                $this->assertSame('secret-key', $request['api_key']);
-
-                return Http::response([
-                    'payment' => [
-                        'project' => 'lhie-test',
-                        'order_id' => $request['order_id'],
-                        'amount' => $amount,
-                        'fee' => $fee,
-                        'total_payment' => $amount + $fee,
-                        'payment_method' => 'qris',
-                        'payment_number' => $paymentNumber,
-                        'expired_at' => now()->addMinutes(15)->utc()->toAtomString(),
-                    ],
-                ], 200);
-            },
-        ]);
-    }
-
-    private function configurePakasirApiQrisMode(): void
-    {
-        $this->configurePakasirConfig();
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
-            'is_active' => true,
-        ]);
-    }
-
-    private function configurePakasirConfig(): void
-    {
-        config()->set('services.pakasir.slug', 'lhie-test');
-        config()->set('services.pakasir.api_key', 'secret-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.redirect_url', 'https://lhie.test/shop/pakasir-return');
-    }
-
-    private function fakeQrRenderer(): void
-    {
-        $this->app->instance(TelegramQrCodeRenderer::class, new class extends TelegramQrCodeRenderer
-        {
-            public function png(string $content): string
-            {
-                return 'png-for:'.$content;
-            }
-        });
-    }
-
     private function assertRouteContract(string $name, string $method, string $uri): \Illuminate\Routing\Route
     {
         $route = Route::getRoutes()->getByName($name);
@@ -668,24 +509,6 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains($method, $route->methods(), "Route [{$name}] does not support {$method}.");
 
         return $route;
-    }
-
-    private function assertRedirectsToSignedOrderShow(?string $location, Order $order): void
-    {
-        $this->assertIsString($location);
-        $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($location, PHP_URL_PATH));
-        $this->assertStringContainsString('signature=', $location);
-        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET')));
-    }
-
-    private function assertNoLocalCheckoutRowsCreated(string $context): void
-    {
-        $this->assertSame(0, Customer::count(), $context);
-        $this->assertSame(0, Cart::count(), $context);
-        $this->assertSame(0, CartItem::count(), $context);
-        $this->assertSame(0, Order::count(), $context);
-        $this->assertSame(0, Payment::count(), $context);
-        $this->assertSame(0, InventoryMovement::count(), $context);
     }
 
     private function unavailableProductCardHtml(string $html, Product $product): string

@@ -3,21 +3,21 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
-use App\Models\OrderItem;
 use App\Models\Product;
-use App\Models\ProductStockItem;
 use App\Storefront\StorefrontCatalogPageBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
 class StorefrontCatalogPageBuilderTest extends TestCase
 {
     use RefreshDatabase;
+    use StorefrontProductScenarios;
 
     public function test_shop_context_trims_search_and_filters_public_product_entries(): void
     {
-        Product::factory()->create(['name' => 'Chat GPT Plus', 'description' => 'Premium model access.', 'is_active' => true]);
-        Product::factory()->create(['name' => 'Canva Pro', 'description' => 'Design tools.', 'is_active' => true]);
+        $this->availableProduct(['name' => 'Chat GPT Plus', 'description' => 'Premium model access.']);
+        $this->availableProduct(['name' => 'Canva Pro', 'description' => 'Design tools.']);
 
         $page = app(StorefrontCatalogPageBuilder::class)->shop('  chat  ');
 
@@ -53,8 +53,8 @@ class StorefrontCatalogPageBuilderTest extends TestCase
     public function test_products_preserve_visibility_and_storefront_order(): void
     {
         $inactiveCategory = Category::factory()->create(['is_active' => false]);
-        Product::factory()->create(['name' => 'Akun Kosong', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => true]);
-        Product::factory()->create(['name' => 'Zeta Ready', 'stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
+        $this->unavailableProduct(['name' => 'Akun Kosong']);
+        $this->availableProduct(['name' => 'Zeta Ready', 'stock' => 1]);
         Product::factory()->create(['name' => 'Hidden Product', 'is_active' => false]);
         Product::factory()->create(['category_id' => $inactiveCategory->id, 'name' => 'Hidden Category Product', 'is_active' => true]);
 
@@ -74,9 +74,9 @@ class StorefrontCatalogPageBuilderTest extends TestCase
             'is_active' => true,
         ]));
 
-        Product::factory()->create(['category_id' => $categories[0]->id, 'name' => 'Alpha Ready']);
-        Product::factory()->create(['category_id' => $categories[2]->id, 'name' => 'Charlie Ready']);
-        Product::factory()->create(['category_id' => $categories[8]->id, 'name' => 'Outside Category Limit']);
+        $this->availableProduct(['category_id' => $categories[0]->id, 'name' => 'Alpha Ready']);
+        $this->availableProduct(['category_id' => $categories[2]->id, 'name' => 'Charlie Ready']);
+        $this->availableProduct(['category_id' => $categories[8]->id, 'name' => 'Outside Category Limit']);
 
         $page = app(StorefrontCatalogPageBuilder::class)->home(null);
 
@@ -86,9 +86,9 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_featured_product_is_available_public_product_only(): void
     {
-        Product::factory()->create(['name' => 'Akun Habis', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => true]);
+        $this->unavailableProduct(['name' => 'Akun Habis']);
         Product::factory()->create(['name' => 'Produk Nonaktif Siap', 'stock' => 5, 'reserved_stock' => 0, 'is_active' => false]);
-        Product::factory()->create(['name' => 'Canva Ready', 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
 
         $featuredProduct = app(StorefrontCatalogPageBuilder::class)->home(null)->featuredProduct;
 
@@ -99,24 +99,17 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_featured_product_skips_credential_managed_product_without_unclaimed_credentials(): void
     {
-        $managedExhausted = Product::factory()->create([
-            'name' => 'Akun Managed Kosong',
-            'stock' => 5,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-        $claimedItem = OrderItem::factory()->create(['product_id' => $managedExhausted->id]);
-        ProductStockItem::create([
-            'product_id' => $managedExhausted->id,
-            'order_item_id' => $claimedItem->id,
-            'secret' => 'claimed@example.test|pass',
-        ]);
+        $this->credentialManagedProductWithClaimedCredentials(
+            secrets: ['claimed@example.test|pass'],
+            attributes: [
+                'name' => 'Akun Managed Kosong',
+                'stock' => 5,
+            ],
+        );
 
-        Product::factory()->create([
+        $this->availableProduct([
             'name' => 'Canva Ready',
             'stock' => 2,
-            'reserved_stock' => 0,
-            'is_active' => true,
         ]);
 
         $featuredProduct = app(StorefrontCatalogPageBuilder::class)->home(null)->featuredProduct;
@@ -127,36 +120,21 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_products_order_credential_managed_products_by_available_product_invariant(): void
     {
-        $managedNumericOnly = Product::factory()->create([
-            'name' => 'A Managed Numeric Only',
-            'stock' => 5,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-        $claimedItem = OrderItem::factory()->create(['product_id' => $managedNumericOnly->id]);
-        ProductStockItem::create([
-            'product_id' => $managedNumericOnly->id,
-            'order_item_id' => $claimedItem->id,
-            'secret' => 'claimed@example.test|pass',
-        ]);
-
-        $managedReady = Product::factory()->create([
-            'name' => 'Z Managed Ready',
-            'stock' => 5,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-        ProductStockItem::create([
-            'product_id' => $managedReady->id,
-            'secret' => 'ready@example.test|pass',
-        ]);
-
-        Product::factory()->create([
-            'name' => 'B Numeric Empty',
-            'stock' => 1,
-            'reserved_stock' => 1,
-            'is_active' => true,
-        ]);
+        $this->credentialManagedProductWithClaimedCredentials(
+            secrets: ['claimed@example.test|pass'],
+            attributes: [
+                'name' => 'A Managed Numeric Only',
+                'stock' => 5,
+            ],
+        );
+        $this->availableProductWithCredentials(
+            secrets: ['ready@example.test|pass'],
+            attributes: [
+                'name' => 'Z Managed Ready',
+                'stock' => 5,
+            ],
+        );
+        $this->unavailableProduct(['name' => 'B Numeric Empty']);
 
         $products = app(StorefrontCatalogPageBuilder::class)->home(null)->products;
 
@@ -165,11 +143,11 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_popular_products_are_prepared_available_entries_from_current_product_list(): void
     {
-        Product::factory()->create(['name' => 'Alpha Ready', 'stock' => 2, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Bravo Ready', 'stock' => 2, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Charlie Ready', 'stock' => 2, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Delta Ready', 'stock' => 2, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Echo Empty', 'stock' => 1, 'reserved_stock' => 1]);
+        $this->availableProduct(['name' => 'Alpha Ready', 'stock' => 2]);
+        $this->availableProduct(['name' => 'Bravo Ready', 'stock' => 2]);
+        $this->availableProduct(['name' => 'Charlie Ready', 'stock' => 2]);
+        $this->availableProduct(['name' => 'Delta Ready', 'stock' => 2]);
+        $this->unavailableProduct(['name' => 'Echo Empty']);
 
         $page = app(StorefrontCatalogPageBuilder::class)->home(null);
 
@@ -185,7 +163,7 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_storefront_controller_normalizes_array_search_parameters(): void
     {
-        Product::factory()->create(['name' => 'Chat GPT Plus', 'description' => 'Premium model access.', 'is_active' => true]);
+        $this->availableProduct(['name' => 'Chat GPT Plus', 'description' => 'Premium model access.']);
 
         $this->get('/?q[]=chat')
             ->assertOk()

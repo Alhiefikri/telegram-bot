@@ -2,18 +2,19 @@
 
 namespace Tests\Feature;
 
-use App\Models\Product;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
 class StorefrontProductPresentationTest extends TestCase
 {
     use RefreshDatabase;
+    use StorefrontProductScenarios;
 
     public function test_available_product_presentation_is_buyable_and_opens_modal(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'Claude Pro Ready',
             'description' => "Akun private siap pakai.\nGaransi login.",
             'price_amount' => 60000,
@@ -49,10 +50,8 @@ class StorefrontProductPresentationTest extends TestCase
 
     public function test_unavailable_product_presentation_stays_visible_without_checkout_actions(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->unavailableProduct([
             'name' => 'ChatGPT Habis',
-            'stock' => 1,
-            'reserved_stock' => 1,
         ]);
 
         $presentation = app(StorefrontProductPresenter::class)->present($product);
@@ -72,10 +71,9 @@ class StorefrontProductPresentationTest extends TestCase
 
     public function test_available_product_exposes_website_qris_and_telegram_checkout_choices(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'CapCut Pro Web',
             'stock' => 3,
-            'reserved_stock' => 0,
         ]);
 
         $presentation = app(StorefrontProductPresenter::class)->present($product);
@@ -100,7 +98,7 @@ class StorefrontProductPresentationTest extends TestCase
 
     public function test_stock_description_and_cover_image_state_are_prepared_consistently(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'Canva Premium',
             'description' => "\n\nDesain premium siap pakai.\nDetail lain.",
             'image_path' => 'products/canva.jpg',
@@ -119,12 +117,11 @@ class StorefrontProductPresentationTest extends TestCase
 
     public function test_modal_payload_contains_the_browser_rendering_state(): void
     {
-        $product = Product::factory()->create([
+        $product = $this->availableProduct([
             'name' => 'Gemini Web',
             'description' => '',
             'price_amount' => 42000,
             'stock' => 2,
-            'reserved_stock' => 0,
         ]);
 
         $payload = app(StorefrontProductPresenter::class)->present($product)->modalPayload();
