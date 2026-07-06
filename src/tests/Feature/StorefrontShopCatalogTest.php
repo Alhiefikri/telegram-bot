@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Storefront\StorefrontCatalogPage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -21,23 +22,10 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.shop.index'))
             ->assertOk()
             ->assertViewIs('storefront.shop')
-            ->assertViewHasAll([
-                'storefront',
-                'brand',
-                'copy',
-                'pageTitle',
-                'pageDescription',
-                'canonicalUrl',
-                'homeUrl',
-                'shopUrl',
-                'supportHref',
-                'supportDestination',
-                'categoriesWithProducts',
-                'catalogProducts',
-                'popularProducts',
-                'searchAction',
-                'checkoutUrl',
-            ])
+            ->assertViewHas('catalogPage', fn (StorefrontCatalogPage $page) => $page->isShop()
+                && $page->productCount() === 3
+                && $page->categoryFilters->pluck('name')->all() === ['AI Tools']
+                && $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all() === ['ChatGPT Plus Ready', 'Claude Pro Ready'])
             ->assertSee('Belanja Akun AI | Lhie Store')
             ->assertSee('Marketplace akun AI siap pakai')
             ->assertSee('Pilih produk, pilih bayar QRIS dari web atau lanjut lewat Telegram.')

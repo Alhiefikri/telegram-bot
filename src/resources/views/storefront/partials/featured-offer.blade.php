@@ -1,7 +1,7 @@
 <section id="featured-offer" class="relative mx-auto max-w-6xl px-5 mt-16 pb-20 sm:px-6">
-    @if ($featuredProduct)
+    @if ($catalogPage->featuredProduct)
         @php
-            $featuredPresentation = $storefront->productPresentation($featuredProduct);
+            $featuredPresentation = $catalogPage->featuredProduct->presentation;
             $featuredPayload = $featuredPresentation->modalPayload();
         @endphp
 
@@ -10,7 +10,6 @@
             <div class="relative z-10 grid items-center gap-8 lg:grid-cols-12 lg:gap-12">
                 <div class="flex justify-center lg:col-span-5">
                     @include('storefront.components.product-cover', [
-                        'product' => $featuredProduct,
                         'presentation' => $featuredPresentation,
                         'context' => 'featured',
                     ])

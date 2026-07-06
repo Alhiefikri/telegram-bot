@@ -1,14 +1,15 @@
 @php
-    $presentation = $presentation ?? $storefront->productPresentation($product);
+    $catalogProduct = $catalogProduct ?? null;
+    $presentation = $catalogProduct?->presentation ?? ($presentation ?? $storefront->productPresentation($product));
+    $isPopular = $catalogProduct?->isPopular ?? ($isPopular ?? false);
 @endphp
 
 @if ($presentation->canOpenModal)
     <a href="{{ $presentation->productUrl }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($presentation->modalPayload(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $presentation->categoryKey }}">
         <article class="neo-panel h-full overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover flex flex-col relative">
             @include('storefront.components.product-cover', [
-                'product' => $product,
                 'presentation' => $presentation,
-                'isPopular' => $isPopular ?? false,
+                'isPopular' => $isPopular,
             ])
 
             <div class="flex flex-grow flex-col justify-between space-y-4 border-t-[3px] border-[var(--sf-border)] p-4">
@@ -46,9 +47,8 @@
     <article id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $presentation->categoryKey }}" aria-disabled="true">
         <div class="neo-panel h-full overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 flex flex-col relative">
             @include('storefront.components.product-cover', [
-                'product' => $product,
                 'presentation' => $presentation,
-                'isPopular' => $isPopular ?? false,
+                'isPopular' => $isPopular,
             ])
 
             <div class="flex flex-grow flex-col justify-between space-y-4 border-t-[3px] border-[var(--sf-border)] p-4">

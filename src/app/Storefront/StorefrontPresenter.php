@@ -2,9 +2,7 @@
 
 namespace App\Storefront;
 
-use App\Models\Category;
 use App\Models\Product;
-use Illuminate\Support\Collection;
 
 class StorefrontPresenter
 {
@@ -56,72 +54,6 @@ class StorefrontPresenter
     public function productPresentation(Product $product, ?int $stockAvailable = null): StorefrontProductPresentation
     {
         return $this->products->present($product, $stockAvailable);
-    }
-
-    /**
-     * @param  Collection<int, Product>  $products
-     */
-    public function categoriesWithProducts(Collection $categories, Collection $products): Collection
-    {
-        return $categories->filter(fn (Category $category) => $products->contains('category_id', $category->id));
-    }
-
-    /**
-     * @param  Collection<int, Product>  $products
-     */
-    public function popularProducts(Collection $products): Collection
-    {
-        return $products->filter(fn (Product $product) => $this->stockAvailable($product) > 0)->take(3);
-    }
-
-    /**
-     * @param  Collection<int, Product>  $products
-     */
-    public function homeViewData(Collection $categories, Collection $products): array
-    {
-        $copy = config('storefront');
-        $brand = $this->brand();
-
-        return [
-            'storefront' => $this,
-            'brand' => $brand,
-            'copy' => $copy,
-            'pageTitle' => str_replace(':brand', $brand, $copy['meta']['title']),
-            'pageDescription' => $copy['meta']['description'],
-            'canonicalUrl' => url('/'),
-            'supportHref' => $this->supportHref(),
-            'supportDestination' => $this->supportDestination(),
-            'categoriesWithProducts' => $this->categoriesWithProducts($categories, $products),
-            'catalogProducts' => $products,
-            'popularProducts' => $this->popularProducts($products),
-        ];
-    }
-
-    /**
-     * @param  Collection<int, Product>  $products
-     */
-    public function shopViewData(Collection $categories, Collection $products, string $search): array
-    {
-        $copy = config('storefront');
-        $brand = $this->brand();
-
-        return [
-            'storefront' => $this,
-            'brand' => $brand,
-            'copy' => $copy,
-            'pageTitle' => 'Belanja Akun AI | Lhie Store',
-            'pageDescription' => 'Marketplace Lhie Store untuk membeli akun AI premium langsung dari web dengan QRIS Pakasir atau lewat Telegram.',
-            'canonicalUrl' => route('storefront.shop.index'),
-            'homeUrl' => route('storefront.home'),
-            'shopUrl' => route('storefront.shop.index'),
-            'supportHref' => $this->supportHref(),
-            'supportDestination' => $this->supportDestination(),
-            'categoriesWithProducts' => $this->categoriesWithProducts($categories, $products),
-            'catalogProducts' => $products,
-            'popularProducts' => $this->popularProducts($products),
-            'searchAction' => route('storefront.shop.index').'#products',
-            'checkoutUrl' => route('storefront.shop.checkout'),
-        ];
     }
 
     public function productPageViewData(Product $product, int $stock): array

@@ -20,7 +20,7 @@ class StorefrontResponseCache
 
     private const DESIGN_VERSION = 6;
 
-    public function __construct(private readonly StorefrontCatalogQuery $catalogQuery) {}
+    public function __construct(private readonly StorefrontCatalogPageBuilder $catalogPages) {}
 
     public function get(string $search): string
     {
@@ -104,7 +104,7 @@ class StorefrontResponseCache
 
     private function render(string $search): string
     {
-        return view('storefront', $this->catalogQuery->get($search))->render();
+        return view('storefront', $this->catalogPages->homeViewData($search))->render();
     }
 
     private function deleteStaticHomepage(): void

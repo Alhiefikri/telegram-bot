@@ -17,7 +17,7 @@
 
         <div class="neo-chip mt-3 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
             <span class="h-2 w-2 rounded-full bg-[var(--sf-green)]"></span>
-            {{ $catalogProducts->count() }} produk AI aktif
+            {{ $catalogPage->productCount() }} produk AI aktif
         </div>
 
         <h1 class="mx-auto mt-4 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">

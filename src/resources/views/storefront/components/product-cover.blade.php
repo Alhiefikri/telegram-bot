@@ -12,7 +12,7 @@
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="absolute inset-0 h-full w-full object-cover">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-4 text-center">
                 <div class="{{ $coverTheme['accent'] }}">
@@ -33,7 +33,7 @@
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $product->name }}" class="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-3 text-center">
                 <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
