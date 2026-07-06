@@ -10,5 +10,7 @@ interface PakasirProviderAdapter
 
     public function createQrisTransaction(Payment $payment): PakasirQrisTransaction;
 
+    public function cancelTransaction(Payment $payment): array;
+
     public function transactionDetail(Payment $payment): array;
 }

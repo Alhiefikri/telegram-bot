@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
+use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -78,6 +80,76 @@ class PakasirGatewayTest extends TestCase
 
         $this->assertSame(['transaction' => ['status' => 'completed']], $response);
         Http::assertSent(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactiondetail?project=warung-ai&amount=10000&order_id='.$payment->merchant_ref.'&api_key=pakasir-secret');
+    }
+
+    public function test_cancel_transaction_posts_to_pakasir_with_expected_body(): void
+    {
+        Http::fake([
+            'https://app.pakasir.com/api/transactioncancel' => Http::response(['transaction' => ['status' => 'cancelled']], 200),
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+
+        $response = app(PakasirClient::class)->cancelTransaction($payment);
+
+        $this->assertSame(['transaction' => ['status' => 'cancelled']], $response);
+        Http::assertSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://app.pakasir.com/api/transactioncancel'
+            && $request['project'] === 'warung-ai'
+            && $request['order_id'] === $payment->merchant_ref
+            && $request['amount'] === 10000
+            && $request['api_key'] === 'pakasir-secret');
+    }
+
+    public function test_expire_pending_orders_cancels_unpaid_pakasir_transaction_and_logs_sanitized_event(): void
+    {
+        config()->set('services.telegram.token', null);
+        $apiKey = (string) config('services.pakasir.api_key');
+        Http::fake([
+            'https://app.pakasir.com/api/transactioncancel' => Http::response([
+                'transaction' => [
+                    'project' => 'warung-ai',
+                    'status' => 'cancelled',
+                ],
+                'api_key' => $apiKey,
+            ], 200),
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->subMinute());
+        $payment = $order->payments()->firstOrFail();
+
+        $this->artisan('orders:expire-pending')
+            ->expectsOutputToContain('orders:expire-pending completed cleanly: processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        Http::assertSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://app.pakasir.com/api/transactioncancel'
+            && $request['project'] === 'warung-ai'
+            && $request['order_id'] === $payment->merchant_ref
+            && $request['amount'] === $payment->amount
+            && $request['api_key'] === $apiKey);
+
+        $event = PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCancel)->sole();
+        $this->assertSame($payment->id, $event->payment_id);
+        $this->assertSame($payment->merchant_ref, $event->merchant_ref);
+        $this->assertSame('cancelled', $event->provider_status);
+        $this->assertNotNull($event->processed_at);
+        $this->assertArrayNotHasKey('api_key', $event->raw_payload);
+        $this->assertStringNotContainsString($apiKey, json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_expire_pending_orders_does_not_call_pakasir_for_manual_payments(): void
+    {
+        config()->set('services.telegram.token', null);
+        Http::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'QR_MANUAL', 'manual', now()->subMinute());
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        Http::assertNothingSent();
+        $this->assertSame(0, PaymentEvent::count());
     }
 
     public function test_transaction_detail_uses_configured_timeouts_and_retries_transient_failure(): void
@@ -253,6 +325,11 @@ class PakasirGatewayTest extends TestCase
             public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
             {
                 return PakasirQrisTransaction::fromPayload($this->payload);
+            }
+
+            public function cancelTransaction(Payment $payment): array
+            {
+                throw new \BadMethodCallException('Transaction cancel is not used by this test.');
             }
 
             public function transactionDetail(Payment $payment): array

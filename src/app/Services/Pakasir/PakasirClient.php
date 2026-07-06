@@ -86,6 +86,34 @@ class PakasirClient implements PakasirProviderAdapter
         return $transaction;
     }
 
+    public function cancelTransaction(Payment $payment): array
+    {
+        $this->readiness->verification()->assertReady('Pakasir transaction cannot be cancelled.');
+
+        try {
+            $response = $this->timed('cancelTransaction', fn () => $this->http()
+                ->asJson()
+                ->post($this->baseUrl().'/api/transactioncancel', [
+                    'project' => config('services.pakasir.slug'),
+                    'order_id' => $payment->merchant_ref,
+                    'amount' => $payment->amount,
+                    'api_key' => config('services.pakasir.api_key'),
+                ])->throw()->json());
+        } catch (ConnectionException|RequestException $exception) {
+            throw $this->providerRequestException('Pakasir transaction cancel request failed', $exception);
+        }
+
+        if ($response === null) {
+            return [];
+        }
+
+        if (! is_array($response)) {
+            throw new UnexpectedValueException('Pakasir transaction cancel response is not valid JSON.');
+        }
+
+        return $response;
+    }
+
     private function providerRequestException(string $message, ConnectionException|RequestException $exception): RuntimeException
     {
         $status = $exception instanceof RequestException ? $exception->response?->status() : null;

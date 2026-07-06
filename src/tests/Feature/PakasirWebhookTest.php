@@ -646,6 +646,11 @@ class PakasirWebhookTest extends TestCase
                 throw new \BadMethodCallException('QRIS create is not used by this test.');
             }
 
+            public function cancelTransaction(Payment $payment): array
+            {
+                throw new \BadMethodCallException('Transaction cancel is not used by this test.');
+            }
+
             public function transactionDetail(Payment $payment): array
             {
                 throw new \RuntimeException('Pakasir Transaction Detail transport failure: GET '.$this->providerUrl);
@@ -683,7 +688,10 @@ class PakasirWebhookTest extends TestCase
     public function test_expire_pending_orders_sends_telegram_expired_notice(): void
     {
         config()->set('services.telegram.token', 'bot-token');
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake([
+            'https://app.pakasir.com/api/transactioncancel' => Http::response(['transaction' => ['status' => 'cancelled']], 200),
+            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+        ]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
@@ -725,6 +733,7 @@ class PakasirWebhookTest extends TestCase
                     'status' => 'completed',
                 ], $overrides),
             ], 200),
+            'https://app.pakasir.com/api/transactioncancel' => Http::response(['transaction' => ['status' => 'cancelled']], 200),
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
     }
@@ -747,6 +756,11 @@ class PakasirWebhookTest extends TestCase
             public function createQrisTransaction(Payment $payment): PakasirQrisTransaction
             {
                 throw new \BadMethodCallException('QRIS create is not used by webhook tests.');
+            }
+
+            public function cancelTransaction(Payment $payment): array
+            {
+                throw new \BadMethodCallException('Transaction cancel is not used by webhook tests.');
             }
 
             public function transactionDetail(Payment $payment): array

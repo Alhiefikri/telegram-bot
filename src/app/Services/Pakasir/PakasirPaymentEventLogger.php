@@ -54,6 +54,35 @@ class PakasirPaymentEventLogger
         ]);
     }
 
+    public function logProviderCancel(Payment $payment, array $payload): PaymentEvent
+    {
+        $receivedAt = now();
+        $sanitizedPayload = PakasirPayloadSanitizer::sanitize($payload);
+
+        return PaymentEvent::create([
+            'payment_id' => $payment->id,
+            'provider' => 'pakasir',
+            'event_type' => PaymentEventType::ProviderCancel,
+            'merchant_ref' => $payment->merchant_ref,
+            'provider_status' => $this->providerCancelStatus($sanitizedPayload),
+            'raw_payload' => $sanitizedPayload,
+            'received_at' => $receivedAt,
+            'last_received_at' => $receivedAt,
+            'received_count' => 1,
+            'processed_at' => $receivedAt,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function providerCancelStatus(array $payload): ?string
+    {
+        $status = $payload['transaction']['status'] ?? $payload['status'] ?? null;
+
+        return is_string($status) && trim($status) !== '' ? $status : null;
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
