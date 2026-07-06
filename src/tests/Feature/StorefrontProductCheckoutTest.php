@@ -51,9 +51,10 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_product_detail_shows_buy_button_for_available_product(): void
+    public function test_product_detail_exposes_web_and_telegram_choices_without_checkout_side_effects(): void
     {
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore_support');
+        config()->set('services.telegram.admin_username', 'lhiestore_admin');
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
             'description' => 'Akun Private',
@@ -70,8 +71,11 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee(route('storefront.shop.index').'#product-'.$product->id, false)
             ->assertSee('Beli via Web QRIS')
             ->assertSee('https://t.me/lhiestore_support', false)
+            ->assertSee('Halo+Admin+%40lhiestore_admin%2C+saya+ingin+tanya+ketersediaan+akun+CapCut+Pro+di+Lhie+Store.', false)
             ->assertSee('Beli lewat Telegram')
             ->assertDontSee(route('storefront.products.payment', $product), false);
+
+        $this->assertNoCheckoutSideEffects();
     }
 
     public function test_product_detail_disables_buy_button_for_empty_product(): void
@@ -108,14 +112,14 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Rp120.000')
             ->assertSee('Belum ada order dibuat')
             ->assertSee('https://t.me/alhie02?text=', false)
+            ->assertSee('Buka Telegram Admin @alhie02')
+            ->assertSee('Halo+Admin+%40alhie02%2C+saya+ingin+checkout+CapCut+Pro+x2+via+Telegram%2FAdmin', false)
             ->assertDontSee('Scan QRIS untuk Bayar')
             ->assertDontSee('/qr-lhie.jpg', false)
             ->assertDontSee('Order ID')
             ->assertDontSee('Total Bayar');
 
-        $this->assertSame(0, Order::count());
-        $this->assertSame(0, Payment::count());
-        $this->assertSame(0, InventoryMovement::count());
+        $this->assertNoCheckoutSideEffects();
     }
 
     public function test_legacy_manual_checkout_url_redirects_to_support_handoff_page(): void
@@ -140,5 +144,12 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get(route('storefront.products.payment', $product))
             ->assertRedirect(route('storefront.products.show', $product));
+    }
+
+    private function assertNoCheckoutSideEffects(): void
+    {
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, InventoryMovement::count());
     }
 }
