@@ -18,7 +18,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 5;
+    private const DESIGN_VERSION = 6;
 
     public function __construct(private readonly StorefrontCatalogQuery $catalogQuery) {}
 

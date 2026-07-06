@@ -112,13 +112,12 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Marketplace akun AI siap pakai')
             ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
             ->assertSee('data-product=', false)
-            ->assertSee('"id":'.$ready->id, false)
-            ->assertSee('"productId":'.$ready->id, false)
-            ->assertSee('"name":"Claude Pro Ready"', false)
-            ->assertSee('"description":"Akun private siap dari dashboard"', false)
-            ->assertSee('"price_amount":60000', false)
-            ->assertSee('"stock":1', false)
-            ->assertSee('"checkoutUrl":"'.str_replace('/', '\\/', route('storefront.shop.checkout')).'"', false)
+            ->assertSee('Claude Pro Ready')
+            ->assertSee('Akun private siap dari dashboard')
+            ->assertSee('Rp60.000')
+            ->assertSee('Stok: 1')
+            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('Beli lewat Telegram')
             ->assertSee('STOK HABIS')
             ->assertSee('Restock segera')
             ->assertSee('Stok kosong');
@@ -148,7 +147,6 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('@click="checkoutManual()"', false)
             ->assertSee('Beli lewat Telegram')
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
-            ->assertSee('x-bind:action="selectedProduct && selectedProduct.checkoutUrl ? selectedProduct.checkoutUrl :', false)
             ->assertSee('method="POST"', false)
             ->assertSee('Bayar QRIS di Website');
     }

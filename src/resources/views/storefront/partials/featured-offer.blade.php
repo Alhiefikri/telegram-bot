@@ -1,8 +1,8 @@
 <section id="featured-offer" class="relative mx-auto max-w-6xl px-5 mt-16 pb-20 sm:px-6">
     @if ($featuredProduct)
         @php
-            $featuredStock = $storefront->stockAvailable($featuredProduct);
-            $featuredPayload = $storefront->productModalPayload($featuredProduct, $featuredStock);
+            $featuredPresentation = $storefront->productPresentation($featuredProduct);
+            $featuredPayload = $featuredPresentation->modalPayload();
         @endphp
 
         <div class="neo-panel relative w-full overflow-hidden bg-[var(--sf-surface)] p-6 text-[var(--sf-ink)] sm:p-8" x-data="fomoTimer()">
@@ -11,29 +11,30 @@
                 <div class="flex justify-center lg:col-span-5">
                     @include('storefront.components.product-cover', [
                         'product' => $featuredProduct,
+                        'presentation' => $featuredPresentation,
                         'context' => 'featured',
                     ])
                 </div>
 
                 <div class="space-y-6 lg:col-span-7">
                     <div class="flex flex-wrap items-center justify-between gap-4">
-                        <h2 class="max-w-2xl font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $featuredProduct->name }}</h2>
+                        <h2 class="max-w-2xl font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $featuredPresentation->name }}</h2>
                         <span class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Stok siap</span>
                     </div>
 
-                    <p class="max-w-2xl text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $featuredProduct->description }}</p>
+                    <p class="max-w-2xl text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $featuredPresentation->description }}</p>
 
                     <div class="grid items-end gap-6 sm:grid-cols-2">
                         <div class="space-y-1">
-                            @if ($featuredProduct->fake_discount_price)
+                            @if ($featuredPresentation->fakeDiscountPrice)
                                 <div class="text-sm font-black text-[var(--sf-muted)] line-through">
-                                    {{ $storefront->idr($featuredProduct->fake_discount_price) }}
+                                    {{ $storefront->idr($featuredPresentation->fakeDiscountPrice) }}
                                 </div>
                             @endif
-                            <span class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)]">{{ $storefront->idr($featuredProduct->price_amount) }}</span>
+                            <span class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)]">{{ $storefront->idr($featuredPresentation->priceAmount) }}</span>
                             <div class="pt-4 grid gap-3 sm:max-w-md">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredStock }}</span>
+                                    <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredPresentation->stockAvailable }}</span>
                                     <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Rekomendasi aktif</span>
                                 </div>
                                 <div class="rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-[var(--sf-ink)] shadow-[6px_6px_0_var(--sf-shadow)]">
@@ -66,4 +67,3 @@
         </div>
     @endif
 </section>
-

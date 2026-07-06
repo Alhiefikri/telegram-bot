@@ -1,8 +1,9 @@
 @php
     $context = $context ?? 'card';
-    $coverTheme = $storefront->productCover($product);
-    $imageUrl = $storefront->publicStorageUrl($product->image_path);
-    $isAvailable = $isAvailable ?? $storefront->stockAvailable($product) > 0;
+    $presentation = $presentation ?? $storefront->productPresentation($product);
+    $coverTheme = $presentation->cover->theme;
+    $imageUrl = $presentation->cover->imageUrl;
+    $isAvailable = $isAvailable ?? $presentation->isAvailable;
     $isPopular = $isPopular ?? false;
 @endphp
 
@@ -51,8 +52,8 @@
                 </span>
             @elseif (!$imageUrl && !$isAvailable)
                 <div class="stock-empty-stamp">
-                    <span>STOK HABIS</span>
-                    <small>Restock segera</small>
+                    <span>{{ $presentation->cover->emptyStampTitle }}</span>
+                    <small>{{ $presentation->cover->emptyStampSubtitle }}</small>
                 </div>
 
             @endif
@@ -65,8 +66,8 @@
 
             @if ($imageUrl && !$isAvailable)
                 <div class="stock-empty-stamp">
-                    <span>STOK HABIS</span>
-                    <small>Restock segera</small>
+                    <span>{{ $presentation->cover->emptyStampTitle }}</span>
+                    <small>{{ $presentation->cover->emptyStampSubtitle }}</small>
                 </div>
             @endif
         </div>

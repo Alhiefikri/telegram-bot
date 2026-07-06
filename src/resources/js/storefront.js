@@ -381,6 +381,10 @@ export function storefrontModal() {
         notes: '',
         buyerHandle: '',
         openProductModal(product) {
+            if (!product?.availability?.canOpenModal) {
+                return;
+            }
+
             this.selectedProduct = product;
             this.quantity = 1;
             this.notes = '';
@@ -396,16 +400,15 @@ export function storefrontModal() {
             document.body.style.overflow = '';
         },
         checkoutManual() {
-            if (!this.selectedProduct || !this.selectedProduct.isAvailable) {
+            const telegramChoice = this.selectedProduct?.checkout?.telegram;
+
+            if (!telegramChoice?.enabled) {
                 return;
             }
 
-            const url = new URL(
-                this.selectedProduct.paymentUrl || `/produk/${this.selectedProduct.id}/bayar`,
-                window.location.origin,
-            );
+            const url = new URL(telegramChoice.url, window.location.origin);
             const requestedQuantity = Number.parseInt(this.quantity, 10) || 1;
-            const availableStock = Number.parseInt(this.selectedProduct.stock, 10) || 1;
+            const availableStock = this.availableStock();
 
             url.searchParams.set('qty', Math.max(1, Math.min(requestedQuantity, availableStock)));
             window.location.href = url.toString();
@@ -418,14 +421,17 @@ export function storefrontModal() {
                 return;
             }
 
-            this.quantity = Math.min(Number.parseInt(this.selectedProduct.stock, 10) || 1, this.quantity + 1);
+            this.quantity = Math.min(this.availableStock(), this.quantity + 1);
         },
         selectedTotal() {
             if (!this.selectedProduct) {
                 return 0;
             }
 
-            return (Number.parseInt(this.selectedProduct.price_amount, 10) || 0) * (Number.parseInt(this.quantity, 10) || 1);
+            return (Number.parseInt(this.selectedProduct.price?.amount, 10) || 0) * (Number.parseInt(this.quantity, 10) || 1);
+        },
+        availableStock() {
+            return Math.max(1, Number.parseInt(this.selectedProduct?.stock?.available, 10) || 1);
         },
         formatIdr(amount) {
             return `Rp${Number.parseInt(amount, 10).toLocaleString('id-ID')}`;

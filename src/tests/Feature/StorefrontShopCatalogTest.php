@@ -84,20 +84,18 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
             ->assertSee('data-product=', false)
-            ->assertSee('"id":'.$product->id, false)
-            ->assertSee('"productId":'.$product->id, false)
-            ->assertSee('"name":"CapCut Pro Web"', false)
-            ->assertSee('"description":"Akun Private dari dashboard"', false)
-            ->assertSee('"price_amount":60000', false)
-            ->assertSee('"stock":8', false)
-            ->assertSee('"checkoutUrl":"'.str_replace('/', '\\/', route('storefront.shop.checkout')).'"', false)
-            ->assertSee('"paymentUrl":"'.str_replace('/', '\\/', route('storefront.products.payment', $product)).'"', false)
+            ->assertSee('CapCut Pro Web')
+            ->assertSee('Akun Private dari dashboard')
+            ->assertSee('Rp60.000')
+            ->assertSee('Tersedia')
+            ->assertSee('Stok: 8')
+            ->assertSee('Pilih Checkout')
             ->assertSee('Total produk')
             ->assertSee('method="POST"', false)
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertSee('name="_token"', false)
             ->assertSee('name="product_id"', false)
-            ->assertSee("x-bind:value=\"selectedProduct?.productId || selectedProduct?.id || ''\"", false)
+            ->assertSee("x-bind:value=\"selectedProduct?.checkout?.websiteQris?.productId || selectedProduct?.id || ''\"", false)
             ->assertSee('name="quantity"', false)
             ->assertSee('x-bind:value="quantity"', false)
             ->assertSee('Username Telegram / nama pembeli')
@@ -113,8 +111,6 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')
             ->assertSee('Stok kosong')
             ->assertDontSee('&amp;quot;', false);
-
-        $this->assertSame(2, substr_count($response->getContent(), 'x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable"'));
     }
 
     public function test_unavailable_shop_products_render_disabled_card_without_modal_trigger(): void

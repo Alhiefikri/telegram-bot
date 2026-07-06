@@ -36,14 +36,14 @@
                         <!-- Content -->
                         <div class="p-6 space-y-6">
                             <!-- Image/Cover -->
-                            <div class="relative flex aspect-[2/1] w-full flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] shadow-[4px_4px_0_var(--sf-shadow)]" :class="selectedProduct.imageUrl ? '' : selectedProduct.coverTheme.bg">
-                                <template x-if="selectedProduct.imageUrl">
-                                    <img :src="selectedProduct.imageUrl" :alt="selectedProduct.name" class="absolute inset-0 h-full w-full object-cover">
+                            <div class="relative flex aspect-[2/1] w-full flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] shadow-[4px_4px_0_var(--sf-shadow)]" :class="selectedProduct.cover.imageUrl ? '' : selectedProduct.cover.theme.bg">
+                                <template x-if="selectedProduct.cover.imageUrl">
+                                    <img :src="selectedProduct.cover.imageUrl" :alt="selectedProduct.name" class="absolute inset-0 h-full w-full object-cover">
                                 </template>
-                                <template x-if="!selectedProduct.imageUrl">
+                                <template x-if="!selectedProduct.cover.imageUrl">
                                     <div class="relative z-10 flex flex-col items-center justify-center space-y-2 text-center text-white">
-                                        <div x-html="selectedProduct.coverTheme.logo"></div>
-                                        <div :class="selectedProduct.coverTheme.accent" class="font-display text-xl font-black uppercase tracking-tight" x-text="selectedProduct.coverTheme.desc"></div>
+                                        <div x-html="selectedProduct.cover.theme.logo"></div>
+                                        <div :class="selectedProduct.cover.theme.accent" class="font-display text-xl font-black uppercase tracking-tight" x-text="selectedProduct.cover.theme.desc"></div>
                                     </div>
                                 </template>
                             </div>
@@ -51,12 +51,12 @@
                             <!-- Price and Stock -->
                             <div class="flex flex-wrap items-center gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
                                 <div class="flex items-center gap-2">
-                                    <template x-if="selectedProduct.fake_discount_price">
-                                        <span class="text-xs font-black text-[var(--sf-muted)] line-through" x-text="formatIdr(selectedProduct.fake_discount_price)"></span>
+                                    <template x-if="selectedProduct.price.fakeDiscountAmount">
+                                        <span class="text-xs font-black text-[var(--sf-muted)] line-through" x-text="formatIdr(selectedProduct.price.fakeDiscountAmount)"></span>
                                     </template>
-                                    <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]" x-text="formatIdr(selectedProduct.price_amount)"></span>
+                                    <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]" x-text="formatIdr(selectedProduct.price.amount)"></span>
                                 </div>
-                                <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[10px] font-black text-[var(--sf-ink)]" x-text="'Stok: ' + selectedProduct.stock"></span>
+                                <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[10px] font-black text-[var(--sf-ink)]" x-text="selectedProduct.stock.label"></span>
                             </div>
 
                             <!-- Description -->
@@ -70,7 +70,7 @@
                                 <div class="flex items-center justify-between gap-3 sm:justify-end">
                                     <button type="button" x-on:click="decreaseQuantity()" x-bind:disabled="quantity <= 1" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">−</button>
                                     <span class="min-w-8 text-center font-display text-lg font-black text-[var(--sf-ink)]" x-text="quantity">1</span>
-                                    <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">+</button>
+                                    <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock.available" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">+</button>
                                 </div>
                                 <div class="sm:col-span-2 flex items-center justify-between border-t-2 border-dashed border-[var(--sf-border)] pt-3 text-sm font-black text-[var(--sf-ink)]">
                                     <span>Total produk</span>
@@ -82,10 +82,10 @@
                             <div class="grid gap-4 pt-2">
                                 <form method="POST"
                                       action="{{ route('storefront.shop.checkout') }}"
-                                      x-bind:action="selectedProduct && selectedProduct.checkoutUrl ? selectedProduct.checkoutUrl : '{{ route('storefront.shop.checkout') }}'"
+                                      x-bind:action="selectedProduct && selectedProduct.checkout.websiteQris ? selectedProduct.checkout.websiteQris.url : '{{ route('storefront.shop.checkout') }}'"
                                       class="grid gap-3">
                                     @csrf
-                                    <input type="hidden" name="product_id" x-bind:value="selectedProduct?.productId || selectedProduct?.id || ''">
+                                    <input type="hidden" name="product_id" x-bind:value="selectedProduct?.checkout?.websiteQris?.productId || selectedProduct?.id || ''">
                                     <input type="hidden" name="quantity" x-bind:value="quantity">
 
                                     <div class="grid gap-2">
@@ -103,20 +103,20 @@
                                         </p>
                                     </div>
 
-                                    <p x-show="selectedProduct && !selectedProduct.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-xs font-black text-[var(--sf-ink)]">
+                                    <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-xs font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        {{ $copy['shop']['checkout_cta'] }}
+                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.websiteQris || !selectedProduct.checkout.websiteQris.enabled" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                        <span x-text="selectedProduct?.checkout?.websiteQris?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
 
                                 <div>
-                                    <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        {{ $copy['shop']['telegram_cta'] }}
+                                    <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.telegram || !selectedProduct.checkout.telegram.enabled" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
+                                        <span x-text="selectedProduct?.checkout?.telegram?.label || @js($copy['shop']['telegram_cta'])">{{ $copy['shop']['telegram_cta'] }}</span>
                                     </button>
-                                    <p class="mt-3 text-center text-[10px] font-bold leading-relaxed text-[var(--sf-muted)]">
+                                    <p class="mt-3 text-center text-[10px] font-bold leading-relaxed text-[var(--sf-muted)]" x-text="selectedProduct?.checkout?.telegram?.description || @js('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')">
                                         Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.
                                     </p>
                                 </div>

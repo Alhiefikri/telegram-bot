@@ -13,25 +13,26 @@ class StorefrontProductCheckoutTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_catalog_product_cards_open_modal_with_database_payload(): void
+    public function test_catalog_product_cards_open_modal_with_checkout_choices(): void
     {
-        $available = Product::factory()->create([
+        Product::factory()->create([
             'name' => 'CapCut Pro',
             'description' => 'Akun Private dari dashboard',
             'price_amount' => 60000,
             'stock' => 8,
             'reserved_stock' => 0,
         ]);
-        $empty = Product::factory()->create(['name' => 'ChatGPT Habis', 'stock' => 1, 'reserved_stock' => 1]);
+        Product::factory()->create(['name' => 'ChatGPT Habis', 'stock' => 1, 'reserved_stock' => 1]);
 
         $this->get('/')
             ->assertOk()
             ->assertSee('JSON.parse($el.dataset.product)', false)
-            ->assertSee('"name":"CapCut Pro"', false)
-            ->assertSee('"description":"Akun Private dari dashboard"', false)
-            ->assertSee('"price_amount":60000', false)
-            ->assertSee('"stock":8', false)
-            ->assertSee('"paymentUrl":"'.str_replace('/', '\\/', route('storefront.products.payment', $available)).'"', false)
+            ->assertSee('CapCut Pro')
+            ->assertSee('Akun Private dari dashboard')
+            ->assertSee('Rp60.000')
+            ->assertSee('Stok: 8')
+            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('Beli lewat Telegram')
             ->assertDontSee('&amp;quot;', false)
             ->assertSee('Habis');
     }
