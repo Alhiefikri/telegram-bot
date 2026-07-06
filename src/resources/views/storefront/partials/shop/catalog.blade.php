@@ -62,8 +62,8 @@
                 ])
             @empty
                 <x-storefront.empty-state
-                    title="Belum ada produk siap dibeli."
-                    body="Produk aktif akan muncul otomatis setelah admin mempublikasikan stok."
+                    title="{{ $copy['shop']['empty_title'] }}"
+                    body="{{ $copy['shop']['empty_body'] }}"
                     class="reveal-item col-span-full py-16"
                 />
             @endforelse

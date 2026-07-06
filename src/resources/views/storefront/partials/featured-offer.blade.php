@@ -48,7 +48,7 @@
 
                         <div class="flex flex-col gap-2">
                             <button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button flex h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
-                                Pesan via Admin
+                                Pilih Checkout
                             </button>
                         </div>
                     </div>

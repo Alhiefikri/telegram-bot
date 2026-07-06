@@ -58,8 +58,8 @@
 
                             <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                                 @if ($isAvailable)
-                                    <x-storefront.button :href="route('storefront.products.payment', $product)" class="flex-1">
-                                        Checkout via Admin
+                                    <x-storefront.button :href="route('storefront.shop.index').'#product-'.$product->id" class="flex-1">
+                                        Beli via Web QRIS
                                     </x-storefront.button>
                                 @else
                                     <x-storefront.button variant="danger" class="flex-1 cursor-not-allowed opacity-80" disabled>
@@ -67,8 +67,8 @@
                                     </x-storefront.button>
                                 @endif
 
-                                <x-storefront.button :href="$storefront->productSupportLink($product)" variant="secondary" class="flex-1">
-                                    Tanya Admin
+                                <x-storefront.button :href="$storefront->productSupportLink($product)" variant="secondary" class="flex-1" data-telegram-link data-icon="telegram">
+                                    Beli lewat Telegram
                                 </x-storefront.button>
                             </div>
                         </div>

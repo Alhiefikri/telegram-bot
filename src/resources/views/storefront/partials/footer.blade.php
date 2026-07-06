@@ -10,7 +10,7 @@
         <div>
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Produk</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
-                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#products" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
+                <li><a href="{{ $shopUrl ?? route('storefront.shop.index') }}" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#cara-beli" class="hover:text-[var(--sf-accent)]">Cara Pembelian</a></li>
                 <li><a href="{{ route('storefront.login-guide') }}" class="hover:text-[var(--sf-accent)]">Panduan Login</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">FAQ</a></li>
@@ -39,8 +39,8 @@
     <div class="mx-auto mt-16 flex max-w-6xl flex-col items-center justify-between border-t-[3px] border-[var(--sf-border)] px-5 pt-8 text-xs font-bold text-[var(--sf-muted)] sm:px-6 md:flex-row">
         <p>&copy; {{ now()->year }} {{ $copy['footer']['copyright_suffix'] }}</p>
         <div class="mt-4 flex items-center gap-4 md:mt-0">
-            <span>QR Manual</span>
-            <span>QRIS</span>
+            <span>Pakasir QRIS</span>
+            <span>Telegram checkout tetap aktif</span>
         </div>
     </div>
 </footer>

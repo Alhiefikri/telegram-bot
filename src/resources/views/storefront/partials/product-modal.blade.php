@@ -89,7 +89,7 @@
                                     <input type="hidden" name="quantity" x-bind:value="quantity">
 
                                     <div class="grid gap-2">
-                                        <label for="storefront-buyer-handle" class="text-xs font-black uppercase tracking-wider text-[var(--sf-ink)]">Username Telegram / nama pembeli</label>
+                                        <label for="storefront-buyer-handle" class="text-xs font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['buyer_handle_label'] }}</label>
                                         <input id="storefront-buyer-handle"
                                                name="buyer_handle"
                                                type="text"
@@ -99,7 +99,7 @@
                                                aria-describedby="storefront-buyer-handle-help"
                                                class="neo-input h-12 w-full bg-white px-3 text-sm font-bold text-[var(--sf-ink)] placeholder:text-[var(--sf-muted)]">
                                         <p id="storefront-buyer-handle-help" class="text-[11px] font-semibold leading-relaxed text-[var(--sf-muted)]">
-                                            Punya Telegram? isi @username supaya admin mudah follow up. Tidak punya Telegram? isi nama panggilan.
+                                            {{ $copy['shop']['buyer_handle_help'] }}
                                         </p>
                                     </div>
 
@@ -108,13 +108,13 @@
                                     </p>
 
                                     <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        Bayar QRIS di Website
+                                        {{ $copy['shop']['checkout_cta'] }}
                                     </button>
                                 </form>
 
                                 <div>
                                     <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        Beli lewat Telegram
+                                        {{ $copy['shop']['telegram_cta'] }}
                                     </button>
                                     <p class="mt-3 text-center text-[10px] font-bold leading-relaxed text-[var(--sf-muted)]">
                                         Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.

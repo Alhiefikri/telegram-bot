@@ -30,29 +30,28 @@
         </p>
 
         <div class="mx-auto mt-6 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
-                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+            <a href="{{ route('storefront.shop.index') }}" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
                 <span>{{ $copy['hero']['primary_cta'] }}</span>
             </a>
-            <a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
+            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
                 @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
                 <span>{{ $copy['hero']['secondary_cta'] }}</span>
             </a>
         </div>
 
         <div class="mx-auto mt-5 grid max-w-sm gap-3">
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
+            <a href="{{ route('storefront.shop.index') }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
                 <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] text-[var(--sf-ink)]">
-                    @include('storefront.components.telegram-icon', ['class' => 'h-5 w-5 shrink-0'])
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h10v10H7z" /><path stroke-linecap="round" stroke-linejoin="round" d="M4 12h16" /></svg>
                 </span>
                 <span>
-                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Telegram Bot</span>
-                    <span class="block text-sm font-black text-[var(--sf-ink)]">Order via Telegram</span>
+                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Web + Telegram</span>
+                    <span class="block text-sm font-black text-[var(--sf-ink)]">Bayar QRIS web atau lanjut bot</span>
                 </span>
             </a>
         </div>
 
-        <a href="#products" class="mt-9 inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--sf-muted)] transition-transform duration-300 hover:translate-y-1 hover:text-[var(--sf-ink)]" aria-label="Lihat produk">
+        <a href="{{ route('storefront.shop.index') }}" class="mt-9 inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--sf-muted)] transition-transform duration-300 hover:translate-y-1 hover:text-[var(--sf-ink)]" aria-label="{{ $copy['hero']['tertiary_cta'] }}">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
         </a>
     </div>

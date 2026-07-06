@@ -53,6 +53,7 @@ class StorefrontProductCheckoutTest extends TestCase
 
     public function test_product_detail_shows_buy_button_for_available_product(): void
     {
+        config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore_support');
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
             'description' => 'Akun Private',
@@ -66,7 +67,11 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('CapCut Pro')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 8')
-            ->assertSee(route('storefront.products.payment', $product), false);
+            ->assertSee(route('storefront.shop.index').'#product-'.$product->id, false)
+            ->assertSee('Beli via Web QRIS')
+            ->assertSee('https://t.me/lhiestore_support', false)
+            ->assertSee('Beli lewat Telegram')
+            ->assertDontSee(route('storefront.products.payment', $product), false);
     }
 
     public function test_product_detail_disables_buy_button_for_empty_product(): void
@@ -81,6 +86,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Stok habis')
             ->assertSee('Restock segera')
+            ->assertDontSee(route('storefront.shop.index').'#product-'.$product->id, false)
             ->assertDontSee(route('storefront.products.payment', $product), false);
     }
 

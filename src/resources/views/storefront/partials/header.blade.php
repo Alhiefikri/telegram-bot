@@ -1,5 +1,6 @@
 @php
     $homeUrl = $homeUrl ?? route('storefront.home');
+    $shopUrl = $shopUrl ?? route('storefront.shop.index');
     $supportDestination = $supportDestination ?? $storefront->supportDestination();
 @endphp
 
@@ -10,16 +11,20 @@
         </a>
 
         <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] lg:flex" aria-label="Navigasi utama">
-            <a href="{{ $homeUrl }}#products" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
+            <a href="{{ $shopUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
             <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
             <a href="{{ route('storefront.login-guide') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan Login</a>
             <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
         </nav>
 
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
+            <a href="{{ $shopUrl }}" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
+                <span>Belanja Web</span>
+            </a>
+
+            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-surface)] px-4 py-2 text-xs font-black text-[var(--sf-ink)] sm:inline-flex">
                 @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                <span>Buka Bot</span>
+                <span>Buka Bot Telegram</span>
             </a>
 
             <button
@@ -58,11 +63,11 @@
                     <span>Beranda</span>
                 </a>
 
-                <a href="{{ $homeUrl }}#products" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
+                <a href="{{ $shopUrl }}" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
                     <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
                     </span>
-                    <span>Produk</span>
+                    <span>Belanja Web</span>
                 </a>
 
                 <a href="{{ $homeUrl }}#cara-beli" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
@@ -100,7 +105,7 @@
             </nav>
 
             <div class="border-t-[3px] border-[var(--sf-border)] px-5 py-3 text-center text-[10px] font-bold text-[var(--sf-muted)]">
-                {{ $brand }} · Telegram-first checkout
+                {{ $brand }} · Web + Telegram checkout
             </div>
         </div>
     </div>

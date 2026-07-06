@@ -20,9 +20,9 @@ return [
     'hero' => [
         'eyebrow' => 'Akun AI premium siap pakai',
         'headline' => 'Toolkit AI premium untuk kerja harian.',
-        'body' => 'Lhie Store mengkurasi akun AI premium yang stoknya jelas, harganya terlihat, dan proses ordernya tetap dekat lewat Telegram. Pilih produk di web, lanjutkan transaksi dengan bot atau admin.',
-        'primary_cta' => 'Buka Bot Telegram',
-        'secondary_cta' => 'Hubungi Admin',
+        'body' => 'Pilih produk dari web, lalu bayar lewat QRIS website atau lanjutkan transaksi melalui bot/admin Telegram yang sudah berjalan.',
+        'primary_cta' => 'Belanja Web',
+        'secondary_cta' => 'Buka Bot Telegram',
         'tertiary_cta' => 'Lihat Produk',
         'popular_label' => 'Produk aktif dari database',
         'popular_empty' => 'Produk populer akan tampil setelah stok aktif tersedia.',
@@ -58,6 +58,17 @@ return [
         'empty_category_body' => 'Tim toko sedang menyiapkan kategori publik pertama agar katalog mudah dijelajahi.',
     ],
 
+    'shop' => [
+        'title' => 'Marketplace akun AI siap pakai',
+        'body' => 'Pilih produk, pilih bayar QRIS dari web atau lanjut lewat Telegram.',
+        'empty_title' => 'Belum ada produk siap dibeli.',
+        'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',
+        'buyer_handle_label' => 'Username Telegram / nama pembeli',
+        'buyer_handle_help' => 'Punya Telegram? isi @username. Tidak punya Telegram? isi nama panggilan.',
+        'checkout_cta' => 'Bayar QRIS di Website',
+        'telegram_cta' => 'Beli lewat Telegram',
+    ],
+
     'featured' => [
         'eyebrow' => 'Pilihan hari ini',
         'empty_title' => 'Promo pilihan menunggu stok siap.',
@@ -83,19 +94,19 @@ return [
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
         'title' => 'Belanja akun AI dalam tiga langkah.',
-        'body' => 'Pilih produk dari katalog, lanjutkan ke Telegram, lalu bayar dengan QRIS manual saat admin mengirim instruksi nominal.',
+        'body' => 'Pilih produk dari katalog, pilih bayar QRIS website atau Telegram, lalu terima akses setelah pembayaran terkonfirmasi.',
         'steps' => [
             [
                 'title' => 'Pilih produk',
                 'body' => 'Cari akun AI yang dibutuhkan dan pastikan badge stok masih tersedia.',
             ],
             [
-                'title' => 'Hubungi support',
-                'body' => 'Kirim nama produk agar support memberi instruksi nominal, metode bayar, dan batas waktu.',
+                'title' => 'Pilih jalur checkout',
+                'body' => 'Gunakan QRIS website untuk bayar langsung, atau lanjut lewat bot/admin Telegram.',
             ],
             [
                 'title' => 'Terima akses',
-                'body' => 'Setelah pembayaran terkonfirmasi, order masuk proses pengiriman akun digital.',
+                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi; Telegram tetap berjalan untuk order dari bot.',
             ],
         ],
     ],
@@ -107,10 +118,9 @@ return [
     ],
 
     'qris' => [
-        'eyebrow' => 'QRIS manual',
-        'title' => 'Scan QRIS, kirim bukti ke Telegram.',
-        'body' => 'QRIS ini statis untuk pembayaran manual. Pastikan nominal mengikuti instruksi admin agar order mudah dicocokkan.',
-        'asset' => '/qr-lhie.jpg',
+        'eyebrow' => 'QRIS Pakasir',
+        'title' => 'QRIS web dibuat per order',
+        'body' => 'Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.',
     ],
 
     'telegram_support' => [
@@ -149,13 +159,13 @@ return [
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
-            'answer' => 'Tidak. Halaman ini hanya menampilkan informasi publik. Bot Telegram dan webhook pembayaran tetap berjalan di alur operasional yang sudah ada.',
+            'answer' => 'Order website diproses sebagai order web dengan QRIS Pakasir dan invoice bertanda tangan. Bot Telegram tetap berjalan untuk pelanggan yang memilih jalur Telegram.',
         ],
     ],
 
     'support' => [
         'eyebrow' => 'Siap belanja?',
-        'title' => 'Pilih di katalog, lanjutkan di Telegram.',
+        'title' => 'Butuh bantuan setelah checkout?',
         'body' => 'Gunakan katalog sementara ini untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
         'primary_cta' => 'Chat Support',
         'secondary_cta' => 'Login Admin',

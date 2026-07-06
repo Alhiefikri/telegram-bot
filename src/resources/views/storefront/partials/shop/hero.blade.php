@@ -5,7 +5,7 @@
                 <div>
                     <p class="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--sf-ink)]">Shop web</p>
                     <h1 class="mt-2 max-w-3xl text-balance font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">
-                        Marketplace akun AI siap pakai
+                        {{ $copy['shop']['title'] }}
                     </h1>
                 </div>
                 <div class="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-[var(--sf-ink)] sm:justify-end">
@@ -16,7 +16,7 @@
 
             <div class="grid gap-6 px-5 py-6 sm:px-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                 <p class="max-w-2xl text-pretty text-sm font-semibold leading-7 text-[var(--sf-muted)] sm:text-base">
-                    Pilih produk, pilih bayar lewat website atau Telegram, lalu ikuti instruksi sampai data akun diterima.
+                    {{ $copy['shop']['body'] }}
                 </p>
 
                 <div class="flex flex-col gap-3 sm:flex-row lg:justify-end">

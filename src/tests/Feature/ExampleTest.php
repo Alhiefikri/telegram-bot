@@ -36,13 +36,59 @@ class ExampleTest extends TestCase
 
         $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
 
-        foreach (['Produk', 'Cara Beli', 'Panduan Login', 'FAQ', 'Support', 'Buka Bot Telegram'] as $customerLinkText) {
+        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Support', 'Belanja Web', 'Buka Bot Telegram'] as $customerLinkText) {
             $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
         }
 
         $this->assertStringNotContainsString('/admin/login', $mobileMenuHtml);
         $this->assertStringNotContainsString('Login Admin', $mobileMenuHtml);
         $this->assertStringNotContainsString('Dashboard toko', $mobileMenuHtml);
+    }
+
+    public function test_landing_header_and_hero_expose_web_shop_and_configured_telegram_bot_paths(): void
+    {
+        $botUrl = 'https://t.me/lhiestore_bot?start=issue122';
+        config(['storefront.links.telegram_bot_url' => $botUrl]);
+
+        $shopUrl = route('storefront.shop.index');
+        $html = $this->get('/')->assertOk()->getContent();
+        $headerHtml = $this->htmlBetween($html, '<header', '</header>');
+        $mobileMenuHtml = $this->htmlBetween($html, '<div id="mobile-menu"', '</header>');
+        $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
+
+        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the web shop grid.');
+        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Belanja Web', 'Desktop header should expose the website checkout path.');
+        $headerTelegramLink = $this->matchingLinkHtml($headerHtml, $botUrl, 'Buka Bot Telegram');
+        $this->assertNotNull($headerTelegramLink, 'Desktop header should expose the configured Telegram bot path.');
+        $this->assertStringContainsString('data-telegram-link', $headerTelegramLink);
+
+        $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Belanja Web', 'Mobile menu should expose the website checkout path.');
+        $mobileTelegramLink = $this->matchingLinkHtml($mobileMenuHtml, $botUrl, 'Buka Bot Telegram');
+        $this->assertNotNull($mobileTelegramLink, 'Mobile menu should expose the configured Telegram bot path.');
+        $this->assertStringContainsString('data-telegram-link', $mobileTelegramLink);
+
+        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Belanja Web', 'Hero primary CTA should send customers to the web shop.');
+        $heroTelegramLink = $this->matchingLinkHtml($heroHtml, $botUrl, 'Buka Bot Telegram');
+        $this->assertNotNull($heroTelegramLink, 'Hero secondary CTA should keep the Telegram checkout path visible.');
+        $this->assertStringContainsString('data-telegram-link', $heroTelegramLink);
+    }
+
+    public function test_landing_qris_card_is_explainer_not_static_payable_checkout(): void
+    {
+        $html = $this->get('/')->assertOk()->getContent();
+        $qrisHtml = $this->htmlBetween($html, '<aside class="qris-card', '</aside>');
+
+        $this->assertStringContainsString('aria-label="Ilustrasi QRIS Pakasir Lhie Store"', $qrisHtml);
+        $this->assertStringContainsString('QRIS Pakasir', $qrisHtml);
+        $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
+        $this->assertStringContainsString('Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.', $qrisHtml);
+        $this->assertStringContainsString('Pakasir', $qrisHtml);
+        $this->assertHtmlContainsLink($qrisHtml, route('storefront.shop.index'), 'Belanja Web via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
+        $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
+        $this->assertStringNotContainsString('Konfirmasi ke Admin', $qrisHtml);
+        $this->assertStringNotContainsString('QRIS pembayaran manual', $qrisHtml);
+        $this->assertStringNotContainsString('/qr-lhie.jpg', $qrisHtml);
+        $this->assertStringNotContainsString('Scan QRIS untuk Bayar', $qrisHtml);
     }
 
     public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
@@ -113,9 +159,9 @@ class ExampleTest extends TestCase
             ->assertSee('Support')
             ->assertSee('Belanja akun AI dalam tiga langkah')
             ->assertSee('/panduan-login-akun', false)
-            ->assertSee('Setelah pembayaran terkonfirmasi')
+            ->assertSee('Pilih produk dari katalog, pilih bayar QRIS website atau Telegram')
             ->assertSee('Pengiriman digital')
-            ->assertSee('Bot dan admin Telegram membantu status order')
+            ->assertSee('Telegram tetap berjalan untuk order dari bot')
             ->assertSee('Akun siap pakai')
             ->assertSee('Tanpa tebak stok')
             ->assertSee('Order dibantu manusia')
@@ -318,7 +364,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Pesan via Admin', $featuredHtml);
+        $this->assertStringContainsString('Pilih Checkout', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -399,8 +445,8 @@ class ExampleTest extends TestCase
             ->assertDontSee('Ready (1)')
             ->assertDontSee('Stok 0')
             ->assertDontSee('Belanja Sekarang')
-            ->assertSee('Keranjang')
-            ->assertSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'"', false);
+            ->assertSee('Pilih Checkout')
+            ->assertDontSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'"', false);
     }
 
     public function test_storefront_avoids_inline_assets_and_mock_only_presentation(): void
@@ -465,6 +511,34 @@ class ExampleTest extends TestCase
 
         return str_contains(strtolower($visibleText), 'telegram')
             || preg_match('/\b(?:aria-label|title|class|data-icon)="[^"]*\btelegram\b/i', $linkHtml) === 1;
+    }
+
+    private function assertHtmlContainsLink(string $html, string $expectedHref, string $expectedText, ?string $message = null): void
+    {
+        $this->assertNotNull(
+            $this->matchingLinkHtml($html, $expectedHref, $expectedText),
+            $message ?? "Expected link [{$expectedText}] to point to [{$expectedHref}].",
+        );
+    }
+
+    private function matchingLinkHtml(string $html, string $expectedHref, string $expectedText): ?string
+    {
+        preg_match_all('/<a\b(?=[^>]*\bhref="([^"]+)")[^>]*>.*?<\/a>/s', $html, $matches, PREG_SET_ORDER);
+
+        foreach ($matches as $match) {
+            $href = html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = trim((string) preg_replace(
+                '/\s+/',
+                ' ',
+                html_entity_decode(strip_tags($match[0]), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            ));
+
+            if ($href === $expectedHref && $text === $expectedText) {
+                return $match[0];
+            }
+        }
+
+        return null;
     }
 
     private function htmlBetween(string $html, string $start, string $end): string

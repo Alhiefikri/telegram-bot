@@ -39,7 +39,7 @@
                     </div>
 
                     <span class="neo-button inline-flex h-10 items-center justify-center bg-[var(--sf-accent)] px-3 text-[11px] font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
-                        Pesan via Admin
+                        Pilih Checkout
                     </span>
                 </div>
             </div>
