@@ -23,6 +23,10 @@ use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontManualCheckoutController;
 use App\Http\Controllers\StorefrontProductController;
 use App\Http\Controllers\StorefrontProductPaymentController;
+use App\Http\Controllers\StorefrontShopCheckoutController;
+use App\Http\Controllers\StorefrontShopController;
+use App\Http\Controllers\StorefrontShopOrderController;
+use App\Http\Controllers\StorefrontShopOrderStatusController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
@@ -30,6 +34,13 @@ Route::get('/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
 Route::get('/produk/{product}/bayar', StorefrontProductPaymentController::class)->name('storefront.products.payment');
 Route::get('/produk/{product}/checkout-manual', StorefrontManualCheckoutController::class)->name('storefront.products.checkout-manual');
+
+Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
+    Route::get('/', StorefrontShopController::class)->name('index');
+    Route::post('checkout', StorefrontShopCheckoutController::class)->name('checkout');
+    Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('signed')->name('orders.show');
+    Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
+});
 Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
 
 Route::middleware('admin.no-cache')->group(function (): void {

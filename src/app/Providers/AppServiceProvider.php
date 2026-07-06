@@ -13,7 +13,6 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
-use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Storefront\StorefrontResponseCache;
@@ -99,6 +98,16 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute($limit)->by('pakasir:webhook:global'),
                 Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source),
             ];
+        });
+
+        RateLimiter::for('pakasir-status-refresh', function (Request $request) {
+            $limit = max(1, (int) config('services.pakasir.status_refresh_rate_limit_per_minute', 3));
+            $routeOrder = $request->route('order');
+            $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
+                ? (string) $routeOrder->getKey()
+                : ($request->ip() ?: 'unknown');
+
+            return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity);
         });
 
     }
