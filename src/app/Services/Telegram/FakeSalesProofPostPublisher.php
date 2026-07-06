@@ -312,7 +312,7 @@ class FakeSalesProofPostPublisher
 
     private function fakeOrderNumber(): int
     {
-        return $this->numbering->nextNumber();
+        return $this->numbering->reserveNextNumber();
     }
 
     private function intervalOptionsLabel(): string

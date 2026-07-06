@@ -8,27 +8,36 @@ use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Support\Money;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 final class AdminDashboardSalesData
 {
+    private const ORDERS_PER_PAGE = 10;
+
     private ?StoreChannelSetting $storeChannelSetting = null;
 
     /**
      * @param  array<string, mixed>  $statusCounts
      * @return array<string, mixed>
      */
-    public function forSales(array $statusCounts, bool $canRetrySalesProof = false): array
+    public function forSales(array $statusCounts, bool $canRetrySalesProof = false, ?string $activeFilter = null): array
     {
+        $activeFilter = $this->normalizeFilter($activeFilter);
+        [$orders, $pagination] = $this->latestOrders($canRetrySalesProof, $activeFilter);
+
         return [
-            'orders' => $this->latestOrders($canRetrySalesProof),
-            'filters' => $this->salesFilters($statusCounts),
+            'orders' => $orders,
+            'filters' => $this->salesFilters($statusCounts, $activeFilter),
             'statusCounts' => $statusCounts,
+            'active_filter' => $activeFilter,
+            'pagination' => $pagination,
         ];
     }
 
-    private function latestOrders(bool $canRetrySalesProof): array
+    private function latestOrders(bool $canRetrySalesProof, string $activeFilter): array
     {
-        return Order::query()
+        $statuses = $this->statusesForFilter($activeFilter);
+        $paginator = Order::query()
             ->with([
                 'customer:id,first_name,username',
                 'orderItems:id,order_id,product_name,quantity,subtotal',
@@ -38,10 +47,13 @@ final class AdminDashboardSalesData
                 'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
+            ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(fn (OrderStatus $status): string => $status->value, $statuses)))
             ->withCount('orderItems')
             ->latest()
-            ->limit(5)
-            ->get()
+            ->paginate(self::ORDERS_PER_PAGE, ['*'], 'sales_page')
+            ->withQueryString();
+
+        $orders = $paginator->getCollection()
             ->map(function (Order $order) use ($canRetrySalesProof): array {
                 $paidAmount = (int) $order->payments->sum('amount');
                 $orderStatusTone = $this->orderStatusTone($order->order_status);
@@ -71,6 +83,8 @@ final class AdminDashboardSalesData
                 ];
             })
             ->all();
+
+        return [$orders, $this->pagination($paginator)];
     }
 
     public function paymentAttention(Order $order): ?array
@@ -86,12 +100,12 @@ final class AdminDashboardSalesData
         ];
     }
 
-    private function salesFilters(array $statusCounts): array
+    private function salesFilters(array $statusCounts, string $activeFilter): array
     {
         $countFor = fn (OrderStatus ...$statuses): int => collect($statuses)
             ->sum(fn (OrderStatus $status): int => $statusCounts[$status->value]['count'] ?? 0);
 
-        return [
+        return collect([
             [
                 'key' => 'all',
                 'label' => 'Semua',
@@ -117,6 +131,48 @@ final class AdminDashboardSalesData
                 'label' => 'Diproses',
                 'count' => $countFor(OrderStatus::Processing),
             ],
+        ])
+            ->map(fn (array $filter): array => $filter + [
+                'active' => $filter['key'] === $activeFilter,
+                'url' => route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => $filter['key']]),
+            ])
+            ->all();
+    }
+
+    /**
+     * @return list<OrderStatus>|null
+     */
+    private function statusesForFilter(string $filter): ?array
+    {
+        return match ($filter) {
+            'completed' => [OrderStatus::Completed],
+            'issue' => [OrderStatus::Cancelled, OrderStatus::Expired],
+            'waiting' => [OrderStatus::Draft, OrderStatus::PendingPayment],
+            'processing' => [OrderStatus::Processing],
+            default => null,
+        };
+    }
+
+    private function normalizeFilter(?string $filter): string
+    {
+        $filter = (string) ($filter ?: 'all');
+
+        return in_array($filter, ['all', 'completed', 'issue', 'waiting', 'processing'], true)
+            ? $filter
+            : 'all';
+    }
+
+    private function pagination(LengthAwarePaginator $paginator): array
+    {
+        return [
+            'current_page' => $paginator->currentPage(),
+            'last_page' => $paginator->lastPage(),
+            'from' => $paginator->firstItem(),
+            'to' => $paginator->lastItem(),
+            'total' => $paginator->total(),
+            'has_pages' => $paginator->hasPages(),
+            'previous_url' => $paginator->previousPageUrl(),
+            'next_url' => $paginator->nextPageUrl(),
         ];
     }
 

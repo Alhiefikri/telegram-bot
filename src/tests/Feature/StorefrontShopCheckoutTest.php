@@ -460,7 +460,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('account@example.test|pass', false)
             ->assertSee('Panduan login & keamanan');
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
     public function test_shop_status_endpoint_reconciles_completed_pakasir_payment(): void
@@ -486,7 +486,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
-            ->assertJsonPath('order_status', OrderStatus::Processing->value)
+            ->assertJsonPath('order_status', OrderStatus::Completed->value)
             ->assertJsonPath('is_paid', true)
             ->assertJsonPath('redirect_url', $redirectUrl);
 
@@ -495,7 +495,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->status);
         $this->assertNotNull($payment->paid_at);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
             && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
     }

@@ -16,7 +16,11 @@ class AdminDashboardController extends Controller
     {
         $user = $request->attributes->get('adminUser');
 
-        $viewData = $dashboardData->forAdmin($user, (string) $request->query('tab', 'stats'));
+        $viewData = $dashboardData->forAdmin(
+            $user,
+            (string) $request->query('tab', 'stats'),
+            (string) $request->query('sales_filter', 'all'),
+        );
         $viewData['dashboardState'] = $dashboardState->build(
             $viewData['productsTab'],
             $viewData['statsTab'],

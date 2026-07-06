@@ -146,7 +146,7 @@ class OrderStateMachine
             return $this->markLatePaymentPaid($payment, $order);
         }
 
-        if ($payment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing && $this->inventory->hasSaleProofForOrder($order)) {
+        if ($payment->status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) && $this->inventory->hasSaleProofForOrder($order)) {
             return $order->fresh(['payments']);
         }
 
@@ -157,7 +157,7 @@ class OrderStateMachine
         $this->inventory->recordOrderSales($order);
 
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
-        $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Processing]);
+        $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => $this->paidOrderStatus($payment)]);
 
         if (StoreChannelSetting::current()->sales_proof_enabled) {
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
@@ -165,6 +165,13 @@ class OrderStateMachine
         }
 
         return $order->fresh(['payments']);
+    }
+
+    private function paidOrderStatus(Payment $payment): OrderStatus
+    {
+        return strtolower((string) $payment->provider) === 'pakasir'
+            ? OrderStatus::Completed
+            : OrderStatus::Processing;
     }
 
     private function markLatePaymentPaid(Payment $payment, Order $order): Order

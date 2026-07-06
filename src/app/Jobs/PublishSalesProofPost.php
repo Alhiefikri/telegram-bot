@@ -121,7 +121,7 @@ class PublishSalesProofPost implements ShouldQueue
 
         try {
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
-            $successfulPostNumber = $numbering->nextNumber();
+            $successfulPostNumber = $numbering->reserveNextNumber();
             $response = $bot->sendMessage($chatId, $formatter->format($order, $successfulPostNumber), [
                 'inline_keyboard' => [[['text' => '🛒 Belanja Sekarang', 'url' => 'https://t.me/lhiestore_bot?start=from_channel']]],
             ]);

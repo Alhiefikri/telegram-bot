@@ -69,6 +69,25 @@
             @endif
         </x-admin-dashboard.card>
 
+        @if ($auditEntries !== [])
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
+                <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Riwayat aksi</p>
+                <div class="mt-3 space-y-2">
+                    @foreach ($auditEntries as $entry)
+                        <div class="rounded-xl border-2 border-brand-border bg-[#f8fafc] p-3 text-sm font-semibold">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <p class="font-black text-neo-ink">{{ $entry['label'] }}</p>
+                                <p class="text-xs font-bold text-brand-muted">{{ $entry['created_at'] }}</p>
+                            </div>
+                            <p class="mt-1 text-brand-muted">
+                                Oleh {{ $entry['actor'] }}@if ($entry['ip_address']) · {{ $entry['ip_address'] }}@endif
+                            </p>
+                        </div>
+                    @endforeach
+                </div>
+            </x-admin-dashboard.card>
+        @endif
+
         <x-admin-dashboard.sales-proof-card :proof="$salesProof" class="mt-4 rounded-2xl" />
     </main>
 </body>

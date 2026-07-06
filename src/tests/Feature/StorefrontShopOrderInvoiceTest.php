@@ -99,7 +99,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
-            ->assertJsonPath('order_status', OrderStatus::Processing->value)
+            ->assertJsonPath('order_status', OrderStatus::Completed->value)
             ->assertJsonPath('is_paid', true)
             ->assertJsonPath('redirect_url', $redirectUrl);
 
@@ -108,7 +108,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->status);
         $this->assertNotNull($payment->paid_at);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
             && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
     }

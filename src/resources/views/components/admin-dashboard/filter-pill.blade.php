@@ -2,14 +2,12 @@
     'filter',
 ])
 
-<button
-    type="button"
-    x-on:click="salesFilter = @js($filter['key'])"
-    x-bind:class="isSalesFilterActive(@js($filter['key'])) ? 'filter-pill-active' : ''"
-    x-bind:aria-pressed="isSalesFilterActive(@js($filter['key']))"
-    class="filter-pill"
+<a
+    href="{{ $filter['url'] }}"
+    class="filter-pill @if ($filter['active'] ?? false) filter-pill-active @endif"
+    @if ($filter['active'] ?? false) aria-current="page" @endif
     data-sales-filter="{{ $filter['key'] }}"
 >
     <span>{{ $filter['label'] }}</span>
     <span class="filter-pill-count">{{ $filter['count'] }}</span>
-</button>
+</a>

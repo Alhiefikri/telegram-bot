@@ -126,7 +126,7 @@ class PakasirCallbackProcessor
         $order = $this->orders->markPaymentPaid($payment);
 
         $payment->refresh();
-        if ($payment->status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing) {
+        if ($payment->status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
         }
 

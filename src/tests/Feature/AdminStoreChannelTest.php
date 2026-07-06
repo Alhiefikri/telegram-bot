@@ -454,6 +454,8 @@ class AdminStoreChannelTest extends TestCase
             });
 
             $this->assertCount(2, $matchingSends);
+            preg_match_all('/Order sukses: #(\d+)/', implode("\n", $matchingSends->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))->all()), $orderNumberMatches);
+            $this->assertSame(['1', '2'], $orderNumberMatches[1]);
             $this->assertSame(4, $product->refresh()->stock);
             $this->assertSame(0, $product->reserved_stock);
             $this->assertNoRealOrderPersistence();

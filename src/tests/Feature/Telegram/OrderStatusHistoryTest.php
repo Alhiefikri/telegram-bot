@@ -212,7 +212,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(211, '/order '.$order->invoice_number))->assertOk();
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Detail Pesanan')

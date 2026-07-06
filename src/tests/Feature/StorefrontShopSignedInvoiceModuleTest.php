@@ -116,12 +116,12 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame([
             'ok' => true,
             'payment_status' => PaymentStatus::Paid->value,
-            'order_status' => OrderStatus::Processing->value,
+            'order_status' => OrderStatus::Completed->value,
             'is_paid' => true,
             'redirect_url' => $result->redirectUrl,
         ], $result->payload());
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
     public function test_refresh_status_returns_retryable_failure_when_provider_reconciliation_fails(): void

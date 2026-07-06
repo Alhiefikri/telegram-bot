@@ -24,6 +24,7 @@
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
+            $salesPagination = $salesTab['pagination'];
             $storeChannel = $storeChannelTab;
         @endphp
 

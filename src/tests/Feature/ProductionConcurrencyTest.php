@@ -161,7 +161,7 @@ class ProductionConcurrencyTest extends TestCase
         $payment->refresh();
         $product = Product::firstOrFail();
 
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
         $this->assertSame(PaymentStatus::Paid, $payment->status);
         $this->assertSame(1, $product->stock);
@@ -198,7 +198,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->count());
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
 
-        if ($order->order_status === OrderStatus::Processing) {
+        if ($order->order_status === OrderStatus::Completed) {
             $this->assertSame(0, $product->stock);
             $this->assertSame(0, $product->reserved_stock);
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());

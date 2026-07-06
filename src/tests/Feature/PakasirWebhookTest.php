@@ -67,7 +67,7 @@ class PakasirWebhookTest extends TestCase
                 ->firstOrFail();
             $firstReceivedAt = $firstEvent->received_at->copy();
             $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+            $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
             $this->assertSame('pakasir', $firstEvent->provider);
             $this->assertSame($payment->id, $firstEvent->payment_id);
@@ -204,7 +204,7 @@ class PakasirWebhookTest extends TestCase
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $amount))->assertOk();
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
     }
 
@@ -407,7 +407,7 @@ class PakasirWebhookTest extends TestCase
             $this->assertTrue(Carbon::parse($event->last_received_at)->greaterThan($firstReceivedAt));
             $this->assertNotNull($event->processed_at);
             $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+            $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
             $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
             $this->assertSame(1, PaymentEvent::query()->whereNotNull('processed_at')->count());
@@ -479,7 +479,7 @@ class PakasirWebhookTest extends TestCase
         $this->artisan('pakasir:reconcile')->assertSuccessful();
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $event = PaymentEvent::firstOrFail();
         $this->assertSame(PaymentEventType::Reconciliation, $event->event_type);
         $this->assertSame($payment->merchant_ref, $event->merchant_ref);

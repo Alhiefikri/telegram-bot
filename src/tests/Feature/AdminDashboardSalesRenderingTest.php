@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
@@ -80,8 +81,8 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertOk()
             ->assertSee('Order masuk dan diproses')
             ->assertSeeInOrder(['Semua', 'Selesai', 'Masalah', 'Menunggu', 'Diproses'])
-            ->assertSee('salesFilter', false)
-            ->assertSee("salesFilter = 'completed'", false)
+            ->assertSee('sales_filter=completed', false)
+            ->assertSee('filter-pill-active', false)
             ->assertSee('data-order-filter-groups="all completed"', false)
             ->assertSee('data-order-filter-groups="all issue"', false)
             ->assertSee('grid grid-cols-2 gap-2', false)
@@ -219,6 +220,71 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('INV-LATE-PAID')
             ->assertSee('Late paid')
             ->assertSee('Perlu refund/support manual');
+    }
+
+    public function test_penjualan_filter_urls_page_through_older_status_groups(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+
+        for ($index = 0; $index < 12; $index++) {
+            Order::factory()->create([
+                'invoice_number' => 'INV-RECENT-'.$index,
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+                'created_at' => now()->subMinutes($index),
+            ]);
+        }
+
+        $cancelled = Order::factory()->create([
+            'invoice_number' => 'INV-OLDER-CANCELLED',
+            'order_status' => OrderStatus::Cancelled,
+            'payment_status' => PaymentStatus::Failed,
+            'created_at' => now()->subDays(2),
+        ]);
+        OrderItem::factory()->create(['order_id' => $cancelled->id, 'product_name' => 'Cancelled Product']);
+
+        $this->get('/admin?tab=penjualan&sales_filter=issue')
+            ->assertOk()
+            ->assertSee('INV-OLDER-CANCELLED')
+            ->assertSee('Dibatalkan')
+            ->assertSee('sales_filter=completed', false)
+            ->assertSee('sales_filter=issue', false)
+            ->assertDontSee('INV-RECENT-0');
+
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee('Halaman 1 dari 2')
+            ->assertSee('Berikutnya')
+            ->assertSee('sales_page=2', false);
+    }
+
+    public function test_admin_order_detail_shows_order_audit_actor_for_cancelled_orders(): void
+    {
+        $viewer = User::factory()->create(['role' => UserRole::Owner]);
+        $operator = User::factory()->create(['name' => 'Alice Admin', 'role' => UserRole::Admin]);
+        $this->actingAs($viewer);
+        $order = Order::factory()->create([
+            'invoice_number' => 'INV-AUDIT-CANCEL',
+            'order_status' => OrderStatus::Cancelled,
+            'payment_status' => PaymentStatus::Failed,
+        ]);
+        AuditLog::factory()->create([
+            'user_id' => $operator->id,
+            'action' => 'order.pending_cancelled_released',
+            'subject_type' => Order::class,
+            'subject_id' => (string) $order->id,
+            'old_values' => ['order_status' => 'pending_payment', 'payment_status' => 'pending'],
+            'new_values' => ['order_status' => 'cancelled', 'payment_status' => 'failed'],
+            'ip_address' => '127.0.0.1',
+            'created_at' => Carbon::parse('2026-07-06 09:15:00'),
+        ]);
+
+        $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Riwayat aksi')
+            ->assertSee('Dibatalkan & stok dilepas')
+            ->assertSee('Alice Admin')
+            ->assertSee('2026-07-06 09:15');
     }
 
     public function test_sales_proof_manual_retry_uses_publisher_path_without_changing_order_state(): void

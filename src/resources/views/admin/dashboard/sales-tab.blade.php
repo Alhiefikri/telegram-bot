@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PENJUALAN TAB (Pesanan)                            ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-cloak x-show="activeTab === 'penjualan'" x-data="salesFilter()" class="mt-4 space-y-4">
+            <div x-cloak x-show="activeTab === 'penjualan'" class="mt-4 space-y-4">
 
                 <div>
                     <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">🛒 Penjualan Saya</h2>
@@ -27,7 +27,6 @@
                             class="rounded-[1.125rem]"
                             data-order-status="{{ $order['order_status'] }}"
                             data-order-filter-groups="{{ implode(' ', $order['filter_groups']) }}"
-                            x-show="orderVisible($el)"
                         >
                             {{-- Invoice + status --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
@@ -77,4 +76,30 @@
                         <x-admin-dashboard.empty-state title="Belum ada order." />
                     @endforelse
                 </div>
+
+                @if ($salesPagination['has_pages'])
+                    <nav class="rounded-[1.125rem] border-[3px] border-neo-ink bg-white p-3 shadow-neo-sm" aria-label="Pagination penjualan">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <p class="text-xs font-black uppercase tracking-wide text-brand-muted">
+                                Halaman {{ $salesPagination['current_page'] }} dari {{ $salesPagination['last_page'] }}
+                                <span class="normal-case tracking-normal">
+                                    · {{ $salesPagination['from'] }}-{{ $salesPagination['to'] }} dari {{ $salesPagination['total'] }} order
+                                </span>
+                            </p>
+                            <div class="flex items-center gap-2">
+                                @if ($salesPagination['previous_url'])
+                                    <x-admin-dashboard.button :href="$salesPagination['previous_url']" variant="neutral" size="sm">Sebelumnya</x-admin-dashboard.button>
+                                @else
+                                    <span class="inline-flex min-h-11 items-center justify-center rounded-neo-2xl border-[3px] border-neo-ink bg-[#f1f5f9] px-3 py-2 text-xs font-black uppercase tracking-wide text-brand-muted opacity-60">Sebelumnya</span>
+                                @endif
+
+                                @if ($salesPagination['next_url'])
+                                    <x-admin-dashboard.button :href="$salesPagination['next_url']" variant="warning" size="sm">Berikutnya</x-admin-dashboard.button>
+                                @else
+                                    <span class="inline-flex min-h-11 items-center justify-center rounded-neo-2xl border-[3px] border-neo-ink bg-[#f1f5f9] px-3 py-2 text-xs font-black uppercase tracking-wide text-brand-muted opacity-60">Berikutnya</span>
+                                @endif
+                            </div>
+                        </div>
+                    </nav>
+                @endif
             </div>

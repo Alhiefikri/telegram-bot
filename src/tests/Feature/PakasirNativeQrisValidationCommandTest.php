@@ -108,7 +108,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 
         $payment->refresh();
         $this->assertSame(PaymentStatus::Paid, $payment->status);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
         $this->assertSame(hash('sha256', $paymentNumber), $payment->provider_payment_number_hash);
         $storedPayloadJson = json_encode($payment->provider_payload, JSON_THROW_ON_ERROR);
