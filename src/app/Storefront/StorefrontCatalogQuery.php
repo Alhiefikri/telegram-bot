@@ -14,6 +14,29 @@ class StorefrontCatalogQuery
      */
     public function get(?string $rawSearch): array
     {
+        $data = $this->catalogData($rawSearch);
+
+        return array_merge($data, $this->storefront->homeViewData($data['categories'], $data['products']));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getForShop(?string $rawSearch): array
+    {
+        $data = $this->catalogData($rawSearch);
+
+        return array_merge(
+            $data,
+            $this->storefront->shopViewData($data['categories'], $data['products'], $data['search'])
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function catalogData(?string $rawSearch): array
+    {
         $search = trim((string) $rawSearch);
 
         $categories = Category::query()
@@ -42,11 +65,11 @@ class StorefrontCatalogQuery
             ->limit(24)
             ->get();
 
-        return array_merge([
+        return [
             'categories' => $categories,
             'products' => $products,
             'featuredProduct' => $featuredProduct,
             'search' => $search,
-        ], $this->storefront->homeViewData($categories, $products));
+        ];
     }
 }

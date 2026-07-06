@@ -2,19 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Storefront\StorefrontResponseCache;
+use App\Storefront\StorefrontCatalogQuery;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 
 class StorefrontShopController extends Controller
 {
-    public function __construct(private readonly StorefrontResponseCache $storefrontResponseCache) {}
-
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request, StorefrontCatalogQuery $catalog): View
     {
         $search = $request->query('q');
 
-        return response($this->storefrontResponseCache->get(is_string($search) ? $search : ''))
-            ->header('Content-Type', 'text/html; charset=UTF-8');
+        return view('storefront.shop', $catalog->getForShop(is_string($search) ? $search : ''));
     }
 }

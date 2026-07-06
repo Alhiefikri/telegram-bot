@@ -107,6 +107,33 @@ class StorefrontPresenter
         ];
     }
 
+    /**
+     * @param  Collection<int, Product>  $products
+     */
+    public function shopViewData(Collection $categories, Collection $products, string $search): array
+    {
+        $copy = config('storefront');
+        $brand = $this->brand();
+
+        return [
+            'storefront' => $this,
+            'brand' => $brand,
+            'copy' => $copy,
+            'pageTitle' => 'Belanja Akun AI | Lhie Store',
+            'pageDescription' => 'Marketplace Lhie Store untuk membeli akun AI premium langsung dari web dengan QRIS Pakasir atau lewat Telegram.',
+            'canonicalUrl' => route('storefront.shop.index'),
+            'homeUrl' => route('storefront.home'),
+            'shopUrl' => route('storefront.shop.index'),
+            'supportHref' => $this->supportHref(),
+            'supportDestination' => $this->supportDestination(),
+            'categoriesWithProducts' => $this->categoriesWithProducts($categories, $products),
+            'catalogProducts' => $products,
+            'popularProducts' => $this->popularProducts($products),
+            'searchAction' => route('storefront.shop.index').'#products',
+            'checkoutUrl' => route('storefront.shop.checkout'),
+        ];
+    }
+
     public function productPageViewData(Product $product, int $stock): array
     {
         $brand = $this->brand();
@@ -155,6 +182,7 @@ class StorefrontPresenter
 
         return [
             'id' => $product->id,
+            'productId' => $product->id,
             'name' => $product->name,
             'descriptionSnippet' => $this->descriptionSnippet($product),
             'description' => $product->description,
@@ -162,6 +190,7 @@ class StorefrontPresenter
             'fake_discount_price' => $product->fake_discount_price,
             'stock' => $stock,
             'isAvailable' => $stock > 0,
+            'checkoutUrl' => route('storefront.shop.checkout'),
             'paymentUrl' => route('storefront.products.payment', $product),
             'coverTheme' => $this->productCover($product),
             'imageUrl' => $this->publicStorageUrl($product->image_path),
