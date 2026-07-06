@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
+use App\Services\Telegram\FakeSalesProofPostPublisher;
 use App\Services\Telegram\TelegramBotApiRedactor;
 
 final class AdminDashboardData
@@ -17,6 +18,7 @@ final class AdminDashboardData
         private readonly AdminDashboardStatsData $statsData,
         private readonly AdminDashboardProductsData $productsData,
         private readonly AdminDashboardSalesData $salesData,
+        private readonly FakeSalesProofPostPublisher $fakeSalesProof,
     ) {}
 
     /**
@@ -118,6 +120,8 @@ final class AdminDashboardData
         };
         $channelFeaturesEnabled = (bool) ($setting->community_gate_enabled || $setting->sales_proof_enabled);
 
+        $canManage = (bool) $user->role?->canManagePaymentSettings();
+
         return [
             'setting' => $setting,
             'status' => $status,
@@ -129,9 +133,10 @@ final class AdminDashboardData
             ],
             'ready' => $ready,
             'show_setup_warning' => $channelFeaturesEnabled && ! $ready,
-            'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'can_manage' => $canManage,
             'update_url' => route('admin.store-channel.update'),
             'test_url' => route('admin.store-channel.test'),
+            'fake_sales_proof' => $this->fakeSalesProof->dashboardState($setting, $ready, $canManage),
         ];
     }
 

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
@@ -48,6 +49,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::prefix('store-channel')->name('store-channel.')->group(function (): void {
                 Route::post('/', AdminStoreChannelController::class)->name('update');
                 Route::post('test', AdminStoreChannelTestController::class)->name('test');
+                Route::post('fake-sales-proof', AdminFakeSalesProofPostController::class)->name('fake-sales-proof');
             });
 
             Route::prefix('orders')->name('orders.')->group(function (): void {

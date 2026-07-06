@@ -4,10 +4,15 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\AuditLog;
+use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class AdminStoreChannelTest extends TestCase
@@ -22,6 +27,7 @@ class AdminStoreChannelTest extends TestCase
 
         config()->set('services.telegram.token', 'bot-token');
         config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+        Cache::flush();
     }
 
     public function test_owner_can_render_and_update_store_channel_settings(): void
@@ -185,6 +191,229 @@ class AdminStoreChannelTest extends TestCase
         $this->assertDatabaseCount('store_channel_settings', 0);
     }
 
+    public function test_ready_channel_tab_renders_fake_sales_proof_product_selector_and_random_interval_copy(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $firstProduct = Product::factory()->create([
+            'name' => 'Alpha Channel Voucher',
+            'is_active' => true,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+        $secondProduct = Product::factory()->create([
+            'name' => 'Beta Channel Voucher',
+            'is_active' => true,
+            'stock' => 5,
+            'reserved_stock' => 1,
+        ]);
+        $inactiveProduct = Product::factory()->create([
+            'name' => 'Inactive Channel Voucher',
+            'is_active' => false,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $soldOutProduct = Product::factory()->create([
+            'name' => 'Sold Out Channel Voucher',
+            'is_active' => true,
+            'stock' => 2,
+            'reserved_stock' => 2,
+        ]);
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'channel_username' => '@lhie_store',
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+            'sales_proof_enabled' => true,
+        ]);
+
+        $content = $this->get(route('admin.dashboard', ['tab' => 'telegram-channel']))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString(url('/admin/store-channel/fake-sales-proof'), $content);
+        $this->assertSame(
+            1,
+            preg_match('/<select\b(?=[^>]*\bid="fake-sales-proof-product")(?=[^>]*\bname="product_id")[^>]*>.*?<\/select>/s', $content, $selectorMatches),
+            'Expected fake sales proof product selector to render.'
+        );
+        $productSelectorHtml = $selectorMatches[0];
+
+        foreach ([$firstProduct, $secondProduct] as $product) {
+            $this->assertStringContainsString('value="'.$product->id.'"', $productSelectorHtml);
+            $this->assertStringContainsString($product->name, $productSelectorHtml);
+        }
+
+        foreach ([$inactiveProduct, $soldOutProduct] as $product) {
+            $this->assertStringNotContainsString('value="'.$product->id.'"', $productSelectorHtml);
+            $this->assertStringNotContainsString($product->name, $productSelectorHtml);
+        }
+
+        foreach (['2 jam', '3 jam', '4 jam', '5 jam'] as $intervalCopy) {
+            $this->assertStringContainsString($intervalCopy, $content);
+        }
+    }
+
+    public function test_post_sends_fake_sales_proof_for_selected_product_without_persisting_orders_or_proofs(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $selectedProduct = Product::factory()->create([
+            'name' => 'Selected Channel Voucher',
+            'is_active' => true,
+            'stock' => 8,
+            'reserved_stock' => 2,
+        ]);
+        $otherActiveProduct = Product::factory()->create([
+            'name' => 'Other Active Channel Voucher',
+            'is_active' => true,
+            'stock' => 6,
+            'reserved_stock' => 1,
+        ]);
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+            'sales_proof_enabled' => true,
+        ]);
+
+        Http::fake([
+            'https://api.telegram.org/botbot-token/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 901],
+            ]),
+        ]);
+
+        $this->post(route('admin.store-channel.fake-sales-proof'), [
+            'product_id' => $selectedProduct->id,
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+
+        Http::assertSentCount(1);
+        Http::assertSent(function (Request $request) use ($selectedProduct, $otherActiveProduct): bool {
+            $text = (string) ($request['text'] ?? '');
+            $replyMarkup = $request['reply_markup'] ?? [];
+
+            return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+                && $request['chat_id'] === '-100123'
+                && str_contains($text, 'PEMBELIAN SUKSES')
+                && preg_match('/Pembeli: [A-Za-z0-9_]{2}\*\*\*/', $text) === 1
+                && str_contains($text, $selectedProduct->name)
+                && ! str_contains($text, $otherActiveProduct->name)
+                && str_contains($text, 'Jumlah: 1x')
+                && str_contains($text, 'Order sukses: #1')
+                && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Belanja Sekarang'
+                && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=from_channel';
+        });
+
+        $this->assertSame(8, $selectedProduct->refresh()->stock);
+        $this->assertSame(2, $selectedProduct->reserved_stock);
+        $this->assertSame(6, $otherActiveProduct->refresh()->stock);
+        $this->assertSame(1, $otherActiveProduct->reserved_stock);
+        $this->assertNoRealOrderPersistence();
+        $this->assertNoFakeSalesProofPosts();
+    }
+
+    public function test_post_rejects_unavailable_fake_sales_proof_product_ids_without_sending(): void
+    {
+        foreach ([
+            'inactive' => ['is_active' => false, 'stock' => 5, 'reserved_stock' => 0],
+            'sold out' => ['is_active' => true, 'stock' => 3, 'reserved_stock' => 3],
+        ] as $case => $attributes) {
+            Cache::flush();
+            StoreChannelSetting::query()->delete();
+            Product::query()->delete();
+
+            $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+            $product = Product::factory()->create([
+                'name' => 'Rejected '.$case.' Channel Voucher',
+                ...$attributes,
+            ]);
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'telegram_chat_id' => '-100123',
+                'last_test_success' => true,
+                'sales_proof_enabled' => true,
+            ]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 902]])]);
+
+            $this->post(route('admin.store-channel.fake-sales-proof'), [
+                'product_id' => $product->id,
+            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+
+            Http::assertNothingSent();
+            $this->assertSame($attributes['stock'], $product->refresh()->stock);
+            $this->assertSame($attributes['reserved_stock'], $product->reserved_stock);
+            $this->assertNoRealOrderPersistence();
+            $this->assertNoFakeSalesProofPosts();
+        }
+    }
+
+    public function test_finance_and_support_cannot_send_fake_sales_proof(): void
+    {
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            Cache::flush();
+            StoreChannelSetting::query()->delete();
+            Product::query()->delete();
+
+            $product = Product::factory()->create(['name' => 'Manager Only Product', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'telegram_chat_id' => '-100123',
+                'last_test_success' => true,
+                'sales_proof_enabled' => true,
+            ]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 903]])]);
+
+            $this->actingAs(User::factory()->create(['role' => $role]))
+                ->post(route('admin.store-channel.fake-sales-proof'), [
+                    'product_id' => $product->id,
+                ])
+                ->assertForbidden();
+
+            Http::assertNothingSent();
+            $this->assertSame(5, $product->refresh()->stock);
+            $this->assertSame(0, $product->reserved_stock);
+            $this->assertNoRealOrderPersistence();
+            $this->assertNoFakeSalesProofPosts();
+        }
+    }
+
+    public function test_second_fake_sales_proof_send_before_five_hours_is_blocked_without_sending_again(): void
+    {
+        $now = Carbon::parse('2026-07-05 12:00:00');
+        Carbon::setTestNow($now);
+
+        try {
+            $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+            $product = Product::factory()->create(['name' => 'Cooldown Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 0]);
+            StoreChannelSetting::create([
+                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+                'telegram_chat_id' => '-100123',
+                'last_test_success' => true,
+                'sales_proof_enabled' => true,
+            ]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 904]])]);
+
+            $this->post(route('admin.store-channel.fake-sales-proof'), [
+                'product_id' => $product->id,
+            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+
+            Carbon::setTestNow($now->copy()->addHour());
+
+            $this->post(route('admin.store-channel.fake-sales-proof'), [
+                'product_id' => $product->id,
+            ])
+                ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']))
+                ->assertSessionHas('error');
+
+            Http::assertSentCount(1);
+            $this->assertSame(4, $product->refresh()->stock);
+            $this->assertSame(0, $product->reserved_stock);
+            $this->assertNoRealOrderPersistence();
+            $this->assertNoFakeSalesProofPosts();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_non_manager_cannot_update_store_channel(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
@@ -198,5 +427,20 @@ class AdminStoreChannelTest extends TestCase
         StoreChannelSetting::create(['channel_username' => '@lhie_store']);
 
         $this->post(route('admin.store-channel.test'))->assertForbidden();
+    }
+
+    private function assertNoRealOrderPersistence(): void
+    {
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertDatabaseCount('order_items', 0);
+        $this->assertDatabaseCount('payments', 0);
+        $this->assertDatabaseCount('sales_proof_posts', 0);
+    }
+
+    private function assertNoFakeSalesProofPosts(): void
+    {
+        if (Schema::hasTable('fake_sales_proof_posts')) {
+            $this->assertDatabaseCount('fake_sales_proof_posts', 0);
+        }
     }
 }

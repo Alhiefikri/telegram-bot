@@ -9,6 +9,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\InventoryLedger;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\SalesProofPostNumbering;
 use App\Services\Telegram\TelegramBotClient;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
@@ -34,7 +35,7 @@ class PublishSalesProofPost implements ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramBotClient $bot, SalesProofPostFormatter $formatter, InventoryLedger $inventory): void
+    public function handle(TelegramBotClient $bot, SalesProofPostFormatter $formatter, SalesProofPostNumbering $numbering, InventoryLedger $inventory): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -56,7 +57,7 @@ class PublishSalesProofPost implements ShouldQueue
                 return;
             }
 
-            $this->publish($bot, $formatter, $inventory);
+            $this->publish($bot, $formatter, $numbering, $inventory);
         } finally {
             if ($lockAcquired) {
                 $publishLock->release();
@@ -70,7 +71,7 @@ class PublishSalesProofPost implements ShouldQueue
         }
     }
 
-    private function publish(TelegramBotClient $bot, SalesProofPostFormatter $formatter, InventoryLedger $inventory): void
+    private function publish(TelegramBotClient $bot, SalesProofPostFormatter $formatter, SalesProofPostNumbering $numbering, InventoryLedger $inventory): void
     {
         $setting = StoreChannelSetting::current();
         $chatId = $setting->telegram_chat_id ?: $setting->channel_username;
@@ -120,7 +121,7 @@ class PublishSalesProofPost implements ShouldQueue
 
         try {
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
-            $successfulPostNumber = SalesProofPost::query()->where('status', SalesProofPost::STATUS_SENT)->count() + 1;
+            $successfulPostNumber = $numbering->nextNumber();
             $response = $bot->sendMessage($chatId, $formatter->format($order, $successfulPostNumber), [
                 'inline_keyboard' => [[['text' => '🛒 Belanja Sekarang', 'url' => 'https://t.me/lhiestore_bot?start=from_channel']]],
             ]);

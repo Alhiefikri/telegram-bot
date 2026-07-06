@@ -7,6 +7,8 @@ use App\Models\SalesProofPost;
 
 class SalesProofPostFormatter
 {
+    public function __construct(private readonly SalesProofPostNumbering $numbering) {}
+
     public function format(Order $order, ?int $successfulPostNumber = null): string
     {
         $order->loadMissing(['customer', 'orderItems']);
@@ -15,20 +17,19 @@ class SalesProofPostFormatter
         $otherCount = max(0, $order->orderItems->count() - 1);
         $other = $otherCount > 0 ? " + {$otherCount} produk lainnya" : '';
 
-        return "🎉 PEMBELIAN SUKSES 🎉\n\n"
-            .'👤 Pembeli: '.$this->maskBuyer($order)."\n"
-            .'🛍️ Produk: '.$primary.$other."\n"
-            .'📦 Jumlah: '.$order->orderItems->sum('quantity')."x\n"
-            .'🏆 Order sukses: #'.$successfulPostNumber."\n\n"
-            ."✨ Terima kasih telah berbelanja!\n"
-            .'Mau order juga? Tap tombol di bawah 👇';
+        return $this->formatMessage($this->maskBuyer($order), $primary.$other, (int) $order->orderItems->sum('quantity'), $successfulPostNumber);
+    }
+
+    public function formatFake(string $buyerMask, string $productName, int $quantity, int $successfulPostNumber): string
+    {
+        return $this->formatMessage($buyerMask, $productName, $quantity, $successfulPostNumber);
     }
 
     private function nextSuccessfulPostNumber(Order $order): int
     {
-        $sentCount = SalesProofPost::query()->where('status', SalesProofPost::STATUS_SENT)->count();
-
-        return $order->salesProofPost?->status === SalesProofPost::STATUS_SENT ? $sentCount : $sentCount + 1;
+        return $order->salesProofPost?->status === SalesProofPost::STATUS_SENT
+            ? $this->numbering->sentCount()
+            : $this->numbering->nextNumber();
     }
 
     private function maskBuyer(Order $order): string
@@ -37,5 +38,16 @@ class SalesProofPostFormatter
         $name = ltrim(trim($name), '@');
 
         return mb_substr($name, 0, 2).'***';
+    }
+
+    private function formatMessage(string $buyerMask, string $productName, int $quantity, int $successfulPostNumber): string
+    {
+        return "🎉 PEMBELIAN SUKSES 🎉\n\n"
+            .'👤 Pembeli: '.$buyerMask."\n"
+            .'🛍️ Produk: '.$productName."\n"
+            .'📦 Jumlah: '.$quantity."x\n"
+            .'🏆 Order sukses: #'.$successfulPostNumber."\n\n"
+            ."✨ Terima kasih telah berbelanja!\n"
+            .'Mau order juga? Tap tombol di bawah 👇';
     }
 }

@@ -41,4 +41,61 @@
                         </form>
                     @endif
                 </x-admin-dashboard.card>
+
+                @php($fakeSalesProof = $storeChannel['fake_sales_proof'])
+                <x-admin-dashboard.card as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Info pembelian fake">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Fake Sales Proof</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Info Pembelian Fake</h2>
+                        </div>
+                        <x-admin-dashboard.badge :tone="$fakeSalesProof['can_send'] ? 'emerald' : 'amber'">
+                            {{ $fakeSalesProof['can_send'] ? 'Ready' : 'Standby' }}
+                        </x-admin-dashboard.badge>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold text-brand-muted">
+                        Pilih produk nyata lalu kirim format “PEMBELIAN SUKSES” ke channel memakai nama random, tanpa membuat data Pesanan dan tanpa mengurangi stok.
+                    </p>
+
+                    <div class="mt-3 grid grid-cols-3 gap-2">
+                        <x-admin-dashboard.mini-stat label="Interval" :value="$fakeSalesProof['interval_label']" align="left" />
+                        <x-admin-dashboard.mini-stat label="Terakhir" :value="$fakeSalesProof['last_sent_label']" align="left" />
+                        <x-admin-dashboard.mini-stat label="Kirim lagi" :value="$fakeSalesProof['next_available_label']" align="left" />
+                    </div>
+
+                    @if ($fakeSalesProof['disabled_reason'])
+                        <x-admin-dashboard.notice tone="warning" class="mt-3 text-xs">{{ $fakeSalesProof['disabled_reason'] }}</x-admin-dashboard.notice>
+                    @endif
+
+                    @if($storeChannel['can_manage'])
+                        <form method="POST" action="{{ $fakeSalesProof['send_url'] }}" class="mt-3">
+                            @csrf
+                            <x-admin-dashboard.field-label for="fake-sales-proof-product" class="text-xs">Pilih produk untuk notif fake</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.select
+                                id="fake-sales-proof-product"
+                                name="product_id"
+                                class="mt-2"
+                                :disabled="! $fakeSalesProof['can_send']"
+                            >
+                                @foreach ($fakeSalesProof['product_options'] as $option)
+                                    <option value="{{ $option['id'] }}">{{ $option['label'] }}</option>
+                                @endforeach
+                            </x-admin-dashboard.select>
+                            <x-admin-dashboard.button
+                                variant="warning"
+                                class="w-full text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                                type="submit"
+                                :disabled="! $fakeSalesProof['can_send']"
+                            >
+                                🎉 Kirim Info Pembelian Fake
+                            </x-admin-dashboard.button>
+                        </form>
+                        <p class="mt-2 text-[11px] font-semibold text-brand-muted">
+                            Guard aktif: setelah sukses, cooldown dipilih acak {{ $fakeSalesProof['interval_options_label'] }}. Stok produk tidak disentuh.
+                        </p>
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">Hanya owner/admin yang bisa mengirim info pembelian fake.</x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
             </div>
