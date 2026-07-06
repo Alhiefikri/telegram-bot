@@ -13,9 +13,10 @@ class StorefrontShopCatalogTest extends TestCase
 
     public function test_shop_renders_compact_marketplace_grid(): void
     {
-        $category = Category::factory()->create(['name' => 'AI Tools', 'sort_order' => 1]);
-        Product::factory()->create(['category_id' => $category->id, 'name' => 'Claude Pro Ready', 'stock' => 3, 'reserved_stock' => 0]);
-        Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Plus Ready', 'stock' => 2, 'reserved_stock' => 0]);
+        $category = Category::factory()->create(['name' => 'AI Tools', 'sort_order' => 1, 'is_active' => true]);
+        Product::factory()->create(['category_id' => $category->id, 'name' => 'Claude Pro Ready', 'stock' => 3, 'reserved_stock' => 0, 'is_active' => true]);
+        Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Plus Ready', 'stock' => 2, 'reserved_stock' => 0, 'is_active' => true]);
+        Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Team Restock', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => true]);
 
         $this->get(route('storefront.shop.index'))
             ->assertOk()
@@ -43,6 +44,9 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Mulai belanja')
             ->assertSee('Tentang Lhie Store')
             ->assertSee('action="'.route('storefront.shop.index').'#products"', false)
+            ->assertSee('Katalog aktif · 3 produk publik')
+            ->assertSee('Pilih akun, cek stok, lanjut checkout.')
+            ->assertSee('Produk aktif dari Admin Dashboard muncul otomatis di sini. Filter kategori atau cari produk yang siap dibeli.')
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
@@ -63,7 +67,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_available_shop_products_open_existing_modal_with_checkout_payload(): void
+    public function test_available_shop_products_open_existing_modal_with_dual_checkout_contract(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro Web',
@@ -73,7 +77,9 @@ class StorefrontShopCatalogTest extends TestCase
             'reserved_stock' => 0,
         ]);
 
-        $this->get(route('storefront.shop.index'))
+        $response = $this->get(route('storefront.shop.index'));
+
+        $response
             ->assertOk()
             ->assertSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
@@ -86,28 +92,70 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('"stock":8', false)
             ->assertSee('"checkoutUrl":"'.str_replace('/', '\\/', route('storefront.shop.checkout')).'"', false)
             ->assertSee('"paymentUrl":"'.str_replace('/', '\\/', route('storefront.products.payment', $product)).'"', false)
+            ->assertSee('Total produk')
+            ->assertSee('method="POST"', false)
+            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertSee('name="_token"', false)
+            ->assertSee('name="product_id"', false)
+            ->assertSee("x-bind:value=\"selectedProduct?.productId || selectedProduct?.id || ''\"", false)
+            ->assertSee('name="quantity"', false)
+            ->assertSee('x-bind:value="quantity"', false)
+            ->assertSee('Username Telegram / nama pembeli')
+            ->assertSee('name="buyer_handle"', false)
+            ->assertSee('x-model.trim="buyerHandle"', false)
+            ->assertSee('required', false)
+            ->assertSee('placeholder="@username atau Nama Pembeli"', false)
+            ->assertSee('Punya Telegram? isi @username supaya admin mudah follow up. Tidak punya Telegram? isi nama panggilan.')
+            ->assertSee('type="submit"', false)
+            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('@click="checkoutManual()"', false)
+            ->assertSee('Beli lewat Telegram')
+            ->assertSee('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')
+            ->assertSee('Stok kosong')
             ->assertDontSee('&amp;quot;', false);
+
+        $this->assertSame(2, substr_count($response->getContent(), 'x-bind:disabled="!selectedProduct || !selectedProduct.isAvailable"'));
     }
 
     public function test_unavailable_shop_products_render_disabled_card_without_modal_trigger(): void
     {
+        $category = Category::factory()->create(['name' => 'Unavailable Products', 'is_active' => true]);
         Product::factory()->create([
+            'category_id' => $category->id,
+            'name' => 'Claude Ready Web',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $unavailableProduct = Product::factory()->create([
+            'category_id' => $category->id,
             'name' => 'ChatGPT Habis Web',
             'stock' => 1,
             'reserved_stock' => 1,
+            'is_active' => true,
         ]);
 
-        $this->get(route('storefront.shop.index'))
+        $response = $this->get(route('storefront.shop.index'));
+        $unavailableCard = $this->productArticleHtml($response->getContent(), $unavailableProduct);
+
+        $response
             ->assertOk()
-            ->assertSee('ChatGPT Habis Web')
-            ->assertSee('aria-disabled="true"', false)
-            ->assertSee('STOK HABIS')
-            ->assertSee('Restock segera')
-            ->assertSee('Stok kosong')
-            ->assertDontSee('openProductModal', false)
-            ->assertDontSee('JSON.parse($el.dataset.product)', false)
-            ->assertDontSee('data-product=', false)
-            ->assertDontSee('"checkoutUrl"', false);
+            ->assertSee('Claude Ready Web')
+            ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
+            ->assertSee('ChatGPT Habis Web');
+
+        $this->assertStringContainsString('class="product-card', $unavailableCard);
+        $this->assertStringContainsString('aria-disabled="true"', $unavailableCard);
+        $this->assertStringContainsString('ChatGPT Habis Web', $unavailableCard);
+        $this->assertStringContainsString('STOK HABIS', $unavailableCard);
+        $this->assertStringContainsString('Restock segera', $unavailableCard);
+        $this->assertStringContainsString('Stok kosong', $unavailableCard);
+        $this->assertStringNotContainsString('openProductModal', $unavailableCard);
+        $this->assertStringNotContainsString('JSON.parse($el.dataset.product)', $unavailableCard);
+        $this->assertStringNotContainsString('data-product=', $unavailableCard);
+        $this->assertStringNotContainsString('"checkoutUrl"', $unavailableCard);
+        $this->assertStringNotContainsString('method="POST"', $unavailableCard);
+        $this->assertStringNotContainsString(route('storefront.shop.checkout'), $unavailableCard);
     }
 
     public function test_shop_empty_state_uses_ready_product_copy(): void
@@ -115,7 +163,8 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.shop.index'))
             ->assertOk()
             ->assertSee('Belum ada produk siap dibeli.')
-            ->assertSee('Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.');
+            ->assertSee('Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.')
+            ->assertSee('Katalog aktif · 0 produk publik');
     }
 
     public function test_landing_catalog_behavior_remains_unchanged(): void
@@ -128,7 +177,21 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('action="'.url('/').'#products"', false)
             ->assertSee('Landing Catalog Product')
             ->assertSee('JSON.parse($el.dataset.product)', false)
+            ->assertSee('Toolkit AI premium untuk kerja harian.')
+            ->assertSee('Belanja akun AI dalam tiga langkah.')
+            ->assertDontSee('Pilih akun, cek stok, lanjut checkout.')
             ->assertDontSee('Marketplace akun AI siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
+    }
+
+    private function productArticleHtml(string $html, Product $product): string
+    {
+        $start = strpos($html, '<article id="product-'.$product->id.'"');
+        $this->assertNotFalse($start, 'Expected unavailable product article for product '.$product->id.' to be rendered.');
+
+        $end = strpos($html, '</article>', $start);
+        $this->assertNotFalse($end, 'Expected unavailable product article for product '.$product->id.' to be closed.');
+
+        return substr($html, $start, $end + strlen('</article>') - $start);
     }
 }

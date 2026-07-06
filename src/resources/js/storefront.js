@@ -301,10 +301,12 @@ export function storefrontModal() {
         selectedProduct: null,
         quantity: 1,
         notes: '',
+        buyerHandle: '',
         openProductModal(product) {
             this.selectedProduct = product;
             this.quantity = 1;
             this.notes = '';
+            this.buyerHandle = '';
             this.productModalOpen = true;
             document.body.style.overflow = 'hidden';
         },
