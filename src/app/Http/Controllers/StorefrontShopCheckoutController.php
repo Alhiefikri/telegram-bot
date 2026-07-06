@@ -15,7 +15,7 @@ class StorefrontShopCheckoutController extends Controller
     public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout): RedirectResponse
     {
         $validated = $request->validated();
-        $product = Product::withTrashed()->findOrFail((int) $validated['product_id']);
+        $product = Product::query()->whereKey($request->integer('product_id'))->firstOrFail();
         $buyer = $request->buyerHandle();
 
         try {
@@ -28,7 +28,7 @@ class StorefrontShopCheckoutController extends Controller
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
             return back()
                 ->withInput()
-                ->withErrors(['checkout' => $exception->getMessage()]);
+                ->withErrors(['product_id' => $exception->getMessage()]);
         }
 
         return redirect()->to($result->orderUrl);

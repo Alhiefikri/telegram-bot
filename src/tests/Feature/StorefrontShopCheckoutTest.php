@@ -147,7 +147,9 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee($order->invoice_number)
-            ->assertSee($paymentNumber);
+            ->assertSee('src="data:image/png;base64,', false)
+            ->assertDontSee($paymentNumber)
+            ->assertDontSee('/qr-lhie.jpg', false);
 
         $product->refresh();
         $this->assertSame(4, $product->stock);

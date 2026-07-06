@@ -295,6 +295,84 @@ function initPaymentActions() {
     });
 }
 
+function initShopPaymentStatus() {
+    const containers = document.querySelectorAll('[data-shop-payment-status]');
+
+    if (!containers.length) {
+        return;
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const terminalStatuses = new Set(['expired', 'cancelled', 'failed']);
+    const isTerminalStatus = (data) => {
+        const paymentStatus = String(data?.payment_status || '').toLowerCase();
+        const orderStatus = String(data?.order_status || '').toLowerCase();
+
+        return terminalStatuses.has(paymentStatus) || terminalStatuses.has(orderStatus);
+    };
+
+    containers.forEach((container) => {
+        const statusUrl = container.getAttribute('data-status-url');
+        const redirectUrl = container.getAttribute('data-redirect-url');
+        const pollMs = Number.parseInt(container.getAttribute('data-poll-ms') || '6000', 10) || 6000;
+        let timer = null;
+        let stopped = false;
+
+        if (!statusUrl || container.getAttribute('data-terminal') === 'true') {
+            return;
+        }
+
+        const stop = () => {
+            stopped = true;
+
+            if (timer !== null) {
+                window.clearInterval(timer);
+                timer = null;
+            }
+        };
+
+        const poll = async () => {
+            if (stopped || container.getAttribute('data-terminal') === 'true') {
+                stop();
+                return;
+            }
+
+            try {
+                const response = await window.fetch(statusUrl, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
+                    },
+                });
+                const data = await response.json().catch(() => null);
+
+                if (!data || typeof data !== 'object') {
+                    return;
+                }
+
+                if (data.is_paid === true) {
+                    stop();
+                    window.location.href = data.redirect_url || redirectUrl || window.location.href;
+                    return;
+                }
+
+                if (isTerminalStatus(data)) {
+                    container.setAttribute('data-terminal', 'true');
+                    stop();
+                }
+            } catch {
+                // Keep the current invoice UI and retry on the next interval.
+            }
+        };
+
+        timer = window.setInterval(poll, pollMs);
+        poll();
+    });
+}
+
 export function storefrontModal() {
     return {
         productModalOpen: false,
@@ -409,6 +487,7 @@ export default function initStorefront() {
         initCounters();
         initFaqAccordion();
         initPaymentActions();
+        initShopPaymentStatus();
     };
 
     if (document.readyState === 'loading') {

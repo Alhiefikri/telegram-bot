@@ -2,55 +2,60 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\URL;
 use Throwable;
 
 class StorefrontShopOrderStatusController extends Controller
 {
     public function __invoke(Order $order, PakasirProviderAdapter $pakasir, PakasirCallbackProcessor $processor): JsonResponse
     {
+        /** @var Payment|null $payment */
         $payment = $order->payments()
-            ->where('provider', 'pakasir')
             ->latest('created_at')
             ->first();
 
-        if ($payment !== null && $payment->status === PaymentStatus::Pending) {
+        if ($payment === null || strtolower((string) $payment->provider) !== 'pakasir') {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Payment Pakasir tidak ditemukan.',
+            ], 422);
+        }
+
+        if ($payment->status === PaymentStatus::Pending && $order->order_status === OrderStatus::PendingPayment) {
             try {
                 $processor->processReconciliationForPayment($payment, $pakasir->transactionDetail($payment));
             } catch (Throwable $exception) {
                 report($exception);
 
-                $order->refresh();
-                $payment->refresh();
-
-                return response()->json($this->payload($order, $payment) + [
+                return response()->json([
                     'ok' => false,
-                    'message' => 'Status pembayaran belum bisa diperbarui.',
-                ], 202);
+                    'message' => 'Status pembayaran belum bisa dicek otomatis sekarang.',
+                ]);
             }
         }
 
         $order->refresh();
-        $payment?->refresh();
+        $payment->refresh();
 
-        return response()->json($this->payload($order, $payment) + ['ok' => true]);
+        return response()->json([
+            'ok' => true,
+            'payment_status' => $payment->status?->value,
+            'order_status' => $order->order_status?->value,
+            'is_paid' => $this->isPaid($order, $payment),
+            'redirect_url' => URL::signedRoute('storefront.shop.orders.show', $order),
+        ]);
     }
 
-    /**
-     * @return array<string, string|null>
-     */
-    private function payload(Order $order, mixed $payment): array
+    private function isPaid(Order $order, Payment $payment): bool
     {
-        return [
-            'order_id' => (string) $order->getKey(),
-            'invoice_number' => $order->invoice_number,
-            'order_status' => $order->order_status?->value,
-            'payment_status' => $order->payment_status?->value,
-            'provider_payment_status' => $payment?->status?->value,
-        ];
+        return $payment->status === PaymentStatus::Paid
+            && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
     }
 }
