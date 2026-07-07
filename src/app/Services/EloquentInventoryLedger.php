@@ -2,13 +2,11 @@
 
 namespace App\Services;
 
-use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
-use App\Models\CartItem;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
@@ -42,7 +40,7 @@ class EloquentInventoryLedger implements InventoryLedger
             throw new InvalidCartState('Product is not active.');
         }
 
-        if ($product->availableStock() < ($quantity + $this->activeCartQuantityForOtherCarts($product, $cartId))) {
+        if ($product->availableStock() < $quantity) {
             throw new InsufficientStock('Insufficient available stock.');
         }
     }
@@ -174,18 +172,5 @@ class EloquentInventoryLedger implements InventoryLedger
         if (! $reservation || $reservation->quantity !== $item->quantity || $reservation->quantity <= 0) {
             throw new InvalidOrderTransition('Reservation movement proof is missing or mismatched.');
         }
-    }
-
-    private function activeCartQuantityForOtherCarts(Product $product, int $cartId): int
-    {
-        return (int) CartItem::query()
-            ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
-            ->where('cart_items.product_id', $product->id)
-            ->where('cart_items.cart_id', '<>', $cartId)
-            ->where('carts.status', CartStatus::Active->value)
-            ->where(fn ($query) => $query
-                ->whereNull('carts.expires_at')
-                ->orWhere('carts.expires_at', '>', now()))
-            ->sum('cart_items.quantity');
     }
 }

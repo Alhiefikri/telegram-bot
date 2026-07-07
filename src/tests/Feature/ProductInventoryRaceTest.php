@@ -27,18 +27,24 @@ use Tests\Support\TelegramBotTestSupport;
 
 class ProductInventoryRaceTest extends TelegramBotTestSupport
 {
-    public function test_two_buyers_competing_for_last_stock_only_commit_one_active_cart_quantity(): void
+    public function test_two_buyers_competing_for_last_stock_can_cart_but_only_one_checkout_reserves_stock(): void
     {
         $this->fakeTelegramHttp();
         $product = $this->stockedProduct(stock: 1, secrets: ['last-secret']);
 
         $this->postTelegramWebhook($this->callbackUpdate(39001, 'buyer-a-qty', 'qty:'.$product->id.':1', ['id' => 390001, 'username' => 'buyer_a'], 390001))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(39002, 'buyer-b-qty', 'qty:'.$product->id.':1', ['id' => 390002, 'username' => 'buyer_b'], 390002))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(39003, 'buyer-a-checkout', 'checkout', ['id' => 390001, 'username' => 'buyer_a'], 390001))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(39004, 'buyer-b-checkout', 'checkout', ['id' => 390002, 'username' => 'buyer_b'], 390002))->assertOk();
 
-        $this->assertSame(1, CartItem::sum('quantity'));
+        $this->assertSame(2, CartItem::sum('quantity'));
+        $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
         $this->assertSame(1, Cart::where('status', CartStatus::Active)->count());
-        $this->assertSame(0, Order::count());
-        $this->assertStockUnavailableMessageCount(1);
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertSame(1, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
+        $this->assertStockUnavailableMessageCount(0);
+        $this->assertCheckoutStockChangedMessageCount(1);
         $this->assertInventoryInvariants($product);
     }
 
@@ -56,16 +62,22 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertInventoryInvariants($product);
     }
 
-    public function test_competing_quantity_callbacks_do_not_leave_active_carts_above_stock(): void
+    public function test_competing_quantity_callbacks_may_exceed_stock_but_checkout_does_not_oversell(): void
     {
         $this->fakeTelegramHttp();
         $product = $this->stockedProduct(stock: 2, secrets: ['secret-1', 'secret-2']);
 
         $this->postTelegramWebhook($this->callbackUpdate(39101, 'buyer-a-qty-two', 'qty:'.$product->id.':2', ['id' => 391001, 'username' => 'buyer_a'], 391001))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(39102, 'buyer-b-qty-one', 'qty:'.$product->id.':1', ['id' => 391002, 'username' => 'buyer_b'], 391002))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(39103, 'buyer-a-checkout', 'checkout', ['id' => 391001, 'username' => 'buyer_a'], 391001))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(39104, 'buyer-b-checkout', 'checkout', ['id' => 391002, 'username' => 'buyer_b'], 391002))->assertOk();
 
-        $this->assertSame(2, CartItem::sum('quantity'));
-        $this->assertStockUnavailableMessageCount(1);
+        $this->assertSame(3, CartItem::sum('quantity'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(2, $product->fresh()->reserved_stock);
+        $this->assertSame(2, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
+        $this->assertStockUnavailableMessageCount(0);
+        $this->assertCheckoutStockChangedMessageCount(1);
         $this->assertInventoryInvariants($product);
     }
 
@@ -314,6 +326,21 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $count = 0;
         Http::assertSent(function ($request) use (&$count): bool {
             if (str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.')) {
+                $count++;
+            }
+
+            return true;
+        });
+        $this->assertSame($expected, $count);
+    }
+
+    private function assertCheckoutStockChangedMessageCount(int $expected): void
+    {
+        $count = 0;
+        Http::assertSent(function ($request) use (&$count): bool {
+            if (str_ends_with($request->url(), '/sendMessage')
+                && str_contains((string) $request['text'], 'Checkout belum berhasil.')
+                && str_contains((string) $request['text'], 'stok berubah')) {
                 $count++;
             }
 

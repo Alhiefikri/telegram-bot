@@ -72,6 +72,39 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($r->data()), 'payment:'));
     }
 
+    public function test_quantity_selection_ignores_abandoned_active_carts_and_checkout_revalidates_stock(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'CHATGPT PLUS PRIVATE',
+            'description' => 'Akun private siap pakai.',
+            'price_amount' => 35000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'chatgpt-private-1@example.test|pass']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'chatgpt-private-2@example.test|pass']);
+
+        $abandonedCustomer = Customer::factory()->create(['telegram_id' => 880001]);
+        app(CartService::class)->setItemQuantity(
+            app(CartService::class)->activeCartFor($abandonedCustomer),
+            $product,
+            2,
+        );
+
+        $this->postTelegramWebhook($this->callbackUpdate(5101, 'buyer-buy', 'buy:'.$product->id, ['id' => 880002, 'username' => 'fresh_buyer'], 880002))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5102, 'buyer-qty', 'qty:'.$product->id.':1', ['id' => 880002, 'username' => 'fresh_buyer'], 880002))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5103, 'buyer-checkout', 'checkout', ['id' => 880002, 'username' => 'fresh_buyer'], 880002))->assertOk();
+
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertDatabaseHas('cart_items', ['product_id' => $product->id, 'quantity' => 1]);
+        $this->assertCount(1, $this->cartConfirmationMessagesFor('CHATGPT PLUS PRIVATE', 1));
+    }
+
     public function test_reselecting_same_quantity_after_product_navigation_resends_checkout_prompt(): void
     {
         $this->fakeTelegramHttp();
