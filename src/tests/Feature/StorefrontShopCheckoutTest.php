@@ -8,6 +8,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
+use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Payment;
@@ -244,6 +245,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
     {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
         $product = $this->availableProductWithCredentials(
             secrets: [
                 'first-account@example.test|first-secret',
@@ -281,6 +283,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
         $this->assertSame(PaymentStatus::Pending, $order->payment_status);
         $this->assertSame(CartStatus::CheckedOut, $order->cart?->status);
+        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
 
         $this->assertDatabaseHas('payments', [
             'id' => $payment->id,

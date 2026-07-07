@@ -9,8 +9,8 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\DogfoodTiming;
+use App\Support\PakasirCheckoutFlow;
 use Throwable;
 
 class TelegramCheckoutIntents
@@ -115,39 +115,6 @@ class TelegramCheckoutIntents
     private function pakasirCheckoutFlow(): string
     {
         return $this->pakasirReadiness->checkout($this->requestedPakasirCheckoutFlow())->checkoutFlow();
-    }
-
-    public function notifyAdminAboutManualOrder(Order $order): void
-    {
-        $settings = ManualPaymentSetting::current();
-        $adminTelegramChatId = $settings?->admin_telegram_chat_id ?: config('services.telegram.admin_telegram_chat_id');
-        if (! $adminTelegramChatId) {
-            return;
-        }
-
-        $order->loadMissing(['customer', 'orderItems']);
-        $method = $this->manualPaymentOption();
-        $lines = [
-            '🧾 Checkout manual baru',
-            '━━━━━━━━━━━━━━',
-            'Invoice: '.$order->invoice_number,
-            'Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
-            'Metode: '.$method['label'],
-            'Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
-            '',
-            'Item:',
-        ];
-        foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
-        }
-        $lines[] = 'Tunggu bukti pembayaran dengan caption /payment.';
-        $lines[] = 'Approve hanya jika pembayaran QR manual masuk, nama QR LHIE STORE benar, dan nominal sama persis.';
-
-        DogfoodTiming::time('dogfood.telegram.checkout_step', [
-            'step' => 'manual_admin_send_message',
-            'payment_mode' => 'manual',
-            'order_correlation_id' => DogfoodTiming::correlation($order->id),
-        ], fn () => $this->bot->sendMessage($adminTelegramChatId, implode("\n", $lines)));
     }
 
     public function paymentMode(): string

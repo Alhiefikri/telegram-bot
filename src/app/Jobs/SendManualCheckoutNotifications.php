@@ -71,28 +71,6 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
                 $order->forceFill(['manual_checkout_customer_notified_at' => now()])->save();
             }
 
-            $order->refresh();
-            if ($order->manual_checkout_admin_notified_at === null && $order->manual_checkout_admin_notification_started_at === null) {
-                // Same bounded-at-most-once contract as the customer photo: ordinary
-                // Telegram failures clear the claim; a worker crash after acceptance
-                // leaves the claim so retries do not duplicate the admin alert.
-                $order->forceFill(['manual_checkout_admin_notification_started_at' => now()])->save();
-
-                try {
-                    DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                        'step' => 'manual_admin_notification',
-                        'payment_mode' => 'manual',
-                        'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
-                        'order_correlation_id' => DogfoodTiming::correlation($order->id),
-                    ], fn () => $checkoutIntents->notifyAdminAboutManualOrder($order));
-                } catch (\Throwable $e) {
-                    $order->forceFill(['manual_checkout_admin_notification_started_at' => null])->save();
-
-                    throw $e;
-                }
-
-                $order->forceFill(['manual_checkout_admin_notified_at' => now()])->save();
-            }
         } finally {
             DogfoodTiming::log('dogfood.telegram.manual_checkout_notifications_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

@@ -9,6 +9,7 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
 use App\Models\Product;
@@ -247,8 +248,10 @@ class TelegramCallbackRouter
         $payment = $order->payments()->latest()->first();
         if ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);
+            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         } else {
             SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         }
     }
 }

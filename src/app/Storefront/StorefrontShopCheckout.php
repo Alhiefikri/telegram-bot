@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
+use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Product;
@@ -66,6 +67,7 @@ class StorefrontShopCheckout
 
         $payment->refresh();
         $order->refresh();
+        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(
             redirectUrl: URL::signedRoute('storefront.shop.orders.show', $order),

@@ -8,6 +8,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Jobs\PublishSalesProofPost;
+use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -96,6 +97,8 @@ class PakasirWebhookTest extends TestCase
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
             Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
             Queue::assertPushed(SendTelegramReceipt::class, 1);
+            Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
+            Queue::assertPushed(SendAdminOrderPaidNotification::class, 1);
             Queue::assertPushed(PublishSalesProofPost::class, 1);
         } finally {
             Carbon::setTestNow();
@@ -137,6 +140,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentEventType::Callback, $event->event_type);
         $this->assertNotNull($event->processed_at);
         Queue::assertNotPushed(SendTelegramReceipt::class);
+        Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
         Queue::assertNotPushed(PublishSalesProofPost::class);
     }
 

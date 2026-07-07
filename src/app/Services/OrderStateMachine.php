@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\PublishSalesProofPost;
+use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
@@ -158,6 +159,7 @@ class OrderStateMachine
 
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => $this->paidOrderStatus($payment)]);
+        $this->dispatchAdminPaidNotification($order);
 
         if (StoreChannelSetting::current()->sales_proof_enabled) {
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
@@ -188,12 +190,19 @@ class OrderStateMachine
             throw new InvalidOrderTransition('Late payment cannot be marked paid from current payment state.');
         }
 
+        $changed = false;
         if ($payment->status !== PaymentStatus::Paid) {
             $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => $payment->paid_at ?? now()]);
+            $changed = true;
         }
 
         if ($order->payment_status !== PaymentStatus::Paid) {
             $order->update(['payment_status' => PaymentStatus::Paid]);
+            $changed = true;
+        }
+
+        if ($changed) {
+            $this->dispatchAdminPaidNotification($order);
         }
 
         return $order->fresh(['payments']);
@@ -241,5 +250,10 @@ class OrderStateMachine
     private function credentials(): ProductCredentialAllocator
     {
         return $this->credentials ?? app(ProductCredentialAllocator::class);
+    }
+
+    private function dispatchAdminPaidNotification(Order $order): void
+    {
+        SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
     }
 }
