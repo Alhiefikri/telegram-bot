@@ -17,6 +17,7 @@ class Phase8HardeningTest extends TestCase
 
     protected function tearDown(): void
     {
+        URL::forceRootUrl(null);
         URL::forceScheme(null);
 
         parent::tearDown();
@@ -43,6 +44,28 @@ class Phase8HardeningTest extends TestCase
         (new AppServiceProvider(app()))->boot();
 
         $this->assertStringStartsWith('https://', URL::to('/up'));
+    }
+
+    public function test_production_public_requests_generate_urls_from_app_url_not_request_host(): void
+    {
+        config([
+            'app.force_https' => true,
+            'app.env' => 'production',
+            'app.key' => 'base64:test-key',
+            'app.url' => 'https://lhiestore.example',
+            'services.telegram.token' => 'telegram-token',
+            'services.telegram.webhook_secret' => 'telegram-secret',
+            'services.pakasir.slug' => 'warung-ai',
+            'services.pakasir.api_key' => 'pakasir-key',
+            'services.pakasir.base_url' => 'https://app.pakasir.test',
+        ]);
+        app()->detectEnvironment(fn () => 'production');
+        app()->instance('request', Request::create('http://43.134.177.28/shop'));
+
+        (new AppServiceProvider(app()))->boot();
+
+        $this->assertSame('https://lhiestore.example', URL::to('/'));
+        $this->assertSame('https://lhiestore.example/shop', route('storefront.shop.index'));
     }
 
     public function test_force_https_does_not_break_loopback_http_compose_requests(): void

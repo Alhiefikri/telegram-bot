@@ -47,6 +47,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->validateProductionConfiguration();
+        $this->configureUrlGeneration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 
         Product::observe(ProductAuditObserver::class);
@@ -59,10 +60,6 @@ class AppServiceProvider extends ServiceProvider
         Category::restored($invalidateStorefront);
 
         DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
-
-        if ((bool) config('app.force_https') && ! in_array(config('app.env'), ['local', 'testing'], true) && ! $this->isLoopbackHttpRequest()) {
-            URL::forceScheme('https');
-        }
 
         RateLimiter::for('telegram', function (Request $request) {
             $limit = (int) config('services.telegram.webhook_rate_limit_per_minute', 120);
@@ -110,6 +107,23 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity);
         });
 
+    }
+
+    private function configureUrlGeneration(): void
+    {
+        if (in_array(config('app.env'), ['local', 'testing'], true) || $this->isLoopbackHttpRequest()) {
+            return;
+        }
+
+        $appUrl = rtrim((string) config('app.url'), '/');
+
+        if ($appUrl !== '') {
+            URL::forceRootUrl($appUrl);
+        }
+
+        if ((bool) config('app.force_https')) {
+            URL::forceScheme('https');
+        }
     }
 
     private function hasTrustedTelegramWebhookSecret(Request $request): bool
