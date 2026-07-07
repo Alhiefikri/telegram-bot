@@ -9,6 +9,7 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -23,6 +24,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class Phase4OrderCartDomainTest extends TestCase
@@ -83,6 +85,30 @@ class Phase4OrderCartDomainTest extends TestCase
         app(OrderStateMachine::class)->cancelPendingOrder($order2);
         app(OrderStateMachine::class)->cancelPendingOrder($order2->fresh());
         $this->assertSame(2, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_expiring_pending_order_dispatches_private_admin_expired_notification_once(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
+
+        app(OrderStateMachine::class)->expirePendingOrder($order);
+        app(OrderStateMachine::class)->expirePendingOrder($order->fresh());
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $order->payments()->firstOrFail()->fresh()->status);
+        Queue::assertPushedOn('notifications', SendAdminOrderExpiredNotification::class, fn (SendAdminOrderExpiredNotification $job): bool => $job->orderId === $order->id);
+        Queue::assertPushed(SendAdminOrderExpiredNotification::class, 1);
+    }
+
+    public function test_cancel_pending_order_does_not_dispatch_private_admin_expired_notification(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
+
+        app(OrderStateMachine::class)->cancelPendingOrder($order);
+
+        Queue::assertNotPushed(SendAdminOrderExpiredNotification::class);
     }
 
     public function test_default_pending_payment_ttl_is_five_minutes_and_expiry_releases_credential(): void

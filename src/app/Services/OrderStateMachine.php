@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\PublishSalesProofPost;
+use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
@@ -235,6 +236,9 @@ class OrderStateMachine
             $payment->update(['status' => $paymentStatus]);
         }
         $order->update(['order_status' => $orderStatus, 'payment_status' => $paymentStatus]);
+        if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
+            $this->dispatchAdminExpiredNotification($order);
+        }
 
         return $order->fresh(['payments']);
     }
@@ -255,5 +259,10 @@ class OrderStateMachine
     private function dispatchAdminPaidNotification(Order $order): void
     {
         SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+    }
+
+    private function dispatchAdminExpiredNotification(Order $order): void
+    {
+        SendAdminOrderExpiredNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
     }
 }

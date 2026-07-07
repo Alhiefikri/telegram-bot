@@ -42,6 +42,19 @@ class TelegramAdminOrderNotifier
         );
     }
 
+    public function sendExpired(Order $order): void
+    {
+        $this->sendOnce(
+            order: $order,
+            startedAtColumn: 'admin_expired_order_notification_started_at',
+            sentAtColumn: 'admin_expired_order_notified_at',
+            step: 'admin_expired_order_notification',
+            canSend: fn (Order $locked): bool => $locked->order_status === OrderStatus::Expired
+                && $locked->payment_status === PaymentStatus::Expired,
+            message: fn (Order $claimed): string => $this->expiredMessage($claimed),
+        );
+    }
+
     private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message): void
     {
         if (blank(config('services.telegram.token'))) {
@@ -148,10 +161,41 @@ class TelegramAdminOrderNotifier
         return implode("\n", $lines);
     }
 
+    private function expiredMessage(Order $order): string
+    {
+        $payment = $this->relevantPayment($order);
+        $expiredAt = $payment?->expired_at ?? $order->expires_at ?? $order->updated_at;
+        $lines = [
+            '⌛ Checkout expired belum bayar',
+            '━━━━━━━━━━━━━━',
+            'Invoice: '.$order->invoice_number,
+            'Pembeli: '.$this->buyerLabel($order),
+            'Sumber: '.$this->sourceLabel($order),
+            'Status: Expired / belum bayar',
+            'Metode: '.$this->paymentLabel($payment),
+            'Total: '.$this->rupiah($order->total_amount),
+            '',
+            'Produk:',
+            ...$this->itemLines($order),
+        ];
+
+        if ($expiredAt) {
+            $lines[] = '';
+            $lines[] = 'Expired at: '.$this->timeLabel($expiredAt);
+        }
+
+        $lines[] = '';
+        $lines[] = 'Stok sudah dilepas kembali.';
+        $lines[] = 'Cek dashboard untuk follow up pembeli ini.';
+
+        return implode("\n", $lines);
+    }
+
     private function relevantPayment(Order $order): ?Payment
     {
         return $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Paid)
             ?? $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Pending)
+            ?? $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Expired)
             ?? $order->payments->first();
     }
 
