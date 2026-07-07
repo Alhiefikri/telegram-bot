@@ -101,19 +101,10 @@ class PakasirGatewayTest extends TestCase
             && $request['api_key'] === 'pakasir-secret');
     }
 
-    public function test_expire_pending_orders_cancels_unpaid_pakasir_transaction_and_logs_sanitized_event(): void
+    public function test_expire_pending_orders_releases_local_pakasir_order_without_provider_cancel(): void
     {
         config()->set('services.telegram.token', null);
-        $apiKey = (string) config('services.pakasir.api_key');
-        Http::fake([
-            'https://app.pakasir.com/api/transactioncancel' => Http::response([
-                'transaction' => [
-                    'project' => 'warung-ai',
-                    'status' => 'cancelled',
-                ],
-                'api_key' => $apiKey,
-            ], 200),
-        ]);
+        Http::fake();
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->subMinute());
         $payment = $order->payments()->firstOrFail();
 
@@ -123,20 +114,8 @@ class PakasirGatewayTest extends TestCase
 
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
-        Http::assertSent(fn ($request) => $request->method() === 'POST'
-            && $request->url() === 'https://app.pakasir.com/api/transactioncancel'
-            && $request['project'] === 'warung-ai'
-            && $request['order_id'] === $payment->merchant_ref
-            && $request['amount'] === $payment->amount
-            && $request['api_key'] === $apiKey);
-
-        $event = PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCancel)->sole();
-        $this->assertSame($payment->id, $event->payment_id);
-        $this->assertSame($payment->merchant_ref, $event->merchant_ref);
-        $this->assertSame('cancelled', $event->provider_status);
-        $this->assertNotNull($event->processed_at);
-        $this->assertArrayNotHasKey('api_key', $event->raw_payload);
-        $this->assertStringNotContainsString($apiKey, json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
+        Http::assertNothingSent();
+        $this->assertSame(0, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCancel)->count());
     }
 
     public function test_expire_pending_orders_does_not_call_pakasir_for_manual_payments(): void

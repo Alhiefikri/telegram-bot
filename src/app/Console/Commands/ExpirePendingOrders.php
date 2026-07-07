@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Services\OrderStateMachine;
-use App\Services\Pakasir\PakasirReleasedPaymentCanceller;
 use App\Services\Telegram\TelegramOrderExpiredNotifier;
 use Illuminate\Console\Command;
 use Throwable;
@@ -16,7 +15,7 @@ class ExpirePendingOrders extends Command
 
     protected $description = 'Expire due pending-payment orders and release reservations.';
 
-    public function handle(OrderStateMachine $orders, TelegramOrderExpiredNotifier $notifier, PakasirReleasedPaymentCanceller $pakasirCanceller): int
+    public function handle(OrderStateMachine $orders, TelegramOrderExpiredNotifier $notifier): int
     {
         $processed = 0;
         $skipped = 0;
@@ -25,7 +24,7 @@ class ExpirePendingOrders extends Command
         Order::where('order_status', OrderStatus::PendingPayment)
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', now())
-            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, $pakasirCanceller, &$processed, &$skipped, &$failed): void {
+            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed): void {
                 foreach ($chunk as $order) {
                     try {
                         $expired = $orders->expirePendingOrder($order);
@@ -34,8 +33,6 @@ class ExpirePendingOrders extends Command
 
                             continue;
                         }
-
-                        $this->cancelPakasirReleasedPayments($expired, $pakasirCanceller, $failed);
 
                         $notifier->send($expired);
                         $processed++;
@@ -50,17 +47,6 @@ class ExpirePendingOrders extends Command
         $this->writeSummary($processed, $skipped, $failed);
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;
-    }
-
-    private function cancelPakasirReleasedPayments(Order $order, PakasirReleasedPaymentCanceller $pakasirCanceller, int &$failed): void
-    {
-        try {
-            $pakasirCanceller->cancelReleasedOrder($order);
-        } catch (Throwable $e) {
-            report($e);
-            $failed++;
-            $this->error("Failed cancelling Pakasir transaction for expired order {$order->id}: {$e->getMessage()}");
-        }
     }
 
     private function writeSummary(int $processed, int $skipped, int $failed): void

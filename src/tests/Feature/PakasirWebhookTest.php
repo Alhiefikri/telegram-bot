@@ -607,6 +607,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertTrue($order->fresh()->expires_at?->equalTo($providerExpiry));
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
+        $this->assertCount(0, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactioncancel')));
     }
 
     public function test_reconcile_command_reports_api_failures_without_mutating_order(): void
@@ -689,7 +690,6 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.telegram.token', 'bot-token');
         Http::fake([
-            'https://app.pakasir.com/api/transactioncancel' => Http::response(['transaction' => ['status' => 'cancelled']], 200),
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
