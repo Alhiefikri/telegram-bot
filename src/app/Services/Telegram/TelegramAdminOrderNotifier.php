@@ -61,7 +61,7 @@ class TelegramAdminOrderNotifier
             return;
         }
 
-        $chatId = $this->adminAccess->adminChatId();
+        $chatId = $this->privateAdminChatId();
         if (! $chatId) {
             return;
         }
@@ -275,5 +275,14 @@ class TelegramAdminOrderNotifier
         return mb_strlen($message) <= 3900
             ? $message
             : mb_substr($message, 0, 3890).'...';
+    }
+
+    private function privateAdminChatId(): ?string
+    {
+        $chatId = $this->adminAccess->adminChatId();
+
+        return $chatId !== null && preg_match('/^[1-9][0-9]*$/', $chatId) === 1
+            ? $chatId
+            : null;
     }
 }
