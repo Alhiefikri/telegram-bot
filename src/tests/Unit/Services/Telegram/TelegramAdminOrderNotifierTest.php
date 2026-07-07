@@ -20,6 +20,48 @@ class TelegramAdminOrderNotifierTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_pending_order_notification_stores_message_tracking_for_later_delete(): void
+    {
+        config()->set('app.url', 'https://admin.example.test');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 654]])]);
+
+        $order = $this->pendingOrderWithItems();
+
+        app(TelegramAdminOrderNotifier::class)->sendPending($order);
+
+        $order->refresh();
+        $this->assertNotNull($order->admin_pending_order_notified_at);
+        $this->assertSame('999', $order->admin_pending_order_notification_chat_id);
+        $this->assertSame(654, $order->admin_pending_order_notification_message_id);
+        $this->assertNull($order->admin_pending_order_notification_deleted_at);
+    }
+
+    public function test_paid_order_notification_deletes_stored_pending_checkout_message_once(): void
+    {
+        config()->set('app.url', 'https://admin.example.test');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 777]])]);
+
+        $order = $this->paidOrderWithPendingAdminMessage();
+
+        app(TelegramAdminOrderNotifier::class)->sendPaid($order);
+        app(TelegramAdminOrderNotifier::class)->sendPaid($order->fresh());
+
+        $deletes = Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));
+        $this->assertCount(1, $deletes);
+        $deleteRequest = $deletes->first()[0];
+        $this->assertSame('999', (string) $deleteRequest['chat_id']);
+        $this->assertSame(321, (int) $deleteRequest['message_id']);
+        $this->assertNotNull($order->fresh()->admin_pending_order_notification_deleted_at);
+    }
+
     public function test_expired_order_notification_is_private_to_admin_and_includes_buyer_context(): void
     {
         config()->set('app.timezone', 'Asia/Makassar');
@@ -101,6 +143,65 @@ class TelegramAdminOrderNotifierTest extends TestCase
         DB::disableQueryLog();
 
         return $count;
+    }
+
+    private function pendingOrderWithItems(): Order
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'first_name' => 'Buyer']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-PENDING-001',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 30000,
+            'expires_at' => Carbon::parse('2026-07-07 18:16:00', 'Asia/Makassar'),
+        ]);
+
+        OrderItem::factory()->for($order)->create([
+            'product_name' => 'CHATGPT PLUS PRIVATE',
+            'quantity' => 1,
+            'unit_price' => 30000,
+            'subtotal' => 30000,
+        ]);
+
+        Payment::factory()->for($order)->create([
+            'provider' => 'pakasir',
+            'method' => 'api_qris',
+            'amount' => 30000,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        return $order;
+    }
+
+    private function paidOrderWithPendingAdminMessage(): Order
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'first_name' => 'Buyer']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-PAID-001',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 30000,
+            'admin_pending_order_notified_at' => now()->subMinute(),
+            'admin_pending_order_notification_chat_id' => '999',
+            'admin_pending_order_notification_message_id' => 321,
+        ]);
+
+        OrderItem::factory()->for($order)->create([
+            'product_name' => 'CHATGPT PLUS PRIVATE',
+            'quantity' => 1,
+            'unit_price' => 30000,
+            'subtotal' => 30000,
+        ]);
+
+        Payment::factory()->for($order)->create([
+            'provider' => 'pakasir',
+            'method' => 'api_qris',
+            'amount' => 30000,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        return $order;
     }
 
     private function expiredOrderWithItems(int $itemCount): Order

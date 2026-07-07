@@ -9,6 +9,7 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -71,6 +72,16 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
     }
 
+    public function test_paid_order_dispatches_admin_pending_notification_delete(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
+
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->firstOrFail());
+
+        Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
+    }
+
     public function test_expiry_and_cancel_release_once(): void
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
@@ -97,6 +108,7 @@ class Phase4OrderCartDomainTest extends TestCase
 
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Expired, $order->payments()->firstOrFail()->fresh()->status);
+        Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
         Queue::assertPushedOn('notifications', SendAdminOrderExpiredNotification::class, fn (SendAdminOrderExpiredNotification $job): bool => $job->orderId === $order->id);
         Queue::assertPushed(SendAdminOrderExpiredNotification::class, 1);
     }
@@ -109,6 +121,7 @@ class Phase4OrderCartDomainTest extends TestCase
         app(OrderStateMachine::class)->cancelPendingOrder($order);
 
         Queue::assertNotPushed(SendAdminOrderExpiredNotification::class);
+        Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
     }
 
     public function test_default_pending_payment_ttl_is_five_minutes_and_expiry_releases_credential(): void

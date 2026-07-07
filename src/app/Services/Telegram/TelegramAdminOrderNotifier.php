@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class TelegramAdminOrderNotifier
@@ -27,19 +28,15 @@ class TelegramAdminOrderNotifier
             canSend: fn (Order $locked): bool => $locked->order_status === OrderStatus::PendingPayment
                 && $locked->payment_status === PaymentStatus::Pending,
             message: fn (Order $claimed): string => $this->pendingMessage($claimed),
+            sentUpdates: fn (array $response, Order $claimed, string $chatId): array => $this->pendingMessageTrackingUpdates($response, $chatId),
         );
+
+        $this->deletePending($order);
     }
 
     public function sendPaid(Order $order): void
     {
-        $this->sendOnce(
-            order: $order,
-            startedAtColumn: 'admin_paid_order_notification_started_at',
-            sentAtColumn: 'admin_paid_order_notified_at',
-            step: 'admin_paid_order_notification',
-            canSend: fn (Order $locked): bool => $locked->payment_status === PaymentStatus::Paid,
-            message: fn (Order $claimed): string => $this->paidMessage($claimed),
-        );
+        $this->deletePending($order);
     }
 
     public function sendExpired(Order $order): void
@@ -53,9 +50,59 @@ class TelegramAdminOrderNotifier
                 && $locked->payment_status === PaymentStatus::Expired,
             message: fn (Order $claimed): string => $this->expiredMessage($claimed),
         );
+
+        $this->deletePending($order);
     }
 
-    private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message): void
+    public function deletePending(Order $order): void
+    {
+        if (blank(config('services.telegram.token'))) {
+            return;
+        }
+
+        $target = Order::query()
+            ->whereKey($order->id)
+            ->first([
+                'id',
+                'order_status',
+                'payment_status',
+                'admin_pending_order_notification_chat_id',
+                'admin_pending_order_notification_message_id',
+                'admin_pending_order_notification_deleted_at',
+            ]);
+
+        if (! $target || ! $this->shouldDeletePendingNotification($target)) {
+            return;
+        }
+
+        $chatId = $target->admin_pending_order_notification_chat_id ?: $this->privateAdminChatId();
+        $messageId = $target->admin_pending_order_notification_message_id;
+        if (! $chatId || ! $messageId || $target->admin_pending_order_notification_deleted_at !== null) {
+            return;
+        }
+
+        try {
+            $this->bot->deleteMessage($chatId, $messageId);
+        } catch (Throwable $e) {
+            Log::warning('telegram.admin_pending_order_notification_delete_failed', [
+                'order_id' => $target->id,
+                'chat_id' => DogfoodTiming::correlation($chatId),
+                'message_id' => $messageId,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        Order::query()
+            ->whereKey($target->id)
+            ->where('admin_pending_order_notification_message_id', $messageId)
+            ->whereNull('admin_pending_order_notification_deleted_at')
+            ->update(['admin_pending_order_notification_deleted_at' => now()]);
+    }
+
+    private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message, ?callable $sentUpdates = null): void
     {
         if (blank(config('services.telegram.token'))) {
             return;
@@ -83,7 +130,7 @@ class TelegramAdminOrderNotifier
 
         try {
             $claimed->loadMissing(['customer', 'orderItems', 'payments']);
-            DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                 'step' => $step,
                 'payment_mode' => $this->paymentMode($claimed),
                 'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
@@ -98,11 +145,33 @@ class TelegramAdminOrderNotifier
             throw $e;
         }
 
+        $updates = [$sentAtColumn => now()];
+        if ($sentUpdates !== null) {
+            $updates += $sentUpdates(is_array($response) ? $response : [], $claimed, $chatId);
+        }
+
         Order::query()
             ->whereKey($claimed->id)
             ->whereNotNull($startedAtColumn)
             ->whereNull($sentAtColumn)
-            ->update([$sentAtColumn => now()]);
+            ->update($updates);
+    }
+
+    private function pendingMessageTrackingUpdates(array $response, string $chatId): array
+    {
+        $messageId = data_get($response, 'result.message_id');
+
+        return [
+            'admin_pending_order_notification_chat_id' => (string) $chatId,
+            'admin_pending_order_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
+            'admin_pending_order_notification_deleted_at' => null,
+        ];
+    }
+
+    private function shouldDeletePendingNotification(Order $order): bool
+    {
+        return $order->order_status !== OrderStatus::PendingPayment
+            || $order->payment_status !== PaymentStatus::Pending;
     }
 
     private function pendingMessage(Order $order): string
@@ -129,34 +198,6 @@ class TelegramAdminOrderNotifier
 
         $lines[] = '';
         $lines[] = 'Cek dashboard untuk follow up pembeli ini.';
-
-        return implode("\n", $lines);
-    }
-
-    private function paidMessage(Order $order): string
-    {
-        $payment = $this->relevantPayment($order);
-        $lines = [
-            '🎉 Produk terjual!',
-            '━━━━━━━━━━━━━━',
-            'Invoice: '.$order->invoice_number,
-            'Pembeli: '.$this->buyerLabel($order),
-            'Sumber: '.$this->sourceLabel($order),
-            'Status: Pembayaran selesai',
-            'Metode: '.$this->paymentLabel($payment),
-            'Earning: '.$this->rupiah($order->total_amount).' (setelah fee)',
-            '',
-            'Produk:',
-            ...$this->itemLines($order),
-        ];
-
-        if ($payment?->paid_at) {
-            $lines[] = '';
-            $lines[] = 'Paid at: '.$this->timeLabel($payment->paid_at);
-        }
-
-        $lines[] = '';
-        $lines[] = 'Cek dashboard untuk proses order ini.';
 
         return implode("\n", $lines);
     }

@@ -117,14 +117,14 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
         return $this->measure('POST', 'sendMessage', fn () => parent::sendMessage($chatId, $text, $replyMarkup));
     }
 
-    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = []): void
+    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): void
     {
-        $this->measure('POST', 'sendPhoto', fn () => parent::sendPhoto($chatId, $photoContents, $filename, $caption, $replyMarkup));
+        $this->measure('POST', 'sendPhoto', fn () => parent::sendPhoto($chatId, $photoContents, $filename, $caption, $replyMarkup, $options));
     }
 
-    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = []): void
+    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): void
     {
-        $this->measure('POST', 'sendPhoto', fn () => parent::sendPhotoReference($chatId, $photoFileId, $caption, $replyMarkup));
+        $this->measure('POST', 'sendPhoto', fn () => parent::sendPhotoReference($chatId, $photoFileId, $caption, $replyMarkup, $options));
     }
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void

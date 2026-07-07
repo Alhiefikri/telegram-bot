@@ -5,9 +5,9 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
-use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
@@ -160,7 +160,7 @@ class OrderStateMachine
 
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => $this->paidOrderStatus($payment)]);
-        $this->dispatchAdminPaidNotification($order);
+        $this->dispatchAdminPendingNotificationDelete($order);
 
         if (StoreChannelSetting::current()->sales_proof_enabled) {
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
@@ -203,7 +203,7 @@ class OrderStateMachine
         }
 
         if ($changed) {
-            $this->dispatchAdminPaidNotification($order);
+            $this->dispatchAdminPendingNotificationDelete($order);
         }
 
         return $order->fresh(['payments']);
@@ -236,6 +236,7 @@ class OrderStateMachine
             $payment->update(['status' => $paymentStatus]);
         }
         $order->update(['order_status' => $orderStatus, 'payment_status' => $paymentStatus]);
+        $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
             $this->dispatchAdminExpiredNotification($order);
         }
@@ -256,9 +257,9 @@ class OrderStateMachine
         return $this->credentials ?? app(ProductCredentialAllocator::class);
     }
 
-    private function dispatchAdminPaidNotification(Order $order): void
+    private function dispatchAdminPendingNotificationDelete(Order $order): void
     {
-        SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+        DeleteAdminPendingOrderNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
     }
 
     private function dispatchAdminExpiredNotification(Order $order): void

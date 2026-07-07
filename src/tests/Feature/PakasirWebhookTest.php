@@ -7,6 +7,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
@@ -97,8 +98,8 @@ class PakasirWebhookTest extends TestCase
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
             Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
             Queue::assertPushed(SendTelegramReceipt::class, 1);
-            Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
-            Queue::assertPushed(SendAdminOrderPaidNotification::class, 1);
+            Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
+            Queue::assertNotPushed(SendAdminOrderPaidNotification::class);
             Queue::assertPushed(PublishSalesProofPost::class, 1);
         } finally {
             Carbon::setTestNow();
@@ -140,7 +141,8 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentEventType::Callback, $event->event_type);
         $this->assertNotNull($event->processed_at);
         Queue::assertNotPushed(SendTelegramReceipt::class);
-        Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
+        Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
+        Queue::assertNotPushed(SendAdminOrderPaidNotification::class);
         Queue::assertNotPushed(PublishSalesProofPost::class);
     }
 
@@ -162,6 +164,12 @@ class PakasirWebhookTest extends TestCase
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
 
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains((string) ($request['text'] ?? ''), 'Order sukses'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') !== '-100123'
+            && str_contains((string) ($request['text'] ?? ''), 'Produk terjual'));
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
         $this->assertSame('77', SalesProofPost::firstOrFail()->telegram_message_id);
         $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));

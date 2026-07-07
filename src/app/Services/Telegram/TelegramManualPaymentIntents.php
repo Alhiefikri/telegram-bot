@@ -93,9 +93,8 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        $completed = $this->adminOrders->completeManualOrder($order);
+        $this->adminOrders->completeManualOrder($order);
         $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran disetujui. Produk dikirim ke pembeli.');
-        $this->bot->sendMessage($chatId, "✅ Pembayaran disetujui\n━━━━━━━━━━━━━━\nInvoice {$completed->invoice_number} sudah diproses. Bot akan mengirim produk ke pembeli.");
     }
 
     public function rejectManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
