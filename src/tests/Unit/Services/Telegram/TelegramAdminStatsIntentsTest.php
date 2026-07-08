@@ -19,29 +19,29 @@ class TelegramAdminStatsIntentsTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_calculate_today_stats_counts_only_todays_real_orders_and_payments(): void
+    public function test_calculate_today_stats_counts_only_orders_and_payments_from_last_24_hours(): void
     {
         Carbon::setTestNow('2026-07-08 15:00:00');
 
         $product = Product::factory()->create(['name' => 'Test Product', 'price_amount' => 10000]);
         $customer = Customer::factory()->create();
 
-        // 1. Yesterday's paid order (Should be ignored)
-        $yesterdayOrder = Order::factory()->for($customer)->create([
+        // 1. Paid order just before the reporting window (Should be ignored)
+        $oldOrder = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
-            'created_at' => now()->subDay(),
-            'updated_at' => now()->subDay(),
+            'created_at' => now()->subDay()->subSecond(),
+            'updated_at' => now()->subDay()->subSecond(),
         ]);
-        OrderItem::factory()->for($yesterdayOrder)->for($product)->create(['quantity' => 2]);
-        Payment::factory()->for($yesterdayOrder)->create([
+        OrderItem::factory()->for($oldOrder)->for($product)->create(['quantity' => 2]);
+        Payment::factory()->for($oldOrder)->create([
             'status' => PaymentStatus::Paid,
             'amount' => 20000,
             'provider_fee' => 1000,
-            'paid_at' => now()->subDay(),
+            'paid_at' => now()->subDay()->subSecond(),
         ]);
 
-        // 2. Today's pending order (Counts as new order, but not paid/earning/sold product)
+        // 2. Pending order in the reporting window (Counts as new order, but not paid/earning/sold product)
         Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::PendingPayment,
             'payment_status' => PaymentStatus::Pending,
@@ -49,7 +49,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        // 3. Today's paid order (Should count towards everything)
+        // 3. Paid order in the reporting window (Should count towards everything)
         $todayPaidOrder = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Processing,
             'payment_status' => PaymentStatus::Paid,
@@ -64,7 +64,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
             'paid_at' => now()->subHours(2),
         ]);
 
-        // 4. Another today's paid order (Should add up)
+        // 4. Another paid order in the reporting window (Should add up)
         $todayPaidOrder2 = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Processing,
             'payment_status' => PaymentStatus::Paid,
@@ -82,14 +82,58 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $intents = app(TelegramAdminStatsIntents::class);
         $stats = $intents->calculateTodayStats();
 
-        // Total orders today: 1 pending + 2 paid = 3
+        // Total orders in the reporting window: 1 pending + 2 paid = 3
         $this->assertSame(3, $stats['new_orders']);
         // Total paid orders today: 2
         $this->assertSame(2, $stats['paid_orders']);
         // Sold products today: 3 + 1 = 4
         $this->assertSame(4, $stats['sold_products']);
-        // Earning today: (30000 - 1500) + (10000 - 500) = 28500 + 9500 = 38000
+        // Earning in the reporting window: (30000 - 1500) + (10000 - 500) = 28500 + 9500 = 38000
         $this->assertSame(38000, $stats['earning']);
+    }
+
+    public function test_calculate_today_stats_includes_orders_since_yesterdays_report_time(): void
+    {
+        Carbon::setTestNow('2026-07-08 22:00:00');
+
+        $product = Product::factory()->create(['name' => 'Test Product', 'price_amount' => 10000]);
+        $customer = Customer::factory()->create();
+
+        $beforePreviousReport = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'created_at' => '2026-07-07 21:59:59',
+            'updated_at' => '2026-07-07 21:59:59',
+        ]);
+        OrderItem::factory()->for($beforePreviousReport)->for($product)->create(['quantity' => 5]);
+        Payment::factory()->for($beforePreviousReport)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 50000,
+            'provider_fee' => 2500,
+            'paid_at' => '2026-07-07 21:59:59',
+        ]);
+
+        $insideReportWindow = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'created_at' => '2026-07-07 22:10:00',
+            'updated_at' => '2026-07-07 22:10:00',
+        ]);
+        OrderItem::factory()->for($insideReportWindow)->for($product)->create(['quantity' => 2]);
+        Payment::factory()->for($insideReportWindow)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 20000,
+            'provider_fee' => 1000,
+            'paid_at' => '2026-07-07 22:10:00',
+        ]);
+
+        $intents = app(TelegramAdminStatsIntents::class);
+        $stats = $intents->calculateTodayStats();
+
+        $this->assertSame(1, $stats['new_orders']);
+        $this->assertSame(1, $stats['paid_orders']);
+        $this->assertSame(2, $stats['sold_products']);
+        $this->assertSame(19000, $stats['earning']);
     }
 
     public function test_send_automated_daily_stats_formats_and_sends_correctly(): void

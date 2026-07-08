@@ -2,13 +2,22 @@
 
 namespace App\Storefront;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Models\OrderItem;
 use App\Models\Product;
 
 class StorefrontProductPresenter
 {
-    public function present(Product $product, ?int $stockAvailable = null): StorefrontProductPresentation
+    public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
     {
         $stockAvailable ??= $product->availableStock();
+        if ($soldQuantity === null) {
+            $attributes = $product->getAttributes();
+            $soldQuantity = array_key_exists('sold_quantity', $attributes)
+                ? (int) $attributes['sold_quantity']
+                : $this->soldQuantity($product);
+        }
         $isAvailable = $stockAvailable > 0;
         $copy = config('storefront.shop');
 
@@ -21,11 +30,13 @@ class StorefrontProductPresenter
             priceAmount: (int) $product->price_amount,
             fakeDiscountPrice: $product->fake_discount_price,
             stockAvailable: $stockAvailable,
+            soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,
             isBuyable: $isAvailable,
             canOpenModal: $isAvailable,
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
             stockLabel: $isAvailable ? 'Stok: '.$stockAvailable : 'Stok kosong',
+            soldLabel: 'Terjual: '.$soldQuantity,
             statusLabel: $isAvailable ? 'Siap dibeli' : 'Restock segera',
             cardActionLabel: $isAvailable ? 'Pilih Checkout' : 'Stok kosong',
             productUrl: route('storefront.products.show', $product),
@@ -35,6 +46,16 @@ class StorefrontProductPresenter
             ),
             checkoutChoices: $isAvailable ? $this->checkoutChoices($product, $copy) : [],
         );
+    }
+
+    private function soldQuantity(Product $product): int
+    {
+        return (int) OrderItem::query()
+            ->where('product_id', $product->id)
+            ->whereHas('order', fn ($order) => $order
+                ->where('order_status', OrderStatus::Completed)
+                ->where('payment_status', PaymentStatus::Paid))
+            ->sum('quantity');
     }
 
     private function descriptionSnippet(Product $product): string

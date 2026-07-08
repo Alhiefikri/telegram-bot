@@ -1,11 +1,11 @@
 <section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[calc(100dvh-5rem)] max-w-6xl items-center justify-center px-5 py-14 sm:px-6 lg:min-h-[760px] lg:pb-16 lg:pt-12">
     <div class="floating-ai-field" aria-hidden="true">
-        <span class="floating-ai-icon left-[4%] top-[10%] text-[var(--sf-yellow)]">✦</span>
-        <span class="floating-ai-icon left-[18%] bottom-[20%] h-8 w-8 rotate-45 rounded-sm bg-[#b7dcff]"></span>
-        <span class="floating-ai-icon right-[8%] top-[18%] text-5xl font-black text-[#ff8eb7]">+</span>
-        <span class="floating-ai-icon right-[28%] bottom-[22%] h-7 w-7 rounded-full border-[3px] border-[#d8b6ff]"></span>
-        <span class="floating-ai-icon left-[34%] top-[12%] h-0 w-0 border-x-[10px] border-b-[18px] border-x-transparent border-b-[#ffc1d6]"></span>
-        <span class="floating-ai-icon right-[4%] bottom-[14%] text-3xl text-[#ffb58b]">✦</span>
+        <span class="floating-ai-icon hidden md:inline-flex left-[4%] top-[10%] text-[var(--sf-yellow)]">✦</span>
+        <span class="floating-ai-icon hidden sm:inline-flex left-[18%] bottom-[20%] h-8 w-8 rotate-45 rounded-sm bg-[#b7dcff]"></span>
+        <span class="floating-ai-icon hidden md:inline-flex right-[8%] top-[18%] text-5xl font-black text-[#ff8eb7]">+</span>
+        <span class="floating-ai-icon hidden sm:inline-flex right-[28%] bottom-[22%] h-7 w-7 rounded-full border-[3px] border-[#d8b6ff]"></span>
+        <span class="floating-ai-icon hidden sm:inline-flex left-[34%] top-[12%] h-0 w-0 border-x-[10px] border-b-[18px] border-x-transparent border-b-[#ffc1d6]"></span>
+        <span class="floating-ai-icon hidden md:inline-flex right-[4%] bottom-[14%] text-3xl text-[#ffb58b]">✦</span>
         <span class="floating-ai-icon right-[25%] top-[44%] h-10 w-10 border-[3px] border-[#a9efcf] bg-transparent [clip-path:polygon(25%_6%,75%_6%,100%_50%,75%_94%,25%_94%,0_50%)]"></span>
         <span class="floating-ai-icon right-[12%] top-[28%] h-5 w-5 rotate-12 border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[3px_3px_0_var(--sf-shadow)]"></span>
     </div>

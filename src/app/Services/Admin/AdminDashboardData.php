@@ -65,6 +65,7 @@ final class AdminDashboardData
         $activeProductCount = Product::query()->where('is_active', true)->count();
         $orderCount = Order::query()->count();
         $ordersToProcess = Order::query()->where('order_status', OrderStatus::Processing)->count();
+        $completedOrderCount = Order::query()->where('order_status', OrderStatus::Completed)->count();
         $gmvAmount = (int) Order::query()
             ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
             ->sum('total_amount');
@@ -79,6 +80,7 @@ final class AdminDashboardData
             'active_product_count' => $activeProductCount,
             'order_count' => $orderCount,
             'orders_to_process' => $ordersToProcess,
+            'completed_order_count' => $completedOrderCount,
         ];
     }
 

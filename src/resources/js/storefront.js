@@ -223,7 +223,7 @@ function initFaqAccordion() {
                 const otherContent = otherItem.querySelector('.faq-content');
                 if (otherContent) {
                     otherContent.classList.add('max-h-0');
-                    otherContent.classList.remove('max-h-96');
+                    otherContent.classList.remove('max-h-[500px]');
                 }
                 otherItem.querySelector('.faq-toggle svg')?.classList.remove('rotate-180');
             });
@@ -231,14 +231,14 @@ function initFaqAccordion() {
             if (isExpanded) {
                 toggle.setAttribute('aria-expanded', 'false');
                 content.classList.add('max-h-0');
-                content.classList.remove('max-h-96');
+                content.classList.remove('max-h-[500px]');
                 icon?.classList.remove('rotate-180');
                 return;
             }
 
             toggle.setAttribute('aria-expanded', 'true');
             content.classList.remove('max-h-0');
-            content.classList.add('max-h-96');
+            content.classList.add('max-h-[500px]');
             icon?.classList.add('rotate-180');
         });
     });

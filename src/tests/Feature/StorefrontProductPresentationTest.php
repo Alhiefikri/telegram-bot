@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\StorefrontProductScenarios;
@@ -30,6 +34,8 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertTrue($presentation->canOpenModal);
         $this->assertSame(7, $presentation->stockAvailable);
         $this->assertSame('Stok: 7', $presentation->stockLabel);
+        $this->assertSame(0, $presentation->soldQuantity);
+        $this->assertSame('Terjual: 0', $presentation->soldLabel);
         $this->assertSame('Akun private siap pakai.', $presentation->descriptionSnippet);
         $this->assertSame('Pilih Checkout', $presentation->cardActionLabel);
         $this->assertSame(route('storefront.products.show', $product), $presentation->productUrl);
@@ -44,8 +50,30 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame(85000, $modalPayload['price']['fakeDiscountAmount']);
         $this->assertSame(7, $modalPayload['stock']['available']);
         $this->assertSame('Stok: 7', $modalPayload['stock']['label']);
+        $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $modalPayload['sold']);
         $this->assertTrue($modalPayload['availability']['isAvailable']);
         $this->assertTrue($modalPayload['availability']['canOpenModal']);
+    }
+
+    public function test_product_presentation_counts_paid_completed_sales_only(): void
+    {
+        $product = $this->availableProduct(['name' => 'ChatGPT Plus Private']);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $pendingOrder = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $product->id, 'quantity' => 3]);
+        OrderItem::factory()->create(['order_id' => $pendingOrder->id, 'product_id' => $product->id, 'quantity' => 5]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame(3, $presentation->soldQuantity);
+        $this->assertSame('Terjual: 3', $presentation->soldLabel);
     }
 
     public function test_unavailable_product_presentation_stays_visible_without_checkout_actions(): void
@@ -133,6 +161,7 @@ class StorefrontProductPresentationTest extends TestCase
             'descriptionSnippet',
             'price',
             'stock',
+            'sold',
             'availability',
             'cover',
             'checkout',
@@ -145,6 +174,7 @@ class StorefrontProductPresentationTest extends TestCase
             'label' => 'Stok: 2',
             'emptyLabel' => 'Stok kosong',
         ], $payload['stock']);
+        $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $payload['sold']);
         $this->assertSame(route('storefront.shop.checkout'), $payload['checkout']['websiteQris']['url']);
         $this->assertSame(route('storefront.products.payment', $product), $payload['checkout']['telegram']['url']);
     }

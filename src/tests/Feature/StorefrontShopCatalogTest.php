@@ -75,7 +75,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('CapCut Pro Web')
             ->assertSee('Akun Private dari dashboard')
             ->assertSee('Rp60.000')
-            ->assertSee('Tersedia')
+            ->assertSee('Terjual: 0')
             ->assertSee('Stok: 8')
             ->assertSee('Pilih Checkout')
             ->assertSee('Total produk')

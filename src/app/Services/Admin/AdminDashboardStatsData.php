@@ -70,7 +70,7 @@ final class AdminDashboardStatsData
             $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
             $this->metricCard('products', 'Produk', $metrics['product_count'], 'Total katalog', 'slate'),
             $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
-            $this->metricCard('orders_to_process', 'Perlu diproses', $metrics['orders_to_process'], 'Order dibayar', 'amber'),
+            $this->metricCard('completed_orders', 'Pesanan', $metrics['completed_order_count'], 'Order selesai', 'emerald'),
         ];
     }
 

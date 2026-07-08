@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Category;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Storefront\StorefrontCatalogPageBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -61,6 +65,27 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $products = app(StorefrontCatalogPageBuilder::class)->home(null)->products;
 
         $this->assertSame(['Zeta Ready', 'Akun Kosong'], $products->map(fn ($entry) => $entry->presentation->name)->all());
+    }
+
+    public function test_catalog_products_include_paid_completed_sold_quantity(): void
+    {
+        $product = $this->availableProduct(['name' => 'ChatGPT Plus Terjual']);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $failedOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Failed,
+        ]);
+
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $product->id, 'quantity' => 4]);
+        OrderItem::factory()->create(['order_id' => $failedOrder->id, 'product_id' => $product->id, 'quantity' => 9]);
+
+        $presentation = app(StorefrontCatalogPageBuilder::class)->home(null)->products->first()->presentation;
+
+        $this->assertSame(4, $presentation->soldQuantity);
+        $this->assertSame('Terjual: 4', $presentation->soldLabel);
     }
 
     public function test_category_filters_preserve_public_limit_order_and_only_include_categories_with_products(): void

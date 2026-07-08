@@ -18,7 +18,7 @@
                         {{ $stat['value'] }}
                     </p>
                 @endif
-                <p class="mt-3 text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">{{ $stat['label'] }}</p>
+                <p class="mt-3 text-[11px] sm:text-xs font-black uppercase tracking-wider text-[var(--sf-ink)]/75">{{ $stat['label'] }}</p>
             </div>
         @endforeach
     </div>

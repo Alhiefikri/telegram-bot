@@ -8,11 +8,11 @@
 @endphp
 
 @if ($context === 'featured')
-    <div class="relative flex aspect-square w-full mx-auto flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] {{ $coverTheme['bg'] }} p-6 text-center text-white shadow-[7px_7px_0_var(--sf-shadow)]">
+    <div class="relative flex aspect-square w-full mx-auto flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] {{ $imageUrl ? 'bg-white p-0' : $coverTheme['bg'].' p-6' }} text-center text-white shadow-[7px_7px_0_var(--sf-shadow)]">
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-contain object-center">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-4 text-center">
                 <div class="{{ $coverTheme['accent'] }}">
@@ -28,14 +28,14 @@
         <span class="sr-only">Gambar produk menyusul</span>
     </div>
 @else
-    <div class="relative flex aspect-[4/3] w-full flex-col items-center justify-center overflow-hidden bg-[#f3eee3] p-4 text-white">
+    <div class="relative flex aspect-[16/9] w-full flex-col items-center justify-center overflow-hidden bg-white text-white">
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-20"></div>
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-contain object-center">
         @else
-            <div class="relative z-10 flex flex-col items-center justify-center space-y-3 text-center">
+            <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center">
                 <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
                     {!! $coverTheme['logo'] !!}
                 </div>

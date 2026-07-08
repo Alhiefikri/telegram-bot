@@ -235,7 +235,7 @@ class ExampleTest extends TestCase
             ->assertSee('AI Tools')
             ->assertSee('Rp125.000')
             ->assertSee('Akses desain premium untuk kebutuhan konten harian.')
-            ->assertSee('Tersedia')
+            ->assertSee('Terjual: 0')
             ->assertSee('Gambar produk menyusul')
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
@@ -286,7 +286,7 @@ class ExampleTest extends TestCase
             ->assertSee('Claude Pro Bulanan')
             ->assertSee('Rp175.000')
             ->assertSee('Akses Claude premium untuk kerja harian.')
-            ->assertSee('Tersedia')
+            ->assertSee('Terjual: 0')
             ->assertSee('Stok: 3')
             ->assertSee(route('storefront.products.show', $product), false)
             ->assertSee('Support Telegram')
@@ -439,9 +439,8 @@ class ExampleTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
-            ->assertSee('Tersedia')
+            ->assertSee('Terjual: 0')
             ->assertSee('STOK HABIS')
-            ->assertSee('Habis')
             ->assertDontSee('Ready (1)')
             ->assertDontSee('Stok 0')
             ->assertDontSee('Belanja Sekarang')
@@ -466,7 +465,7 @@ class ExampleTest extends TestCase
         $this->assertStringNotContainsString('<script>', $html);
         $this->assertStringNotContainsString('<style>', $html);
         $this->assertStringNotContainsString('onclick=', $html);
-        $this->assertStringNotContainsString('Terjual', $html);
+        $this->assertStringContainsString('Terjual: 0', $html);
         $this->assertStringNotContainsString('★', $html);
         $this->assertStringContainsString('Stok: 3', $html);
     }

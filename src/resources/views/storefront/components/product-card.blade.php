@@ -29,14 +29,14 @@
                             {{ $storefront->idr($presentation->priceAmount) }}
                         </span>
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
-                            {{ $presentation->availabilityLabel }}
+                            {{ $presentation->soldLabel }}
                         </span>
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
                             {{ $presentation->stockLabel }}
                         </span>
                     </div>
 
-                    <span class="neo-button inline-flex h-10 items-center justify-center bg-[var(--sf-accent)] px-3 text-[11px] font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
+                    <span class="inline-flex h-10 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-3 text-[11px] font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)]">
                         {{ $presentation->cardActionLabel }}
                     </span>
                 </div>
@@ -68,11 +68,11 @@
                             {{ $storefront->idr($presentation->priceAmount) }}
                         </span>
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-[#c94856] px-2 py-1 text-[9px] font-black text-white">
-                            {{ $presentation->availabilityLabel }}
+                            {{ $presentation->soldLabel }}
                         </span>
                     </div>
 
-                    <span class="neo-button inline-flex h-10 items-center justify-center bg-[var(--sf-surface-warm)] px-3 text-[11px] font-black text-[var(--sf-ink)]">
+                    <span class="inline-flex h-10 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 text-[11px] font-black text-[var(--sf-ink)]">
                         {{ $presentation->cardActionLabel }}
                     </span>
                 </div>

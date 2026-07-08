@@ -38,7 +38,7 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee('Saldo')
             ->assertSee('GMV')
             ->assertSee('Produk')
-            ->assertSee('Perlu diproses')
+            ->assertSee('Pesanan')
             ->assertSee('Buka Toko')
             ->assertSee('Bagikan Toko')
             ->assertSeeInOrder(['Ringkasan', 'Produk', 'Pesanan', 'Tambah'])
@@ -199,6 +199,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame(2, $data['metrics']['active_product_count']);
         $this->assertSame(3, $data['metrics']['order_count']);
         $this->assertSame(1, $data['metrics']['orders_to_process']);
+        $this->assertSame(1, $data['metrics']['completed_order_count']);
         $this->assertSame(205000, $data['metrics']['gmv_amount']);
         $this->assertSame(205000, $data['metrics']['read_only_balance_amount']);
         $this->assertSame(205000, $data['statsTab']['balance']['amount']);
@@ -211,6 +212,10 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame(['gmv', 'saldo', 'orders', 'sales_proof_posts', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
         $this->assertSame(['blue', 'emerald', 'amber', 'emerald', 'emerald'], array_column($data['statsTab']['cards'], 'tone'));
         $this->assertArrayNotHasKey('card_class', $data['statsTab']['cards'][0]);
+        $this->assertSame(['saldo', 'gmv', 'products', 'active_products', 'completed_orders'], array_column($data['statsTab']['summary'], 'key'));
+        $this->assertSame('Pesanan', $data['statsTab']['summary'][4]['label']);
+        $this->assertSame(1, $data['statsTab']['summary'][4]['value']);
+        $this->assertSame('Order selesai', $data['statsTab']['summary'][4]['hint']);
         $this->assertSame(1, $data['statsTab']['statusCounts']['processing']['count']);
         $this->assertSame(1, $data['statsTab']['statusCounts']['completed']['count']);
         $this->assertSame(['pending_payment', 'processing', 'cancelled', 'expired'], array_keys($data['statsTab']['actionableStatusCounts']));

@@ -27,10 +27,10 @@
             <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['delivery']['title'] }}</h3>
             <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['delivery']['body'] }}</p>
         </div>
-        <div class="neo-panel-tight bg-[var(--sf-blue)] p-6 text-white">
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/80">{{ $copy['telegram_support']['eyebrow'] }}</p>
-            <h3 class="font-display text-lg font-black">{{ $copy['telegram_support']['title'] }}</h3>
-            <p class="mt-3 text-sm font-semibold leading-relaxed text-white/85">{{ $copy['telegram_support']['body'] }}</p>
+        <div class="neo-panel-tight bg-[var(--sf-blue)] p-6 text-[var(--sf-ink)]">
+            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]/80">{{ $copy['telegram_support']['eyebrow'] }}</p>
+            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['telegram_support']['title'] }}</h3>
+            <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-ink)]/90">{{ $copy['telegram_support']['body'] }}</p>
         </div>
     </div>
 

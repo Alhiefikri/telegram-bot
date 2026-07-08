@@ -44,24 +44,24 @@ class TelegramAdminStatsIntents
      */
     public function calculateTodayStats(): array
     {
-        $startOfDay = now()->startOfDay();
-        $endOfDay = now()->endOfDay();
+        $reportEndAt = now();
+        $reportStartAt = $reportEndAt->copy()->subDay();
 
         $newOrders = Order::query()
-            ->whereBetween('created_at', [$startOfDay, $endOfDay])
+            ->whereBetween('created_at', [$reportStartAt, $reportEndAt])
             ->count();
 
-        // Get paid orders today based on payments
+        // Daily admin stats are a 24-hour reporting window ending when the report is sent.
         $paidPayments = Payment::query()
             ->where('status', PaymentStatus::Paid)
             ->whereNotNull('paid_at')
-            ->whereBetween('paid_at', [$startOfDay, $endOfDay])
+            ->whereBetween('paid_at', [$reportStartAt, $reportEndAt])
             ->get(['order_id', 'amount', 'provider_fee']);
 
         $paidOrderIds = $paidPayments->pluck('order_id')->unique()->all();
         $paidOrders = count($paidOrderIds);
 
-        // Get total sold products today
+        // Get total sold products for paid orders in the reporting window.
         $soldProducts = 0;
         if ($paidOrders > 0) {
             $soldProducts = OrderItem::query()
@@ -69,7 +69,7 @@ class TelegramAdminStatsIntents
                 ->sum('quantity');
         }
 
-        // Calculate earnings from payments today
+        // Calculate earnings from payments in the reporting window.
         $earning = $paidPayments->sum(fn (Payment $payment): int => $payment->amount - $payment->provider_fee);
 
         return [

@@ -23,33 +23,36 @@
 
                     <p class="max-w-2xl text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $featuredPresentation->description }}</p>
 
-                    <div class="grid items-end gap-6 sm:grid-cols-2">
-                        <div class="space-y-1">
+                    <div class="space-y-4">
+                        <div class="space-y-2">
                             @if ($featuredPresentation->fakeDiscountPrice)
                                 <div class="text-sm font-black text-[var(--sf-muted)] line-through">
                                     {{ $storefront->idr($featuredPresentation->fakeDiscountPrice) }}
                                 </div>
                             @endif
-                            <span class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)]">{{ $storefront->idr($featuredPresentation->priceAmount) }}</span>
-                            <div class="pt-4 grid gap-3 sm:max-w-md">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <span class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)]">{{ $storefront->idr($featuredPresentation->priceAmount) }}</span>
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredPresentation->stockAvailable }}</span>
                                     <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Rekomendasi aktif</span>
                                 </div>
-                                <div class="rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-[var(--sf-ink)] shadow-[6px_6px_0_var(--sf-shadow)]">
-                                    <div class="flex items-center gap-2 text-[11px] font-black">
-                                        <svg class="h-4 w-4 shrink-0 text-[var(--sf-accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Slot cek stok diperbarui
-                                    </div>
-                                    <div class="mt-1 font-display text-4xl font-black leading-none tracking-tight text-[var(--sf-ink)] sm:text-5xl" x-text="timeDisplay">15:00</div>
-                                </div>
                             </div>
                         </div>
 
-                        <div class="flex flex-col gap-2">
-                            <button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button flex h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
-                                Pilih Checkout
-                            </button>
+                        <div class="grid gap-4 sm:grid-cols-2 sm:items-stretch">
+                            <div class="rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-[var(--sf-ink)] shadow-[6px_6px_0_var(--sf-shadow)] flex flex-col justify-center">
+                                <div class="flex items-center gap-2 text-[11px] font-black">
+                                    <svg class="h-4 w-4 shrink-0 text-[var(--sf-accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    Slot cek stok diperbarui
+                                </div>
+                                <div class="mt-1 font-display text-4xl font-black leading-none tracking-tight text-[var(--sf-ink)] sm:text-5xl" x-text="timeDisplay">15:00</div>
+                            </div>
+
+                            <div class="flex items-stretch">
+                                <button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button flex h-auto min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] py-4 px-6 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
+                                    Pilih Checkout
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
