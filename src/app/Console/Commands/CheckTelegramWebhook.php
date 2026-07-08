@@ -60,7 +60,20 @@ class CheckTelegramWebhook extends Command
         $webhookConfigured = $registeredUrl !== '';
         $webhookMatchesAppUrl = $webhookConfigured && hash_equals($target, $registeredUrl);
         $pendingUpdates = data_get($body, 'result.pending_update_count');
-        $lastErrorPresent = data_get($body, 'result.last_error_message') !== null;
+        $lastErrorDate = data_get($body, 'result.last_error_date');
+        $lastErrorMessage = data_get($body, 'result.last_error_message');
+        $lastErrorPresent = $lastErrorMessage !== null;
+
+        // An error is only considered active/blocking if it happened recently (within 5 minutes)
+        // to avoid blocking deployments due to stale historical errors.
+        $lastErrorActive = false;
+        if ($lastErrorPresent) {
+            if (is_numeric($lastErrorDate)) {
+                $lastErrorActive = (time() - (int) $lastErrorDate) <= 300;
+            } else {
+                $lastErrorActive = true;
+            }
+        }
 
         $checks = [
             'telegram_ok' => $telegramOk,
@@ -77,7 +90,7 @@ class CheckTelegramWebhook extends Command
 
         $this->line('Telegram webhook pending_update_count='.(is_numeric($pendingUpdates) ? (string) $pendingUpdates : 'unknown'));
 
-        if (! $telegramOk || ! $webhookConfigured || ! $webhookMatchesAppUrl || $lastErrorPresent || ! is_numeric($pendingUpdates) || (int) $pendingUpdates > $maxPending) {
+        if (! $telegramOk || ! $webhookConfigured || ! $webhookMatchesAppUrl || $lastErrorActive || ! is_numeric($pendingUpdates) || (int) $pendingUpdates > $maxPending) {
             $healthy = false;
         }
 
