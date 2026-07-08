@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
+use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -32,7 +33,7 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramAdminOrderNotifier $notifier): void
+    public function handle(TelegramAdminOrderNotifier $pendingNotifier, TelegramAdminPaidOrderNotifier $paidNotifier): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -46,7 +47,9 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
         ]);
 
         try {
-            $notifier->sendPaid(Order::findOrFail($this->orderId));
+            $order = Order::findOrFail($this->orderId);
+            $pendingNotifier->deletePending($order);
+            $paidNotifier->send($order);
         } finally {
             DogfoodTiming::log('dogfood.telegram.admin_paid_order_notification_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

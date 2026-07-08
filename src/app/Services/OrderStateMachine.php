@@ -8,6 +8,7 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
+use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
@@ -59,6 +60,7 @@ class OrderStateMachine
                 $lockedOrder->refresh();
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
 
+                SendAdminOrderPaidNotification::dispatch($lockedOrder->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
                 SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
 
                 return $lockedOrder->fresh(['payments']);
@@ -166,6 +168,8 @@ class OrderStateMachine
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
             PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
         }
+
+        SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
 
         return $order->fresh(['payments']);
     }

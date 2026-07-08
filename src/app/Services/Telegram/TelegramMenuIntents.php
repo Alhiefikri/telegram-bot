@@ -3,9 +3,12 @@
 namespace App\Services\Telegram;
 
 use App\Models\Customer;
+use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
 class TelegramMenuIntents
 {
+    use HasAdminWebAppButton;
+
     public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess) {}
 
     public function sendWelcome(Customer $customer, string $chatId): void
@@ -103,43 +106,10 @@ class TelegramMenuIntents
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];
             }
+            $keyboard[] = [['text' => '📊 Statistik Harian', 'callback_data' => 'statistik_harian']];
         }
 
         return ['inline_keyboard' => $keyboard];
-    }
-
-    private function adminDashboardWebAppButton(string $text): ?array
-    {
-        $url = $this->adminDashboardWebAppUrl();
-
-        if (! $this->isTelegramWebAppUrl($url)) {
-            return null;
-        }
-
-        return [
-            'text' => $text,
-            'web_app' => ['url' => $url],
-        ];
-    }
-
-    private function adminDashboardWebAppUrl(): string
-    {
-        $configuredUrl = config('services.telegram.mini_app_url');
-        $url = is_string($configuredUrl) && trim($configuredUrl) !== ''
-            ? trim($configuredUrl)
-            : route('admin.dashboard');
-
-        return $url.(str_contains($url, '?') ? '&' : '?').'v='.time();
-    }
-
-    private function isTelegramWebAppUrl(string $url): bool
-    {
-        $parts = parse_url($url);
-        $host = strtolower((string) ($parts['host'] ?? ''));
-
-        return strtolower((string) ($parts['scheme'] ?? '')) === 'https'
-            && $host !== ''
-            && ! in_array($host, ['localhost', '127.0.0.1', '::1'], true);
     }
 
     public function sendSupport(string $chatId): void

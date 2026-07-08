@@ -33,6 +33,7 @@ class TelegramCallbackRouter
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
+        private TelegramAdminStatsIntents $adminStats,
     ) {}
 
     public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private'): void
@@ -56,6 +57,12 @@ class TelegramCallbackRouter
 
         if (preg_match('/^admin:reject-payment:([^\s:]+)$/', $data, $matches)) {
             $this->manualPayments->rejectManualPaymentFromTelegram($customer, $chatId, $id, $matches[1]);
+
+            return;
+        }
+
+        if ($data === 'statistik_harian') {
+            $this->adminStats->showDailyStats($customer, $chatId, $id);
 
             return;
         }

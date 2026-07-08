@@ -56,7 +56,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && $r['chat_id'] === 12345
             && str_contains($r['text'], 'Pembayaran diterima')
             && str_contains($r['text'], 'Email Account'));
-        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
             && str_contains((string) ($r['text'] ?? ''), 'Produk terjual'));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')

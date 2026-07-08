@@ -99,7 +99,7 @@ class PakasirWebhookTest extends TestCase
             Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
             Queue::assertPushed(SendTelegramReceipt::class, 1);
             Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
-            Queue::assertNotPushed(SendAdminOrderPaidNotification::class);
+            Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
             Queue::assertPushed(PublishSalesProofPost::class, 1);
         } finally {
             Carbon::setTestNow();
@@ -562,8 +562,8 @@ class PakasirWebhookTest extends TestCase
         $exitCode = Artisan::call('schedule:list');
         $output = Artisan::output();
 
-        $reconcilePattern = '/^\s*\* \* \* \* \*\s+php artisan pakasir:reconcile --chunk=100\b/m';
-        $expirePendingPattern = '/^\s*\* \* \* \* \*\s+php artisan orders:expire-pending\b/m';
+        $reconcilePattern = '/^\s*\*\s+\*\s+\*\s+\*\s+\*\s+php artisan pakasir:reconcile --chunk=100\b/m';
+        $expirePendingPattern = '/^\s*\*\s+\*\s+\*\s+\*\s+\*\s+php artisan orders:expire-pending\b/m';
 
         $this->assertSame(0, $exitCode);
         $this->assertSame(1, preg_match($reconcilePattern, $output, $reconcileMatches, PREG_OFFSET_CAPTURE));
