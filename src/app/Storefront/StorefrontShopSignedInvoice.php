@@ -33,7 +33,7 @@ class StorefrontShopSignedInvoice
             order: $order,
             payment: $payment,
             state: $state,
-            statusUrl: URL::signedRoute('storefront.shop.orders.status', $order),
+            statusUrl: URL::signedRoute('storefront.shop.orders.status', $order, null, false),
             redirectUrl: $redirectUrl,
             payableAmount: $payment?->provider_total_payment ?? $payment?->amount,
             payableAmountFromProvider: $payment?->provider_total_payment !== null,
@@ -165,6 +165,6 @@ class StorefrontShopSignedInvoice
 
     private function redirectUrl(Order $order): string
     {
-        return URL::signedRoute('storefront.shop.orders.show', $order);
+        return URL::signedRoute('storefront.shop.orders.show', $order, null, false);
     }
 }

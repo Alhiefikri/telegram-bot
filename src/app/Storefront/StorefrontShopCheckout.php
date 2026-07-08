@@ -62,7 +62,7 @@ class StorefrontShopCheckout
                 report($cancellationException);
             }
 
-            throw new InvalidCheckout('QRIS Pakasir belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.', 0, $exception);
+            throw new InvalidCheckout('QRIS belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.', 0, $exception);
         }
 
         $payment->refresh();
@@ -70,7 +70,7 @@ class StorefrontShopCheckout
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(
-            redirectUrl: URL::signedRoute('storefront.shop.orders.show', $order),
+            redirectUrl: URL::signedRoute('storefront.shop.orders.show', $order, null, false),
         );
     }
 

@@ -78,11 +78,11 @@ class ExampleTest extends TestCase
         $html = $this->get('/')->assertOk()->getContent();
         $qrisHtml = $this->htmlBetween($html, '<aside class="qris-card', '</aside>');
 
-        $this->assertStringContainsString('aria-label="Ilustrasi QRIS Pakasir Lhie Store"', $qrisHtml);
-        $this->assertStringContainsString('QRIS Pakasir', $qrisHtml);
+        $this->assertStringContainsString('aria-label="Ilustrasi QRIS Lhie Store"', $qrisHtml);
+        $this->assertStringContainsString('QRIS Website', $qrisHtml);
         $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
         $this->assertStringContainsString('Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.', $qrisHtml);
-        $this->assertStringContainsString('Pakasir', $qrisHtml);
+        $this->assertStringNotContainsString('Pakasir', $qrisHtml);
         $this->assertHtmlContainsLink($qrisHtml, route('storefront.shop.index'), 'Belanja Web via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
         $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
         $this->assertStringNotContainsString('Konfirmasi ke Admin', $qrisHtml);

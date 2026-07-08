@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AuthorizeAdminAccess;
 use App\Http\Middleware\PreventAdminMiniAppCache;
+use App\Http\Middleware\ValidateStorefrontSignedInvoice;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin.access' => AuthorizeAdminAccess::class,
             'admin.no-cache' => PreventAdminMiniAppCache::class,
+            'storefront.signed' => ValidateStorefrontSignedInvoice::class,
         ]);
 
         $trustedProxies = array_values(array_filter(array_map(

@@ -39,7 +39,7 @@
     <div class="mx-auto mt-16 flex max-w-6xl flex-col items-center justify-between border-t-[3px] border-[var(--sf-border)] px-5 pt-8 text-xs font-bold text-[var(--sf-muted)] sm:px-6 md:flex-row">
         <p>&copy; {{ now()->year }} {{ $copy['footer']['copyright_suffix'] }}</p>
         <div class="mt-4 flex items-center gap-4 md:mt-0">
-            <span>Pakasir QRIS</span>
+            <span>QRIS website</span>
             <span>Telegram checkout tetap aktif</span>
         </div>
     </div>

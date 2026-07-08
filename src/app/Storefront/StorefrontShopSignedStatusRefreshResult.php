@@ -7,7 +7,7 @@ use App\Enums\PaymentStatus;
 
 class StorefrontShopSignedStatusRefreshResult
 {
-    private const PAKASIR_NOT_FOUND = 'Payment Pakasir tidak ditemukan.';
+    private const PAKASIR_NOT_FOUND = 'Pembayaran QRIS tidak ditemukan.';
 
     private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek otomatis sekarang.';
 

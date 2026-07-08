@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -20,7 +21,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
     use RefreshDatabase;
     use StorefrontSignedInvoiceScenarios;
 
-    public function test_signed_pending_invoice_renders_native_pakasir_qris_payment_contract_without_revealing_allocated_secret(): void
+    public function test_signed_pending_invoice_renders_native_qris_payment_contract_without_revealing_allocated_secret_or_provider_brand(): void
     {
         $this->pakasirConfigIsReady();
         $this->qrisRendererReturnsDeterministicPng();
@@ -34,7 +35,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             secret: $secret,
         );
 
-        $response = $this->get(URL::signedRoute('storefront.shop.orders.show', $order));
+        $response = $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false));
 
         $expectedQrDataUri = 'data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber);
         $response
@@ -47,8 +48,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Total bayar QRIS')
             ->assertSee('Rp121.500')
             ->assertSee($expectedQrDataUri, false)
-            ->assertSee('Bayar via Website Pakasir')
-            ->assertSee('https://app.pakasir.test/pay/lhie-test/120000', false)
+            ->assertSee('Pembayaran QRIS')
+            ->assertDontSee('Bayar via Website Pakasir')
+            ->assertDontSee('https://app.pakasir.test/pay/lhie-test/120000', false)
+            ->assertDontSee('Pakasir')
             ->assertSee('data-shop-payment-status', false)
             ->assertSee('data-status-url=', false)
             ->assertSee('/shop/orders/'.$order->getKey().'/status', false)
@@ -74,11 +77,12 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE121NOFINAL99',
         );
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $order))
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
             ->assertSee('Total bayar QRIS')
             ->assertSee('Rp88.000')
-            ->assertSee('Total final Pakasir belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.');
+            ->assertSee('Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.')
+            ->assertDontSee('Pakasir');
     }
 
     public function test_signed_status_endpoint_reconciles_completed_pakasir_transaction_and_returns_paid_redirect_payload(): void
@@ -93,9 +97,9 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         );
         $this->providerTransactionDetailCompletesPayment($payment);
 
-        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order);
+        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
 
-        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order))
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
@@ -111,6 +115,36 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(OrderStatus::Completed, $order->order_status);
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
             && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
+    }
+
+    public function test_signed_status_endpoint_accepts_legacy_absolute_signed_links_after_relative_signature_migration(): void
+    {
+        $this->pakasirConfigIsReady();
+        Queue::fake();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 73000,
+            providerFee: 500,
+            providerTotalPayment: 73500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE121LEGACYSTATUS99',
+        );
+        $this->providerTransactionDetailCompletesPayment($payment);
+
+        $legacyUrl = URL::signedRoute('storefront.shop.orders.status', $order);
+        $path = parse_url($legacyUrl, PHP_URL_PATH);
+        $query = parse_url($legacyUrl, PHP_URL_QUERY);
+        $this->assertIsString($path);
+        $this->assertIsString($query);
+        $this->assertFalse(URL::hasValidSignature(Request::create('https://proxy-observed.example.test'.$path.'?'.$query, 'POST'), false));
+
+        $this->postJson('https://proxy-observed.example.test'.$path.'?'.$query)
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
+            ->assertJsonPath('order_status', OrderStatus::Completed->value)
+            ->assertJsonPath('is_paid', true);
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
     public function test_paid_invoice_reveals_grouped_account_secrets_but_pending_invoice_keeps_them_hidden(): void
@@ -140,7 +174,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             secret: 'pending-account@example.test|DoNotLeak',
         );
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder))
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false))
             ->assertOk()
             ->assertSee('Data akun')
             ->assertSee('Alpha Account')
@@ -151,7 +185,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Simpan data ini baik-baik dan jangan bagikan ke orang lain.')
             ->assertSee('Panduan login & keamanan');
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder))
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder, null, false))
             ->assertOk()
             ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
             ->assertDontSee('pending-account@example.test|DoNotLeak', false);
@@ -182,7 +216,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             'subtotal' => 64000,
         ]);
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder))
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false))
             ->assertOk()
             ->assertSee('Pembayaran diterima. Produk ini tidak punya data akun otomatis; admin akan follow up memakai invoice ini.')
             ->assertSee('Panduan login & keamanan');
@@ -202,10 +236,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         ]);
 
         foreach ([$noPaymentOrder, $manualPaymentOrder] as $order) {
-            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order))
+            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
                 ->assertUnprocessable()
                 ->assertJsonPath('ok', false)
-                ->assertJsonPath('message', 'Payment Pakasir tidak ditemukan.');
+                ->assertJsonPath('message', 'Pembayaran QRIS tidak ditemukan.');
         }
 
         Http::assertNothingSent();
@@ -222,7 +256,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         );
         $this->providerTransactionDetailFails();
 
-        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order))
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
             ->assertJsonPath('ok', false)
             ->assertJsonPath('message', 'Status pembayaran belum bisa dicek otomatis sekarang.');

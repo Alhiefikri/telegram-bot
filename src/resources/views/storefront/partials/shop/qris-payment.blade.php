@@ -2,13 +2,13 @@
     $hasNativeQris = $isPendingPayment && filled($qrisImageDataUri);
 @endphp
 
-<x-storefront.panel as="section" class="mt-5" aria-label="Pembayaran QRIS Pakasir">
+<x-storefront.panel as="section" class="mt-5" aria-label="Pembayaran QRIS">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Pembayaran Pakasir</p>
+            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Pembayaran QRIS</p>
             <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">QRIS invoice</h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                Bayar memakai total QRIS dari Pakasir. Jangan memakai total produk sebagai total final jika biaya QRIS belum muncul.
+                Bayar sesuai total QRIS final. Jangan memakai total produk sebagai total final jika biaya QRIS belum muncul.
             </p>
         </div>
 
@@ -34,7 +34,7 @@
 
     @if (! $payableAmountFromProvider)
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-            Total final Pakasir belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.
+            Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.
         </p>
     @endif
 
@@ -42,18 +42,12 @@
         <div class="payment-qris-stage relative mt-6 overflow-hidden rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-5 shadow-[6px_6px_0_var(--sf-shadow)]">
             <div class="payment-qris-poster mx-auto max-w-sm">
                 <div class="qris-frame relative mx-auto max-w-[300px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[7px_7px_0_var(--sf-shadow)]">
-                    <img src="{{ $qrisImageDataUri }}" alt="QRIS Pakasir invoice {{ $order->invoice_number }}" class="relative z-10 aspect-square w-full object-contain">
+                    <img src="{{ $qrisImageDataUri }}" alt="QRIS invoice {{ $order->invoice_number }}" class="relative z-10 aspect-square w-full object-contain">
                     <div class="qris-scan-line" aria-hidden="true"></div>
                 </div>
                 <div class="payment-qris-corners" aria-hidden="true"></div>
             </div>
         </div>
-
-        @if ($hostedPaymentUrl)
-            <a href="{{ $hostedPaymentUrl }}" class="mt-4 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-blue)] px-5 py-3 text-center font-display text-sm font-black uppercase tracking-[0.18em] text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)]">
-                Bayar via Website Pakasir
-            </a>
-        @endif
     @elseif ($isPendingPayment)
         <p class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
             QRIS belum tersedia di invoice ini. Simpan link invoice dan hubungi admin jika status tidak berubah.
@@ -65,9 +59,9 @@
              data-shop-payment-status
              data-status-url="{{ $statusUrl }}"
              data-redirect-url="{{ $redirectUrl }}"
-             data-poll-ms="6000">
+            data-poll-ms="6000">
             <p class="font-black text-[var(--sf-ink)]">Status pembayaran dicek otomatis.</p>
-            <p>Halaman ini akan membuka ulang invoice setelah Pakasir mengonfirmasi pembayaran.</p>
+            <p>Halaman ini akan membuka ulang invoice setelah pembayaran terkonfirmasi.</p>
         </div>
     @endif
 </x-storefront.panel>

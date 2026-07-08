@@ -18,7 +18,7 @@ trait StorefrontShopAssertions
         $this->assertIsString($location);
         $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($location, PHP_URL_PATH));
         $this->assertStringContainsString('signature=', $location);
-        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET')));
+        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET'), false));
     }
 
     protected function assertNoLocalCheckoutRowsCreated(string $context = ''): void

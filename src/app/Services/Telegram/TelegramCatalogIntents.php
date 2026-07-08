@@ -2,7 +2,10 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Category;
+use App\Models\OrderItem;
 use App\Models\Product;
 use Illuminate\Support\Str;
 
@@ -27,6 +30,7 @@ class TelegramCatalogIntents
 
     public function sendStockChoices(string $chatId, Product $product, int $availableStock): void
     {
+        $soldQuantity = $this->soldQuantity($product);
         $keyboard = [];
         if ($availableStock > 0) {
             $keyboard[] = [[
@@ -48,6 +52,7 @@ class TelegramCatalogIntents
         if ($availableStock > 0) {
             $lines[] = '📦 Stok: '.$availableStock;
         }
+        $lines[] = '🛒 Terjual: '.$soldQuantity;
         $lines[] = '';
         $lines[] = '📝 Detail produk';
         $lines[] = $this->descriptionText($product);
@@ -158,6 +163,16 @@ class TelegramCatalogIntents
         $description = trim((string) $product->description);
 
         return $description !== '' ? $description : 'Deskripsi produk belum ditambahkan. Tapi tenang, produknya tetap bisa dicek dari info harga dan stok.';
+    }
+
+    private function soldQuantity(Product $product): int
+    {
+        return (int) OrderItem::query()
+            ->where('product_id', $product->id)
+            ->whereHas('order', fn ($order) => $order
+                ->where('order_status', OrderStatus::Completed)
+                ->where('payment_status', PaymentStatus::Paid))
+            ->sum('quantity');
     }
 
     private function descriptionExcerpt(Product $product): string

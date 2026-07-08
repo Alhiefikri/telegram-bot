@@ -45,18 +45,18 @@ class StorefrontShopCheckoutTest extends TestCase
         $showRoute = $this->assertRouteContract('storefront.shop.orders.show', 'GET', 'shop/orders/{order}');
         $statusRoute = $this->assertRouteContract('storefront.shop.orders.status', 'POST', 'shop/orders/{order}/status');
 
-        $this->assertContains('signed', $showRoute->middleware());
-        $this->assertContains('signed', $statusRoute->middleware());
+        $this->assertContains('storefront.signed', $showRoute->middleware());
+        $this->assertContains('storefront.signed', $statusRoute->middleware());
         $this->assertContains('throttle:pakasir-status-refresh', $statusRoute->middleware());
 
         $order = Order::factory()->create();
-        $showUrl = URL::signedRoute('storefront.shop.orders.show', $order);
-        $statusUrl = URL::signedRoute('storefront.shop.orders.status', $order);
+        $showUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        $statusUrl = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
 
         $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($showUrl, PHP_URL_PATH));
         $this->assertSame('/shop/orders/'.$order->getKey().'/status', parse_url($statusUrl, PHP_URL_PATH));
-        $this->assertTrue(URL::hasValidSignature(Request::create($showUrl, 'GET')));
-        $this->assertTrue(URL::hasValidSignature(Request::create($statusUrl, 'POST')));
+        $this->assertTrue(URL::hasValidSignature(Request::create($showUrl, 'GET'), false));
+        $this->assertTrue(URL::hasValidSignature(Request::create($statusUrl, 'POST'), false));
     }
 
     public function test_checkout_module_normalizes_buyer_identity_from_input_handle(): void
@@ -180,8 +180,39 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response
             ->assertRedirect(route('storefront.shop.index'))
+            ->assertSessionHas('storefront_checkout_error', 'Produk tidak ditemukan atau sudah tidak tersedia.')
             ->assertInvalid(['product_id' => 'Produk tidak ditemukan atau sudah tidak tersedia.']);
         $this->assertNoLocalCheckoutRowsCreated('missing product');
+        Http::assertNothingSent();
+    }
+
+    public function test_shop_checkout_failure_from_homepage_redirects_to_shop_with_visible_error(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Disabled Native QRIS Notice',
+            'stock' => 1,
+        ]);
+        Http::fake();
+
+        $response = $this
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_handle' => '@buyer_test',
+            ]);
+
+        $response
+            ->assertRedirect(route('storefront.shop.index'))
+            ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
+            ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
+
+        $this->followingRedirects()
+            ->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->assertSee('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
+
+        $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS from homepage');
         Http::assertNothingSent();
     }
 
@@ -271,7 +302,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringContainsString('/shop/orders/', $location);
         $this->assertStringContainsString('signature=', $location);
         $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($location, PHP_URL_PATH));
-        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET')));
+        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET'), false));
 
         $this->assertDatabaseHas('customers', [
             'id' => $order->customer_id,
@@ -348,6 +379,61 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, Payment::count());
     }
 
+    public function test_shop_checkout_signed_invoice_survives_proxy_scheme_or_host_mismatch(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Proxy Signed QRIS',
+            'price_amount' => 30000,
+            'stock' => 1,
+        ]);
+
+        [$response] = $this->successfulNativeQrisCheckout(
+            product: $product,
+            quantity: 1,
+            buyerHandle: '@proxy_buyer',
+            paymentNumber: '00020101021226610016ID.CO.QRIS.PROXYMISMATCH99',
+        );
+
+        $location = $response->headers->get('Location');
+        $this->assertIsString($location);
+
+        $path = parse_url($location, PHP_URL_PATH);
+        $query = parse_url($location, PHP_URL_QUERY);
+        $this->assertIsString($path);
+        $this->assertIsString($query);
+
+        $this->get('http://proxy-observed.example.test'.$path.'?'.$query)
+            ->assertOk()
+            ->assertSee('Proxy Signed QRIS');
+    }
+
+    public function test_shop_order_page_accepts_legacy_absolute_signed_invoice_links_after_relative_signature_migration(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Legacy Absolute QRIS',
+            'price_amount' => 30000,
+            'stock' => 1,
+        ]);
+
+        [, $order] = $this->successfulNativeQrisCheckout(
+            product: $product,
+            quantity: 1,
+            buyerHandle: '@legacy_buyer',
+            paymentNumber: '00020101021226610016ID.CO.QRIS.LEGACYABSOLUTE99',
+        );
+
+        $legacyUrl = URL::signedRoute('storefront.shop.orders.show', $order);
+        $path = parse_url($legacyUrl, PHP_URL_PATH);
+        $query = parse_url($legacyUrl, PHP_URL_QUERY);
+        $this->assertIsString($path);
+        $this->assertIsString($query);
+        $this->assertFalse(URL::hasValidSignature(Request::create('https://proxy-observed.example.test'.$path.'?'.$query, 'GET'), false));
+
+        $this->get('https://proxy-observed.example.test'.$path.'?'.$query)
+            ->assertOk()
+            ->assertSee('Legacy Absolute QRIS');
+    }
+
     public function test_shop_checkout_fails_closed_when_native_qris_is_not_enabled(): void
     {
         $product = $this->availableProduct([
@@ -360,6 +446,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response
             ->assertRedirect(route('storefront.shop.index'))
+            ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS');
         $this->assertSame(0, $product->fresh()->reserved_stock);
@@ -417,7 +504,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response
             ->assertRedirect(route('storefront.shop.index'))
-            ->assertInvalid(['product_id' => 'QRIS Pakasir belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.']);
+            ->assertInvalid(['product_id' => 'QRIS belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.']);
 
         $order = Order::with(['payments', 'orderItems'])->firstOrFail();
         $payment = $order->payments->first();
@@ -456,7 +543,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         app(OrderStateMachine::class)->markPaymentPaid($payment);
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $order))
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
             ->assertSee('Data akun')
             ->assertSee('Allocated Account Product')
@@ -483,9 +570,9 @@ class StorefrontShopCheckoutTest extends TestCase
         );
         $this->providerTransactionDetailCompletesPayment($payment);
 
-        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order);
+        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
 
-        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order))
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)

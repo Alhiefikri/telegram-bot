@@ -164,7 +164,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             $this->assertSame(422, $result->statusCode());
             $this->assertSame([
                 'ok' => false,
-                'message' => 'Payment Pakasir tidak ditemukan.',
+                'message' => 'Pembayaran QRIS tidak ditemukan.',
             ], $result->payload());
         }
 

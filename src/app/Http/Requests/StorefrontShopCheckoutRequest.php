@@ -6,6 +6,8 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontShopCheckoutRequest extends FormRequest
 {
+    protected $redirectRoute = 'storefront.shop.index';
+
     public function authorize(): bool
     {
         return true;

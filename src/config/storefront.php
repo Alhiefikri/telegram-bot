@@ -118,7 +118,7 @@ return [
     ],
 
     'qris' => [
-        'eyebrow' => 'QRIS Pakasir',
+        'eyebrow' => 'QRIS Website',
         'title' => 'QRIS web dibuat per order',
         'body' => 'Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.',
     ],
@@ -159,7 +159,7 @@ return [
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
-            'answer' => 'Order website diproses sebagai order web dengan QRIS Pakasir dan invoice bertanda tangan. Bot Telegram tetap berjalan untuk pelanggan yang memilih jalur Telegram.',
+            'answer' => 'Order website diproses sebagai order web dengan QRIS dan invoice bertanda tangan. Bot Telegram tetap berjalan untuk pelanggan yang memilih jalur Telegram.',
         ],
     ],
 

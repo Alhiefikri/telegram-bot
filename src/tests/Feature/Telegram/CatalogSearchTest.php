@@ -2,8 +2,12 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Customer;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -194,6 +198,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $product = Product::factory()->create(['name' => 'Canva Pro', 'description' => 'Desain premium siap pakai.', 'price_amount' => 25000, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        $completedOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $completedOrder->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 2,
+            'unit_price' => $product->price_amount,
+            'subtotal' => $product->price_amount * 2,
+        ]);
 
         $this->postTelegramWebhook($this->messageUpdate(125, '/cari canva'))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(126, 'cb-search-product', 'product:'.$product->id))->assertOk();
@@ -203,6 +219,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Canva Pro')
             && str_contains($r['text'], '📝 Detail produk')
+            && str_contains($r['text'], '🛒 Terjual: 2')
             && str_contains($r['text'], 'Desain premium siap pakai.')
             && str_contains(json_encode($r->data()), 'Beli Sekarang - Rp25.000')
             && str_contains(json_encode($r->data()), 'buy:'.$product->id));

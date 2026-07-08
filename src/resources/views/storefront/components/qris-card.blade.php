@@ -2,7 +2,7 @@
     $qris = $copy['qris'];
 @endphp
 
-<aside class="qris-card neo-panel reveal-item relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-6" aria-label="Ilustrasi QRIS Pakasir Lhie Store">
+<aside class="qris-card neo-panel reveal-item relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-6" aria-label="Ilustrasi QRIS Lhie Store">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-40"></div>
     <div class="relative z-10">
         <div class="mb-5 flex items-start justify-between gap-4">
@@ -10,7 +10,7 @@
                 <p class="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">{{ $qris['eyebrow'] }}</p>
                 <h3 class="mt-2 font-display text-2xl font-black leading-tight text-[var(--sf-ink)]">{{ $qris['title'] }}</h3>
             </div>
-            <span class="neo-float-badge rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Pakasir</span>
+            <span class="neo-float-badge rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">QRIS</span>
         </div>
 
         <div class="qris-frame relative mx-auto max-w-[280px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[7px_7px_0_var(--sf-shadow)]">

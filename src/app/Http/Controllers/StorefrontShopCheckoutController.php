@@ -17,8 +17,10 @@ class StorefrontShopCheckoutController extends Controller
         try {
             $result = $checkout->start(StorefrontShopCheckoutInput::fromValidated($request->validated()));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
-            return back()
+            return redirect()
+                ->route('storefront.shop.index')
                 ->withInput()
+                ->with('storefront_checkout_error', $exception->getMessage())
                 ->withErrors(['product_id' => $exception->getMessage()]);
         }
 

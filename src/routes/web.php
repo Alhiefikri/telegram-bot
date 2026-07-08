@@ -38,8 +38,8 @@ Route::get('/produk/{product}/checkout-manual', StorefrontManualCheckoutControll
 Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('/', StorefrontShopController::class)->name('index');
     Route::post('checkout', StorefrontShopCheckoutController::class)->name('checkout');
-    Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('signed')->name('orders.show');
-    Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
+    Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
+    Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
 });
 Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
 

@@ -72,7 +72,7 @@ class StorefrontProductPresenter
             'website_qris' => new StorefrontProductCheckoutChoice(
                 key: 'website_qris',
                 label: $copy['checkout_cta'] ?? 'Bayar QRIS di Website',
-                description: 'Checkout langsung dari website dengan QRIS Pakasir.',
+                description: 'Checkout langsung dari website dengan QRIS.',
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,
