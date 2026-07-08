@@ -9,7 +9,6 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 class TelegramAdminPaidOrderNotifier
 {
@@ -57,22 +56,13 @@ class TelegramAdminPaidOrderNotifier
             return;
         }
 
-        try {
-            $claimed->loadMissing(['customer', 'orderItems', 'payments']);
-            $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => $step,
-                'payment_mode' => $this->paymentMode($claimed),
-                'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
-                'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-            ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
-        } catch (Throwable $e) {
-            Order::query()
-                ->whereKey($claimed->id)
-                ->whereNull($sentAtColumn)
-                ->update([$startedAtColumn => null]);
-
-            throw $e;
-        }
+        $claimed->loadMissing(['customer', 'orderItems', 'payments']);
+        $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => $step,
+            'payment_mode' => $this->paymentMode($claimed),
+            'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
+            'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
 
         Order::query()
             ->whereKey($claimed->id)
@@ -84,7 +74,7 @@ class TelegramAdminPaidOrderNotifier
     private function paidMessage(Order $order): string
     {
         $payment = $this->relevantPayment($order);
-        
+
         $lines = [
             '🔔 Produk terjual!',
             '━━━━━━━━━━━━━━',
@@ -113,11 +103,11 @@ class TelegramAdminPaidOrderNotifier
     {
         $amount = $payment?->amount ?? $order->total_amount;
         $fee = $payment?->provider_fee ?? 0;
-        
+
         if ($fee > 0) {
-            return $this->rupiah($amount - $fee) . ' (setelah fee)';
+            return $this->rupiah($amount - $fee).' (setelah fee)';
         }
-        
+
         return $this->rupiah($amount);
     }
 
@@ -134,9 +124,10 @@ class TelegramAdminPaidOrderNotifier
             $product = $products->get($item->product_id);
             if (! $product) {
                 $lines[] = '- '.$item->product_name.': (Produk dihapus)';
+
                 continue;
             }
-            
+
             $lines[] = '- '.$item->product_name.': '.$product->availableStock();
         }
 

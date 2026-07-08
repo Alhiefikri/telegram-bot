@@ -97,7 +97,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
         Carbon::setTestNow('2026-07-08 22:00:00');
         config()->set('services.telegram.token', 'bot-token');
         config()->set('app.url', 'https://admin.example.test');
-        
+
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
         ]);
@@ -125,7 +125,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $request = $sends->first()[0];
 
         $this->assertSame('admin-chat-123', (string) $request['chat_id']);
-        
+
         $text = $request['text'];
         $this->assertStringContainsString('📊 Statistik Hari Ini', $text);
         $this->assertStringContainsString('Order Baru: 1', $text);

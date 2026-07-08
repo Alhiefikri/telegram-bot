@@ -32,6 +32,7 @@ class TelegramBotClientTest extends TestCase
 
             $requests[$operation] = $request;
             $optionsByOperation[$operation] = $options;
+
             return Http::response(['ok' => true, 'result' => ['id' => 12345]], 200);
         });
 

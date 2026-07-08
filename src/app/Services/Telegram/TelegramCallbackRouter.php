@@ -33,6 +33,7 @@ class TelegramCallbackRouter
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
+        private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
     ) {}
 
@@ -61,14 +62,20 @@ class TelegramCallbackRouter
             return;
         }
 
-        if ($data === 'statistik_harian') {
-            $this->adminStats->showDailyStats($customer, $chatId, $id);
+        if (! $this->chatPrivacy->isPrivate($chatType) && ! $this->isNonPrivateSafeCallback($data)) {
+            $this->chatPrivacy->denyCallback($id);
 
             return;
         }
 
-        if (! $this->chatPrivacy->isPrivate($chatType) && ! $this->isNonPrivateSafeCallback($data)) {
-            $this->chatPrivacy->denyCallback($id);
+        if ($data === 'statistik_harian') {
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->answerCallbackQuery($id, 'Akses ditolak.');
+
+                return;
+            }
+
+            $this->adminStats->showDailyStats($customer, $chatId, $id);
 
             return;
         }

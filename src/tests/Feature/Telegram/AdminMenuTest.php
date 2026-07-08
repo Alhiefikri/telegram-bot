@@ -144,4 +144,32 @@ class AdminMenuTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), '/admin'));
     }
+
+    public function test_non_admin_cannot_trigger_forged_daily_stats_callback(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(309, 'forged-stats', 'statistik_harian', ['id' => 111], 111))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'forged-stats'
+            && $request['text'] === 'Akses ditolak.');
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
+    }
+
+    public function test_daily_stats_callback_from_group_is_denied_before_sending_stats(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(310, 'group-stats', 'statistik_harian', ['id' => 999], -100123, 'group'))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'group-stats'
+            && $request['text'] === 'Demi keamanan, lanjutkan di chat pribadi dengan bot ya.');
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
+    }
 }

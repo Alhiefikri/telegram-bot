@@ -49,7 +49,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $this->assertStringContainsString('Earning: Rp30.000', $text);
         $this->assertStringContainsString('Produk:', $text);
         $this->assertStringContainsString('- CHATGPT PLUS x 1', $text);
-        
+
         $expectedPaidAt = $order->fresh(['payments'])->payments->first()->paid_at->copy()
             ->timezone((string) config('app.timezone'))
             ->format('d M Y, H:i');
@@ -71,7 +71,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        
+
         $order = $this->paidOrderWithSpecificProduct($product, 2);
 
         app(TelegramAdminPaidOrderNotifier::class)->send($order);
@@ -108,7 +108,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
             'amount' => 32000,
             'provider_fee' => 2000,
         ]);
-        
+
         $order->update(['total_amount' => 32000]);
 
         app(TelegramAdminPaidOrderNotifier::class)->send($order);
@@ -137,7 +137,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
                 'reserved_stock' => 0,
                 'is_active' => true,
             ]);
-            
+
             OrderItem::factory()->for($order)->for($product)->create([
                 'product_name' => $product->name,
                 'quantity' => 1,
@@ -157,7 +157,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
 
         return $order;
     }
-    
+
     private function paidOrderWithSpecificProduct(Product $product, int $quantity): Order
     {
         $paidAt = Carbon::parse('2026-07-07 18:16:00', 'Asia/Makassar');

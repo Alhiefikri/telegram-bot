@@ -2,16 +2,17 @@
 
 namespace App\Jobs;
 
-use App\Models\ManualPaymentSetting;
+use App\Services\Telegram\TelegramAdminAccess;
 use App\Services\Telegram\TelegramAdminStatsIntents;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-class SendDailyAdminStatsNotification implements ShouldQueue
+class SendDailyAdminStatsNotification implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable;
     use InteractsWithQueue;
@@ -26,7 +27,7 @@ class SendDailyAdminStatsNotification implements ShouldQueue
         $this->jobEnqueuedAt = $jobEnqueuedAt ?: now()->toISOString();
     }
 
-    public function handle(TelegramAdminStatsIntents $statsIntents): void
+    public function handle(TelegramAdminStatsIntents $statsIntents, TelegramAdminAccess $adminAccess): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -39,8 +40,7 @@ class SendDailyAdminStatsNotification implements ShouldQueue
         ]);
 
         try {
-            $setting = ManualPaymentSetting::current();
-            $adminChatId = $setting?->admin_telegram_chat_id;
+            $adminChatId = $adminAccess->adminChatId();
 
             if ($adminChatId) {
                 $statsIntents->sendAutomatedDailyStats($adminChatId);

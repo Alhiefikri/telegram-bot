@@ -13,7 +13,7 @@ class TelegramBotClient
 
     public function __construct(?TelegramBotApiRequestFactory $requests = null)
     {
-        $this->requests = $requests ?? new TelegramBotApiRequestFactory();
+        $this->requests = $requests ?? new TelegramBotApiRequestFactory;
     }
 
     public function getChat(int|string $chatId): array

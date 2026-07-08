@@ -4,6 +4,7 @@ namespace Tests\Unit\Jobs;
 
 use App\Jobs\SendDailyAdminStatsNotification;
 use App\Models\ManualPaymentSetting;
+use App\Services\Telegram\TelegramAdminAccess;
 use App\Services\Telegram\TelegramAdminStatsIntents;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -24,8 +25,8 @@ class SendDailyAdminStatsNotificationTest extends TestCase
             ->once()
             ->with('123456789');
 
-        $job = new SendDailyAdminStatsNotification();
-        $job->handle($mockIntents);
+        $job = new SendDailyAdminStatsNotification;
+        $job->handle($mockIntents, app(TelegramAdminAccess::class));
     }
 
     public function test_send_daily_admin_stats_does_nothing_if_no_admin_chat_id(): void
@@ -35,7 +36,21 @@ class SendDailyAdminStatsNotificationTest extends TestCase
         $mockIntents = $this->mock(TelegramAdminStatsIntents::class);
         $mockIntents->shouldReceive('sendAutomatedDailyStats')->never();
 
-        $job = new SendDailyAdminStatsNotification();
-        $job->handle($mockIntents);
+        $job = new SendDailyAdminStatsNotification;
+        $job->handle($mockIntents, app(TelegramAdminAccess::class));
+    }
+
+    public function test_send_daily_admin_stats_uses_configured_admin_chat_id_fallback(): void
+    {
+        config()->set('services.telegram.admin_telegram_chat_id', '987654321');
+        ManualPaymentSetting::query()->delete();
+
+        $mockIntents = $this->mock(TelegramAdminStatsIntents::class);
+        $mockIntents->shouldReceive('sendAutomatedDailyStats')
+            ->once()
+            ->with('987654321');
+
+        $job = new SendDailyAdminStatsNotification;
+        $job->handle($mockIntents, app(TelegramAdminAccess::class));
     }
 }

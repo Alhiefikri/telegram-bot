@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
@@ -26,7 +27,7 @@ class TelegramAdminStatsIntents
     {
         $stats = $this->calculateTodayStats();
         $message = $this->formatMessage($stats);
-        
+
         $keyboard = [];
         $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
         if ($adminDashboardButton !== null) {
@@ -34,7 +35,7 @@ class TelegramAdminStatsIntents
         }
 
         $replyMarkup = $keyboard === [] ? [] : ['inline_keyboard' => $keyboard];
-        
+
         $this->bot->sendMessage($chatId, $message, $replyMarkup);
     }
 
@@ -56,14 +57,14 @@ class TelegramAdminStatsIntents
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$startOfDay, $endOfDay])
             ->get(['order_id', 'amount', 'provider_fee']);
-            
+
         $paidOrderIds = $paidPayments->pluck('order_id')->unique()->all();
         $paidOrders = count($paidOrderIds);
 
         // Get total sold products today
         $soldProducts = 0;
         if ($paidOrders > 0) {
-            $soldProducts = \App\Models\OrderItem::query()
+            $soldProducts = OrderItem::query()
                 ->whereIn('order_id', $paidOrderIds)
                 ->sum('quantity');
         }
@@ -80,7 +81,7 @@ class TelegramAdminStatsIntents
     }
 
     /**
-     * @param array{new_orders: int, paid_orders: int, sold_products: int, earning: int} $stats
+     * @param  array{new_orders: int, paid_orders: int, sold_products: int, earning: int}  $stats
      */
     private function formatMessage(array $stats): string
     {
