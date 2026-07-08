@@ -21,13 +21,13 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
         config()->set('services.dogfood_timing.enabled', true);
         config()->set('services.telegram.token', 'bot-token');
         $logs = $this->captureDogfoodInfoLogs();
-        Http::fake(fn (HttpRequest $request) => (string) $request['chat_id'] === '222'
+        Http::fake(fn (HttpRequest $request) => (string) $request['chat_id'] === '222222222'
             ? Http::response(['ok' => false, 'description' => 'rate limited'], 429)
             : Http::response(['ok' => true, 'result' => ['message_id' => 77]])
         );
 
-        Customer::factory()->create(['telegram_id' => 111]);
-        Customer::factory()->create(['telegram_id' => 222]);
+        Customer::factory()->create(['telegram_id' => 111111111]);
+        Customer::factory()->create(['telegram_id' => 222222222]);
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
             ->post(route('admin.broadcast.store'), [
@@ -54,7 +54,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
             && $context['failed'] === 1
         );
 
-        $this->assertDogfoodLogsDoNotContain($logs, ['111', '222', 'bot-token', 'Sensitive broadcast body']);
+        $this->assertDogfoodLogsDoNotContain($logs, ['111111111', '222222222', 'bot-token', 'Sensitive broadcast body']);
     }
 
     public function test_product_create_and_stock_add_dogfood_timing_report_admin_request_duration(): void
@@ -63,7 +63,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
         config()->set('services.telegram.token', 'bot-token');
         $logs = $this->captureDogfoodInfoLogs();
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 88]])]);
-        Customer::factory()->create(['telegram_id' => 333]);
+        Customer::factory()->create(['telegram_id' => 333333333]);
         $admin = User::factory()->create(['role' => UserRole::Admin]);
 
         $this->actingAs($admin)
@@ -102,7 +102,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
         );
 
         $this->assertDogfoodLogsDoNotContain($logs, [
-            '333',
+            '333333333',
             'bot-token',
             'Private product details',
             'secret-1@example.test',
