@@ -234,7 +234,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Marketplace akun AI siap pakai')
+            ->assertSee('Marketplace produk digital siap pakai')
             ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
             ->assertSee('data-product=', false)
             ->assertSee('Claude Pro Ready')

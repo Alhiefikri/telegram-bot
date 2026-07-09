@@ -17,7 +17,7 @@
 
         <div class="neo-chip mt-3 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
             <span class="h-2 w-2 rounded-full bg-[var(--sf-green)]"></span>
-            {{ $catalogPage->productCount() }} produk AI aktif
+            {{ $catalogPage->productCount() }} produk aktif
         </div>
 
         <h1 class="mx-auto mt-4 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">
@@ -26,14 +26,14 @@
 
         <p class="mx-auto mt-4 max-w-xl text-sm font-bold leading-relaxed text-[var(--sf-muted)] sm:text-base">
             {{ $copy['hero']['body'] }}
-            <span class="sr-only">Akun AI Premium Siap Pakai. Katalog akun AI premium</span>
+            <span class="sr-only">Akun Premium & Produk Digital. Katalog produk digital premium</span>
         </p>
 
         <div class="mx-auto mt-6 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
-            <a href="{{ route('storefront.shop.index') }}" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
+            <a href="{{ route('storefront.shop.index') }}" class="neo-button hover-rubber-band inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
                 <span>{{ $copy['hero']['primary_cta'] }}</span>
             </a>
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
+            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button hover-tilt-shake inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
                 @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
                 <span>{{ $copy['hero']['secondary_cta'] }}</span>
             </a>

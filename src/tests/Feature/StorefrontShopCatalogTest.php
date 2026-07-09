@@ -26,8 +26,8 @@ class StorefrontShopCatalogTest extends TestCase
                 && $page->productCount() === 3
                 && $page->categoryFilters->pluck('name')->all() === ['AI Tools']
                 && $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all() === ['ChatGPT Plus Ready', 'Claude Pro Ready'])
-            ->assertSee('Belanja Akun AI | Lhie Store')
-            ->assertSee('Marketplace akun AI siap pakai')
+            ->assertSee('Belanja Produk Digital | Lhie Store')
+            ->assertSee('Marketplace produk digital siap pakai')
             ->assertSee('Pilih produk, pilih bayar QRIS dari web atau lanjut lewat Telegram.')
             ->assertSee('Mulai belanja')
             ->assertSee('Tentang Lhie Store')
@@ -157,14 +157,14 @@ class StorefrontShopCatalogTest extends TestCase
 
         $this->get(route('storefront.home'))
             ->assertOk()
-            ->assertSee('Pilih akun AI sesuai kebutuhan.')
+            ->assertSee('Pilih produk digital sesuai kebutuhan.')
             ->assertSee('action="'.url('/').'#products"', false)
             ->assertSee('Landing Catalog Product')
             ->assertSee('JSON.parse($el.dataset.product)', false)
-            ->assertSee('Toolkit AI premium untuk kerja harian.')
-            ->assertSee('Belanja akun AI dalam tiga langkah.')
+            ->assertSee('Solusi Produk Digital & Layanan Premium Terbaik.')
+            ->assertSee('Belanja produk digital dalam tiga langkah.')
             ->assertDontSee('Pilih akun, cek stok, lanjut checkout.')
-            ->assertDontSee('Marketplace akun AI siap pakai')
+            ->assertDontSee('Marketplace produk digital siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
     }
 

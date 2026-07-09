@@ -10,7 +10,7 @@
 
             <div class="flex w-full shrink-0 flex-col gap-3 sm:w-auto">
                 @if ($supportHref)
-                    <a href="{{ $supportHref }}" data-telegram-link data-icon="telegram" class="neo-button inline-flex h-12 items-center justify-center gap-2 bg-[var(--sf-yellow)] px-6 text-sm font-black text-[var(--sf-ink)]">
+                    <a href="{{ $supportHref }}" data-telegram-link data-icon="telegram" class="neo-button hover-rubber-band inline-flex h-12 items-center justify-center gap-2 bg-[var(--sf-yellow)] px-6 text-sm font-black text-[var(--sf-ink)]">
                         @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
                         <span>{{ $copy['support']['primary_cta'] }}</span>
                     </a>

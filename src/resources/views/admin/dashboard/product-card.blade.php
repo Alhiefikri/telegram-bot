@@ -8,11 +8,11 @@
                                 }"
                             >
                             @if ($product['image_url'])
-                                <div class="-mx-1 -mt-1 mb-3 flex aspect-[16/9] items-center justify-center overflow-hidden rounded-[0.9rem] border-[3px] border-neo-ink bg-white shadow-[4px_4px_0_0_#050505]">
+                                <div class="-mx-1 -mt-1 mb-3 flex aspect-square items-center justify-center overflow-hidden rounded-[0.9rem] border-[3px] border-neo-ink bg-white shadow-[4px_4px_0_0_#050505]">
                                     <img
                                         src="{{ $product['image_url'] }}"
                                         alt="{{ $product['name'] }}"
-                                        class="h-full w-full object-contain object-center"
+                                        class="h-full w-full object-cover object-center"
                                         loading="lazy"
                                         decoding="async"
                                     >

@@ -27,11 +27,11 @@
     @if ($catalogPage->hasPublicCategories)
         @if ($catalogPage->categoryFilters->isNotEmpty())
             <div class="mb-12 flex flex-wrap justify-center gap-3" aria-label="Filter kategori produk">
-                <button type="button" class="category-btn neo-filter-active rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 focus:outline-none" data-filter="all" aria-pressed="true" aria-controls="storefront-product-grid">
+                <button type="button" class="category-btn hover-rubber-band neo-filter-active rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 focus:outline-none" data-filter="all" aria-pressed="true" aria-controls="storefront-product-grid">
                     Semua
                 </button>
                 @foreach ($catalogPage->categoryFilters as $category)
-                    <button type="button" class="category-btn neo-filter-inactive rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)] focus:outline-none" data-filter="{{ $category->id }}" aria-pressed="false" aria-controls="storefront-product-grid">
+                    <button type="button" class="category-btn hover-rubber-band neo-filter-inactive rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)] focus:outline-none" data-filter="{{ $category->id }}" aria-pressed="false" aria-controls="storefront-product-grid">
                         {{ $category->name }}
                     </button>
                 @endforeach
@@ -52,7 +52,7 @@
     <div class="neo-zigzag mx-auto mb-10 max-w-lg"></div>
 
     <div id="storefront-product-grid" @class([
-        'storefront-popular-card grid gap-6',
+        'storefront-popular-card storefront-product-grid',
         'mx-auto max-w-xs grid-cols-1' => $catalogPage->productCount() === 1,
         'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' => $catalogPage->productCount() !== 1,
     ])>

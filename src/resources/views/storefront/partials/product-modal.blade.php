@@ -25,7 +25,7 @@
                         <!-- Header with Close Button -->
                         <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">
                             <h3 class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct.name"></h3>
-                            <button type="button" @click="closeProductModal()" class="grid h-10 w-10 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none focus:outline-none text-[var(--sf-ink)] font-black">
+                            <button type="button" @click="closeProductModal()" class="grid h-10 w-10 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none text-[var(--sf-ink)] font-black">
                                 <span class="text-xl leading-none" aria-hidden="true">×</span>
                                 <span class="sr-only">Close panel</span>
                             </button>
@@ -66,9 +66,9 @@
                                     <p class="mt-1 text-[11px] font-semibold text-[var(--sf-muted)]">Maksimal mengikuti stok dashboard.</p>
                                 </div>
                                 <div class="flex items-center justify-between gap-3 sm:justify-end">
-                                    <button type="button" x-on:click="decreaseQuantity()" x-bind:disabled="quantity <= 1" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform duration-100 hover:enabled:-translate-x-0.5 hover:enabled:-translate-y-0.5 active:enabled:translate-x-[1px] active:enabled:translate-y-[1px] active:enabled:shadow-none hover:enabled:shadow-[4px_4px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">−</button>
+                                    <button type="button" x-on:click="decreaseQuantity()" x-bind:disabled="quantity <= 1" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform duration-100 hover:enabled:-translate-x-0.5 hover:enabled:-translate-y-0.5 active:enabled:translate-x-[3px] active:enabled:translate-y-[3px] active:enabled:shadow-none hover:enabled:shadow-[4px_4px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">−</button>
                                     <span class="min-w-8 text-center font-display text-lg font-black text-[var(--sf-ink)]" x-text="quantity">1</span>
-                                    <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock.available" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform duration-100 hover:enabled:-translate-x-0.5 hover:enabled:-translate-y-0.5 active:enabled:translate-x-[1px] active:enabled:translate-y-[1px] active:enabled:shadow-none hover:enabled:shadow-[4px_4px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">+</button>
+                                    <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock.available" class="grid h-10 w-10 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform duration-100 hover:enabled:-translate-x-0.5 hover:enabled:-translate-y-0.5 active:enabled:translate-x-[3px] active:enabled:translate-y-[3px] active:enabled:shadow-none hover:enabled:shadow-[4px_4px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50">+</button>
                                 </div>
                                 <div class="sm:col-span-2 flex items-center justify-between border-t-2 border-dashed border-[var(--sf-border)] pt-3 text-sm font-black text-[var(--sf-ink)]">
                                     <span>Total produk</span>
@@ -105,13 +105,13 @@
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.websiteQris || !selectedProduct.checkout.websiteQris.enabled" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.websiteQris || !selectedProduct.checkout.websiteQris.enabled" class="neo-button hover-rubber-band flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
                                         <span x-text="selectedProduct?.checkout?.websiteQris?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
 
                                 <div>
-                                    <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.telegram || !selectedProduct.checkout.telegram.enabled" class="neo-button flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.telegram || !selectedProduct.checkout.telegram.enabled" class="neo-button hover-tilt-shake flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
                                         <span x-text="selectedProduct?.checkout?.telegram?.label || @js($copy['shop']['telegram_cta'])">{{ $copy['shop']['telegram_cta'] }}</span>
                                     </button>
                                     <p class="mt-3 text-center text-[10px] font-bold leading-relaxed text-[var(--sf-muted)]" x-text="selectedProduct?.checkout?.telegram?.description || @js('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')">

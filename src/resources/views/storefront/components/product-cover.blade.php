@@ -12,7 +12,7 @@
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-contain object-center">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-4 text-center">
                 <div class="{{ $coverTheme['accent'] }}">
@@ -28,12 +28,12 @@
         <span class="sr-only">Gambar produk menyusul</span>
     </div>
 @else
-    <div class="relative flex aspect-[16/9] w-full flex-col items-center justify-center overflow-hidden bg-white text-white">
+    <div class="relative flex aspect-square w-full flex-col items-center justify-center overflow-hidden bg-white text-white">
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-20"></div>
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-contain object-center">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center">
                 <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">

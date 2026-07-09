@@ -22,8 +22,8 @@ class ExampleTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Akun AI Premium Siap Pakai')
-            ->assertSee('Katalog akun AI premium')
+            ->assertSee('Akun Premium & Produk Digital')
+            ->assertSee('Katalog produk digital premium')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
             ->assertDontSee('/admin/login', false)
@@ -157,15 +157,15 @@ class ExampleTest extends TestCase
             ->assertSee('Panduan Login')
             ->assertSee('FAQ')
             ->assertSee('Support')
-            ->assertSee('Belanja akun AI dalam tiga langkah')
+            ->assertSee('Belanja produk digital dalam tiga langkah')
             ->assertSee('/panduan-login-akun', false)
             ->assertSee('Pilih produk dari katalog, pilih bayar QRIS website atau Telegram')
             ->assertSee('Pengiriman digital')
             ->assertSee('Telegram tetap berjalan untuk order dari bot')
-            ->assertSee('Akun siap pakai')
+            ->assertSee('Produk siap pakai')
             ->assertSee('Tanpa tebak stok')
             ->assertSee('Order dibantu manusia')
-            ->assertSee('Bagaimana cara membeli akun AI di Lhie Store?')
+            ->assertSee('Bagaimana cara membeli produk digital di Lhie Store?')
             ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);

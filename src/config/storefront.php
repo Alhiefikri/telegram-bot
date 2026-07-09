@@ -2,8 +2,8 @@
 
 return [
     'meta' => [
-        'title' => ':brand | Akun AI Premium Siap Pakai',
-        'description' => 'Lhie Store menyediakan akun AI premium siap pakai dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
+        'title' => ':brand | Akun Premium & Produk Digital',
+        'description' => 'Lhie Store menyediakan produk digital, akun premium, dan layanan terbaik dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
     ],
 
     'nav' => [
@@ -18,8 +18,8 @@ return [
     ],
 
     'hero' => [
-        'eyebrow' => 'Akun AI premium siap pakai',
-        'headline' => 'Toolkit AI premium untuk kerja harian.',
+        'eyebrow' => 'Produk digital & layanan premium siap pakai',
+        'headline' => 'Solusi Produk Digital & Layanan Premium Terbaik.',
         'body' => 'Pilih produk dari web, lalu bayar lewat QRIS website atau lanjutkan transaksi melalui bot/admin Telegram yang sudah berjalan.',
         'primary_cta' => 'Belanja Web',
         'secondary_cta' => 'Buka Bot Telegram',
@@ -49,17 +49,17 @@ return [
 
     'catalog' => [
         'eyebrow' => 'Katalog Lhie Store',
-        'title' => 'Pilih akun AI sesuai kebutuhan.',
-        'body' => 'Cari ChatGPT, Claude, Gemini, Canva, dan akun AI premium lain yang sedang tersedia. Produk aktif dari admin otomatis tampil di katalog ini.',
-        'search_placeholder' => 'Cari akun AI...',
+        'title' => 'Pilih produk digital sesuai kebutuhan.',
+        'body' => 'Cari akun premium, lisensi software, tools digital, dan produk digital lain yang sedang tersedia. Produk aktif otomatis tampil di katalog ini.',
+        'search_placeholder' => 'Cari produk digital...',
         'empty_title' => 'Katalog publik sedang disiapkan.',
-        'empty_body' => 'Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Sambil menunggu, pelanggan bisa menghubungi support untuk rekomendasi akun AI yang tersedia.',
+        'empty_body' => 'Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Sambil menunggu, pelanggan bisa menghubungi support untuk rekomendasi produk digital yang tersedia.',
         'empty_category_title' => 'Kategori akan segera hadir.',
         'empty_category_body' => 'Tim toko sedang menyiapkan kategori publik pertama agar katalog mudah dijelajahi.',
     ],
 
     'shop' => [
-        'title' => 'Marketplace akun AI siap pakai',
+        'title' => 'Marketplace produk digital siap pakai',
         'body' => 'Pilih produk, pilih bayar QRIS dari web atau lanjut lewat Telegram.',
         'empty_title' => 'Belum ada produk siap dibeli.',
         'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',
@@ -78,8 +78,8 @@ return [
 
     'benefits' => [
         [
-            'title' => 'Akun siap pakai',
-            'body' => 'Produk dikurasi untuk kebutuhan AI harian: menulis, coding, riset, desain, sampai konten sosial.',
+            'title' => 'Produk siap pakai',
+            'body' => 'Produk dikurasi untuk berbagai kebutuhan digital: akun premium, lisensi software, game keys, dan tools harian.',
         ],
         [
             'title' => 'Tanpa tebak stok',
@@ -93,12 +93,12 @@ return [
 
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
-        'title' => 'Belanja akun AI dalam tiga langkah.',
+        'title' => 'Belanja produk digital dalam tiga langkah.',
         'body' => 'Pilih produk dari katalog, pilih bayar QRIS website atau Telegram, lalu terima akses setelah pembayaran terkonfirmasi.',
         'steps' => [
             [
                 'title' => 'Pilih produk',
-                'body' => 'Cari akun AI yang dibutuhkan dan pastikan badge stok masih tersedia.',
+                'body' => 'Cari produk digital yang dibutuhkan dan pastikan badge stok masih tersedia.',
             ],
             [
                 'title' => 'Pilih jalur checkout',
@@ -130,9 +130,9 @@ return [
     ],
 
     'testimonial' => [
-        'quote' => 'Butuh akun AI cepat untuk kerja harian. Di Lhie Store, stoknya jelas dan proses tanyanya tidak ribet.',
+        'quote' => 'Butuh produk digital cepat untuk kebutuhan harian. Di Lhie Store, stoknya jelas dan proses tanyanya tidak ribet.',
         'name' => 'Pelanggan Lhie Store',
-        'role' => 'Pengguna akun AI premium',
+        'role' => 'Pelanggan Lhie Store',
         'stats' => [
             ['value' => '24 jam', 'label' => 'support order'],
             ['value' => 'Real-time', 'label' => 'status stok katalog'],
@@ -142,7 +142,7 @@ return [
 
     'faq' => [
         [
-            'question' => 'Bagaimana cara membeli akun AI di Lhie Store?',
+            'question' => 'Bagaimana cara membeli produk digital di Lhie Store?',
             'answer' => 'Pilih produk dari katalog, hubungi support melalui tombol yang tersedia, lalu ikuti instruksi pembayaran. Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia.',
         ],
         [
@@ -151,11 +151,11 @@ return [
         ],
         [
             'question' => 'Produk apa saja yang tersedia?',
-            'answer' => 'Produk dapat berubah mengikuti stok toko. Katalog biasanya berisi akun AI premium dan produk digital pendukung seperti ChatGPT, Claude, Gemini, Canva, atau layanan serupa yang dipublikasikan admin.',
+            'answer' => 'Produk dapat berubah mengikuti stok toko. Katalog biasanya berisi akun premium, lisensi software, game keys, dan produk digital lain yang dipublikasikan admin.',
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
-            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, or kendala teknis produk digital.',
+            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, atau kendala teknis produk digital.',
         ],
         [
             'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
@@ -172,11 +172,11 @@ return [
     ],
 
     'footer' => [
-        'body' => 'Lhie Store membantu pelanggan menemukan akun AI premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
+        'body' => 'Lhie Store membantu pelanggan menemukan produk digital dan akun premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
         'platform_title' => 'Toko',
         'help_title' => 'Bantuan',
         'copyright_suffix' => 'Lhie Store. Semua hak dilindungi.',
-        'powered_by' => 'Dibangun untuk katalog akun AI premium.',
+        'powered_by' => 'Dibangun untuk katalog produk digital premium.',
     ],
 
     'login_guide' => [
