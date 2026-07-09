@@ -107,6 +107,17 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity);
         });
 
+        RateLimiter::for('storefront-checkout', function (Request $request) {
+            $limit = max(1, (int) config('services.storefront.checkout_rate_limit_per_minute', 5));
+            $source = $request->ip() ?: 'unknown';
+            $session = $request->hasSession() ? $request->session()->getId() : 'no-session';
+
+            return [
+                Limit::perMinute($limit)->by('storefront:checkout:source:'.$source),
+                Limit::perMinute($limit)->by('storefront:checkout:session:'.$session),
+            ];
+        });
+
     }
 
     private function configureUrlGeneration(): void

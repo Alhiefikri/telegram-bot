@@ -95,11 +95,27 @@ class Product extends Model
 
     public function isCredentialManaged(): bool
     {
+        if (array_key_exists('stock_items_exists', $this->attributes)) {
+            return (bool) $this->attributes['stock_items_exists'];
+        }
+
+        if ($this->relationLoaded('stockItems')) {
+            return $this->stockItems->isNotEmpty();
+        }
+
         return $this->stockItems()->exists();
     }
 
     public function availableStockItemCount(): int
     {
+        if (array_key_exists('available_stock_items_count', $this->attributes)) {
+            return (int) $this->attributes['available_stock_items_count'];
+        }
+
+        if ($this->relationLoaded('stockItems')) {
+            return $this->stockItems->whereNull('order_item_id')->count();
+        }
+
         return $this->stockItems()->whereNull('order_item_id')->count();
     }
 

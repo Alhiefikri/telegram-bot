@@ -9,13 +9,24 @@ use App\Http\Requests\StorefrontShopCheckoutRequest;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Str;
 
 class StorefrontShopCheckoutController extends Controller
 {
     public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout): RedirectResponse
     {
         try {
-            $result = $checkout->start(StorefrontShopCheckoutInput::fromValidated($request->validated()));
+            $session = $request->session();
+            $checkoutClientKey = $session->get('storefront.checkout_client_key');
+            if (! is_string($checkoutClientKey) || $checkoutClientKey === '') {
+                $checkoutClientKey = Str::random(40);
+                $session->put('storefront.checkout_client_key', $checkoutClientKey);
+            }
+
+            $result = $checkout->start(
+                StorefrontShopCheckoutInput::fromValidated($request->validated()),
+                $checkoutClientKey,
+            );
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
             return redirect()
                 ->route('storefront.shop.index')

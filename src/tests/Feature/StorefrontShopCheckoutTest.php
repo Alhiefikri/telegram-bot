@@ -15,6 +15,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\OrderStateMachine;
+use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Support\PakasirCheckoutFlow;
@@ -353,6 +354,40 @@ class StorefrontShopCheckoutTest extends TestCase
             && $request['api_key'] === 'secret-key');
     }
 
+    public function test_repeated_web_checkout_from_the_same_session_reuses_the_existing_order(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        $product = $this->availableProduct([
+            'name' => 'Idempotent Web Checkout',
+            'price_amount' => 15000,
+            'stock' => 2,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        $this->providerQrisCreateSucceedsWithProviderTotal(
+            amount: 15000,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.IDEMPOTENT99',
+        );
+
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+        ];
+        $first = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), $payload);
+        $second = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), $payload);
+
+        $first->assertRedirect();
+        $second->assertRedirect($first->headers->get('Location'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+    }
+
     public function test_shop_checkout_accepts_non_telegram_buyer_name(): void
     {
         $product = $this->availableProduct([
@@ -570,7 +605,7 @@ class StorefrontShopCheckoutTest extends TestCase
         );
         $this->providerTransactionDetailCompletesPayment($payment);
 
-        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        $redirectUrl = app(StorefrontInvoiceUrl::class)->show($order);
 
         $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()

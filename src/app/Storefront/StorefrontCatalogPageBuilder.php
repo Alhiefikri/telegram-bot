@@ -102,6 +102,8 @@ class StorefrontCatalogPageBuilder
         return Product::query()
             ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
+            ->withExists('stockItems')
+            ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
                 ->whereHas('order', fn ($order) => $order
                     ->where('order_status', OrderStatus::Completed)
@@ -165,6 +167,8 @@ class StorefrontCatalogPageBuilder
         $product = Product::query()
             ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
+            ->withExists('stockItems')
+            ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
                 ->whereHas('order', fn ($order) => $order
                     ->where('order_status', OrderStatus::Completed)

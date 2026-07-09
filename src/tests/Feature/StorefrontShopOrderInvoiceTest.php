@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Storefront\StorefrontInvoiceUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
@@ -97,7 +98,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         );
         $this->providerTransactionDetailCompletesPayment($payment);
 
-        $redirectUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        $redirectUrl = app(StorefrontInvoiceUrl::class)->show($order);
 
         $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()

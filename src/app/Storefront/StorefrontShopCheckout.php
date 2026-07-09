@@ -7,6 +7,7 @@ use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
@@ -14,7 +15,8 @@ use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
-use Illuminate\Support\Facades\URL;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class StorefrontShopCheckout
@@ -25,10 +27,30 @@ class StorefrontShopCheckout
         private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirProviderReadiness $readiness,
         private readonly OrderStateMachine $orderStates,
+        private readonly StorefrontInvoiceUrl $invoiceUrls,
     ) {}
 
-    public function start(StorefrontShopCheckoutInput $input): StorefrontShopCheckoutResult
+    public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
     {
+        $checkoutKey = $this->checkoutKey($input, $sessionId);
+        if ($checkoutKey === null) {
+            return $this->startOnce($input, null);
+        }
+
+        try {
+            return Cache::lock('storefront:checkout:'.$checkoutKey, 45)
+                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $checkoutKey));
+        } catch (LockTimeoutException $exception) {
+            throw new InvalidCheckout('Checkout sedang diproses. Tunggu sebentar lalu buka kembali invoice Anda.', previous: $exception);
+        }
+    }
+
+    private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
+    {
+        if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing));
+        }
+
         $product = $this->product($input->productId);
 
         $this->assertNativeQrisReady();
@@ -48,7 +70,13 @@ class StorefrontShopCheckout
         $cart = $this->carts->activeCartFor($customer);
         $this->carts->setItemQuantity($cart, $product, $input->quantity);
 
-        $order = $this->orders->checkout($cart, PakasirCheckoutFlow::API_QRIS, 'pakasir');
+        $order = $this->orders->checkout(
+            $cart,
+            PakasirCheckoutFlow::API_QRIS,
+            'pakasir',
+            null,
+            $checkoutKey,
+        );
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
         try {
@@ -70,7 +98,7 @@ class StorefrontShopCheckout
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(
-            redirectUrl: URL::signedRoute('storefront.shop.orders.show', $order, null, false),
+            redirectUrl: $this->invoiceUrls->show($order),
         );
     }
 
@@ -116,5 +144,21 @@ class StorefrontShopCheckout
             || ! $this->readiness->checkout(PakasirCheckoutFlow::API_QRIS)->isReady()) {
             throw new InvalidCheckout('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
         }
+    }
+
+    private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId): ?string
+    {
+        if ($sessionId === null || $sessionId === '') {
+            return null;
+        }
+
+        $payload = implode('|', [
+            $sessionId,
+            $input->productId,
+            $input->quantity,
+            mb_strtolower(trim($input->buyerHandle)),
+        ]);
+
+        return hash_hmac('sha256', $payload, (string) config('app.key'));
     }
 }

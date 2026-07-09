@@ -161,7 +161,11 @@ class OrderStateMachine
         $this->inventory->recordOrderSales($order);
 
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
-        $order->update(['payment_status' => PaymentStatus::Paid, 'order_status' => $this->paidOrderStatus($payment)]);
+        $order->update([
+            'payment_status' => PaymentStatus::Paid,
+            'order_status' => $this->paidOrderStatus($payment),
+            'checkout_key' => null,
+        ]);
         $this->dispatchAdminPendingNotificationDelete($order);
 
         if (StoreChannelSetting::current()->sales_proof_enabled) {
@@ -239,7 +243,11 @@ class OrderStateMachine
         foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
             $payment->update(['status' => $paymentStatus]);
         }
-        $order->update(['order_status' => $orderStatus, 'payment_status' => $paymentStatus]);
+        $order->update([
+            'order_status' => $orderStatus,
+            'payment_status' => $paymentStatus,
+            'checkout_key' => null,
+        ]);
         $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
             $this->dispatchAdminExpiredNotification($order);

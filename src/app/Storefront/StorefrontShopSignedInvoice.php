@@ -10,7 +10,6 @@ use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramQrCodeRenderer;
-use Illuminate\Support\Facades\URL;
 use Throwable;
 
 class StorefrontShopSignedInvoice
@@ -19,6 +18,7 @@ class StorefrontShopSignedInvoice
         private readonly TelegramQrCodeRenderer $qrCodes,
         private readonly PakasirProviderAdapter $pakasir,
         private readonly PakasirCallbackProcessor $processor,
+        private readonly StorefrontInvoiceUrl $invoiceUrls,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -33,7 +33,7 @@ class StorefrontShopSignedInvoice
             order: $order,
             payment: $payment,
             state: $state,
-            statusUrl: URL::signedRoute('storefront.shop.orders.status', $order, null, false),
+            statusUrl: $this->invoiceUrls->status($order),
             redirectUrl: $redirectUrl,
             payableAmount: $payment?->provider_total_payment ?? $payment?->amount,
             payableAmountFromProvider: $payment?->provider_total_payment !== null,
@@ -165,6 +165,6 @@ class StorefrontShopSignedInvoice
 
     private function redirectUrl(Order $order): string
     {
-        return URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        return $this->invoiceUrls->show($order);
     }
 }
