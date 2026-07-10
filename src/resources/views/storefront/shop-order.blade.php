@@ -26,6 +26,9 @@
                 </div>
 
                 @include('storefront.partials.shop.order-summary')
+                @if ($accessKey)
+                    @include('storefront.partials.shop.recovery-key')
+                @endif
                 @include('storefront.partials.shop.qris-payment')
                 @include('storefront.partials.shop.account-delivery')
             </section>

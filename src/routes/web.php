@@ -20,9 +20,8 @@ use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontLoginGuideController;
-use App\Http\Controllers\StorefrontManualCheckoutController;
+use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontProductController;
-use App\Http\Controllers\StorefrontProductPaymentController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopController;
 use App\Http\Controllers\StorefrontShopOrderController;
@@ -32,8 +31,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', StorefrontController::class)->name('storefront.home');
 Route::get('/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
-Route::get('/produk/{product}/bayar', StorefrontProductPaymentController::class)->name('storefront.products.payment');
-Route::get('/produk/{product}/checkout-manual', StorefrontManualCheckoutController::class)->name('storefront.products.checkout-manual');
+Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
+Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');
+Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 'show'])->name('storefront.order-access.show');
 
 Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('/', StorefrontShopController::class)->name('index');

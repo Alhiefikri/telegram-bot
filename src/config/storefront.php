@@ -3,7 +3,7 @@
 return [
     'meta' => [
         'title' => ':brand | Akun Premium & Produk Digital',
-        'description' => 'Lhie Store menyediakan produk digital, akun premium, dan layanan terbaik dengan stok transparan, harga jelas, dan bantuan order lewat support Telegram.',
+        'description' => 'Lhie Store menyediakan produk digital dan akun premium dengan stok transparan, harga jelas, checkout QRIS, serta akses pesanan mandiri.',
     ],
 
     'nav' => [
@@ -19,10 +19,10 @@ return [
 
     'hero' => [
         'eyebrow' => 'Produk digital & layanan premium siap pakai',
-        'headline' => 'Solusi Produk Digital & Layanan Premium Terbaik.',
-        'body' => 'Pilih produk dari web, lalu bayar lewat QRIS website atau lanjutkan transaksi melalui bot/admin Telegram yang sudah berjalan.',
-        'primary_cta' => 'Belanja Web',
-        'secondary_cta' => 'Buka Bot Telegram',
+        'headline' => 'Produk digital siap pakai, checkout tanpa ribet.',
+        'body' => 'Pilih produk, cek stok, lalu bayar QRIS langsung di website.',
+        'primary_cta' => 'Lihat Produk',
+        'secondary_cta' => 'Cara beli',
         'tertiary_cta' => 'Lihat Produk',
         'popular_label' => 'Produk aktif dari database',
         'popular_empty' => 'Produk populer akan tampil setelah stok aktif tersedia.',
@@ -38,12 +38,12 @@ return [
             'body' => 'Akun digital disiapkan setelah pembayaran terkonfirmasi.',
         ],
         [
-            'title' => 'Bantuan Telegram',
-            'body' => 'Support membantu cek stok, pembayaran, dan kendala akses.',
+            'title' => 'Akses mandiri',
+            'body' => 'Invoice dan recovery key membantu membuka kembali data pesanan.',
         ],
         [
             'title' => 'Harga jelas',
-            'body' => 'Harga katalog tampil sebelum Anda menghubungi support.',
+            'body' => 'Harga katalog tampil jelas sebelum Anda checkout.',
         ],
     ],
 
@@ -53,26 +53,25 @@ return [
         'body' => 'Cari akun premium, lisensi software, tools digital, dan produk digital lain yang sedang tersedia. Produk aktif otomatis tampil di katalog ini.',
         'search_placeholder' => 'Cari produk digital...',
         'empty_title' => 'Katalog publik sedang disiapkan.',
-        'empty_body' => 'Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Sambil menunggu, pelanggan bisa menghubungi support untuk rekomendasi produk digital yang tersedia.',
+        'empty_body' => 'Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin. Cek kembali katalog saat stok produk yang Anda cari tersedia.',
         'empty_category_title' => 'Kategori akan segera hadir.',
         'empty_category_body' => 'Tim toko sedang menyiapkan kategori publik pertama agar katalog mudah dijelajahi.',
     ],
 
     'shop' => [
         'title' => 'Marketplace produk digital siap pakai',
-        'body' => 'Pilih produk, pilih bayar QRIS dari web atau lanjut lewat Telegram.',
+        'body' => 'Pilih produk, bayar QRIS di website, lalu simpan invoice dan recovery key untuk akses ulang.',
         'empty_title' => 'Belum ada produk siap dibeli.',
         'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',
-        'buyer_handle_label' => 'Username Telegram / nama pembeli',
-        'buyer_handle_help' => 'Punya Telegram? isi @username. Tidak punya Telegram? isi nama panggilan.',
+        'buyer_handle_label' => 'Nama pembeli',
+        'buyer_handle_help' => 'Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.',
         'checkout_cta' => 'Bayar QRIS di Website',
-        'telegram_cta' => 'Beli lewat Telegram',
     ],
 
     'featured' => [
         'eyebrow' => 'Pilihan hari ini',
         'empty_title' => 'Promo pilihan menunggu stok siap.',
-        'empty_body' => 'Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca, dan pelanggan dapat menghubungi support untuk rekomendasi.',
+        'empty_body' => 'Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca dan diperiksa lagi saat stok diperbarui.',
         'empty_cta' => 'Minta rekomendasi ke support',
     ],
 
@@ -86,27 +85,27 @@ return [
             'body' => 'Status sisa stok dan kondisi habis tampil jelas sebelum Anda lanjut ke support.',
         ],
         [
-            'title' => 'Order dibantu manusia',
-            'body' => 'Support membantu memastikan pilihan produk, instruksi bayar, dan pengiriman akses tetap jelas.',
+            'title' => 'Akses mandiri',
+            'body' => 'Nomor invoice dan recovery key memberi akses ulang tanpa perlu membuat akun toko.',
         ],
     ],
 
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
         'title' => 'Belanja produk digital dalam tiga langkah.',
-        'body' => 'Pilih produk dari katalog, pilih bayar QRIS website atau Telegram, lalu terima akses setelah pembayaran terkonfirmasi.',
+        'body' => 'Pilih produk dari katalog, checkout sebagai tamu, lalu simpan invoice dan recovery key untuk akses ulang.',
         'steps' => [
             [
                 'title' => 'Pilih produk',
                 'body' => 'Cari produk digital yang dibutuhkan dan pastikan badge stok masih tersedia.',
             ],
             [
-                'title' => 'Pilih jalur checkout',
-                'body' => 'Gunakan QRIS website untuk bayar langsung, atau lanjut lewat bot/admin Telegram.',
+                'title' => 'Checkout sebagai tamu',
+                'body' => 'Tidak perlu membuat akun. Isi nama pembeli, lalu buat QRIS langsung dari website.',
             ],
             [
                 'title' => 'Terima akses',
-                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi; Telegram tetap berjalan untuk order dari bot.',
+                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi. Simpan invoice dan recovery key untuk membuka kembali data akun.',
             ],
         ],
     ],
@@ -120,13 +119,13 @@ return [
     'qris' => [
         'eyebrow' => 'QRIS Website',
         'title' => 'QRIS web dibuat per order',
-        'body' => 'Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.',
+        'body' => 'QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan recovery key sebelum melanjutkan pembayaran.',
     ],
 
-    'telegram_support' => [
-        'eyebrow' => 'Support',
-        'title' => 'Bot dan admin Telegram membantu status order.',
-        'body' => 'Telegram dipakai untuk notifikasi dan bantuan order yang sudah berjalan. Halaman ini hanya menjelaskan kanal bantuan; perilaku bot dan webhook Telegram tidak berubah.',
+    'recovery_access' => [
+        'eyebrow' => 'Akses ulang',
+        'title' => 'Invoice dan recovery key menjaga akses pesanan.',
+        'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun tanpa membuat akun Lhie Store.',
     ],
 
     'testimonial' => [
@@ -134,7 +133,7 @@ return [
         'name' => 'Pelanggan Lhie Store',
         'role' => 'Pelanggan Lhie Store',
         'stats' => [
-            ['value' => '24 jam', 'label' => 'support order'],
+            ['value' => 'Mandiri', 'label' => 'akses pesanan'],
             ['value' => 'Real-time', 'label' => 'status stok katalog'],
             ['value' => 'Digital', 'label' => 'pengiriman akses'],
         ],
@@ -143,7 +142,11 @@ return [
     'faq' => [
         [
             'question' => 'Bagaimana cara membeli produk digital di Lhie Store?',
-            'answer' => 'Pilih produk dari katalog, hubungi support melalui tombol yang tersedia, lalu ikuti instruksi pembayaran. Setelah pembayaran terkonfirmasi, akses atau instruksi produk digital akan dikirim melalui kanal yang tersedia.',
+            'answer' => 'Pilih produk dari katalog, checkout sebagai tamu, lalu bayar QRIS dari halaman invoice. Setelah pembayaran terkonfirmasi, buka data produk dengan nomor invoice dan recovery key yang Anda simpan saat checkout.',
+        ],
+        [
+            'question' => 'Apakah saya harus login untuk membeli?',
+            'answer' => 'Tidak. Checkout website memakai nama pembeli untuk menandai invoice. Login hanya diperlukan nanti jika produk yang dibeli memang memiliki akun layanan tersendiri.',
         ],
         [
             'question' => 'Apakah stok yang tampil benar-benar tersedia?',
@@ -155,24 +158,24 @@ return [
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
-            'answer' => 'Hubungi support dengan detail order. Tim support akan membantu pengecekan status, stok, pembayaran, atau kendala teknis produk digital.',
+            'answer' => 'Buka Akses Pesanan menggunakan nomor invoice dan recovery key. Pastikan pembayaran sudah terverifikasi dan ikuti panduan login yang tersedia sebelum mencoba akun.',
         ],
         [
-            'question' => 'Apakah bot Telegram memproses order dari halaman ini?',
-            'answer' => 'Order website diproses sebagai order web dengan QRIS dan invoice bertanda tangan. Bot Telegram tetap berjalan untuk pelanggan yang memilih jalur Telegram.',
+            'question' => 'Bagaimana cara membuka data pesanan lagi?',
+            'answer' => 'Buka halaman Akses Pesanan, lalu masukkan nomor invoice dan recovery key yang Anda simpan saat checkout. Recovery key tidak dapat ditampilkan ulang jika hilang.',
         ],
     ],
 
     'support' => [
         'eyebrow' => 'Siap belanja?',
-        'title' => 'Butuh bantuan setelah checkout?',
-        'body' => 'Gunakan katalog sementara ini untuk memilih produk, lalu hubungi support Lhie Store untuk cek detail stok, pembayaran, dan pengiriman akses digital.',
-        'primary_cta' => 'Chat Support',
+        'title' => 'Butuh membuka pesanan lagi?',
+        'body' => 'Gunakan nomor invoice dan recovery key yang Anda simpan saat checkout untuk membuka kembali data akun setelah pembayaran terverifikasi.',
+        'primary_cta' => 'Akses Pesanan',
         'secondary_cta' => 'Login Admin',
     ],
 
     'footer' => [
-        'body' => 'Lhie Store membantu pelanggan menemukan produk digital dan akun premium siap pakai dengan katalog ringan, stok jelas, dan support yang mudah dihubungi.',
+        'body' => 'Lhie Store membantu pelanggan menemukan produk digital dan akun premium siap pakai dengan katalog ringan, stok jelas, dan akses pesanan mandiri.',
         'platform_title' => 'Toko',
         'help_title' => 'Bantuan',
         'copyright_suffix' => 'Lhie Store. Semua hak dilindungi.',

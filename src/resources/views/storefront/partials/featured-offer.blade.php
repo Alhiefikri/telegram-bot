@@ -61,10 +61,9 @@
     @else
         <div class="neo-panel mx-auto flex w-full max-w-xl flex-col items-center border-dashed bg-[var(--sf-surface)] p-10 text-center">
             <h2 class="font-display text-xl font-black text-[var(--sf-ink)] sm:text-2xl">Promo pilihan menunggu stok siap.</h2>
-            <p class="mt-3 max-w-sm text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca, dan pelanggan dapat menghubungi support untuk rekomendasi.</p>
-            <a href="{{ $supportHref ?: '#support' }}" data-telegram-link data-icon="telegram" class="neo-button mt-6 inline-flex h-12 items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 text-xs font-black text-white">
-                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                <span>Minta rekomendasi ke support</span>
+            <p class="mt-3 max-w-sm text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Cek kembali katalog saat stok sudah diperbarui.</p>
+            <a href="{{ route('storefront.shop.index') }}" class="neo-button mt-6 inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-6 text-xs font-black text-white">
+                <span>Lihat katalog</span>
             </a>
         </div>
     @endif

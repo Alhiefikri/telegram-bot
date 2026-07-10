@@ -53,6 +53,8 @@ return [
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
+        'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),
+        'credential_access_session_minutes' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_SESSION_MINUTES', 30),
     ],
 
     'telegram' => [

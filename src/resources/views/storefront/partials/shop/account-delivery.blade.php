@@ -4,7 +4,7 @@
         <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
             Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.
         </p>
-    @elseif ($accountGroups !== [])
+    @elseif ($accountGroups !== [] && $canRevealCredentials)
         <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun</h2>
         <div class="mt-5 space-y-4">
             @foreach ($accountGroups as $group)
@@ -19,8 +19,12 @@
             @endforeach
         </div>
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-            Simpan data ini baik-baik dan jangan bagikan ke orang lain.
+            Simpan data ini di password manager pribadi atau screenshot pribadi yang aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.
         </p>
+    @elseif ($accountGroups !== [])
+        <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun siap dibuka</h2>
+        <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">Untuk melindungi data akun, buka kembali menggunakan nomor invoice dan recovery key yang Anda simpan saat checkout.</p>
+        <a href="{{ $orderAccessUrl }}" class="neo-button mt-5 inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Akses data pesanan</a>
     @else
         <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Pembayaran diterima</h2>
         <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">

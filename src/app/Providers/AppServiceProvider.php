@@ -112,9 +112,28 @@ class AppServiceProvider extends ServiceProvider
             $source = $request->ip() ?: 'unknown';
             $session = $request->hasSession() ? $request->session()->getId() : 'no-session';
 
+            $rateLimitedResponse = function (Request $request, array $headers) {
+                $retryAfter = max(1, (int) ($headers['Retry-After'] ?? 60));
+
+                return response()->view('errors.429', [
+                    'retryAfter' => $retryAfter,
+                ], 429, $headers);
+            };
+
             return [
-                Limit::perMinute($limit)->by('storefront:checkout:source:'.$source),
-                Limit::perMinute($limit)->by('storefront:checkout:session:'.$session),
+                Limit::perMinute($limit)->by('storefront:checkout:source:'.$source)->response($rateLimitedResponse),
+                Limit::perMinute($limit)->by('storefront:checkout:session:'.$session)->response($rateLimitedResponse),
+            ];
+        });
+
+        RateLimiter::for('storefront-order-access', function (Request $request) {
+            $limit = max(1, (int) config('services.storefront.credential_access_rate_limit_per_minute', 5));
+            $source = $request->ip() ?: 'unknown';
+            $invoice = strtoupper(trim((string) $request->input('invoice_number', 'unknown')));
+
+            return [
+                Limit::perMinute($limit)->by('storefront:order-access:source:'.$source),
+                Limit::perMinute($limit)->by('storefront:order-access:invoice:'.$invoice),
             ];
         });
 

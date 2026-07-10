@@ -21,6 +21,14 @@
         @include('storefront.components.qris-card')
     </div>
 
+    <div class="mt-8 flex flex-col gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-5 shadow-[5px_5px_0_var(--sf-shadow)] sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <h3 class="font-display text-base font-black text-[var(--sf-ink)]">Tidak perlu akun Lhie Store untuk checkout.</h3>
+            <p class="mt-1 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Kami hanya meminta kontak agar invoice dan bantuan pesanan bisa ditelusuri dengan cepat.</p>
+        </div>
+        <a href="{{ route('storefront.shop.index') }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Pilih Produk</a>
+    </div>
+
     <div class="mt-16 grid gap-8 border-t-[3px] border-dashed border-[var(--sf-border)] pt-12 sm:grid-cols-2">
         <div class="neo-panel-tight bg-[var(--sf-yellow)] p-6">
             <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]">{{ $copy['delivery']['eyebrow'] }}</p>
@@ -28,9 +36,9 @@
             <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['delivery']['body'] }}</p>
         </div>
         <div class="neo-panel-tight bg-[var(--sf-blue)] p-6 text-[var(--sf-ink)]">
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]/80">{{ $copy['telegram_support']['eyebrow'] }}</p>
-            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['telegram_support']['title'] }}</h3>
-            <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-ink)]/90">{{ $copy['telegram_support']['body'] }}</p>
+            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]/80">{{ $copy['recovery_access']['eyebrow'] }}</p>
+            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['recovery_access']['title'] }}</h3>
+            <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-ink)]/90">{{ $copy['recovery_access']['body'] }}</p>
         </div>
     </div>
 

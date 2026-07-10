@@ -16,7 +16,7 @@
                     <a href="#alur" class="rounded-md bg-[var(--sf-surface)] px-4 py-2 shadow-[3px_3px_0_var(--sf-shadow)]">Alur</a>
                     <a href="#langkah" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
                     <a href="#bantuan" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>
-                    <a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">@include('storefront.components.telegram-icon', ['class' => 'h-3.5 w-3.5 shrink-0']) <span>Support</span></a>
+                    <a href="{{ route('storefront.order-access.create') }}" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
                 </nav>
             </div>
         </header>
@@ -39,9 +39,9 @@
                         <x-storefront.button href="#langkah" variant="secondary">
                             Lihat langkah
                         </x-storefront.button>
-                        <x-storefront.telegram-link :href="$supportDestination" variant="yellow" :external="false">
-                            Chat support
-                        </x-storefront.telegram-link>
+                        <x-storefront.button :href="route('storefront.order-access.create')" variant="yellow">
+                            Akses pesanan
+                        </x-storefront.button>
                     </div>
                 </div>
 
@@ -136,7 +136,7 @@
                 <div>
                     <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--sf-accent)]">Troubleshooting</p>
                     <h2 class="mt-3 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Kalau gagal, jangan ulang asal-asalan.</h2>
-                    <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Cek penyebab paling sering di bawah ini sebelum mencoba lagi. Kalau tetap buntu, hubungi support dan kirim invoice plus screenshot kendala tanpa membagikan password.</p>
+                    <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Cek penyebab paling sering di bawah ini sebelum mencoba lagi. Simpan invoice dan screenshot kendala pribadi, tetapi jangan pernah membagikan password atau recovery key.</p>
                 </div>
                 <div class="grid gap-4 sm:grid-cols-2">
                     @foreach ($guide['troubleshooting'] as $item)
@@ -161,7 +161,7 @@
                             </li>
                         @endforeach
                     </ul>
-                    <x-storefront.telegram-link :href="$supportDestination" variant="yellow" class="mt-7" :external="false">Butuh bantuan support</x-storefront.telegram-link>
+                    <x-storefront.button :href="route('storefront.order-access.create')" variant="yellow" class="mt-7">Buka akses pesanan</x-storefront.button>
                 </div>
                 <figure class="rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[6px_6px_0_var(--sf-shadow)]">
                     <img src="{{ $guide['images']['security'] }}" alt="Menu Security and login untuk mengganti password dan mengatur ulang MFA" class="w-full rounded-lg border-[3px] border-[var(--sf-border)] bg-white object-contain" loading="lazy">

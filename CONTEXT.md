@@ -1,6 +1,6 @@
 # LhieStore Bot
 
-This context describes the store domain language used by the Telegram bot, especially ordering, catalog access, and public sales-proof communication.
+This context describes the store domain language used by the web storefront and Telegram bot, especially ordering, catalog access, and public sales-proof communication.
 
 ## Language
 
@@ -11,6 +11,14 @@ _Avoid_: Testimonial, review
 **Store Bot**:
 The Telegram bot customers use to browse products and place orders.
 _Avoid_: Channel
+
+**Web Storefront**:
+The public website where customers browse the catalog, check out with QRIS, and access paid digital-account data without a Telegram dependency.
+_Avoid_: Telegram checkout
+
+**Recovery Key**:
+A one-time-displayed customer secret paired with an invoice number to reopen paid digital-account data in the Web Storefront. Only its hash is stored with the order.
+_Avoid_: Password reset token, resendable key
 
 **Store Channel**:
 The Telegram channel customers must join before using the Store Bot, and where sales proof and owner announcements are published.

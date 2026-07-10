@@ -399,20 +399,6 @@ export function storefrontModal() {
             }, 300);
             document.body.style.overflow = '';
         },
-        checkoutManual() {
-            const telegramChoice = this.selectedProduct?.checkout?.telegram;
-
-            if (!telegramChoice?.enabled) {
-                return;
-            }
-
-            const url = new URL(telegramChoice.url, window.location.origin);
-            const requestedQuantity = Number.parseInt(this.quantity, 10) || 1;
-            const availableStock = this.availableStock();
-
-            url.searchParams.set('qty', Math.max(1, Math.min(requestedQuantity, availableStock)));
-            window.location.href = url.toString();
-        },
         decreaseQuantity() {
             this.quantity = Math.max(1, this.quantity - 1);
         },

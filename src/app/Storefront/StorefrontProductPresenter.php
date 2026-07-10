@@ -99,15 +99,6 @@ class StorefrontProductPresenter
                 enabled: true,
                 productId: (int) $product->id,
             ),
-            'telegram_admin' => new StorefrontProductCheckoutChoice(
-                key: 'telegram_admin',
-                label: $copy['telegram_cta'] ?? 'Beli lewat Telegram',
-                description: 'Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.',
-                url: route('storefront.products.payment', $product),
-                method: 'GET',
-                enabled: true,
-                browserAction: 'checkoutManual',
-            ),
         ];
     }
 

@@ -183,7 +183,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('alpha-two@example.test|AlphaSecret2', false)
             ->assertSee('Beta Account')
             ->assertSee('beta@example.test|BetaSecret', false)
-            ->assertSee('Simpan data ini baik-baik dan jangan bagikan ke orang lain.')
+            ->assertSee('Simpan data ini di password manager pribadi atau screenshot pribadi yang aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.')
             ->assertSee('Panduan login & keamanan');
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder, null, false))

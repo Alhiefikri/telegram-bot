@@ -101,6 +101,8 @@
                                         </p>
                                     </div>
 
+                                    <p class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-[11px] font-bold leading-relaxed text-[var(--sf-muted)]">Setelah QRIS dibuat, simpan link invoice ini. Data akses hanya muncul setelah pembayaran terverifikasi.</p>
+
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-xs font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong
                                     </p>
@@ -110,14 +112,6 @@
                                     </button>
                                 </form>
 
-                                <div>
-                                    <button type="button" @click="checkoutManual()" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.telegram || !selectedProduct.checkout.telegram.enabled" class="neo-button hover-tilt-shake flex h-12 w-full select-none items-center justify-center gap-2 bg-white text-sm font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        <span x-text="selectedProduct?.checkout?.telegram?.label || @js($copy['shop']['telegram_cta'])">{{ $copy['shop']['telegram_cta'] }}</span>
-                                    </button>
-                                    <p class="mt-3 text-center text-[10px] font-bold leading-relaxed text-[var(--sf-muted)]" x-text="selectedProduct?.checkout?.telegram?.description || @js('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')">
-                                        Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.
-                                    </p>
-                                </div>
                             </div>
                         </div>
                     </div>

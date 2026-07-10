@@ -10,7 +10,7 @@
                 </div>
                 <div class="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-[var(--sf-ink)] sm:justify-end">
                     <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-3 py-1.5 shadow-[3px_3px_0_var(--sf-shadow)]">QRIS web</span>
-                    <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-3 py-1.5 shadow-[3px_3px_0_var(--sf-shadow)]">Telegram tetap ada</span>
+                    <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-3 py-1.5 shadow-[3px_3px_0_var(--sf-shadow)]">Akses ulang mandiri</span>
                 </div>
             </div>
 

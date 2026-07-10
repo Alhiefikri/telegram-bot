@@ -22,7 +22,6 @@ class StorefrontLoginGuideController extends Controller
             'pageTitle' => 'Panduan Login Akun | '.$brand,
             'pageDescription' => 'Panduan masuk dan mengamankan akun digital Lhie Store memakai Outlook, iCloud, dan Google Authenticator.',
             'canonicalUrl' => route('storefront.login-guide'),
-            'supportDestination' => $this->storefront->supportDestination(),
         ]);
     }
 }

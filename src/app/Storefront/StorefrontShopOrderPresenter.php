@@ -14,7 +14,7 @@ class StorefrontShopOrderPresenter
     /**
      * @return array<string, mixed>
      */
-    public function viewData(Order $order): array
+    public function viewData(Order $order, bool $canRevealCredentials = false, ?string $accessKey = null): array
     {
         $invoice = $this->signedInvoices->read($order);
         $brand = $this->storefront->brand();
@@ -40,6 +40,9 @@ class StorefrontShopOrderPresenter
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
+            'canRevealCredentials' => $canRevealCredentials,
+            'accessKey' => $accessKey,
+            'orderAccessUrl' => route('storefront.order-access.create'),
         ];
     }
 }

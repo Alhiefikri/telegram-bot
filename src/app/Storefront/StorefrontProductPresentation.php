@@ -69,7 +69,6 @@ final readonly class StorefrontProductPresentation
             'cover' => $this->cover->toModalPayload(),
             'checkout' => [
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
-                'telegram' => $this->checkoutChoice('telegram_admin')?->toModalPayload(),
             ],
         ];
     }

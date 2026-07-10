@@ -76,28 +76,6 @@ class StorefrontPresenter
         ];
     }
 
-    public function paymentPageViewData(Product $product, int $quantity, int $subtotal): array
-    {
-        $brand = $this->brand();
-
-        return [
-            'storefront' => $this,
-            'brand' => $brand,
-            'copy' => config('storefront'),
-            'homeUrl' => route('storefront.home'),
-            'pageTitle' => 'Checkout via Telegram Admin | '.$brand,
-            'pageDescription' => 'Lanjutkan checkout produk '.$product->name.' melalui Telegram admin agar order, payment, stok, dan receipt tercatat resmi.',
-            'canonicalUrl' => route('storefront.products.payment', $product),
-            'supportHref' => $this->supportHref(),
-            'supportDestination' => $this->supportDestination(),
-            'adminUsername' => $this->adminTelegramUsername(),
-            'checkoutSupportLink' => $this->checkoutSupportLink($product, $quantity, $subtotal),
-            'product' => $product,
-            'subtotal' => $subtotal,
-            'quantity' => $quantity,
-        ];
-    }
-
     public function productCover(Product $product): array
     {
         return $this->products->present($product)->cover->theme;
@@ -118,11 +96,6 @@ class StorefrontPresenter
     public function productSupportLink(Product $product): string
     {
         return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya ingin tanya ketersediaan akun {$product->name} di Lhie Store.");
-    }
-
-    public function checkoutSupportLink(Product $product, int $quantity, int $subtotal): string
-    {
-        return $this->supportLink("Halo Admin @{$this->adminTelegramUsername()}, saya ingin checkout {$product->name} x{$quantity} via Telegram/Admin. Estimasi produk {$this->idr($subtotal)}. Saya belum transfer; mohon dibuatkan order dan instruksi pembayaran resmi.");
     }
 
     public function descriptionSnippet(Product $product): string

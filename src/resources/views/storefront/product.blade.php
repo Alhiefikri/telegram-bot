@@ -67,8 +67,8 @@
                                     </x-storefront.button>
                                 @endif
 
-                                <x-storefront.button :href="$storefront->productSupportLink($product)" variant="secondary" class="flex-1" data-telegram-link data-icon="telegram">
-                                    Beli lewat Telegram
+                                <x-storefront.button :href="route('storefront.order-access.create')" variant="secondary" class="flex-1">
+                                    Akses Pesanan
                                 </x-storefront.button>
                             </div>
                         </div>

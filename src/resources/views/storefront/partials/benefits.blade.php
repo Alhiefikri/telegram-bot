@@ -2,7 +2,7 @@
     <div class="mx-auto mb-14 max-w-2xl text-center">
         <span class="neo-chip inline-flex px-4 py-2 text-[11px] font-black tracking-[0.08em] text-[var(--sf-ink)]">✦ Trust order</span>
         <h2 class="mt-5 font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Mengapa memilih Lhie Store?</h2>
-        <p class="mx-auto mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Katalognya jelas, stoknya terbaca, dan proses order tetap dibantu manusia di Telegram.</p>
+        <p class="mx-auto mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Katalognya jelas, stoknya terbaca, dan akses pesanan bisa dibuka kembali langsung dari website.</p>
     </div>
 
     <div class="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">

@@ -58,7 +58,7 @@ class StorefrontCatalogPageBuilder
             copy: $copy,
             pageTitle: $isShop ? 'Belanja Produk Digital | Lhie Store' : str_replace(':brand', $brand, $copy['meta']['title']),
             pageDescription: $isShop
-                ? 'Marketplace Lhie Store untuk membeli produk digital & akun premium langsung dari web dengan QRIS atau lewat Telegram.'
+                ? 'Marketplace Lhie Store untuk membeli produk digital dan akun premium langsung dari web dengan QRIS, invoice, dan akses pesanan mandiri.'
                 : $copy['meta']['description'],
             canonicalUrl: $isShop ? route('storefront.shop.index') : url('/'),
             homeUrl: route('storefront.home'),

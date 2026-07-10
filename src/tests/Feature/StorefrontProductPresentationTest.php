@@ -97,7 +97,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNull($presentation->modalPayload());
     }
 
-    public function test_available_product_exposes_website_qris_and_telegram_checkout_choices(): void
+    public function test_available_product_exposes_only_the_website_qris_checkout_choice(): void
     {
         $product = $this->availableProduct([
             'name' => 'CapCut Pro Web',
@@ -107,7 +107,6 @@ class StorefrontProductPresentationTest extends TestCase
         $presentation = app(StorefrontProductPresenter::class)->present($product);
 
         $websiteQris = $presentation->checkoutChoice('website_qris');
-        $telegram = $presentation->checkoutChoice('telegram_admin');
 
         $this->assertNotNull($websiteQris);
         $this->assertSame('Bayar QRIS di Website', $websiteQris->label);
@@ -116,12 +115,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame($product->id, $websiteQris->productId);
         $this->assertTrue($websiteQris->enabled);
 
-        $this->assertNotNull($telegram);
-        $this->assertSame('Beli lewat Telegram', $telegram->label);
-        $this->assertSame('GET', $telegram->method);
-        $this->assertSame(route('storefront.products.payment', $product), $telegram->url);
-        $this->assertSame('checkoutManual', $telegram->browserAction);
-        $this->assertTrue($telegram->enabled);
+        $this->assertNull($presentation->checkoutChoice('telegram_admin'));
     }
 
     public function test_stock_description_and_cover_image_state_are_prepared_consistently(): void
@@ -176,6 +170,6 @@ class StorefrontProductPresentationTest extends TestCase
         ], $payload['stock']);
         $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $payload['sold']);
         $this->assertSame(route('storefront.shop.checkout'), $payload['checkout']['websiteQris']['url']);
-        $this->assertSame(route('storefront.products.payment', $product), $payload['checkout']['telegram']['url']);
+        $this->assertArrayNotHasKey('telegram', $payload['checkout']);
     }
 }

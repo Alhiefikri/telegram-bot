@@ -36,12 +36,13 @@ class StorefrontShopCheckoutTest extends TestCase
     use StorefrontCheckoutScenarios;
     use StorefrontShopAssertions;
 
-    public function test_shop_named_route_contracts_are_registered_without_replacing_legacy_product_routes(): void
+    public function test_shop_named_route_contracts_are_registered(): void
     {
         $this->assertRouteContract('storefront.shop.index', 'GET', 'shop');
         $this->assertRouteContract('storefront.shop.checkout', 'POST', 'shop/checkout');
         $this->assertRouteContract('storefront.products.show', 'GET', 'produk/{product}');
-        $this->assertRouteContract('storefront.products.payment', 'GET', 'produk/{product}/bayar');
+        $this->assertFalse(Route::has('storefront.products.payment'));
+        $this->assertFalse(Route::has('storefront.products.checkout-manual'));
 
         $showRoute = $this->assertRouteContract('storefront.shop.orders.show', 'GET', 'shop/orders/{order}');
         $statusRoute = $this->assertRouteContract('storefront.shop.orders.status', 'POST', 'shop/orders/{order}/status');
@@ -243,7 +244,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 1')
             ->assertSee('Bayar QRIS di Website')
-            ->assertSee('Beli lewat Telegram')
+            ->assertDontSee('Beli lewat Telegram')
             ->assertSee('STOK HABIS')
             ->assertSee('Restock segera')
             ->assertSee('Stok kosong');
@@ -258,7 +259,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringNotContainsString('data-product=', $emptyCard);
     }
 
-    public function test_shop_modal_keeps_telegram_checkout_action(): void
+    public function test_shop_modal_uses_only_the_website_qris_checkout_action(): void
     {
         $this->availableProduct([
             'name' => 'CapCut Pro Web',
@@ -267,9 +268,9 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get(route('storefront.shop.index'))
             ->assertOk()
-            ->assertSee('checkoutManual()', false)
-            ->assertSee('@click="checkoutManual()"', false)
-            ->assertSee('Beli lewat Telegram')
+            ->assertDontSee('checkoutManual()', false)
+            ->assertDontSee('@click="checkoutManual()"', false)
+            ->assertDontSee('Beli lewat Telegram')
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertSee('method="POST"', false)
             ->assertSee('Bayar QRIS di Website');

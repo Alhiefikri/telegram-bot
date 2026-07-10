@@ -24,9 +24,5 @@
         @include('storefront.partials.product-modal')
     </div>
 
-    <div class="hidden sm:block">
-        @include('storefront.partials.floating-support')
-    </div>
-
 </body>
 </html>

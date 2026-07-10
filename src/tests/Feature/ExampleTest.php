@@ -36,7 +36,7 @@ class ExampleTest extends TestCase
 
         $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
 
-        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Support', 'Belanja Web', 'Buka Bot Telegram'] as $customerLinkText) {
+        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Belanja Web', 'Akses Pesanan'] as $customerLinkText) {
             $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
         }
 
@@ -45,12 +45,10 @@ class ExampleTest extends TestCase
         $this->assertStringNotContainsString('Dashboard toko', $mobileMenuHtml);
     }
 
-    public function test_landing_header_and_hero_expose_web_shop_and_configured_telegram_bot_paths(): void
+    public function test_landing_header_and_hero_expose_web_shop_and_order_access_paths(): void
     {
-        $botUrl = 'https://t.me/lhiestore_bot?start=issue122';
-        config(['storefront.links.telegram_bot_url' => $botUrl]);
-
         $shopUrl = route('storefront.shop.index');
+        $accessUrl = route('storefront.order-access.create');
         $html = $this->get('/')->assertOk()->getContent();
         $headerHtml = $this->htmlBetween($html, '<header', '</header>');
         $mobileMenuHtml = $this->htmlBetween($html, '<div id="mobile-menu"', '</header>');
@@ -58,19 +56,13 @@ class ExampleTest extends TestCase
 
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the web shop grid.');
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Belanja Web', 'Desktop header should expose the website checkout path.');
-        $headerTelegramLink = $this->matchingLinkHtml($headerHtml, $botUrl, 'Buka Bot Telegram');
-        $this->assertNotNull($headerTelegramLink, 'Desktop header should expose the configured Telegram bot path.');
-        $this->assertStringContainsString('data-telegram-link', $headerTelegramLink);
+        $this->assertHtmlContainsLink($headerHtml, $accessUrl, 'Akses Pesanan', 'Desktop header should expose repeat order access.');
 
         $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Belanja Web', 'Mobile menu should expose the website checkout path.');
-        $mobileTelegramLink = $this->matchingLinkHtml($mobileMenuHtml, $botUrl, 'Buka Bot Telegram');
-        $this->assertNotNull($mobileTelegramLink, 'Mobile menu should expose the configured Telegram bot path.');
-        $this->assertStringContainsString('data-telegram-link', $mobileTelegramLink);
+        $this->assertHtmlContainsLink($mobileMenuHtml, $accessUrl, 'Akses Pesanan', 'Mobile menu should expose repeat order access.');
 
-        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Belanja Web', 'Hero primary CTA should send customers to the web shop.');
-        $heroTelegramLink = $this->matchingLinkHtml($heroHtml, $botUrl, 'Buka Bot Telegram');
-        $this->assertNotNull($heroTelegramLink, 'Hero secondary CTA should keep the Telegram checkout path visible.');
-        $this->assertStringContainsString('data-telegram-link', $heroTelegramLink);
+        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Lihat Produk', 'Hero primary CTA should send customers to the web shop.');
+        $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
     }
 
     public function test_landing_qris_card_is_explainer_not_static_payable_checkout(): void
@@ -81,7 +73,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('aria-label="Ilustrasi QRIS Lhie Store"', $qrisHtml);
         $this->assertStringContainsString('QRIS Website', $qrisHtml);
         $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
-        $this->assertStringContainsString('Di jalur website, QRIS final muncul di halaman invoice setelah checkout. Jalur Telegram tetap mengikuti instruksi bot/admin.', $qrisHtml);
+        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan recovery key sebelum melanjutkan pembayaran.', $qrisHtml);
         $this->assertStringNotContainsString('Pakasir', $qrisHtml);
         $this->assertHtmlContainsLink($qrisHtml, route('storefront.shop.index'), 'Belanja Web via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
         $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
@@ -101,7 +93,7 @@ class ExampleTest extends TestCase
             ->assertDontSee('Dashboard toko');
     }
 
-    public function test_storefront_telegram_destination_ctas_expose_telegram_marker(): void
+    public function test_storefront_customer_flow_does_not_render_telegram_destination_ctas(): void
     {
         config([
             'services.telegram.admin_contact_url' => 'https://t.me/lhiestore_support',
@@ -111,14 +103,7 @@ class ExampleTest extends TestCase
         $html = $this->get('/')->assertOk()->getContent();
         $telegramLinks = $this->telegramDestinationLinks($html);
 
-        $this->assertNotEmpty($telegramLinks, 'Expected storefront to render Telegram-destination CTAs.');
-
-        foreach ($telegramLinks as $linkHtml) {
-            $this->assertTrue(
-                $this->hasTelegramMarker($linkHtml),
-                'Telegram-destination CTA is missing a visible or semantic Telegram marker: '.$linkHtml,
-            );
-        }
+        $this->assertEmpty($telegramLinks, 'The web checkout flow should not send customers to Telegram.');
     }
 
     public function test_storefront_uses_host_relative_vite_assets(): void
@@ -145,7 +130,7 @@ class ExampleTest extends TestCase
             ->assertDontSee('bg-[#09090b]', false);
     }
 
-    public function test_root_path_renders_trust_payment_telegram_and_faq_content_without_dispatching_webhook_jobs(): void
+    public function test_root_path_renders_trust_payment_and_order_access_content_without_dispatching_webhook_jobs(): void
     {
         Bus::fake([ProcessTelegramUpdate::class]);
         Queue::fake([SendTelegramReceipt::class]);
@@ -156,17 +141,17 @@ class ExampleTest extends TestCase
             ->assertSee('Cara Beli')
             ->assertSee('Panduan Login')
             ->assertSee('FAQ')
-            ->assertSee('Support')
+            ->assertSee('Akses Pesanan')
             ->assertSee('Belanja produk digital dalam tiga langkah')
             ->assertSee('/panduan-login-akun', false)
-            ->assertSee('Pilih produk dari katalog, pilih bayar QRIS website atau Telegram')
+            ->assertSee('Pilih produk dari katalog, checkout sebagai tamu, lalu simpan invoice dan recovery key untuk akses ulang.')
             ->assertSee('Pengiriman digital')
-            ->assertSee('Telegram tetap berjalan untuk order dari bot')
+            ->assertSee('Invoice dan recovery key menjaga akses pesanan.')
             ->assertSee('Produk siap pakai')
             ->assertSee('Tanpa tebak stok')
-            ->assertSee('Order dibantu manusia')
+            ->assertSee('Akses mandiri')
             ->assertSee('Bagaimana cara membeli produk digital di Lhie Store?')
-            ->assertSee('Apakah bot Telegram memproses order dari halaman ini?');
+            ->assertSee('Bagaimana cara membuka data pesanan lagi?');
 
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);
         Queue::assertNotPushed(SendTelegramReceipt::class);
@@ -199,7 +184,7 @@ class ExampleTest extends TestCase
             ->assertOk()
             ->assertSee('Katalog publik sedang disiapkan')
             ->assertSee('Kategori akan segera hadir')
-            ->assertSee('pelanggan bisa menghubungi support')
+            ->assertSee('Cek kembali katalog saat stok produk yang Anda cari tersedia.')
             ->assertSee('Produk populer akan tampil');
     }
 
@@ -289,7 +274,7 @@ class ExampleTest extends TestCase
             ->assertSee('Terjual: 0')
             ->assertSee('Stok: 3')
             ->assertSee(route('storefront.products.show', $product), false)
-            ->assertSee('Support Telegram')
+            ->assertSee('Akses Pesanan')
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
             ->assertDontSee('Secret-333');
@@ -392,7 +377,7 @@ class ExampleTest extends TestCase
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
 
         $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
-        $this->assertStringContainsString('Minta rekomendasi ke support', $featuredHtml);
+        $this->assertStringContainsString('Lihat katalog', $featuredHtml);
         $this->assertStringNotContainsString('Pesan via Admin', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);

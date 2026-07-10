@@ -13,6 +13,7 @@
         <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] lg:flex" aria-label="Navigasi utama">
             <a href="{{ $shopUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
             <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
+            <a href="{{ route('storefront.order-access.create') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
             <a href="{{ route('storefront.login-guide') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan Login</a>
             <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
         </nav>
@@ -20,11 +21,6 @@
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
             <a href="{{ $shopUrl }}" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
                 <span>Belanja Web</span>
-            </a>
-
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-surface)] px-4 py-2 text-xs font-black text-[var(--sf-ink)] sm:inline-flex">
-                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                <span>Buka Bot Telegram</span>
             </a>
 
             <button
@@ -91,21 +87,13 @@
                     <span>FAQ</span>
                 </a>
 
-                <a href="{{ $supportDestination }}" data-telegram-link data-icon="telegram" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
-                    <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[#2d9cff] text-white">
-                        @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                    </span>
-                    <span>Support Telegram</span>
-                </a>
-
-                <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button mt-2 inline-flex min-h-12 items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 text-center text-xs font-black text-white">
-                    @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
-                    <span>Buka Bot Telegram</span>
+                <a href="{{ route('storefront.order-access.create') }}" class="neo-button mt-2 inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-xs font-black text-white">
+                    <span>Akses Pesanan</span>
                 </a>
             </nav>
 
             <div class="border-t-[3px] border-[var(--sf-border)] px-5 py-3 text-center text-[10px] font-bold text-[var(--sf-muted)]">
-                {{ $brand }} · Web + Telegram checkout
+                {{ $brand }} · Checkout dan akses pesanan mandiri
             </div>
         </div>
     </div>

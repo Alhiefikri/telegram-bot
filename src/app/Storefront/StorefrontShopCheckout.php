@@ -28,6 +28,7 @@ class StorefrontShopCheckout
         private readonly PakasirProviderReadiness $readiness,
         private readonly OrderStateMachine $orderStates,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
+        private readonly StorefrontOrderAccess $orderAccess,
     ) {}
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
@@ -48,7 +49,7 @@ class StorefrontShopCheckout
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
-            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing));
+            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey());
         }
 
         $product = $this->product($input->productId);
@@ -95,10 +96,13 @@ class StorefrontShopCheckout
 
         $payment->refresh();
         $order->refresh();
+        $recoveryKey = $this->orderAccess->issue($order);
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(
             redirectUrl: $this->invoiceUrls->show($order),
+            orderId: $order->getKey(),
+            recoveryKey: $recoveryKey,
         );
     }
 

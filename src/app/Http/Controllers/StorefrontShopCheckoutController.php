@@ -6,6 +6,8 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Http\Requests\StorefrontShopCheckoutRequest;
+use App\Models\Order;
+use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use Illuminate\Http\RedirectResponse;
@@ -13,7 +15,7 @@ use Illuminate\Support\Str;
 
 class StorefrontShopCheckoutController extends Controller
 {
-    public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout): RedirectResponse
+    public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout, StorefrontOrderAccess $orderAccess): RedirectResponse
     {
         try {
             $session = $request->session();
@@ -33,6 +35,13 @@ class StorefrontShopCheckoutController extends Controller
                 ->withInput()
                 ->with('storefront_checkout_error', $exception->getMessage())
                 ->withErrors(['product_id' => $exception->getMessage()]);
+        }
+
+        if ($result->orderId !== null && $result->recoveryKey !== null) {
+            $order = Order::find($result->orderId);
+            if ($order !== null) {
+                $orderAccess->rememberIssuedKey($request, $order, $result->recoveryKey);
+            }
         }
 
         return redirect()->to($result->redirectUrl);

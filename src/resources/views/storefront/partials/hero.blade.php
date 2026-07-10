@@ -1,4 +1,4 @@
-<section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[calc(100dvh-5rem)] max-w-6xl items-center justify-center px-5 py-14 sm:px-6 lg:min-h-[760px] lg:pb-16 lg:pt-12">
+<section class="storefront-hero-card hero-preview-panel relative mx-auto flex min-h-[calc(100dvh-5rem)] max-w-6xl items-center justify-center px-5 py-10 sm:px-6 lg:min-h-[700px] lg:pb-14 lg:pt-8">
     <div class="floating-ai-field" aria-hidden="true">
         <span class="floating-ai-icon hidden md:inline-flex left-[4%] top-[10%] text-[var(--sf-yellow)]">✦</span>
         <span class="floating-ai-icon hidden sm:inline-flex left-[18%] bottom-[20%] h-8 w-8 rotate-45 rounded-sm bg-[#b7dcff]"></span>
@@ -15,12 +15,9 @@
             <img src="{{ Vite::asset('resources/images/lhie-store-logo.webp') }}" alt="Logo Lhie Store" width="900" height="810" fetchpriority="high" class="hero-logo-image">
         </div>
 
-        <div class="neo-chip mt-3 inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
-            <span class="h-2 w-2 rounded-full bg-[var(--sf-green)]"></span>
-            {{ $catalogPage->productCount() }} produk aktif
-        </div>
+        <p class="mt-4 text-sm font-black text-[var(--sf-accent)]">{{ $catalogPage->productCount() }} produk aktif siap dipilih</p>
 
-        <h1 class="mx-auto mt-4 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">
+        <h1 class="mx-auto mt-3 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">
             {{ $copy['hero']['headline'] }}
         </h1>
 
@@ -33,26 +30,11 @@
             <a href="{{ route('storefront.shop.index') }}" class="neo-button hover-rubber-band inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
                 <span>{{ $copy['hero']['primary_cta'] }}</span>
             </a>
-            <a href="{{ $storefront->telegramBotHref() }}" data-telegram-link data-icon="telegram" class="neo-button hover-tilt-shake inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
-                @include('storefront.components.telegram-icon', ['class' => 'h-4 w-4 shrink-0'])
+            <a href="#cara-beli" class="neo-button hover-tilt-shake inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">
                 <span>{{ $copy['hero']['secondary_cta'] }}</span>
             </a>
         </div>
 
-        <div class="mx-auto mt-5 grid max-w-sm gap-3">
-            <a href="{{ route('storefront.shop.index') }}" class="hero-contact-tile group flex items-center gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[#dff8ea] p-3 text-left shadow-[5px_5px_0_var(--sf-shadow)] transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
-                <span class="grid h-10 w-10 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] text-[var(--sf-ink)]">
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h10v10H7z" /><path stroke-linecap="round" stroke-linejoin="round" d="M4 12h16" /></svg>
-                </span>
-                <span>
-                    <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Web + Telegram</span>
-                    <span class="block text-sm font-black text-[var(--sf-ink)]">Bayar QRIS web atau lanjut bot</span>
-                </span>
-            </a>
-        </div>
-
-        <a href="{{ route('storefront.shop.index') }}" class="mt-9 inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--sf-muted)] transition-transform duration-300 hover:translate-y-1 hover:text-[var(--sf-ink)]" aria-label="{{ $copy['hero']['tertiary_cta'] }}">
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
-        </a>
+        <p class="mx-auto mt-5 max-w-md text-xs font-bold leading-relaxed text-[var(--sf-muted)]">Checkout web tidak memerlukan akun. Simpan invoice dan recovery key agar data pesanan bisa dibuka kembali.</p>
     </div>
 </section>
