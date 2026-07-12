@@ -17,15 +17,13 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
   - Production Docker image build check.
 
-- `.github/workflows/admin-asset-smoke.yml`
-  - Kept as a focused guard for the existing admin asset smoke contract.
-
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.
-  - Runs release gate first: PHP tests, asset smoke, and a CI-parity Docker image build.
+  - Pins the deployment to the dispatched revision (or an explicitly supplied full commit SHA), requires that SHA to be contained in `main`, and requires a successful `CI` workflow run for that exact SHA.
+  - Does not rerun Composer, NPM, PHPUnit, asset smoke, or the CI-parity Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
-  - Builds the production image on the VPS after checking out `origin/main`, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This is the explicit image provenance decision: the VPS rebuild is the gated release artifact because production secrets and the deploy host stay local to the VPS, while the GitHub Actions image build remains a CI parity check and is not deployed.
+  - Builds the production image on the VPS after checking out the pinned SHA, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This preserves the VPS build as the release artifact because production secrets and the deploy host stay local to the VPS.
   - Verifies app health, scheduler heartbeat, failed jobs, queue depth, Telegram webhook external registration, and absence of duplicate running Telegram Bot Compose projects after deploy.
 
 ## Required GitHub secrets

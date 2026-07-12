@@ -2,12 +2,20 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact main commit SHA to deploy; defaults to the dispatched main revision.
+        required: false
+        default: ''
+        type: string
 
 env:
   DEPLOY_BRANCH: main
+  DEPLOY_SHA: ${{ inputs.commit || github.sha }}
   COMPOSE_PROJECT_NAME: telegram-bot-prod
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -19,15 +27,8 @@ jobs:
     name: Release gate
     runs-on: ubuntu-latest
     env:
-      APP_ENV: testing
-      APP_FORCE_HTTPS: false
-    defaults:
-      run:
-        working-directory: src
+      TARGET_SHA: ${{ env.DEPLOY_SHA }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Require manual deploy from main
         run: |
           set -euo pipefail
@@ -36,49 +37,29 @@ jobs:
             exit 1
           fi
 
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: bcmath, gd, intl, pdo_sqlite, sqlite3, zip
-          coverage: none
-          tools: composer:v2
+          case "$TARGET_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "Deployment commit must be a full lowercase SHA: $TARGET_SHA"; exit 1 ;;
+          esac
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: src/package-lock.json
-
-      - name: Cache Composer downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.composer/cache/files
-          key: composer-${{ runner.os }}-${{ hashFiles('src/composer.lock') }}
-          restore-keys: |
-            composer-${{ runner.os }}-
-
-      - name: Install dependencies
+      - name: Require successful CI for deployment commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          composer validate --strict --no-check-publish
-          composer install --no-interaction --prefer-dist --no-progress
-          npm ci
+          set -euo pipefail
+          main_status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TARGET_SHA}...${DEPLOY_BRANCH}" --jq '.status')"
+          case "$main_status" in
+            identical|ahead) ;;
+            *) echo "Deployment commit $TARGET_SHA is not contained in ${DEPLOY_BRANCH}."; exit 1 ;;
+          esac
 
-      - name: Prepare Laravel test environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate --ansi
-          mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
+          ci_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&status=completed&per_page=100" --jq '.workflow_runs | map(select(.conclusion == "success")) | .[0].id // empty')"
+          if [ -z "$ci_run_id" ]; then
+            echo "CI has not succeeded for deployment commit $TARGET_SHA. Push the commit to ${DEPLOY_BRANCH} and wait for CI."
+            exit 1
+          fi
 
-      - name: Build assets and run tests
-        run: |
-          ../scripts/smoke-admin-assets.sh
-          composer test
-
-      - name: Build production Docker image for CI parity
-        working-directory: ${{ github.workspace }}
-        run: docker build --pull -t telegram-bot:${{ github.sha }} .
+          echo "Using successful CI run $ci_run_id for $TARGET_SHA."
 
   deploy:
     name: Deploy to production VPS
@@ -113,13 +94,14 @@ jobs:
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
 
           git fetch --prune origin "$DEPLOY_BRANCH"
-          git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
-          git reset --hard "origin/$DEPLOY_BRANCH"
+          git cat-file -e "${DEPLOY_SHA}^{commit}"
+          git checkout --detach "$DEPLOY_SHA"
+          git reset --hard "$DEPLOY_SHA"
 
           ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull
