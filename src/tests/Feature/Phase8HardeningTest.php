@@ -409,13 +409,14 @@ SH);
         $this->assertStringNotContainsString('resources/css/filament/admin/theme.css', $contents);
     }
 
-    public function test_admin_asset_smoke_workflow_uses_no_production_credentials(): void
+    public function test_ci_asset_smoke_uses_no_production_credentials(): void
     {
-        $workflow = base_path('../.github/workflows/admin-asset-smoke.yml');
+        $workflow = base_path('../.github/workflows/ci.yml');
 
         $this->assertFileExists($workflow);
 
         $contents = file_get_contents($workflow);
+        $this->assertStringContainsString('name: Frontend build and asset smoke', $contents);
         $this->assertStringContainsString('../scripts/smoke-admin-assets.sh', $contents);
         $this->assertStringContainsString('npm ci', $contents);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
@@ -430,6 +431,9 @@ SH);
         $contents = file_get_contents($workflow);
         $this->assertStringContainsString('DEPLOY_BRANCH: main', $contents);
         $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
+        $this->assertStringContainsString('DEPLOY_SHA: ${{ inputs.commit || github.sha }}', $contents);
+        $this->assertStringContainsString('actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}', $contents);
+        $this->assertStringContainsString('git checkout --detach "$DEPLOY_SHA"', $contents);
         $this->assertStringContainsString('./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env', $contents);
         $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull', $contents);
         $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans', $contents);
