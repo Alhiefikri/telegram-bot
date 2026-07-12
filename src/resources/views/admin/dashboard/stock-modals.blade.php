@@ -59,7 +59,7 @@
                         </div>
 
                         <x-admin-dashboard.notice tone="neutral" x-show="manageStockTruncated" class="mb-2 rounded-[0.45rem] p-2 text-[11px]">
-                            25 akun pertama ditampilkan. Hapus/edit yang lama dulu untuk melihat sisanya.
+                            Ringkasan menghitung semua akun. Hanya 25 akun terbaru per status yang ditampilkan di riwayat.
                         </x-admin-dashboard.notice>
 
                         <div class="space-y-3">

@@ -39,19 +39,27 @@ final class AdminDashboardProductsData
             ->get();
 
         $productIds = $products->pluck('id')->all();
-        $stockItemCounts = $includeManageableStockItems
+        $stockItemsTable = (new ProductStockItem)->getTable();
+        $stockItemSummaries = $includeManageableStockItems
             ? ProductStockItem::query()
-                ->whereIn('product_id', $productIds)
-                ->selectRaw('product_id, count(*) as aggregate')
-                ->groupBy('product_id')
-                ->pluck('aggregate', 'product_id')
+                ->whereIn("{$stockItemsTable}.product_id", $productIds)
+                ->leftJoin('order_items', "{$stockItemsTable}.order_item_id", '=', 'order_items.id')
+                ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
+                ->select("{$stockItemsTable}.product_id")
+                ->selectRaw('count(*) as total')
+                ->selectRaw("sum(case when {$stockItemsTable}.order_item_id is null then 1 else 0 end) as available")
+                ->selectRaw("sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved", [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+                ->selectRaw("sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid", [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+                ->groupBy("{$stockItemsTable}.product_id")
+                ->get()
+                ->keyBy('product_id')
             : collect();
         if ($includeManageableStockItems) {
             $this->loadOrderedStockItems($products);
         }
 
         return $products
-            ->map(function (Product $product) use ($stockItemCounts, $includeManageableStockItems): array {
+            ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems): array {
                 $descriptionSections = $this->descriptionSections->decode($product->description);
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
@@ -60,7 +68,10 @@ final class AdminDashboardProductsData
                         ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
                         ->all()
                     : [];
-                $stockSummary = $this->stockSummary($stockItems);
+                $summary = $stockItemSummaries->get($product->id);
+                $stockSummary = $includeManageableStockItems
+                    ? ['available' => (int) ($summary?->available ?? 0), 'reserved' => (int) ($summary?->reserved ?? 0), 'paid' => (int) ($summary?->paid ?? 0)]
+                    : ['available' => 0, 'reserved' => 0, 'paid' => 0];
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
                 $updateUrl = route('admin.products.update', ['product' => $product]);
 
@@ -79,7 +90,7 @@ final class AdminDashboardProductsData
                     'reserved_stock' => $product->reserved_stock,
                     'available_stock' => $availableStock,
                     'available_stock_item_count' => $availableStockItemCount,
-                    'stock_items_truncated' => (int) ($stockItemCounts[$product->id] ?? 0) > count($stockItems),
+                    'stock_items_truncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                     'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
                     'status_label' => $product->is_active ? 'Aktif' : 'Pause',
@@ -117,7 +128,7 @@ final class AdminDashboardProductsData
                         'stock' => $product->stock,
                         'availableStockItemCount' => $availableStockItemCount,
                         'stockSummary' => $stockSummary,
-                        'stockItemsTruncated' => (int) ($stockItemCounts[$product->id] ?? 0) > count($stockItems),
+                        'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
                     ],
                 ];
@@ -152,7 +163,7 @@ final class AdminDashboardProductsData
                     END",
                     [PaymentStatus::Paid->value, PaymentStatus::Paid->value, OrderStatus::PendingPayment->value],
                 )
-                ->orderBy("{$stockItemsTable}.id")
+                ->orderByDesc("{$stockItemsTable}.id")
                 ->limit(25);
         }]);
     }
@@ -213,14 +224,6 @@ final class AdminDashboardProductsData
         };
     }
 
-    private function stockSummary(array $stockItems): array
-    {
-        return [
-            'available' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'TERSEDIA')),
-            'reserved' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'DIPESAN')),
-            'paid' => count(array_filter($stockItems, fn (array $item): bool => $item['status'] === 'PAID')),
-        ];
-    }
 
     private function productStatusBadge(bool $isActive): array
     {

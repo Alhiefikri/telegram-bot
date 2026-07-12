@@ -112,6 +112,40 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame('INV-PAID', $payload['stockItems'][3]['invoice']);
     }
 
+    public function test_manage_stock_data_keeps_latest_paid_credential_visible_after_25_item_history_limit(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $product = Product::factory()->create(['name' => 'Credential History Vault', 'stock' => 26]);
+
+        foreach (range(1, 25) as $sequence) {
+            $olderPaidOrder = Order::factory()->create([
+                'invoice_number' => sprintf('INV-PAID-OLDER-%02d', $sequence),
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+            ]);
+            $olderPaidOrder->payments()->create(['provider' => 'manual', 'merchant_ref' => sprintf('MR-PAID-OLDER-%02d', $sequence), 'method' => 'manual', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Paid, 'paid_at' => now()->subMinute()]);
+            $olderPaidItem = OrderItem::factory()->create(['order_id' => $olderPaidOrder->id, 'product_id' => $product->id]);
+            ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $olderPaidItem->id, 'secret' => sprintf('older-paid-%02d@example.test|pass', $sequence)]);
+        }
+
+        $latestPaidOrder = Order::factory()->create([
+            'invoice_number' => 'INV-PAID-LATEST',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $latestPaidOrder->payments()->create(['provider' => 'manual', 'merchant_ref' => 'MR-PAID-LATEST', 'method' => 'manual', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Paid, 'paid_at' => now()]);
+        $latestPaidItem = OrderItem::factory()->create(['order_id' => $latestPaidOrder->id, 'product_id' => $product->id]);
+        $latestPaidStockItem = ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $latestPaidItem->id, 'secret' => 'latest-paid@example.test|pass']);
+
+        $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
+        $this->assertSame(26, $payload['stockSummary']['paid']);
+
+        $stockItemsById = array_column($payload['stockItems'], null, 'id');
+
+        $this->assertArrayHasKey($latestPaidStockItem->id, $stockItemsById);
+        $this->assertSame('INV-PAID-LATEST', $stockItemsById[$latestPaidStockItem->id]['invoice']);
+    }
+
     public function test_dashboard_cancel_release_pending_order_restores_credential_stock(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
