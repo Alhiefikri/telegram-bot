@@ -17,7 +17,7 @@ class TelegramMessageRouter
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramAdminAccess $adminAccess,
-        private TelegramBroadcastService $broadcast,
+        private TelegramBroadcastIntents $broadcasts,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
     ) {}
@@ -36,7 +36,7 @@ class TelegramMessageRouter
         if ($text === '/start') {
             $this->session->forget($customer);
             $this->menu->sendWelcome($customer, $chatId);
-            $this->menu->sendMainMenu($customer, $chatId);
+            $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
             return;
         }
@@ -56,7 +56,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/menu', '☰ Menu'], true)) {
             $this->session->forget($customer);
-            $this->menu->sendMainMenu($customer, $chatId);
+            $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
             return;
         }
@@ -70,36 +70,14 @@ class TelegramMessageRouter
 
         if ($text === '📣 Broadcast Info') {
             $this->session->forget($customer);
-            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
-                $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
-
-                return;
-            }
-
-            $this->bot->sendMessage($chatId, "📣 Broadcast Info\n━━━━━━━━━━━━━━\nKirim pesan broadcast dengan format:\n\n/broadcast isi pesan\n\nContoh:\n/broadcast Stok Netflix sudah ready lagi.");
+            $this->broadcasts->handleMenu($customer, $chatId);
 
             return;
         }
 
         if ($text === '/broadcast' || str_starts_with($text, '/broadcast ')) {
             $this->session->forget($customer);
-            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
-                $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
-
-                return;
-            }
-
-            $message = trim(substr($text, strlen('/broadcast')));
-            if ($message === '') {
-                $this->bot->sendMessage($chatId, "Isi broadcast-nya belum ada.\n\nGunakan format:\n/broadcast isi pesan");
-
-                return;
-            }
-
-            $result = $this->broadcast->sendToActiveUsers($message);
-            $this->bot->sendMessage($chatId, $result['skipped']
-                ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
-                : "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: {$result['sent']}\nGagal: {$result['failed']}");
+            $this->broadcasts->handleCommand($customer, $chatId, $text);
 
             return;
         }
@@ -202,8 +180,9 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '👤 Akun Saya', '/batal', '/payment', '/status', '/pesanan', '📦 Pesanan', '/riwayat', '/order'], true)
+        return in_array($text, ['/akun', '👤 Akun Saya', '/batal', '/payment', '/status', '/pesanan', '📦 Pesanan', '/riwayat', '/order', '/broadcast', '📣 Broadcast Info'], true)
             || str_starts_with($text, '/payment ')
-            || str_starts_with($text, '/order ');
+            || str_starts_with($text, '/order ')
+            || str_starts_with($text, '/broadcast ');
     }
 }

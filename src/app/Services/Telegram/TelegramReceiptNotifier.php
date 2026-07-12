@@ -45,7 +45,7 @@ class TelegramReceiptNotifier
                 return;
             }
 
-            $claimed->loadMissing(['customer', 'orderItems.stockItems']);
+            $claimed->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
             if (! $claimed->customer?->telegram_id) {
                 return;
             }
@@ -113,6 +113,12 @@ class TelegramReceiptNotifier
             $lines[] = $item->product_name;
             foreach ($item->stockItems->values() as $index => $stockItem) {
                 $lines[] = ($index + 1).'. '.$stockItem->secret;
+            }
+            $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
+            if ($deliveryNote !== '') {
+                $lines[] = '';
+                $lines[] = '📌 Catatan pengiriman:';
+                $lines[] = $deliveryNote;
             }
             $lines[] = '';
         }

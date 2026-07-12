@@ -35,6 +35,7 @@ class TelegramCallbackRouter
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
+        private TelegramBroadcastIntents $broadcasts,
     ) {}
 
     public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private'): void
@@ -65,6 +66,10 @@ class TelegramCallbackRouter
         if (! $this->chatPrivacy->isPrivate($chatType) && ! $this->isNonPrivateSafeCallback($data)) {
             $this->chatPrivacy->denyCallback($id);
 
+            return;
+        }
+
+        if ($this->broadcasts->handleCallback($customer, $chatId, $id, $data)) {
             return;
         }
 

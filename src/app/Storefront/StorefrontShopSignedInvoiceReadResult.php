@@ -8,7 +8,7 @@ use App\Models\Payment;
 class StorefrontShopSignedInvoiceReadResult
 {
     /**
-     * @param  list<array{product_name: string, secrets: list<string>}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<string>, delivery_note: ?string}>  $accountGroups
      */
     public function __construct(
         public readonly Order $order,

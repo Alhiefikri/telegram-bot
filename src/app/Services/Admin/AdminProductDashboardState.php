@@ -58,16 +58,12 @@ class AdminProductDashboardState
                 'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
-                'productFeatures' => old('features', $editingProduct['features'] ?? ''),
-                'productSpecifications' => old('specifications', $editingProduct['specifications'] ?? ''),
+                'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
                 'productIsActive' => (bool) old('is_active', $editingProduct['is_active'] ?? true),
                 'productImageUrl' => $editingProduct['image_url'] ?? '',
-                'productFeaturesOpen' => $productCreateErrors->has('features')
-                    || $productUpdateErrors->has('features')
-                    || trim((string) old('features', $editingProduct['features'] ?? '')) !== '',
-                'productSpecificationsOpen' => $productCreateErrors->has('specifications')
-                    || $productUpdateErrors->has('specifications')
-                    || trim((string) old('specifications', $editingProduct['specifications'] ?? '')) !== '',
+                'productDeliveryNoteOpen' => $productCreateErrors->has('delivery_note')
+                    || $productUpdateErrors->has('delivery_note')
+                    || trim((string) old('delivery_note', $editingProduct['delivery_note'] ?? '')) !== '',
             ],
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
             'stockForm' => [

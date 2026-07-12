@@ -12,7 +12,7 @@ use Illuminate\Support\Collection;
 
 final class AdminDashboardProductsData
 {
-    public function __construct(private readonly ProductDescriptionSectionProtocol $descriptionSections, private readonly ProductImageOptimizer $images) {}
+    public function __construct(private readonly ProductImageOptimizer $images) {}
 
     /**
      * @return array<string, mixed>
@@ -31,7 +31,7 @@ final class AdminDashboardProductsData
     {
         $products = Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->latest()
@@ -48,8 +48,8 @@ final class AdminDashboardProductsData
                 ->select("{$stockItemsTable}.product_id")
                 ->selectRaw('count(*) as total')
                 ->selectRaw("sum(case when {$stockItemsTable}.order_item_id is null then 1 else 0 end) as available")
-                ->selectRaw("sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved", [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
-                ->selectRaw("sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid", [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+                ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+                ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
                 ->groupBy("{$stockItemsTable}.product_id")
                 ->get()
                 ->keyBy('product_id')
@@ -60,7 +60,6 @@ final class AdminDashboardProductsData
 
         return $products
             ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems): array {
-                $descriptionSections = $this->descriptionSections->decode($product->description);
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
@@ -79,9 +78,8 @@ final class AdminDashboardProductsData
                     'id' => $product->id,
                     'category_id' => $product->category_id,
                     'name' => $product->name,
-                    'description' => $descriptionSections['description'],
-                    'features' => $descriptionSections['features'],
-                    'specifications' => $descriptionSections['specifications'],
+                    'description' => $product->description,
+                    'delivery_note' => $product->delivery_note,
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
                     'fake_discount_price' => $product->fake_discount_price,
@@ -118,9 +116,8 @@ final class AdminDashboardProductsData
                         'priceAmount' => $product->price_amount,
                         'fakeDiscountPrice' => $product->fake_discount_price,
                         'categoryId' => $product->category_id,
-                        'description' => $descriptionSections['description'],
-                        'features' => $descriptionSections['features'],
-                        'specifications' => $descriptionSections['specifications'],
+                        'description' => $product->description,
+                        'deliveryNote' => $product->delivery_note,
                         'isActive' => $product->is_active,
                         'imageUrl' => $this->images->publicUrl($product->image_path),
                         'updateUrl' => $updateUrl,
@@ -223,7 +220,6 @@ final class AdminDashboardProductsData
             default => $order->invoice_number,
         };
     }
-
 
     private function productStatusBadge(bool $isActive): array
     {

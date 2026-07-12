@@ -23,7 +23,7 @@ class StorefrontShopSignedInvoice
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
     {
-        $order->loadMissing(['customer', 'orderItems.stockItems']);
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
 
         $payment = $this->latestPayment($order);
         $state = $this->state($order, $payment);
@@ -141,7 +141,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @return list<array{product_name: string, secrets: list<string>}>
+     * @return list<array{product_name: string, secrets: list<string>, delivery_note: ?string}>
      */
     private function accountGroups(Order $order, StorefrontShopSignedInvoiceState $state): array
     {
@@ -152,6 +152,7 @@ class StorefrontShopSignedInvoice
         return $order->orderItems
             ->map(fn (OrderItem $item): array => [
                 'product_name' => (string) $item->product_name,
+                'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
                 'secrets' => $item->stockItems
                     ->map(fn ($stockItem): string => (string) $stockItem->secret)
                     ->filter(fn (string $secret): bool => trim($secret) !== '')

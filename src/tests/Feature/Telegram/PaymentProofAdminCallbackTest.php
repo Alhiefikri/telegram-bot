@@ -221,7 +221,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         Customer::factory()->create(['telegram_id' => 54321, 'username' => 'other']);
-        $product = Product::factory()->create(['name' => 'Netflix Premium', 'stock' => 0, 'reserved_stock' => 0]);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'delivery_note' => 'Ganti password dan MFA setelah berhasil login.', 'stock' => 0, 'reserved_stock' => 0]);
         app(StockAdjustmentService::class)->adjust($product, 1, 'seed credential', null, null, [
             'email: buyer@example.test | password: Secret-123',
         ]);
@@ -236,6 +236,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && $r['chat_id'] === 12345
             && str_contains((string) $r['text'], 'Pembayaran diterima')
             && str_contains((string) $r['text'], 'email: buyer@example.test | password: Secret-123')
+            && str_contains((string) $r['text'], 'Ganti password dan MFA setelah berhasil login.')
             && str_contains((string) $r['text'], 'Bingung cara masuk dan amankan akunnya?')
             && str_contains((string) $r['text'], route('storefront.login-guide'))
             && (($r['reply_markup']['inline_keyboard'][0][0]['url'] ?? null) === route('storefront.login-guide')));
@@ -257,18 +258,39 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 111]);
         Customer::factory()->create(['telegram_id' => 222]);
+        $product = Product::factory()->create(['name' => 'Canva Pro', 'price_amount' => 75000, 'stock' => 3]);
 
         $this->postTelegramWebhook($this->messageUpdate(224, '/broadcast Stok Canva ready malam ini.', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '999'
+            && str_contains((string) $r['text'], 'Preview broadcast'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && in_array((string) ($r['chat_id'] ?? ''), ['111', '222'], true)
+            && str_contains((string) ($r['text'] ?? ''), 'Stok Canva ready malam ini.'));
+
+        $this->postTelegramWebhook($this->callbackUpdate(225, 'broadcast-picker', 'broadcast:pick:1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', 'broadcast:select:'.$product->id.':1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
         foreach ([111, 222, 999] as $chatId) {
             Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
                 && (string) $r['chat_id'] === (string) $chatId
-                && str_contains((string) $r['text'], 'Stok Canva ready malam ini.'));
+                && str_contains((string) $r['text'], 'Stok Canva ready malam ini.')
+                && (($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$product->id));
         }
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
             && str_contains((string) $r['text'], "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: 3\nGagal: 0"));
+
+        $this->postTelegramWebhook($this->callbackUpdate(228, 'broadcast-send-again', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $recipientMessages = collect(Http::recorded())
+            ->filter(fn (array $record): bool => str_ends_with($record[0]->url(), '/sendMessage')
+                && in_array((string) ($record[0]['chat_id'] ?? ''), ['111', '222'], true)
+                && str_contains((string) ($record[0]['text'] ?? ''), 'Stok Canva ready malam ini.'));
+        $this->assertCount(2, $recipientMessages);
     }
 
     public function test_non_admin_cannot_approve_manual_payment_callback(): void
@@ -452,6 +474,38 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(TelegramReceiptNotifier::class)->send($order);
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && $r['chat_id'] === 777 && str_contains($r['text'], 'Pembayaran diterima'));
+    }
+
+    public function test_legacy_pending_order_uses_current_product_delivery_note_as_fallback(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 778]);
+        $product = Product::factory()->create(['name' => 'Legacy Account', 'delivery_note' => 'Catatan fallback untuk order lama.']);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'payment_status' => PaymentStatus::Paid,
+            'order_status' => OrderStatus::Completed,
+        ]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        $item = OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'delivery_note' => null,
+            'delivery_note_snapshotted' => false,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'secret' => 'legacy@example.test|Password',
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '778'
+            && str_contains((string) $r['text'], 'legacy@example.test|Password')
+            && str_contains((string) $r['text'], 'Catatan fallback untuk order lama.'));
     }
 
     public function test_receipt_retry_skips_started_send_after_worker_crash(): void

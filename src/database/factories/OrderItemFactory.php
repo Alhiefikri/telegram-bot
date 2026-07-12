@@ -14,6 +14,6 @@ class OrderItemFactory extends Factory
 
     public function definition(): array
     {
-        return ['order_id' => Order::factory(), 'product_id' => Product::factory(), 'product_name' => fake()->words(2, true), 'quantity' => 1, 'unit_price' => 10000, 'subtotal' => 10000];
+        return ['order_id' => Order::factory(), 'product_id' => Product::factory(), 'product_name' => fake()->words(2, true), 'delivery_note' => null, 'delivery_note_snapshotted' => false, 'quantity' => 1, 'unit_price' => 10000, 'subtotal' => 10000];
     }
 }

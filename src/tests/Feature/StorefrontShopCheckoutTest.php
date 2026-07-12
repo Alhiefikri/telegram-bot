@@ -565,6 +565,7 @@ class StorefrontShopCheckoutTest extends TestCase
             secrets: ['account@example.test|pass'],
             attributes: [
                 'name' => 'Allocated Account Product',
+                'delivery_note' => 'Ganti password dan MFA setelah login pertama.',
                 'price_amount' => 42000,
                 'stock' => 1,
             ],
@@ -577,6 +578,8 @@ class StorefrontShopCheckoutTest extends TestCase
         );
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
 
+        $product->update(['delivery_note' => 'Catatan baru yang tidak boleh diterima pembeli lama.']);
+
         app(OrderStateMachine::class)->markPaymentPaid($payment);
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
@@ -584,7 +587,11 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Data akun')
             ->assertSee('Allocated Account Product')
             ->assertSee('account@example.test|pass', false)
+            ->assertSee('Ganti password dan MFA setelah login pertama.')
+            ->assertDontSee('Catatan baru yang tidak boleh diterima pembeli lama.')
             ->assertSee('Panduan login & keamanan');
+        $this->assertSame('Ganti password dan MFA setelah login pertama.', $order->orderItems()->sole()->delivery_note);
+        $this->assertTrue($order->orderItems()->sole()->delivery_note_snapshotted);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }

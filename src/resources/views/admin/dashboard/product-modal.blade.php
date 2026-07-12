@@ -155,71 +155,37 @@
                             @enderror
                         </x-admin-dashboard.card>
 
-                        <div class="grid gap-3">
-                            <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
-                                <div class="flex items-center justify-between gap-3">
-                                    <div>
-                                        <p class="font-display text-sm font-extrabold text-neo-ink">✨ Fitur utama</p>
-                                        <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productFeaturesOpen">Tap “+ tambah” untuk menambah fitur.</p>
-                                    </div>
-                                    <x-admin-dashboard.button
-                                        type="button"
-                                        variant="primary"
-                                        size="sm"
-                                        class="min-h-9 px-2 py-1 text-[10px]"
-                                        x-on:click="productFeaturesOpen = ! productFeaturesOpen"
-                                        x-text="productFeaturesOpen ? 'Tutup' : '+ Tambah'"
-                                    >+ Tambah</x-admin-dashboard.button>
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <div class="flex items-center justify-between gap-3">
+                                <div>
+                                    <p class="font-display text-sm font-extrabold text-neo-ink">🔐 Catatan pengiriman rahasia</p>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productDeliveryNoteOpen">Hanya dikirim ke pembeli setelah pembayaran dan data akun tersedia.</p>
                                 </div>
+                                <x-admin-dashboard.button
+                                    type="button"
+                                    variant="primary"
+                                    size="sm"
+                                    class="min-h-9 px-2 py-1 text-[10px]"
+                                    x-on:click="productDeliveryNoteOpen = ! productDeliveryNoteOpen"
+                                    x-text="productDeliveryNoteOpen ? 'Tutup' : '+ Tambah'"
+                                >+ Tambah</x-admin-dashboard.button>
+                            </div>
 
-                                <div class="mt-3" x-show="productFeaturesOpen" x-transition>
-                                    <x-admin-dashboard.textarea
-                                        name="features"
-                                        rows="3"
-                                        placeholder="Satu fitur per baris"
-                                        x-model="productFeatures"
-                                    />
-                                    @error('features', 'productCreate')
-                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                    @enderror
-                                    @error('features', 'productUpdate')
-                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                    @enderror
-                                </div>
-                            </x-admin-dashboard.card>
-
-                            <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
-                                <div class="flex items-center justify-between gap-3">
-                                    <div>
-                                        <p class="font-display text-sm font-extrabold text-neo-ink">🌐 Paket / spesifikasi</p>
-                                        <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productSpecificationsOpen">Opsional. Cocok untuk produk multi-tier.</p>
-                                    </div>
-                                    <x-admin-dashboard.button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        class="min-h-9 px-2 py-1 text-[10px]"
-                                        x-on:click="productSpecificationsOpen = ! productSpecificationsOpen"
-                                        x-text="productSpecificationsOpen ? 'Tutup' : '+ Paket'"
-                                    >+ Paket</x-admin-dashboard.button>
-                                </div>
-
-                                <div class="mt-3" x-show="productSpecificationsOpen" x-transition>
-                                    <x-admin-dashboard.textarea
-                                        name="specifications"
-                                        rows="3"
-                                        placeholder="Satu spesifikasi per baris"
-                                        x-model="productSpecifications"
-                                    />
-                                    @error('specifications', 'productCreate')
-                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                    @enderror
-                                    @error('specifications', 'productUpdate')
-                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                    @enderror
-                                </div>
-                            </x-admin-dashboard.card>
-                        </div>
+                            <div class="mt-3" x-show="productDeliveryNoteOpen" x-transition>
+                                <x-admin-dashboard.textarea
+                                    name="delivery_note"
+                                    rows="5"
+                                    placeholder="Contoh: Login memakai email dan password di atas, lalu ganti password dan MFA setelah berhasil masuk."
+                                    x-model="productDeliveryNote"
+                                />
+                                @error('delivery_note', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('delivery_note', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+                        </x-admin-dashboard.card>
 
                         <div class="grid grid-cols-2 gap-2 pt-1">
                             <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">

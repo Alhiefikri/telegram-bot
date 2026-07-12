@@ -76,6 +76,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame([
             [
                 'product_name' => 'Module Secret Product',
+                'delivery_note' => null,
                 'secrets' => ['paid-account@example.test|Visible'],
             ],
         ], $paidInvoice->accountGroups);

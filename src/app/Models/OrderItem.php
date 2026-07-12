@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['order_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'subtotal'])]
+#[Fillable(['order_id', 'product_id', 'product_name', 'delivery_note', 'delivery_note_snapshotted', 'quantity', 'unit_price', 'subtotal'])]
 class OrderItem extends Model
 {
     /** @use HasFactory<OrderItemFactory> */
@@ -15,7 +15,7 @@ class OrderItem extends Model
 
     protected function casts(): array
     {
-        return ['quantity' => 'integer', 'unit_price' => 'integer', 'subtotal' => 'integer'];
+        return ['delivery_note_snapshotted' => 'boolean', 'quantity' => 'integer', 'unit_price' => 'integer', 'subtotal' => 'integer'];
     }
 
     public function order()
@@ -25,7 +25,7 @@ class OrderItem extends Model
 
     public function product()
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(Product::class)->withTrashed();
     }
 
     public function stockItems()

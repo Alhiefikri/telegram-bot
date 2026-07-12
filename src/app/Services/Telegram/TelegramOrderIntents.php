@@ -39,7 +39,7 @@ class TelegramOrderIntents
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void
     {
-        $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'payments' => fn ($query) => $query->latest()])->first();
+        $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()])->first();
         if (! $order) {
             $this->bot->sendMessage($chatId, "Pesanan tidak ditemukan.\n\nCoba cek nomor invoice-nya lagi, atau lihat daftar pesanan kamu di /riwayat.");
 
@@ -49,7 +49,7 @@ class TelegramOrderIntents
         $payment = $order->payments->first();
         $refreshNotice = $this->refreshPendingPakasirPayment($customer, $order, $payment);
         if ($refreshNotice !== null) {
-            $order = $order->fresh(['orderItems.stockItems', 'payments' => fn ($query) => $query->latest()]);
+            $order = $order->fresh(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()]);
             $payment = $order->payments->first();
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
@@ -162,6 +162,11 @@ class TelegramOrderIntents
             $lines[] = $item->product_name;
             foreach ($item->stockItems->values() as $index => $stockItem) {
                 $lines[] = ($index + 1).'. '.$stockItem->secret;
+            }
+            $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
+            if ($deliveryNote !== '') {
+                $lines[] = '📌 Catatan pengiriman:';
+                $lines[] = $deliveryNote;
             }
         }
 

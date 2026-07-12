@@ -49,19 +49,19 @@ class TelegramMenuIntents
         $this->bot->sendMessage($chatId, $caption, $replyMarkup);
     }
 
-    public function sendMainMenu(Customer $customer, string $chatId): void
+    public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", $this->mainMenuKeyboard($customer, $chatId));
+        $this->bot->sendMessage($chatId, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
 
-    public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null): array
+    public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array
     {
         $keyboard = [
             [['text' => '🛍️ Lihat Produk'], ['text' => '📦 Pesanan']],
             [['text' => '💬 Support']],
         ];
 
-        if ($customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
+        if ($isPrivateChat && $customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
             $adminDashboardButton = $this->adminDashboardWebAppButton('🛠️ Admin Dashboard');
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];

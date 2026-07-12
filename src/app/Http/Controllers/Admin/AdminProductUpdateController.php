@@ -6,14 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
-use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 
 class AdminProductUpdateController extends Controller
 {
-    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductDescriptionSectionProtocol $descriptions, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -23,11 +22,8 @@ class AdminProductUpdateController extends Controller
         $product->fill([
             'category_id' => $validated['category_id'] ?? null,
             'name' => $validated['name'],
-            'description' => $descriptions->encode(
-                $validated['description'],
-                $validated['features'] ?? '',
-                $validated['specifications'] ?? '',
-            ),
+            'description' => $validated['description'],
+            'delivery_note' => $validated['delivery_note'] ?? null,
             'price_amount' => (int) $validated['price_amount'],
             'fake_discount_price' => isset($validated['fake_discount_price']) ? (int) $validated['fake_discount_price'] : null,
             'currency' => 'IDR',

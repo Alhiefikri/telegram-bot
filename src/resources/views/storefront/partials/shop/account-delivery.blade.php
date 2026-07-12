@@ -15,6 +15,12 @@
                             <pre class="overflow-x-auto whitespace-pre-wrap rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-ink)] p-3 font-mono text-sm font-bold leading-6 text-white shadow-[3px_3px_0_var(--sf-shadow)]">{{ $secret }}</pre>
                         @endforeach
                     </div>
+                    @if (filled($group['delivery_note']))
+                        <div class="mt-4 rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
+                            <p class="font-display text-xs font-black uppercase tracking-[0.14em]">Catatan pengiriman</p>
+                            <p class="mt-2 whitespace-pre-line">{{ $group['delivery_note'] }}</p>
+                        </div>
+                    @endif
                 </section>
             @endforeach
         </div>

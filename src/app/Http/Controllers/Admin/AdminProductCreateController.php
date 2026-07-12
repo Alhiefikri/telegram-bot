@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductRequest;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
-use App\Services\Admin\ProductDescriptionSectionProtocol;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -16,7 +15,7 @@ use Illuminate\Http\RedirectResponse;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductDescriptionSectionProtocol $descriptions, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
@@ -26,11 +25,8 @@ class AdminProductCreateController extends Controller
         $product = new Product([
             'category_id' => $validated['category_id'] ?? null,
             'name' => $validated['name'],
-            'description' => $descriptions->encode(
-                $validated['description'],
-                $validated['features'] ?? '',
-                $validated['specifications'] ?? '',
-            ),
+            'description' => $validated['description'],
+            'delivery_note' => $validated['delivery_note'] ?? null,
             'price_amount' => (int) $validated['price_amount'],
             'fake_discount_price' => isset($validated['fake_discount_price']) ? (int) $validated['fake_discount_price'] : null,
             'currency' => 'IDR',

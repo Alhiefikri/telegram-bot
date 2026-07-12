@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Tests\Support\TelegramBotTestSupport;
@@ -96,6 +97,51 @@ class AdminMenuTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
             && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya')
             && ! str_contains(json_encode($request['reply_markup']), 'Admin Dashboard'));
+    }
+
+    public function test_non_admin_cannot_create_a_broadcast_draft(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(311, '/broadcast Promo rahasia', ['id' => 111], 111))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '111'
+            && $request['text'] === 'Akses admin diperlukan.');
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'));
+    }
+
+    public function test_broadcast_command_is_private_only(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(312, '/broadcast Promo grup', ['id' => 999], -100123, 'group'))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains($request['text'], 'Lanjut di chat pribadi'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'));
+    }
+
+    public function test_expired_broadcast_draft_cannot_be_sent(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(313, '/broadcast Promo terbatas', ['id' => 999], 999))->assertOk();
+        Cache::forget('telegram:broadcast-draft:999');
+        $this->postTelegramWebhook($this->callbackUpdate(314, 'expired-broadcast', 'broadcast:send', ['id' => 999], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'expired-broadcast'
+            && $request['text'] === 'Draft sudah kedaluwarsa.');
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Promo terbatas')
+            && (string) ($request['chat_id'] ?? '') !== '999');
     }
 
     public function test_start_welcome_shows_mini_app_dashboard_only_to_admin(): void

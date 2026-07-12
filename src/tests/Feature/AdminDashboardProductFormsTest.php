@@ -32,8 +32,9 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('Harga')
             ->assertSee('Kategori')
             ->assertSee('Deskripsi singkat')
-            ->assertSee('Fitur utama')
-            ->assertSee('Paket / spesifikasi')
+            ->assertSee('Catatan pengiriman rahasia')
+            ->assertDontSee('Fitur utama')
+            ->assertDontSee('Paket / spesifikasi')
             ->assertSee('Akun Premium')
             ->assertSee('Submit produk')
             ->assertSee('x-data', false)
@@ -65,8 +66,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'price_amount' => '75000',
                 'category_id' => (string) $category->id,
                 'description' => 'Akses Canva Pro siap pakai.',
-                'features' => "Akun ready\nGaransi login",
-                'specifications' => "Durasi 30 hari\nSupport reset",
+                'delivery_note' => "Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.",
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
             ->assertSessionHas('status', 'Produk Canva Pro 1 Bulan berhasil dibuat. Tambahkan stok saat item sudah siap.');
@@ -82,9 +82,8 @@ class AdminDashboardProductFormsTest extends TestCase
         ]);
 
         $product = Product::where('name', 'Canva Pro 1 Bulan')->firstOrFail();
-        $this->assertStringContainsString('Akses Canva Pro siap pakai.', $product->description);
-        $this->assertStringContainsString("Fitur utama:\n- Akun ready\n- Garansi login", $product->description);
-        $this->assertStringContainsString("Paket/spesifikasi:\n- Durasi 30 hari\n- Support reset", $product->description);
+        $this->assertSame('Akses Canva Pro siap pakai.', $product->description);
+        $this->assertSame("Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.", $product->delivery_note);
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $admin->id,
@@ -218,8 +217,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'price_amount' => '15000',
                 'category_id' => '',
                 'description' => 'Produk tanpa fitur tambahan.',
-                'features' => '',
-                'specifications' => '',
+                'delivery_note' => '',
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
 
@@ -253,8 +251,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'price_amount' => '99000',
                 'category_id' => (string) $category->id,
                 'description' => 'Akses streaming siap pakai.',
-                'features' => "Garansi login\nBisa semua device",
-                'specifications' => 'Durasi 30 hari',
+                'delivery_note' => 'Login dari perangkat pribadi lalu ganti password.',
                 'is_active' => '0',
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
@@ -266,7 +263,8 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertFalse($product->is_active);
         $this->assertSame(7, $product->stock);
         $this->assertSame(2, $product->reserved_stock);
-        $this->assertStringContainsString("Fitur utama:\n- Garansi login\n- Bisa semua device", $product->description);
+        $this->assertSame('Akses streaming siap pakai.', $product->description);
+        $this->assertSame('Login dari perangkat pribadi lalu ganti password.', $product->delivery_note);
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $admin->id,
             'action' => 'product.updated',
@@ -324,8 +322,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'name' => '',
                 'price_amount' => '99000',
                 'description' => 'Submitted description',
-                'features' => "Submitted feature\nSecond feature",
-                'specifications' => 'Submitted package',
+                'delivery_note' => "Submitted delivery note\nSecond delivery note",
                 'is_active' => '0',
             ])
             ->assertOk()
@@ -336,8 +333,8 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('\u0022productId\u0022:'.$product->id, false)
             ->assertSee('\u0022productPrice\u0022:\u002299000\u0022', false)
             ->assertSee('Submitted description')
-            ->assertSee('Submitted feature')
-            ->assertSee('Submitted package')
+            ->assertSee('Submitted delivery note')
+            ->assertSee('Second delivery note')
             ->assertSee('Periksa kembali field produk yang ditandai.');
 
         $product->refresh();
