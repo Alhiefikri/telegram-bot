@@ -27,7 +27,7 @@ jobs:
     name: Release gate
     runs-on: ubuntu-latest
     env:
-      TARGET_SHA: ${{ env.DEPLOY_SHA }}
+      TARGET_SHA: ${{ inputs.commit || github.sha }}
     steps:
       - name: Require manual deploy from main
         run: |
