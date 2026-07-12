@@ -9,14 +9,14 @@ class TelegramUpdateReplayGuard
 {
     /**
      * Claim an update for processing, run the handler once, then mark it done.
-     *
-     * The first processed_at check is a cheap replay fast-path. The second check
-     * happens after the cache lock is acquired and the model is refreshed, which
-     * preserves the existing duplicate-job behavior for in-flight updates.
+     * The first processed/claimed checks are cheap replay fast-paths. The
+     * second checks happen after the cache lock is acquired and the model is
+     * refreshed. The durable claim is written before any Telegram I/O: a worker
+     * death after Telegram accepts an outbound command must never replay it.
      */
     public function processOnce(TelegramUpdate $update, callable $handler): void
     {
-        if ($update->processed_at) {
+        if ($update->processed_at || $update->processing_started_at) {
             return;
         }
 
@@ -27,9 +27,11 @@ class TelegramUpdateReplayGuard
 
         try {
             $update->refresh();
-            if ($update->processed_at) {
+            if ($update->processed_at || $update->processing_started_at) {
                 return;
             }
+
+            $update->update(['processing_started_at' => now()]);
 
             $handler($update);
 

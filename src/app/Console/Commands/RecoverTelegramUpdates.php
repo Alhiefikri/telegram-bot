@@ -10,7 +10,7 @@ class RecoverTelegramUpdates extends Command
 {
     protected $signature = 'telegram:recover-updates {--chunk=100} {--queue=default}';
 
-    protected $description = 'Redispatch stored Telegram updates that have not been processed yet.';
+    protected $description = 'Redispatch stored Telegram updates that have not been processed or claimed yet.';
 
     public function handle(): int
     {
@@ -18,6 +18,7 @@ class RecoverTelegramUpdates extends Command
 
         TelegramUpdate::query()
             ->whereNull('processed_at')
+            ->whereNull('processing_started_at')
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($updates) use (&$dispatched): void {
                 foreach ($updates as $update) {

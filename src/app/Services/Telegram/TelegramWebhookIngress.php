@@ -42,7 +42,7 @@ class TelegramWebhookIngress
         $duplicate = $inserted !== 1;
         $jobEnqueuedAt = null;
 
-        if ($update->processed_at === null) {
+        if ($update->processed_at === null && $update->processing_started_at === null) {
             $jobEnqueuedAt = now();
             $this->dispatchProcessor($update->id, $jobEnqueuedAt->toISOString());
         }
