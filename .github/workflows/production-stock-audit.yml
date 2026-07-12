@@ -1,0 +1,110 @@
+name: Audit production stock
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Read-only stock audit
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_HOST:?Missing GitHub secret PRODUCTION_HOST}"
+          : "${PRODUCTION_SSH_PRIVATE_KEY:?Missing GitHub secret PRODUCTION_SSH_PRIVATE_KEY}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > ~/.ssh/production_key
+          chmod 600 ~/.ssh/production_key
+          ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts
+
+      - name: Audit orders and inventory over SSH
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
+          : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
+
+          ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd "$PRODUCTION_PATH"
+
+          docker compose -p telegram-bot-prod --env-file .env ps
+
+          docker compose -p telegram-bot-prod --env-file .env exec -T db sh -lc '
+            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off <<'"'"'SQL'"'"'
+          SELECT
+            o.invoice_number,
+            o.order_status,
+            o.payment_status,
+            p.provider,
+            p.status AS provider_payment_status,
+            p.paid_at,
+            oi.product_name,
+            oi.quantity,
+            COALESCE(s.quantity, 0) AS sale_quantity,
+            COALESCE(r.quantity, 0) AS reservation_quantity,
+            COALESCE(rel.quantity, 0) AS release_quantity,
+            CASE WHEN s.id IS NULL THEN '"'"'MISSING_SALE'"'"' ELSE '"'"'OK'"'"' END AS sale_proof
+          FROM orders o
+          JOIN payments p ON p.order_id = o.id
+          JOIN order_items oi ON oi.order_id = o.id
+          LEFT JOIN inventory_movements s ON s.order_id = o.id AND s.product_id = oi.product_id AND s.type = '"'"'sale'"'"'
+          LEFT JOIN inventory_movements r ON r.order_id = o.id AND r.product_id = oi.product_id AND r.type = '"'"'reservation'"'"'
+          LEFT JOIN inventory_movements rel ON rel.order_id = o.id AND rel.product_id = oi.product_id AND rel.type = '"'"'release'"'"'
+          WHERE p.status = '"'"'paid'"'"'
+            AND p.paid_at >= CURRENT_TIMESTAMP - INTERVAL '"'"'2 days'"'"'
+          ORDER BY p.paid_at DESC, o.invoice_number, oi.id;
+          SQL
+          '
+
+          docker compose -p telegram-bot-prod --env-file .env exec -T db sh -lc '
+            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off <<'"'"'SQL'"'"'
+          SELECT
+            p.id,
+            p.name,
+            p.stock,
+            p.reserved_stock,
+            si.credential_rows,
+            si.credential_rows_available,
+            si.credential_rows_allocated,
+            mv.adjusted,
+            mv.sold,
+            mv.reserved,
+            mv.released
+          FROM products p
+          LEFT JOIN LATERAL (
+            SELECT
+              COUNT(*) AS credential_rows,
+              COUNT(*) FILTER (WHERE order_item_id IS NULL) AS credential_rows_available,
+              COUNT(*) FILTER (WHERE order_item_id IS NOT NULL) AS credential_rows_allocated
+            FROM product_stock_items
+            WHERE product_id = p.id
+          ) si ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT
+              COALESCE(SUM(quantity) FILTER (WHERE type = '"'"'adjustment'"'"'), 0) AS adjusted,
+              COALESCE(SUM(quantity) FILTER (WHERE type = '"'"'sale'"'"'), 0) AS sold,
+              COALESCE(SUM(quantity) FILTER (WHERE type = '"'"'reservation'"'"'), 0) AS reserved,
+              COALESCE(SUM(quantity) FILTER (WHERE type = '"'"'release'"'"'), 0) AS released
+            FROM inventory_movements
+            WHERE product_id = p.id
+          ) mv ON TRUE
+          ORDER BY p.id;
+          SQL
+          '
+          REMOTE
