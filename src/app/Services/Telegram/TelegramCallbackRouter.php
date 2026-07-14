@@ -57,7 +57,7 @@ class TelegramCallbackRouter
             if ($this->communityGate->verify($customer, $chatId)) {
                 $this->bot->answerCallbackQuery($id);
             } else {
-                $this->bot->answerCallbackQuery($id, 'Kamu belum terdeteksi join channel nih.');
+                $this->bot->answerCallbackQuery($id, $this->text($customer, 'Kamu belum terdeteksi join channel nih.', 'You have not joined the channel yet.'));
             }
 
             return;
@@ -99,7 +99,7 @@ class TelegramCallbackRouter
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
             $this->session->forget($customer);
-            $this->bot->answerCallbackQuery($id, 'Join Store Channel dulu ya biar bisa lanjut belanja.');
+            $this->bot->answerCallbackQuery($id, $this->text($customer, 'Join Store Channel dulu ya biar bisa lanjut belanja.', 'Join the Store Channel first to continue shopping.'));
 
             return;
         }
@@ -107,7 +107,7 @@ class TelegramCallbackRouter
         if ($data === 'katalog' || $data === 'back:categories') {
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
-            $this->catalog->sendCategoryCatalog($chatId);
+            $this->catalog->sendCategoryCatalog($customer, $chatId);
 
             return;
         }
@@ -115,13 +115,13 @@ class TelegramCallbackRouter
         if (preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $data, $matches)) {
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
-            $this->catalog->sendCategoryProducts($chatId, $matches[1]);
+            $this->catalog->sendCategoryProducts($customer, $chatId, $matches[1]);
 
             return;
         }
 
         if ($data === 'balance') {
-            $this->bot->answerCallbackQuery($id, 'Fitur saldo segera hadir.');
+            $this->bot->answerCallbackQuery($id, $this->text($customer, 'Fitur saldo segera hadir.', 'Balance is coming soon.'));
 
             return;
         }
@@ -129,7 +129,7 @@ class TelegramCallbackRouter
         if ($data === 'status') {
             $this->bot->answerCallbackQuery($id);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}" : 'Belum ada pesanan nih.');
+            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}") : $this->text($customer, 'Belum ada pesanan nih.', 'You do not have any orders yet.'));
 
             return;
         }
@@ -151,7 +151,7 @@ class TelegramCallbackRouter
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.");
+            $this->bot->sendMessage($chatId, $this->text($customer, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.", "🛒 Your active cart has been cancelled.\n\nOpen /products to browse again."));
 
             return;
         }
@@ -161,14 +161,14 @@ class TelegramCallbackRouter
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
                 $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, 'Produk ini belum bisa dibeli sekarang.');
+                $this->bot->answerCallbackQuery($id, $this->text($customer, 'Produk ini belum bisa dibeli sekarang.', 'This product cannot be purchased right now.'));
 
                 return;
             }
 
             $this->bot->answerCallbackQuery($id);
             $this->session->forget($customer);
-            $this->catalog->sendStockChoices($chatId, $product, $availableStock);
+            $this->catalog->sendStockChoices($customer, $chatId, $product, $availableStock);
 
             return;
         }
@@ -178,14 +178,14 @@ class TelegramCallbackRouter
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product || $availableStock < 1) {
                 $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, 'Produk ini belum bisa dibeli sekarang.');
+                $this->bot->answerCallbackQuery($id, $this->text($customer, 'Produk ini belum bisa dibeli sekarang.', 'This product cannot be purchased right now.'));
 
                 return;
             }
 
             $this->bot->answerCallbackQuery($id);
             $this->session->put($customer, $product->id);
-            $this->catalog->sendQuantityChoices($chatId, $product, $availableStock);
+            $this->catalog->sendQuantityChoices($customer, $chatId, $product, $availableStock);
 
             return;
         }
@@ -217,7 +217,7 @@ class TelegramCallbackRouter
             return;
         }
 
-        $this->bot->answerCallbackQuery($id, 'Aksi ini belum dikenali.');
+        $this->bot->answerCallbackQuery($id, $this->text($customer, 'Aksi ini belum dikenali.', 'This action is not recognized.'));
     }
 
     private function isNonPrivateSafeCallback(string $data): bool
@@ -225,6 +225,11 @@ class TelegramCallbackRouter
         return in_array($data, ['katalog', 'back:categories', 'balance'], true)
             || preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $data) === 1
             || preg_match('/^product:([1-9][0-9]*)$/', $data) === 1;
+    }
+
+    private function text(Customer $customer, string $id, string $en): string
+    {
+        return $customer->locale === 'en' ? $en : $id;
     }
 
     private function cancelPendingOrder(Customer $customer, string $chatId, string $id, string $orderId): void

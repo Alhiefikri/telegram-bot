@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 
 class TelegramReceiptNotifier
 {
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramLocale $locale) {}
 
     public function send(Order $order, bool $force = false): void
     {
@@ -51,11 +51,11 @@ class TelegramReceiptNotifier
             }
 
             $lines = [
-                '✅ Pembayaran diterima',
+                $this->locale->text($claimed->customer, '✅ Pembayaran diterima', '✅ Payment received'),
                 '━━━━━━━━━━━━━━',
                 '🧾 Invoice: '.$claimed->invoice_number,
                 '',
-                'Produk pesanan kamu:',
+                $this->locale->text($claimed->customer, 'Produk pesanan kamu:', 'Your ordered products:'),
             ];
             foreach ($claimed->orderItems as $item) {
                 $lines[] = '- '.$item->product_name.' x '.$item->quantity;
@@ -63,27 +63,27 @@ class TelegramReceiptNotifier
             $accountLines = $this->accountSecretLines($claimed);
             if ($accountLines !== []) {
                 $lines[] = '';
-                $lines[] = '🔐 Data akun';
+                $lines[] = $this->locale->text($claimed->customer, '🔐 Data akun', '🔐 Account details');
                 $lines[] = '━━━━━━━━━━━━━━';
                 array_push($lines, ...$accountLines);
                 $lines[] = '';
-                $lines[] = '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.';
+                $lines[] = $this->locale->text($claimed->customer, '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.', '⚠️ Save these details securely and do not share them with anyone.');
                 $lines[] = '';
-                $lines[] = 'Bingung cara masuk dan amankan akunnya?';
-                $lines[] = 'Panduan: '.route('storefront.login-guide');
+                $lines[] = $this->locale->text($claimed->customer, 'Bingung cara masuk dan amankan akunnya?', 'Need help signing in and securing the account?');
+                $lines[] = $this->locale->text($claimed->customer, 'Panduan: ', 'Guide: ').route('storefront.login-guide');
                 $lines[] = '';
-                $lines[] = 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.';
-                $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
+                $lines[] = $this->locale->text($claimed->customer, 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.', 'If you have a login problem, contact /support and include this invoice.');
+                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE 🌙', 'Thank you for shopping at LHIE STORE 🌙');
             } else {
                 $lines[] = '';
-                $lines[] = 'Pesanan kamu sudah tercatat. Simpan pesan ini sebagai bukti pembelian.';
+                $lines[] = $this->locale->text($claimed->customer, 'Pesanan kamu sudah tercatat. Simpan pesan ini sebagai bukti pembelian.', 'Your order has been recorded. Save this message as proof of purchase.');
                 $lines[] = '';
-                $lines[] = 'Kalau butuh bantuan, hubungi /support dan sertakan invoice ini.';
-                $lines[] = 'Terima kasih sudah belanja di LHIE STORE 🌙';
+                $lines[] = $this->locale->text($claimed->customer, 'Kalau butuh bantuan, hubungi /support dan sertakan invoice ini.', 'If you need help, contact /support and include this invoice.');
+                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE 🌙', 'Thank you for shopping at LHIE STORE 🌙');
             }
 
             try {
-                $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup());
+                $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup($claimed->customer));
             } catch (\Throwable $e) {
                 Order::whereKey($claimed->id)
                     ->whereNull('telegram_receipt_sent_at')
@@ -130,11 +130,11 @@ class TelegramReceiptNotifier
         return $lines;
     }
 
-    private function receiptReplyMarkup(): array
+    private function receiptReplyMarkup(\App\Models\Customer $customer): array
     {
         return [
             'inline_keyboard' => [[
-                ['text' => 'Panduan Login & Keamanan', 'url' => route('storefront.login-guide')],
+                ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
             ]],
         ];
     }

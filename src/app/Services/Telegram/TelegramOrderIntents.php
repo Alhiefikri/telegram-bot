@@ -16,22 +16,22 @@ use Throwable;
 
 class TelegramOrderIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness) {}
+    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness, private TelegramLocale $locale) {}
 
     public function sendOrderHistory(Customer $customer, string $chatId): void
     {
         $orders = $customer->orders()->latest()->limit(5)->get();
         if ($orders->isEmpty()) {
-            $this->bot->sendMessage($chatId, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk lihat produk dulu, siapa tahu ada yang cocok.", ['inline_keyboard' => [[['text' => '🛍️ Lihat Produk', 'callback_data' => 'katalog']]]]);
+            $this->bot->sendMessage($chatId, $this->text($customer, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk lihat produk dulu, siapa tahu ada yang cocok.", "📦 No order history\n━━━━━━━━━━━━━━\nYou do not have any orders yet.\n\nBrowse products to get started."), ['inline_keyboard' => [[['text' => $this->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']]]]);
 
             return;
         }
 
-        $lines = ['📦 Riwayat Pesanan Terakhir', '━━━━━━━━━━━━━━', 'Tekan Detail untuk lihat isi pesanan.'];
+        $lines = [$this->text($customer, '📦 Riwayat Pesanan Terakhir', '📦 Recent Order History'), '━━━━━━━━━━━━━━', $this->text($customer, 'Tekan Detail untuk lihat isi pesanan.', 'Tap Details to view an order.')];
         $keyboard = [];
         foreach ($orders as $i => $order) {
             $lines[] = ($i + 1).'. '.$order->invoice_number.' · '.$order->order_status->value.' / '.$order->payment_status->value.' · Rp '.number_format($order->total_amount, 0, ',', '.').' · '.$this->formatShortDate($order->created_at);
-            $keyboard[] = [['text' => '🧾 Detail '.$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
+            $keyboard[] = [['text' => $this->text($customer, '🧾 Detail ', '🧾 Details ').$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -41,7 +41,7 @@ class TelegramOrderIntents
     {
         $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()])->first();
         if (! $order) {
-            $this->bot->sendMessage($chatId, "Pesanan tidak ditemukan.\n\nCoba cek nomor invoice-nya lagi, atau lihat daftar pesanan kamu di /riwayat.");
+            $this->bot->sendMessage($chatId, $this->text($customer, "Pesanan tidak ditemukan.\n\nCoba cek nomor invoice-nya lagi, atau lihat daftar pesanan kamu di /riwayat.", "Order not found.\n\nCheck the invoice number or view your order history with /history."));
 
             return;
         }
@@ -54,29 +54,29 @@ class TelegramOrderIntents
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
         $lines = [
-            '🧾 Detail Pesanan',
+            $this->text($customer, '🧾 Detail Pesanan', '🧾 Order Details'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
-            'Status: '.$order->order_status->value.' / '.$paymentStatus->value,
-            'Dibuat: '.$this->formatDate($order->created_at),
+            $this->text($customer, 'Status: ', 'Status: ').$order->order_status->value.' / '.$paymentStatus->value,
+            $this->text($customer, 'Dibuat: ', 'Created: ').$this->formatDate($order->created_at),
             '',
-            'Item:',
+            $this->text($customer, 'Item:', 'Items:'),
         ];
         foreach ($order->orderItems as $item) {
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $lines[] = 'Total: Rp '.number_format($order->total_amount, 0, ',', '.');
         if ($payment) {
-            $lines[] = 'Pembayaran: '.$payment->payment_method_label.' ('.$payment->status->value.')';
+            $lines[] = $this->text($customer, 'Pembayaran: ', 'Payment: ').$payment->payment_method_label.' ('.$payment->status->value.')';
             if ($payment->paid_at) {
-                $lines[] = 'Dibayar: '.$this->formatDate($payment->paid_at);
+                $lines[] = $this->text($customer, 'Dibayar: ', 'Paid: ').$this->formatDate($payment->paid_at);
             }
         }
         if (($order->order_status === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = 'Batas pembayaran: '.$this->formatDate($payment?->expired_at ?? $order->expires_at);
+            $lines[] = $this->text($customer, 'Batas pembayaran: ', 'Payment deadline: ').$this->formatDate($payment?->expired_at ?? $order->expires_at);
         }
         if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = 'Berakhir: '.$this->formatDate($payment?->expired_at ?? $order->expires_at);
+            $lines[] = $this->text($customer, 'Berakhir: ', 'Expired: ').$this->formatDate($payment?->expired_at ?? $order->expires_at);
         }
         if ($refreshNotice !== null) {
             $lines[] = '';
@@ -85,30 +85,30 @@ class TelegramOrderIntents
         $accountLines = $this->accountSecretLines($order, $paymentStatus);
         if ($accountLines !== []) {
             $lines[] = '';
-            $lines[] = '🔐 Data akun:';
+            $lines[] = $this->text($customer, '🔐 Data akun:', '🔐 Account details:');
             array_push($lines, ...$accountLines);
         }
         $lines[] = '';
-        $lines[] = $this->orderInstruction($order, $payment);
+        $lines[] = $this->orderInstruction($customer, $order, $payment);
 
         $this->bot->sendMessage($chatId, implode("\n", $lines));
     }
 
-    public function orderInstruction(Order $order, ?Payment $payment): string
+    public function orderInstruction(Customer $customer, Order $order, ?Payment $payment): string
     {
         $orderStatus = $order->order_status;
         $paymentStatus = $payment?->status ?? $order->payment_status;
         if ($orderStatus === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) {
-            return 'Order masih menunggu pembayaran. Selesaikan pembayaran sebelum batas waktu ya.';
+            return $this->text($customer, 'Order masih menunggu pembayaran. Selesaikan pembayaran sebelum batas waktu ya.', 'This order is awaiting payment. Complete payment before the deadline.');
         }
         if (in_array($orderStatus, [OrderStatus::Processing, OrderStatus::Completed], true) || $paymentStatus === PaymentStatus::Paid) {
-            return 'Pembayaran sudah diterima. Pesanan sedang atau sudah selesai diproses.';
+            return $this->text($customer, 'Pembayaran sudah diterima. Pesanan sedang atau sudah selesai diproses.', 'Payment has been received. Your order is being processed or is complete.');
         }
         if (in_array($orderStatus, [OrderStatus::Expired, OrderStatus::Cancelled], true) || in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true)) {
-            return 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /produk.';
+            return $this->text($customer, 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /produk.', 'This order is no longer active. You can check out again via /products.');
         }
 
-        return 'Kalau butuh bantuan, hubungi admin toko lewat /support.';
+        return $this->text($customer, 'Kalau butuh bantuan, hubungi admin toko lewat /support.', 'Need help? Contact store support via /support.');
     }
 
     private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string
@@ -127,7 +127,7 @@ class TelegramOrderIntents
         if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
             $seconds = RateLimiter::availableIn($key);
 
-            return "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.";
+            return $this->text($customer, "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.", "Payment-status checks are temporarily limited. Try again in {$seconds} seconds.");
         }
 
         RateLimiter::hit($key, 60);
@@ -137,14 +137,14 @@ class TelegramOrderIntents
         } catch (Throwable $e) {
             report($e);
 
-            return 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.';
+            return $this->text($customer, 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.', 'Payment status cannot be checked automatically right now. Please try again later.');
         }
 
         if ($event->processed_at !== null) {
-            return 'Status pembayaran dicek ulang dan sudah terverifikasi.';
+            return $this->text($customer, 'Status pembayaran dicek ulang dan sudah terverifikasi.', 'Payment status was checked again and verified.');
         }
 
-        return 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.';
+        return $this->text($customer, 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.', 'Payment status was checked. No completed payment was found.');
     }
 
     private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array
@@ -193,5 +193,10 @@ class TelegramOrderIntents
             'Asia/Jayapura' => 'WIT',
             default => $timezone,
         };
+    }
+
+    private function text(Customer $customer, string $id, string $en): string
+    {
+        return $this->locale->text($customer, $id, $en);
     }
 }

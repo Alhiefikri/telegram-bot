@@ -15,12 +15,14 @@ class TelegramPaymentInstructionRenderer
     /**
      * @param  array{label: string, name: string}  $paymentOption
      */
-    public function manual(Order $order, array $paymentOption, string $supportUsername): TelegramPaymentInstruction
+    public function manual(Order $order, array $paymentOption, string $supportUsername, string $locale = 'id'): TelegramPaymentInstruction
     {
         $order->loadMissing('orderItems');
         $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
 
-        $lines = [
+        $lines = $locale === 'en' ? [
+            '✅ Checkout created', '━━━━━━━━━━━━━━', '🧾 Invoice: '.$order->invoice_number, '💰 Total: '.$formattedTotal, '💳 Pay via: '.$paymentOption['label'], '', '📲 Scan the manual QR above.', '', 'Before paying, make sure:', '• QR name: '.$paymentOption['name'], '• Amount must match exactly: '.$formattedTotal,
+        ] : [
             '✅ Checkout berhasil dibuat',
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
@@ -36,19 +38,19 @@ class TelegramPaymentInstructionRenderer
 
         if ($order->expires_at) {
             $lines[] = '';
-            $lines[] = '⏳ Batas bayar:';
+            $lines[] = $locale === 'en' ? '⏳ Payment deadline:' : '⏳ Batas bayar:';
             $lines[] = $this->formatDate($order->expires_at);
-            $lines[] = 'Stok dipegang '.(int) config('orders.pending_payment_ttl_minutes', 5).' menit. Kalau belum bayar/kirim bukti, order otomatis expired dan stok balik.';
+            $lines[] = $locale === 'en' ? 'Stock is reserved for '.(int) config('orders.pending_payment_ttl_minutes', 5).' minutes. If payment proof is not sent, the order expires automatically and stock is released.' : 'Stok dipegang '.(int) config('orders.pending_payment_ttl_minutes', 5).' menit. Kalau belum bayar/kirim bukti, order otomatis expired dan stok balik.';
         }
 
         $lines[] = '';
-        $lines[] = '📦 Pesanan: '.$this->orderItemsSummary($order);
+        $lines[] = ($locale === 'en' ? '📦 Order: ' : '📦 Pesanan: ').$this->orderItemsSummary($order);
         $lines[] = '';
-        $lines[] = 'Setelah bayar, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:';
+        $lines[] = $locale === 'en' ? 'After paying, send a payment screenshot to this bot as a PHOTO with this caption:' : 'Setelah bayar, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:';
         $lines[] = '';
         $lines[] = '/payment';
         $lines[] = '';
-        $lines[] = 'Kalau kesusahan, chat admin @'.$supportUsername.'.';
+        $lines[] = $locale === 'en' ? 'Need help? Chat admin @'.$supportUsername.'.' : 'Kalau kesusahan, chat admin @'.$supportUsername.'.';
 
         return new TelegramPaymentInstruction(
             photoContents: $this->manualQrPhotoContents($order),

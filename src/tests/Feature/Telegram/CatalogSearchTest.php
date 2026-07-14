@@ -55,6 +55,34 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertLessThan($welcomeMessageIndex, $welcomePhotoIndex);
     }
 
+    public function test_english_start_sends_the_welcome_banner_and_english_actions(): void
+    {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(111, '/start', ['first_name' => 'Ayu']))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto') && $request['photo'] === 'banner-file-id');
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Browse products')
+            && ($request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products');
+    }
+
+    public function test_english_catalog_uses_english_customer_copy(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $category = Category::factory()->create(['name' => 'Streaming']);
+        Product::factory()->create(['category_id' => $category->id, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(112, '/products'))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Browse Products')
+            && ! str_contains((string) $request['text'], 'Lihat Produk'));
+    }
+
     public function test_katalog_lists_active_categories_uncategorized_and_empty_state(): void
     {
         $this->fakeTelegramHttp();

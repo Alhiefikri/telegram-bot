@@ -58,7 +58,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products', '🛍️ Marketplace'], true)) {
             $this->session->forget($customer);
-            $this->catalog->sendCategoryCatalog($chatId);
+            $this->catalog->sendCategoryCatalog($customer, $chatId);
 
             return;
         }
@@ -72,7 +72,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/support', '💬 Support'], true)) {
             $this->session->forget($customer);
-            $this->menu->sendSupport($chatId);
+            $this->menu->sendSupport($customer, $chatId);
 
             return;
         }
@@ -102,12 +102,12 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $keyword = trim(substr($text, strlen('/cari')));
             if ($keyword === '') {
-                $this->bot->sendMessage($chatId, "Mau cari produk apa?\n\nKetik seperti ini:\n/cari netflix\n\nBisa pakai nama produk, kategori, atau kata kunci lain.");
+                $this->bot->sendMessage($chatId, $this->text($customer, "Mau cari produk apa?\n\nKetik seperti ini:\n/cari netflix\n\nBisa pakai nama produk, kategori, atau kata kunci lain.", "What product are you looking for?\n\nType it like this:\n/search netflix\n\nYou can use a product name, category, or other keyword."));
 
                 return;
             }
 
-            $this->catalog->sendSearchResults($chatId, $keyword);
+            $this->catalog->sendSearchResults($customer, $chatId, $keyword);
 
             return;
         }
@@ -122,7 +122,7 @@ class TelegramMessageRouter
         if ($text === '/batal') {
             $this->session->forget($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.");
+            $this->bot->sendMessage($chatId, $this->text($customer, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.", "🛒 Your active cart has been cancelled.\n\nOpen /products to browse again."));
 
             return;
         }
@@ -137,7 +137,7 @@ class TelegramMessageRouter
         if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}" : "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️");
+            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️", "You do not have any orders yet.\n\nOpen /products to start shopping 🛍️"));
 
             return;
         }
@@ -153,7 +153,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $invoice = trim(substr($text, strlen('/order')));
             if ($invoice === '') {
-                $this->bot->sendMessage($chatId, "Ketik nomor invoice setelah command ya.\n\nContoh:\n/order INV-12345678");
+                $this->bot->sendMessage($chatId, $this->text($customer, "Ketik nomor invoice setelah command ya.\n\nContoh:\n/order INV-12345678", "Type the invoice number after the command.\n\nExample:\n/order INV-12345678"));
 
                 return;
             }
@@ -177,14 +177,14 @@ class TelegramMessageRouter
             }
 
             if (! ctype_digit($text)) {
-                $this->bot->sendMessage($chatId, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.');
+                $this->bot->sendMessage($chatId, $this->text($customer, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.', 'That quantity is not available. Please choose a quantity within the available stock.'));
             }
 
             return;
         }
 
         $this->session->forget($customer);
-        $this->bot->sendMessage($chatId, "Aku belum paham perintah itu 😅\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.");
+        $this->bot->sendMessage($chatId, $this->text($customer, "Aku belum paham perintah itu 😅\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.", "I did not understand that command 😅\n\nOpen /products to shop or /support if you need help."));
     }
 
     private function isPrivateOnlyCommand(string $text): bool
@@ -193,5 +193,10 @@ class TelegramMessageRouter
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || str_starts_with($text, '/broadcast ');
+    }
+
+    private function text(Customer $customer, string $id, string $en): string
+    {
+        return $customer->locale === 'en' ? $en : $id;
     }
 }

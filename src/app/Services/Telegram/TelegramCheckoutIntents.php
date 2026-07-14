@@ -25,10 +25,12 @@ class TelegramCheckoutIntents
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
     {
+        $order->loadMissing('customer');
         $instruction = $this->paymentInstructions->manual(
             $order,
             $this->manualPaymentOption(),
             ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@'),
+            $order->customer?->locale === 'en' ? 'en' : 'id',
         );
 
         $this->sendPaymentInstruction($chatId, $instruction, [
