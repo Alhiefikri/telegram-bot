@@ -31,7 +31,7 @@ final class AdminDashboardProductsData
     {
         $products = Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->latest()
@@ -82,6 +82,7 @@ final class AdminDashboardProductsData
                     'delivery_note' => $product->delivery_note,
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
+                    'usdt_price_amount' => $product->usdt_price_amount === null ? null : number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''),
                     'fake_discount_price' => $product->fake_discount_price,
                     'price' => Money::idr($product->price_amount),
                     'stock' => $product->stock,
@@ -114,6 +115,7 @@ final class AdminDashboardProductsData
                         'id' => $product->id,
                         'name' => $product->name,
                         'priceAmount' => $product->price_amount,
+                        'usdtPriceAmount' => $product->usdt_price_amount === null ? null : number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''),
                         'fakeDiscountPrice' => $product->fake_discount_price,
                         'categoryId' => $product->category_id,
                         'description' => $product->description,

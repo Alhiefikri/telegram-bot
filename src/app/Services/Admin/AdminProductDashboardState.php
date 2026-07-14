@@ -56,6 +56,7 @@ class AdminProductDashboardState
                 'productId' => old('product_id', $editingProduct['id'] ?? null),
                 'productName' => old('name', $editingProduct['name'] ?? ''),
                 'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
+                'productUsdtPrice' => old('usdt_price_amount', $editingProduct['usdt_price_amount'] ?? ''),
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),

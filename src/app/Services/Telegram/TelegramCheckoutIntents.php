@@ -60,6 +60,23 @@ class TelegramCheckoutIntents
         $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment);
     }
 
+    public function binancePayEnabled(): bool
+    {
+        return (bool) ManualPaymentSetting::current()?->binance_pay_enabled && filled(config('services.binance.pay_id'));
+    }
+
+    public function formatUsdt(int $amount): string
+    {
+        return number_format($amount / 1_000_000, 6, '.', '');
+    }
+
+    public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, \App\Models\Customer $customer): void
+    {
+        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, (string) config('services.binance.pay_id'), $customer->locale), [
+            'inline_keyboard' => [[['text' => '📸 Send Payment Proof', 'callback_data' => 'payment-proof:'.$order->id]]],
+        ]);
+    }
+
     private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, bool $fallback = false): void
     {
         $this->sendPaymentInstruction(

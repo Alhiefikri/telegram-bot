@@ -40,6 +40,14 @@ class TelegramCallbackRouter
 
     public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private'): void
     {
+        if (preg_match('/^locale:(id|en)$/', $data, $matches)) {
+            $customer->update(['locale' => $matches[1]]);
+            $customer->refresh();
+            $this->bot->answerCallbackQuery($id);
+            $this->menu->sendWelcome($customer, $chatId);
+            $this->menu->sendMainMenu($customer, $chatId, $this->chatPrivacy->isPrivate($chatType));
+            return;
+        }
         if ($data === TelegramCommunityGate::VERIFY_CALLBACK) {
             $this->session->forget($customer);
             if ($this->communityGate->verify($customer, $chatId)) {
@@ -189,7 +197,18 @@ class TelegramCallbackRouter
         }
 
         if ($data === 'checkout') {
-            $this->checkout($customer, $chatId, $id);
+            $this->choosePaymentMethod($customer, $chatId, $id);
+            return;
+        }
+
+        if (in_array($data, ['checkout:current', 'checkout:binance'], true)) {
+            $this->checkout($customer, $chatId, $id, $data === 'checkout:binance');
+
+            return;
+        }
+
+        if (str_starts_with($data, 'payment-proof:')) {
+            $this->bot->answerCallbackQuery($id, 'Send a photo with /payment INVOICE in its caption.');
 
             return;
         }
@@ -212,6 +231,7 @@ class TelegramCallbackRouter
             ->whereKey($orderId)
             ->where('order_status', OrderStatus::PendingPayment->value)
             ->where('payment_status', PaymentStatus::Pending->value)
+            ->whereDoesntHave('payments', fn ($query) => $query->whereNotNull('payment_proof_submitted_at'))
             ->first();
 
         if (! $order) {
@@ -234,7 +254,25 @@ class TelegramCallbackRouter
         $this->bot->sendMessage($chatId, "❌ Pesanan dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.");
     }
 
-    private function checkout(Customer $customer, string $chatId, string $id): void
+    private function choosePaymentMethod(Customer $customer, string $chatId, string $id): void
+    {
+        $cart = $this->carts->currentActiveCartFor($customer);
+        if (! $cart) { $this->checkout($customer, $chatId, $id); return; }
+        $cart->load('cartItems.product');
+        if (! $this->checkoutIntents->binancePayEnabled() || ! $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
+            $this->checkout($customer, $chatId, $id);
+            return;
+        }
+        $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
+        $buttons = [
+            [['text' => '💳 QRIS', 'callback_data' => 'checkout:current']],
+            [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']],
+        ];
+        $this->bot->answerCallbackQuery($id);
+        $this->bot->sendMessage($chatId, $customer->locale === 'en' ? 'Choose a payment method:' : 'Pilih metode pembayaran:', ['inline_keyboard' => $buttons]);
+    }
+
+    private function checkout(Customer $customer, string $chatId, string $id, bool $binance = false): void
     {
         $this->bot->answerCallbackQuery($id);
 
@@ -251,9 +289,11 @@ class TelegramCallbackRouter
                 'payment_mode' => $paymentMode,
                 'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
-            ], fn () => $paymentMode === 'pakasir'
-                ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir')
-                : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual'));
+            ], fn () => $binance
+                ? $this->checkout->checkout($cart, 'BINANCE_PAY_ID', 'manual')
+                : ($paymentMode === 'pakasir'
+                    ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir')
+                    : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual')));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.");
 
@@ -265,7 +305,10 @@ class TelegramCallbackRouter
         }
 
         $payment = $order->payments()->latest()->first();
-        if ($payment?->provider === 'pakasir') {
+        if ($payment?->method === 'BINANCE_PAY_ID') {
+            $this->checkoutIntents->sendBinancePaymentInstructions($chatId, $order, $payment, $customer);
+            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+        } elseif ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         } else {

@@ -22,7 +22,7 @@ class AdminPaymentModeController extends Controller
             ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
             : null;
 
-        [$setting, $oldValues] = DB::transaction(function () use ($mode, $checkoutFlow): array {
+        [$setting, $oldValues] = DB::transaction(function () use ($mode, $checkoutFlow, $validated): array {
             $setting = ManualPaymentSetting::query()
                 ->where('is_active', true)
                 ->oldest('id')
@@ -40,10 +40,12 @@ class AdminPaymentModeController extends Controller
                 ? [
                     'payment_mode' => $setting->payment_mode,
                     'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
+                    'binance_pay_enabled' => $setting->binance_pay_enabled,
                 ]
                 : [
                     'payment_mode' => null,
                     'pakasir_checkout_flow' => null,
+                    'binance_pay_enabled' => false,
                 ];
 
             $setting->payment_mode = $mode;
@@ -53,6 +55,9 @@ class AdminPaymentModeController extends Controller
                 $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
             }
             $setting->is_active = true;
+            if (array_key_exists('binance_pay_enabled', $validated)) {
+                $setting->binance_pay_enabled = (bool) $validated['binance_pay_enabled'];
+            }
             $setting->save();
 
             return [$setting, $oldValues];
@@ -61,6 +66,7 @@ class AdminPaymentModeController extends Controller
         $newValues = [
             'payment_mode' => $setting->payment_mode,
             'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
+            'binance_pay_enabled' => $setting->binance_pay_enabled,
         ];
 
         $auditLogger->log(

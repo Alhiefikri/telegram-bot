@@ -170,6 +170,14 @@
                         <p class="mt-2 text-[11px] font-semibold text-brand-muted">
                             Mode aktif dipilih di dashboard. Environment hanya dipakai untuk kredensial dan endpoint provider.
                         </p>
+                        <form method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3">
+                            @csrf
+                            <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
+                            <input type="hidden" name="binance_pay_enabled" value="{{ $paymentControl['binance_pay_enabled'] ? 0 : 1 }}">
+                            <x-admin-dashboard.button type="submit" :variant="$paymentControl['binance_pay_enabled'] ? 'primary' : 'neutral'" size="sm" class="w-full text-[11px]">
+                                {{ $paymentControl['binance_pay_enabled'] ? 'Binance Pay USDT: Aktif' : 'Aktifkan Binance Pay USDT' }}
+                            </x-admin-dashboard.button>
+                        </form>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             Hanya owner/admin yang bisa mengubah mode pembayaran.

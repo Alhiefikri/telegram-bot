@@ -17,7 +17,7 @@ class AdminProductUpdateController extends Controller
         $user = $request->attributes->get('adminUser');
 
         $validated = $request->validated();
-        $oldValues = $product->only(['category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
+        $oldValues = $product->only(['category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
 
         $product->fill([
             'category_id' => $validated['category_id'] ?? null,
@@ -25,6 +25,7 @@ class AdminProductUpdateController extends Controller
             'description' => $validated['description'],
             'delivery_note' => $validated['delivery_note'] ?? null,
             'price_amount' => (int) $validated['price_amount'],
+            'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
             'fake_discount_price' => isset($validated['fake_discount_price']) ? (int) $validated['fake_discount_price'] : null,
             'currency' => 'IDR',
             'is_active' => $request->boolean('is_active'),
@@ -35,7 +36,7 @@ class AdminProductUpdateController extends Controller
         }
         $product->save();
 
-        $newValues = $product->only(['category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
+        $newValues = $product->only(['category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
 
         $auditLogger->log(
             'product.updated',

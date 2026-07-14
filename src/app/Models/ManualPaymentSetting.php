@@ -6,12 +6,12 @@ use App\Support\PakasirCheckoutFlow;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'instructions', 'is_active'])]
+#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'instructions', 'is_active', 'binance_pay_enabled'])]
 class ManualPaymentSetting extends Model
 {
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        return ['is_active' => 'boolean', 'binance_pay_enabled' => 'boolean'];
     }
 
     public function pakasirCheckoutFlow(): string

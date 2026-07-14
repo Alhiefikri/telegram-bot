@@ -69,8 +69,14 @@ class OrderCheckoutService
         $products = $this->inventory->lockedCheckoutProducts($items);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
+        $usdtTotal = $provider === 'manual' && $paymentMethod === 'BINANCE_PAY_ID'
+            ? $items->sum(function ($item) use ($products): int {
+                $price = $products[$item->product_id]->usdt_price_amount;
+                if ($price === null) { throw new InvalidCheckout('A cart item has no USDT price.'); }
+                return $price * $item->quantity;
+            }) : null;
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => 'IDR', 'expires_at' => $expiresAt]);
-        Payment::create(['order_id' => $order->id, 'provider' => $provider, 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentMethod, 'amount' => $total, 'currency' => 'IDR', 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
+        Payment::create(['order_id' => $order->id, 'provider' => $provider, 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentMethod, 'amount' => $usdtTotal ?? $total, 'currency' => $usdtTotal === null ? 'IDR' : 'USDT', 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];

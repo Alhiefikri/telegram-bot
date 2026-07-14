@@ -149,6 +149,7 @@ final class AdminDashboardStatsData
             'tone' => $isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber',
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'binance_pay_enabled' => (bool) $settings?->binance_pay_enabled,
             'update_url' => route('admin.payment-mode.update'),
             'status_badge' => [
                 'label' => $statusBadge,

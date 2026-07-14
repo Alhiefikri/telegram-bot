@@ -35,9 +35,18 @@ class TelegramMessageRouter
 
         if ($text === '/start') {
             $this->session->forget($customer);
+            if ($customer->locale === null) {
+                $this->menu->sendLanguagePicker($chatId);
+                return;
+            }
             $this->menu->sendWelcome($customer, $chatId);
             $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
+            return;
+        }
+
+        if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
+            $this->menu->sendLanguagePicker($chatId);
             return;
         }
 
@@ -47,7 +56,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/produk', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Marketplace'], true)) {
+        if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products', '🛍️ Marketplace'], true)) {
             $this->session->forget($customer);
             $this->catalog->sendCategoryCatalog($chatId);
 
@@ -125,7 +134,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/status', '/pesanan', '📦 Pesanan'], true)) {
+        if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();
             $this->bot->sendMessage($chatId, $order ? "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}" : "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️");

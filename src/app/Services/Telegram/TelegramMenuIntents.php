@@ -9,11 +9,20 @@ class TelegramMenuIntents
 {
     use HasAdminWebAppButton;
 
-    public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess, private TelegramLocale $locale) {}
+
+    public function sendLanguagePicker(string $chatId): void
+    {
+        $this->bot->sendMessage($chatId, '🌐 Pilih bahasa / Choose your language', $this->locale->languageKeyboard());
+    }
 
     public function sendWelcome(Customer $customer, string $chatId): void
     {
-        $firstName = trim((string) $customer->first_name) ?: 'kak';
+        $firstName = trim((string) $customer->first_name) ?: 'there';
+        if ($this->locale->code($customer) === 'en') {
+            $this->bot->sendMessage($chatId, "👋 Welcome to LHIE STORE, {$firstName}!\n\nBrowse digital products, pay securely, and receive your order after payment is confirmed.", $this->welcomeInlineKeyboard($customer, $chatId));
+            return;
+        }
         [$greetingIcon, $greetingText] = $this->timeAwareGreeting();
         $caption = implode("\n", [
             $greetingIcon.' '.$greetingText.', '.$firstName.' — welcome ke LHIE STORE 👋',
@@ -51,14 +60,14 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
+        $this->bot->sendMessage($chatId, $this->locale->text($customer, '☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀', '☰ Main menu\nWhat would you like to do?'), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
 
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array
     {
         $keyboard = [
-            [['text' => '🛍️ Lihat Produk'], ['text' => '📦 Pesanan']],
-            [['text' => '💬 Support']],
+            [['text' => $customer && $this->locale->code($customer) === 'en' ? '🛍️ Browse Products' : '🛍️ Lihat Produk'], ['text' => $customer && $this->locale->code($customer) === 'en' ? '📦 Orders' : '📦 Pesanan']],
+            [['text' => '💬 Support'], ['text' => $customer && $this->locale->code($customer) === 'en' ? '🌐 Language' : '🌐 Bahasa']],
         ];
 
         if ($isPrivateChat && $customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {

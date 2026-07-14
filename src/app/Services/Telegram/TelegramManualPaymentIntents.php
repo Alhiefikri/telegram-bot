@@ -29,10 +29,21 @@ class TelegramManualPaymentIntents
             return;
         }
 
+        if ($invoice === '' && $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()) {
+            $this->bot->sendMessage($chatId, "Untuk pembayaran Binance Pay, caption wajib menyertakan invoice:\n\n/payment {$order->invoice_number}");
+            return;
+        }
+
         $photoFileId = $this->largestPhotoFileId($message);
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, "Bukti pembayaran harus dikirim sebagai FOTO ya.\n\nCaranya:\n1. Upload screenshot transfer\n2. Isi caption dengan:\n\n/payment\n\nKalau punya beberapa order, pakai format:\n\n/payment {$order->invoice_number}");
 
+            return;
+        }
+
+        $payment = $order->payments()->where('status', PaymentStatus::Pending)->first();
+        if ($payment?->payment_proof_submitted_at) {
+            $this->bot->sendMessage($chatId, '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.');
             return;
         }
 
@@ -43,15 +54,31 @@ class TelegramManualPaymentIntents
             return;
         }
 
+        // Claim before forwarding so Telegram retries cannot create duplicate admin actions.
+        $claimed = $payment?->newQuery()
+            ->whereKey($payment->id)
+            ->whereNull('payment_proof_submitted_at')
+            ->update([
+                'payment_proof_file_id' => $photoFileId,
+                'payment_proof_submitted_at' => now(),
+                'payment_proof_admin_chat_id' => $adminTelegramChatId,
+                'expired_at' => null,
+            ]);
+        if ($claimed !== 1) {
+            $this->bot->sendMessage($chatId, '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.');
+            return;
+        }
+        $order->update(['expires_at' => null]);
+
         $order->loadMissing(['customer', 'orderItems', 'payments']);
-        $payment = $order->payments->first();
+        $payment ??= $order->payments->first();
         $caption = [
             '📸 Bukti pembayaran masuk',
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
             '👤 Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
             '💳 Metode: '.($payment?->payment_method_label ?: 'manual'),
-            '💰 Total: Rp '.number_format($order->total_amount, 0, ',', '.'),
+            '💰 Total: '.($payment?->currency === 'USDT' ? number_format($payment->amount / 1_000_000, 6, '.', '').' USDT' : 'Rp '.number_format($order->total_amount, 0, ',', '.')),
             '',
             'Item:',
         ];

@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\Model;
     'status',
     'paid_at',
     'expired_at',
+    'payment_proof_file_id', 'payment_proof_submitted_at', 'payment_proof_admin_chat_id',
 ])]
 class Payment extends Model
 {
@@ -48,6 +49,8 @@ class Payment extends Model
             'status' => PaymentStatus::class,
             'paid_at' => 'datetime',
             'expired_at' => 'datetime',
+            'payment_proof_file_id' => 'encrypted',
+            'payment_proof_submitted_at' => 'datetime',
         ];
     }
 

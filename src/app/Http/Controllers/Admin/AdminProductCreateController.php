@@ -28,6 +28,7 @@ class AdminProductCreateController extends Controller
             'description' => $validated['description'],
             'delivery_note' => $validated['delivery_note'] ?? null,
             'price_amount' => (int) $validated['price_amount'],
+            'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
             'fake_discount_price' => isset($validated['fake_discount_price']) ? (int) $validated['fake_discount_price'] : null,
             'currency' => 'IDR',
             'image_path' => $request->hasFile('image') ? $images->store($request->file('image')) : null,
@@ -41,7 +42,7 @@ class AdminProductCreateController extends Controller
             'product.created',
             $product,
             null,
-            $product->only(['category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
+            $product->only(['category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
             $user,
             $request->ip(),
         );

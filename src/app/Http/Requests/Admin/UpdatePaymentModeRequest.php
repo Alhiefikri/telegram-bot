@@ -30,6 +30,7 @@ class UpdatePaymentModeRequest extends FormRequest
         return [
             'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir'])],
             'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === 'pakasir'), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
+            'binance_pay_enabled' => ['sometimes', 'boolean'],
         ];
     }
 
