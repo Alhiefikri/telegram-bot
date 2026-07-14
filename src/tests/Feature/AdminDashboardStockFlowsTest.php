@@ -282,7 +282,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         Http::assertSentCount(1);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
             && (string) $request['chat_id'] === '333'
-            && str_contains((string) $request['text'], '✅ Stok Ready')
+            && str_contains((string) $request['text'], '✅ Stok Tersedia')
             && str_contains((string) $request['text'], $product->name)
             && str_contains((string) $request['text'], '📦 Stok: 1'));
     }

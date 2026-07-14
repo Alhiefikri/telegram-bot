@@ -156,7 +156,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(304, '/start', ['id' => 999], 12345))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+            && str_contains($request['text'], 'selamat datang di LHIE STORE')
             && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '🌐 Mini App Dashboard'
             && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][1][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v='));
     }
@@ -172,7 +172,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(308, '/start', ['id' => 999], 12345))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+            && str_contains($request['text'], 'selamat datang di LHIE STORE')
             && str_contains(json_encode($request['reply_markup']), 'Lihat Produk')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), 'web_app')
@@ -190,7 +190,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(305, '/start', ['id' => 111], 12345))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'welcome ke LHIE STORE')
+            && str_contains($request['text'], 'selamat datang di LHIE STORE')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), '/admin'));
     }
