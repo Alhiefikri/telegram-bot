@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\PaymentStatus;
+use App\Models\Customer;
 use App\Models\Order;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -117,7 +118,7 @@ class TelegramReceiptNotifier
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {
                 $lines[] = '';
-                $lines[] = '📌 Catatan pengiriman:';
+                $lines[] = $this->locale->text($order->customer, '📌 Catatan pengiriman:', '📌 Delivery note:');
                 $lines[] = $deliveryNote;
             }
             $lines[] = '';
@@ -130,7 +131,7 @@ class TelegramReceiptNotifier
         return $lines;
     }
 
-    private function receiptReplyMarkup(\App\Models\Customer $customer): array
+    private function receiptReplyMarkup(Customer $customer): array
     {
         return [
             'inline_keyboard' => [[

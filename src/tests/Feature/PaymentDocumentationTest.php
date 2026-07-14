@@ -36,4 +36,27 @@ class PaymentDocumentationTest extends TestCase
             $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=${APP_URL}', $envExample);
         }
     }
+
+    public function test_binance_pay_id_is_blank_in_env_examples_and_forwarded_by_shared_compose_environment(): void
+    {
+        $envExamples = [
+            'root .env.example' => file_get_contents(base_path('../.env.example')),
+            'src/.env.example' => file_get_contents(base_path('.env.example')),
+        ];
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+        $violations = [];
+
+        foreach ($envExamples as $name => $envExample) {
+            if (preg_match('/^BINANCE_PAY_ID=$/m', $envExample) !== 1) {
+                $violations[] = $name.' must document BINANCE_PAY_ID with an empty value.';
+            }
+        }
+
+        if (! str_contains($sharedAppEnvironment, '  BINANCE_PAY_ID: ${BINANCE_PAY_ID:-}')) {
+            $violations[] = 'docker-compose.yml shared x-app-environment must forward BINANCE_PAY_ID to app and scheduler.';
+        }
+
+        $this->assertSame([], $violations, implode("\n", $violations));
+    }
 }

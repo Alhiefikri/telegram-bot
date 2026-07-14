@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -21,6 +22,7 @@ class TelegramCheckoutIntents
         private PakasirNativeQrisService $nativeQris,
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
+        private TelegramLocale $locale,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -28,9 +30,9 @@ class TelegramCheckoutIntents
         $order->loadMissing('customer');
         $instruction = $this->paymentInstructions->manual(
             $order,
-            $this->manualPaymentOption(),
+            $this->manualPaymentOption($order->customer),
             ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@'),
-            $order->customer?->locale === 'en' ? 'en' : 'id',
+            $this->locale->code($order->customer),
         );
 
         $this->sendPaymentInstruction($chatId, $instruction, [
@@ -43,23 +45,25 @@ class TelegramCheckoutIntents
 
     public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
     {
+        $order->loadMissing('customer');
+        $locale = $this->locale->code($order->customer);
         if ($this->pakasirCheckoutFlow() === 'api_qris') {
             try {
                 $transaction = $this->nativeQris->ensureCreated($payment);
             } catch (Throwable $e) {
                 report($e);
-                $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, fallback: true);
+                $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale, fallback: true);
 
                 return;
             }
 
             $payment->refresh();
-            $this->sendNativePakasirPaymentInstructions($chatId, $order, $payment, $transaction);
+            $this->sendNativePakasirPaymentInstructions($chatId, $order, $payment, $transaction, $locale);
 
             return;
         }
 
-        $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment);
+        $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
     }
 
     public function binancePayEnabled(): bool
@@ -69,17 +73,17 @@ class TelegramCheckoutIntents
 
     public function formatUsdt(int $amount): string
     {
-        return number_format($amount / 1_000_000, 6, '.', '');
+        return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
     }
 
-    public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, \App\Models\Customer $customer): void
+    public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): void
     {
-        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, (string) config('services.binance.pay_id'), $customer->locale), [
-            'inline_keyboard' => [[['text' => '📸 Send Payment Proof', 'callback_data' => 'payment-proof:'.$order->id]]],
+        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, (string) config('services.binance.pay_id'), $this->locale->code($customer)), [
+            'inline_keyboard' => [[['text' => $this->locale->text($customer, '📸 Kirim Bukti Pembayaran', '📸 Send Payment Proof'), 'callback_data' => 'payment-proof:'.$order->id]]],
         ]);
     }
 
-    private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, bool $fallback = false): void
+    private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, string $locale, bool $fallback = false): void
     {
         $this->sendPaymentInstruction(
             $chatId,
@@ -88,11 +92,12 @@ class TelegramCheckoutIntents
                 $payment,
                 $this->pakasir->hostedPaymentUrl($payment),
                 $fallback,
+                $locale,
             ),
         );
     }
 
-    private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction): void
+    private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $locale): void
     {
         $this->sendPaymentInstruction(
             $chatId,
@@ -101,6 +106,7 @@ class TelegramCheckoutIntents
                 $payment,
                 $transaction,
                 $this->pakasir->hostedPaymentUrl($payment),
+                $locale,
             ),
         );
     }
@@ -159,9 +165,13 @@ class TelegramCheckoutIntents
         return (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
     }
 
-    public function pakasirUnavailableCustomerMessage(): string
+    public function pakasirUnavailableCustomerMessage(Customer $customer): string
     {
-        return "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi pembayaran otomatis sebelum fitur ini dipakai lagi.";
+        return $this->locale->text(
+            $customer,
+            "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi pembayaran otomatis sebelum fitur ini dipakai lagi.",
+            "Automatic payment is currently unavailable, so this checkout has been redirected to a manual QR payment.\n\nThe store admin needs to check the automatic payment configuration before this feature can be used again.",
+        );
     }
 
     public function manualPaymentMethod(): string
@@ -169,10 +179,10 @@ class TelegramCheckoutIntents
         return 'QR_MANUAL';
     }
 
-    public function manualPaymentOption(): array
+    public function manualPaymentOption(Customer $customer): array
     {
         return [
-            'label' => 'QR Manual',
+            'label' => $this->locale->text($customer, 'QR Manual', 'Manual QR'),
             'name' => 'LHIE STORE',
         ];
     }

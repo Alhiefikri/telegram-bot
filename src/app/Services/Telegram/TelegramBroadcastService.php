@@ -11,9 +11,12 @@ class TelegramBroadcastService
     public function __construct(private TelegramBotClient $bot) {}
 
     /**
+     * @param  string|callable(Customer): string  $message
+     * @param  string|callable(Customer): string|null  $title
+     * @param  array|callable(Customer): array  $replyMarkup
      * @return array{sent:int, failed:int, skipped:bool, recipient_count:int, telegram_total_duration_ms:float, per_recipient_telegram:list<array{recipient_correlation_id:?string, status:string, duration_ms:float, exception?:string}>}
      */
-    public function sendToActiveUsers(string $message, string $title = '📣 Info dari Admin', array $replyMarkup = []): array
+    public function sendToActiveUsers(string|callable $message, string|callable|null $title = null, array|callable $replyMarkup = []): array
     {
         if (blank(config('services.telegram.token'))) {
             $result = [
@@ -30,14 +33,6 @@ class TelegramBroadcastService
             return $result;
         }
 
-        $text = implode("\n", [
-            $title,
-            '━━━━━━━━━━━━━━',
-            trim($message),
-            '',
-            'Butuh bantuan? Balas /support ya.',
-        ]);
-
         $sent = 0;
         $failed = 0;
         $seen = [];
@@ -47,8 +42,8 @@ class TelegramBroadcastService
         Customer::query()
             ->whereNotNull('telegram_id')
             ->orderBy('id')
-            ->select(['id', 'telegram_id'])
-            ->chunkById(100, function ($customers) use (&$sent, &$failed, &$seen, &$perRecipient, &$telegramTotalMs, $text, $replyMarkup): void {
+            ->select(['id', 'telegram_id', 'locale'])
+            ->chunkById(100, function ($customers) use (&$sent, &$failed, &$seen, &$perRecipient, &$telegramTotalMs, $message, $title, $replyMarkup): void {
                 foreach ($customers as $customer) {
                     $chatId = (string) $customer->telegram_id;
                     if ($chatId === '' || isset($seen[$chatId])) {
@@ -64,7 +59,19 @@ class TelegramBroadcastService
                     ];
 
                     try {
-                        $this->bot->sendMessage($chatId, $text, $replyMarkup);
+                        $resolvedMessage = is_string($message) ? $message : $message($customer);
+                        $resolvedTitle = $title === null
+                            ? ($customer->locale === 'en' ? '📣 Info from Admin' : '📣 Info dari Admin')
+                            : (is_string($title) ? $title : $title($customer));
+                        $resolvedReplyMarkup = is_array($replyMarkup) ? $replyMarkup : $replyMarkup($customer);
+                        $text = implode("\n", [
+                            $resolvedTitle,
+                            '━━━━━━━━━━━━━━',
+                            $resolvedMessage,
+                            '',
+                            $customer->locale === 'en' ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.',
+                        ]);
+                        $this->bot->sendMessage($chatId, $text, $resolvedReplyMarkup);
                         $sent++;
                     } catch (Throwable $e) {
                         report($e);

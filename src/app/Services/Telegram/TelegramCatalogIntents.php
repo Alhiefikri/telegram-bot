@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class TelegramCatalogIntents
 {
-    public function __construct(private TelegramBotClient $bot, private ProductBrandIconResolver $icons, private TelegramLocale $locale) {}
+    public function __construct(private TelegramBotClient $bot, private ProductBrandIconResolver $icons, private TelegramLocale $locale, private TelegramCheckoutIntents $checkout) {}
 
     public function sendCategoryCatalog(Customer $customer, string $chatId): void
     {
@@ -26,18 +26,27 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => $this->locale->text($customer, '📂 Lainnya', '📂 Other'), 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\n━━━━━━━━━━━━━━\nProduk belum tampil karena admin belum menambahkan produk aktif.\n\nCek lagi nanti ya.", "🛍️ No products yet\n━━━━━━━━━━━━━━\nThere are no active products to show yet.\n\nPlease check again later.") : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk ready dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here."), ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $keyboard === [] ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\n━━━━━━━━━━━━━━\nProduk belum tampil karena admin belum menambahkan produk aktif.\n\nCek lagi nanti ya.", "🛍️ No products yet\n━━━━━━━━━━━━━━\nThere are no active products to show yet.\n\nPlease check again later.") : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here."), ['inline_keyboard' => $keyboard]);
     }
 
     public function sendStockChoices(Customer $customer, string $chatId, Product $product, int $availableStock): void
     {
         $soldQuantity = $this->soldQuantity($product);
+        $binanceAvailable = $availableStock > 0
+            && $product->usdt_price_amount !== null
+            && $this->checkout->binancePayEnabled();
         $keyboard = [];
         if ($availableStock > 0) {
             $keyboard[] = [[
-                'text' => $this->locale->text($customer, '🧾 Beli Sekarang - Rp', '🧾 Buy Now - Rp').number_format($product->price_amount, 0, ',', '.'),
-                'callback_data' => 'buy:'.$product->id,
+                'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'callback_data' => 'buy:qris:'.$product->id,
             ]];
+            if ($binanceAvailable) {
+                $keyboard[] = [[
+                    'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
+                    'callback_data' => 'buy:binance:'.$product->id,
+                ]];
+            }
         }
         $keyboard[] = [[
             'text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'),
@@ -48,8 +57,11 @@ class TelegramCatalogIntents
             '🛍️ '.$product->name,
             '━━━━━━━━━━━━━━',
             $this->locale->text($customer, '💰 Harga: Rp', '💰 Price: Rp').number_format($product->price_amount, 0, ',', '.'),
-            $availableStock > 0 ? $this->locale->text($customer, '✅ Status: Ready', '✅ Status: Available') : $this->locale->text($customer, '❌ Status: Stok kosong', '❌ Status: Sold out'),
         ];
+        if ($binanceAvailable) {
+            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT';
+        }
+        $lines[] = $availableStock > 0 ? $this->locale->text($customer, '✅ Status: Tersedia', '✅ Status: Available') : $this->locale->text($customer, '❌ Status: Stok kosong', '❌ Status: Sold out');
         if ($availableStock > 0) {
             $lines[] = $this->locale->text($customer, '📦 Stok: ', '📦 Stock: ').$availableStock;
         }
@@ -59,18 +71,29 @@ class TelegramCatalogIntents
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
         $lines[] = $availableStock > 0
-            ? $this->locale->text($customer, 'Kalau cocok, langsung gas checkout di bawah.', 'Ready to buy? Continue to checkout below.')
+            ? $this->locale->text($customer, 'Pilih cara bayar di bawah. Setelah pilih jumlah, checkout langsung dibuat.', 'Choose how to pay below. After you choose the quantity, checkout is created immediately.')
             : $this->locale->text($customer, 'Stoknya lagi habis nih. Cek produk lain dulu ya, atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
-    public function sendQuantityChoices(Customer $customer, string $chatId, Product $product, int $availableStock): void
+    public function sendQuantityChoices(Customer $customer, string $chatId, Product $product, int $availableStock, ?string $paymentMethod = null): void
     {
         $quantityLimit = min($availableStock, 5);
+        $directCheckout = in_array($paymentMethod, ['qris', 'binance'], true);
         $keyboard = [];
         for ($quantity = 1; $quantity <= $quantityLimit; $quantity++) {
-            $keyboard[] = [['text' => (string) $quantity, 'callback_data' => 'qty:'.$product->id.':'.$quantity]];
+            if ($paymentMethod === 'binance') {
+                $total = $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity).' USDT';
+            } elseif ($paymentMethod === 'qris') {
+                $total = 'Rp'.number_format($product->price_amount * $quantity, 0, ',', '.');
+            } else {
+                $total = null;
+            }
+            $keyboard[] = [[
+                'text' => $total === null ? (string) $quantity : $quantity.' · '.$total,
+                'callback_data' => $directCheckout ? 'qty:'.$paymentMethod.':'.$product->id.':'.$quantity : 'qty:'.$product->id.':'.$quantity,
+            ]];
         }
         $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Detail Produk', '⬅️ Product Details'), 'callback_data' => 'product:'.$product->id]];
 
@@ -78,10 +101,17 @@ class TelegramCatalogIntents
             $this->locale->text($customer, '🔢 Pilih jumlah', '🔢 Choose quantity'),
             '━━━━━━━━━━━━━━',
             $this->locale->text($customer, '📦 Produk: ', '📦 Product: ').$product->name,
-            $this->locale->text($customer, '✅ Stok ready: ', '✅ Available stock: ').$availableStock,
-            '',
-            $this->locale->text($customer, 'Mau ambil berapa item?', 'How many items would you like?'),
+            $this->locale->text($customer, '✅ Stok tersedia: ', '✅ Available stock: ').$availableStock,
         ];
+        if ($paymentMethod === 'binance') {
+            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt((int) $product->usdt_price_amount).' USDT'.$this->locale->text($customer, ' per item', ' / item');
+        } elseif ($paymentMethod === 'qris') {
+            $lines[] = '💳 QRIS: Rp'.number_format($product->price_amount, 0, ',', '.').$this->locale->text($customer, ' per item', ' / item');
+        }
+        $lines[] = '';
+        $lines[] = $directCheckout
+            ? $this->locale->text($customer, 'Tekan jumlah yang kamu mau. Checkout langsung dibuat tanpa langkah tambahan.', 'Tap the quantity you want. Checkout will be created immediately with no extra step.')
+            : $this->locale->text($customer, 'Mau ambil berapa item?', 'How many items would you like?');
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }

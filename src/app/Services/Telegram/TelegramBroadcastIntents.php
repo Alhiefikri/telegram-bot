@@ -231,9 +231,9 @@ class TelegramBroadcastIntents
             return;
         }
 
-        $replyMarkup = $product ? [
+        $replyMarkup = $product ? fn (Customer $recipient): array => [
             'inline_keyboard' => [[
-                ['text' => '🛍️ Beli: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                ['text' => ($recipient->locale === 'en' ? '🛍️ Buy: ' : '🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
             ]],
         ] : [];
 

@@ -20,6 +20,7 @@ class TelegramMessageRouter
         private TelegramBroadcastIntents $broadcasts,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
+        private TelegramLocale $locale,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -28,7 +29,7 @@ class TelegramMessageRouter
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
             $this->session->forget($customer);
-            $this->chatPrivacy->denyMessage($chatId);
+            $this->chatPrivacy->denyMessage($customer, $chatId);
 
             return;
         }
@@ -37,6 +38,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             if ($customer->locale === null) {
                 $this->menu->sendLanguagePicker($chatId);
+
                 return;
             }
             $this->menu->sendWelcome($customer, $chatId);
@@ -47,6 +49,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
             $this->menu->sendLanguagePicker($chatId);
+
             return;
         }
 
@@ -91,16 +94,17 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/akun', '👤 Akun Saya'], true)) {
+        if (in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account'], true)) {
             $this->session->forget($customer);
             $this->menu->sendAccountSummary($customer, $chatId);
 
             return;
         }
 
-        if ($text === '/cari' || str_starts_with($text, '/cari ')) {
+        if ($text === '/cari' || str_starts_with($text, '/cari ') || $text === '/search' || str_starts_with($text, '/search ')) {
             $this->session->forget($customer);
-            $keyword = trim(substr($text, strlen('/cari')));
+            $command = str_starts_with($text, '/search') ? '/search' : '/cari';
+            $keyword = trim(substr($text, strlen($command)));
             if ($keyword === '') {
                 $this->bot->sendMessage($chatId, $this->text($customer, "Mau cari produk apa?\n\nKetik seperti ini:\n/cari netflix\n\nBisa pakai nama produk, kategori, atau kata kunci lain.", "What product are you looking for?\n\nType it like this:\n/search netflix\n\nYou can use a product name, category, or other keyword."));
 
@@ -137,12 +141,14 @@ class TelegramMessageRouter
         if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();
-            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$order->order_status->value}\n💳 Payment: {$order->payment_status->value}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️", "You do not have any orders yet.\n\nOpen /products to start shopping 🛍️"));
+            $orderStatus = $order ? $this->locale->orderStatus($customer, $order->order_status) : null;
+            $paymentStatus = $order ? $this->locale->paymentStatus($customer, $order->payment_status) : null;
+            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Pesanan: {$orderStatus}\n💳 Pembayaran: {$paymentStatus}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$orderStatus}\n💳 Payment: {$paymentStatus}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️", "You do not have any orders yet.\n\nOpen /products to start shopping 🛍️"));
 
             return;
         }
 
-        if ($text === '/riwayat') {
+        if (in_array($text, ['/riwayat', '/history'], true)) {
             $this->session->forget($customer);
             $this->orders->sendOrderHistory($customer, $chatId);
 
@@ -164,7 +170,7 @@ class TelegramMessageRouter
 
         $productId = $this->session->getSelectedProductId($customer);
         if ($productId !== null && ! $isPrivateChat) {
-            $this->chatPrivacy->denyMessage($chatId);
+            $this->chatPrivacy->denyMessage($customer, $chatId);
 
             return;
         }
@@ -189,7 +195,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '👤 Akun Saya', '/batal', '/payment', '/status', '/pesanan', '📦 Pesanan', '/riwayat', '/order', '/broadcast', '📣 Broadcast Info'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || str_starts_with($text, '/broadcast ');
@@ -197,6 +203,6 @@ class TelegramMessageRouter
 
     private function text(Customer $customer, string $id, string $en): string
     {
-        return $customer->locale === 'en' ? $en : $id;
+        return $this->locale->text($customer, $id, $en);
     }
 }

@@ -53,8 +53,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'kopi@example.test')
-            && str_contains(json_encode($r->data()), 'Beli Sekarang - Rp25.000')
-            && str_contains(json_encode($r->data()), 'buy:'.$product->id)
+            && str_contains(json_encode($r->data()), 'QRIS')
+            && str_contains(json_encode($r->data()), 'Rp25.000')
+            && str_contains(json_encode($r->data()), 'buy:qris:'.$product->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Pilih jumlah')
@@ -70,6 +71,123 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'checkout')
             && str_contains(json_encode($r->data()), 'Lanjut Checkout')
             && ! str_contains(json_encode($r->data()), 'payment:'));
+    }
+
+    public function test_product_detail_and_binance_quantity_checkout_directly_in_usdt(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'AI Premium',
+            'description' => 'Akun premium siap pakai.',
+            'price_amount' => 25000,
+            'usdt_price_amount' => 2_500_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(60, 'binance-detail', 'product:'.$product->id))->assertOk();
+
+        $detailMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'AI Premium')
+            && str_contains((string) ($request['text'] ?? ''), 'Detail produk'));
+        $this->assertCount(1, $detailMessages);
+        $detailRequest = $detailMessages->first()[0];
+        $detailButtons = collect($detailRequest['reply_markup']['inline_keyboard'])->flatten(1);
+        $this->assertTrue($detailButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'buy:qris:'.$product->id
+            && str_contains((string) ($button['text'] ?? ''), 'QRIS')
+            && str_contains((string) ($button['text'] ?? ''), 'Rp25.000')));
+        $this->assertTrue($detailButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'buy:binance:'.$product->id
+            && str_contains((string) ($button['text'] ?? ''), 'Binance Pay')
+            && str_contains((string) ($button['text'] ?? ''), '2.5 USDT')));
+
+        $this->postTelegramWebhook($this->callbackUpdate(61, 'binance-buy', 'buy:binance:'.$product->id))->assertOk();
+
+        $quantityMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Pilih jumlah')
+            && str_contains((string) ($request['text'] ?? ''), 'AI Premium'));
+        $this->assertCount(1, $quantityMessages);
+        $quantityRequest = $quantityMessages->first()[0];
+        $quantityButtons = collect($quantityRequest['reply_markup']['inline_keyboard'])->flatten(1);
+        $this->assertTrue($quantityButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'qty:binance:'.$product->id.':1'
+            && str_contains((string) ($button['text'] ?? ''), '2.5 USDT')));
+        $this->assertTrue($quantityButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'qty:binance:'.$product->id.':2'
+            && str_contains((string) ($button['text'] ?? ''), '5 USDT')));
+
+        $this->postTelegramWebhook($this->callbackUpdate(62, 'binance-quantity', 'qty:binance:'.$product->id.':2'))->assertOk();
+
+        $order = Order::with(['payments', 'orderItems'])->firstOrFail();
+        $payment = $order->payments->firstOrFail();
+        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->payment_status);
+        $this->assertSame(50000, $order->total_amount);
+        $this->assertSame('IDR', $order->currency);
+        $this->assertSame(2, $order->orderItems->sole()->quantity);
+        $this->assertSame('manual', $payment->provider);
+        $this->assertSame('BINANCE_PAY_ID', $payment->method);
+        $this->assertSame(5_000_000, $payment->amount);
+        $this->assertSame('USDT', $payment->currency);
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID')
+            && str_contains((string) ($request['text'] ?? ''), '987654321')
+            && str_contains((string) ($request['text'] ?? ''), '5.000000 USDT'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
+                || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));
+    }
+
+    public function test_product_detail_hides_binance_when_disabled_or_product_has_no_usdt_price(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        $settings = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => false,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $disabledProduct = Product::factory()->create([
+            'name' => 'Binance Disabled',
+            'price_amount' => 20000,
+            'usdt_price_amount' => 2_000_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $missingUsdtProduct = Product::factory()->create([
+            'name' => 'No USDT Price',
+            'price_amount' => 30000,
+            'usdt_price_amount' => null,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(70, 'disabled-detail', 'product:'.$disabledProduct->id))->assertOk();
+        $settings->update(['binance_pay_enabled' => true]);
+        $this->postTelegramWebhook($this->callbackUpdate(71, 'missing-usdt-detail', 'product:'.$missingUsdtProduct->id))->assertOk();
+
+        foreach ([$disabledProduct, $missingUsdtProduct] as $product) {
+            $detailMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+                && str_contains((string) ($request['text'] ?? ''), $product->name)
+                && str_contains((string) ($request['text'] ?? ''), 'Detail produk'));
+            $this->assertCount(1, $detailMessages);
+            $detailRequest = $detailMessages->first()[0];
+            $detailButtons = collect($detailRequest['reply_markup']['inline_keyboard'])->flatten(1);
+            $this->assertTrue($detailButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'buy:qris:'.$product->id
+                && str_contains((string) ($button['text'] ?? ''), 'QRIS')));
+            $this->assertFalse($detailButtons->contains(fn (array $button): bool => ($button['callback_data'] ?? null) === 'buy:binance:'.$product->id));
+            $this->assertStringNotContainsString('Binance Pay', json_encode($detailRequest->data()));
+        }
     }
 
     public function test_quantity_selection_ignores_abandoned_active_carts_and_checkout_revalidates_stock(): void

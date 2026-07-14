@@ -10,7 +10,6 @@ use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
-use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
@@ -30,7 +29,7 @@ class TelegramOrderIntents
         $lines = [$this->text($customer, '📦 Riwayat Pesanan Terakhir', '📦 Recent Order History'), '━━━━━━━━━━━━━━', $this->text($customer, 'Tekan Detail untuk lihat isi pesanan.', 'Tap Details to view an order.')];
         $keyboard = [];
         foreach ($orders as $i => $order) {
-            $lines[] = ($i + 1).'. '.$order->invoice_number.' · '.$order->order_status->value.' / '.$order->payment_status->value.' · Rp '.number_format($order->total_amount, 0, ',', '.').' · '.$this->formatShortDate($order->created_at);
+            $lines[] = ($i + 1).'. '.$order->invoice_number.' · '.$this->locale->orderStatus($customer, $order->order_status).' / '.$this->locale->paymentStatus($customer, $order->payment_status).' · Rp '.number_format($order->total_amount, 0, ',', '.').' · '.$this->locale->formatShortDate($customer, $order->created_at);
             $keyboard[] = [['text' => $this->text($customer, '🧾 Detail ', '🧾 Details ').$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
         }
 
@@ -57,8 +56,8 @@ class TelegramOrderIntents
             $this->text($customer, '🧾 Detail Pesanan', '🧾 Order Details'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
-            $this->text($customer, 'Status: ', 'Status: ').$order->order_status->value.' / '.$paymentStatus->value,
-            $this->text($customer, 'Dibuat: ', 'Created: ').$this->formatDate($order->created_at),
+            $this->text($customer, 'Status: ', 'Status: ').$this->locale->orderStatus($customer, $order->order_status).' / '.$this->locale->paymentStatus($customer, $paymentStatus),
+            $this->text($customer, 'Dibuat: ', 'Created: ').$this->locale->formatDate($customer, $order->created_at),
             '',
             $this->text($customer, 'Item:', 'Items:'),
         ];
@@ -67,22 +66,22 @@ class TelegramOrderIntents
         }
         $lines[] = 'Total: Rp '.number_format($order->total_amount, 0, ',', '.');
         if ($payment) {
-            $lines[] = $this->text($customer, 'Pembayaran: ', 'Payment: ').$payment->payment_method_label.' ('.$payment->status->value.')';
+            $lines[] = $this->text($customer, 'Pembayaran: ', 'Payment: ').$this->locale->paymentMethod($customer, $payment).' ('.$this->locale->paymentStatus($customer, $payment->status).')';
             if ($payment->paid_at) {
-                $lines[] = $this->text($customer, 'Dibayar: ', 'Paid: ').$this->formatDate($payment->paid_at);
+                $lines[] = $this->text($customer, 'Dibayar: ', 'Paid: ').$this->locale->formatDate($customer, $payment->paid_at);
             }
         }
         if (($order->order_status === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = $this->text($customer, 'Batas pembayaran: ', 'Payment deadline: ').$this->formatDate($payment?->expired_at ?? $order->expires_at);
+            $lines[] = $this->text($customer, 'Batas pembayaran: ', 'Payment deadline: ').$this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at);
         }
         if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = $this->text($customer, 'Berakhir: ', 'Expired: ').$this->formatDate($payment?->expired_at ?? $order->expires_at);
+            $lines[] = $this->text($customer, 'Berakhir: ', 'Expired: ').$this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at);
         }
         if ($refreshNotice !== null) {
             $lines[] = '';
             $lines[] = $refreshNotice;
         }
-        $accountLines = $this->accountSecretLines($order, $paymentStatus);
+        $accountLines = $this->accountSecretLines($customer, $order, $paymentStatus);
         if ($accountLines !== []) {
             $lines[] = '';
             $lines[] = $this->text($customer, '🔐 Data akun:', '🔐 Account details:');
@@ -147,7 +146,7 @@ class TelegramOrderIntents
         return $this->text($customer, 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.', 'Payment status was checked. No completed payment was found.');
     }
 
-    private function accountSecretLines(Order $order, PaymentStatus $paymentStatus): array
+    private function accountSecretLines(Customer $customer, Order $order, PaymentStatus $paymentStatus): array
     {
         if ($paymentStatus !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             return [];
@@ -165,34 +164,12 @@ class TelegramOrderIntents
             }
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {
-                $lines[] = '📌 Catatan pengiriman:';
+                $lines[] = $this->text($customer, '📌 Catatan pengiriman:', '📌 Delivery note:');
                 $lines[] = $deliveryNote;
             }
         }
 
         return $lines;
-    }
-
-    public function formatDate(CarbonInterface $date): string
-    {
-        $timezone = (string) config('app.timezone');
-
-        return $date->copy()->timezone($timezone)->format('d M Y H:i').' '.$this->timezoneLabel($timezone);
-    }
-
-    public function formatShortDate(CarbonInterface $date): string
-    {
-        return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y');
-    }
-
-    private function timezoneLabel(string $timezone): string
-    {
-        return match ($timezone) {
-            'Asia/Jakarta' => 'WIB',
-            'Asia/Makassar', 'Asia/Ujung_Pandang' => 'WITA',
-            'Asia/Jayapura' => 'WIT',
-            default => $timezone,
-        };
     }
 
     private function text(Customer $customer, string $id, string $en): string

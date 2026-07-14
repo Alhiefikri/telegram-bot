@@ -39,7 +39,7 @@ class TelegramPaymentInstructionRenderer
         if ($order->expires_at) {
             $lines[] = '';
             $lines[] = $locale === 'en' ? '⏳ Payment deadline:' : '⏳ Batas bayar:';
-            $lines[] = $this->formatDate($order->expires_at);
+            $lines[] = $this->formatDate($order->expires_at, $locale);
             $lines[] = $locale === 'en' ? 'Stock is reserved for '.(int) config('orders.pending_payment_ttl_minutes', 5).' minutes. If payment proof is not sent, the order expires automatically and stock is released.' : 'Stok dipegang '.(int) config('orders.pending_payment_ttl_minutes', 5).' menit. Kalau belum bayar/kirim bukti, order otomatis expired dan stok balik.';
         }
 
@@ -67,16 +67,22 @@ class TelegramPaymentInstructionRenderer
         if ($locale === 'en') {
             return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 Send EXACTLY this amount:\n{$amount} USDT\n\n📥 To Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Copy the Binance Pay ID above\n2️⃣ Send exactly {$amount} USDT using Binance Pay\n3️⃣ Send a payment screenshot as a PHOTO with caption:\n   /payment {$order->invoice_number}\n\n⚠️ Amount must match exactly. Payment is verified manually.";
         }
+
         return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 Kirim TEPAT sejumlah ini:\n{$amount} USDT\n\n📥 Ke Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Salin Binance Pay ID di atas\n2️⃣ Kirim tepat {$amount} USDT melalui Binance Pay\n3️⃣ Kirim screenshot pembayaran sebagai FOTO dengan caption:\n   /payment {$order->invoice_number}\n\n⚠️ Nominal harus tepat. Pembayaran diverifikasi manual.";
     }
 
-    public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false): TelegramPaymentInstruction
+    public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false, string $locale = 'id'): TelegramPaymentInstruction
     {
         $order->loadMissing('orderItems');
         $lines = [];
 
         if ($fallback) {
-            $lines = [
+            $lines = $locale === 'en' ? [
+                '⚠️ QRIS checkout redirected',
+                'The direct QRIS code could not be created automatically. The order is still awaiting payment and the stock remains reserved.',
+                'Use the QR code/payment link below to continue payment.',
+                '',
+            ] : [
                 '⚠️ Checkout QRIS dialihkan',
                 'QRIS langsung belum bisa dibuat otomatis. Order tetap pending dan stok tetap dipegang.',
                 'Gunakan QR/link website di bawah untuk lanjut bayar.',
@@ -84,72 +90,90 @@ class TelegramPaymentInstructionRenderer
             ];
         }
 
-        $lines = array_merge($lines, $this->pakasirOrderHeaderLines($order), [
+        $lines = array_merge($lines, $this->pakasirOrderHeaderLines($order, $locale), [
             '💰 Total: '.$this->formatRupiah($order->total_amount),
             '',
-            '⚠️ Bayar dengan nominal yang SAMA PERSIS ya.',
+            $locale === 'en' ? '⚠️ Pay the EXACT amount shown.' : '⚠️ Bayar dengan nominal yang SAMA PERSIS ya.',
         ]);
 
         if ($order->expires_at) {
-            $lines[] = '⏳ Order aktif sampai: '.$this->formatDate($order->expires_at);
+            $lines[] = ($locale === 'en' ? '⏳ Order active until: ' : '⏳ Order aktif sampai: ').$this->formatDate($order->expires_at, $locale);
         }
 
         $lines[] = '';
-        $lines[] = '📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.';
+        $lines[] = $locale === 'en'
+            ? '📲 Scan the QRIS code above, or tap the payment button to open the payment page.'
+            : '📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.';
         $lines[] = '';
-        $lines[] = '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
-        $lines[] = 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
+        $lines[] = $locale === 'en'
+            ? '✅ After payment succeeds, it will be verified automatically and the product will be sent directly to this chat.'
+            : '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
+        $lines[] = $locale === 'en'
+            ? 'If no automatic message arrives after payment, tap the Check Payment button.'
+            : 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($paymentUrl),
             filename: 'qris-checkout-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
-            replyMarkup: $this->paymentActions($order, $paymentUrl),
+            replyMarkup: $this->paymentActions($order, $paymentUrl, $locale),
         );
     }
 
-    public function nativePakasir(Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $paymentUrl): TelegramPaymentInstruction
+    public function nativePakasir(Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $paymentUrl, string $locale = 'id'): TelegramPaymentInstruction
     {
         $order->loadMissing('orderItems');
         $payableAmount = $transaction->totalPayment() ?? $payment->amount;
         $expiry = $this->earliestDate($transaction->expiresAt(), $payment->provider_expires_at, $payment->expired_at, $order->expires_at);
 
-        $lines = array_merge($this->pakasirOrderHeaderLines($order), [
-            '💰 Total produk: '.$this->formatRupiah($order->total_amount),
-            '🏷️ Biaya QRIS: '.($transaction->fee() === null ? 'Belum tersedia' : $this->formatRupiah($transaction->fee())),
-            '💳 Total bayar QRIS: '.$this->formatRupiah($payableAmount),
+        $lines = array_merge($this->pakasirOrderHeaderLines($order, $locale), [
+            ($locale === 'en' ? '💰 Product total: ' : '💰 Total produk: ').$this->formatRupiah($order->total_amount),
+            ($locale === 'en' ? '🏷️ QRIS fee: ' : '🏷️ Biaya QRIS: ').($transaction->fee() === null
+                ? ($locale === 'en' ? 'Not available yet' : 'Belum tersedia')
+                : $this->formatRupiah($transaction->fee())),
+            ($locale === 'en' ? '💳 Total QRIS payment: ' : '💳 Total bayar QRIS: ').$this->formatRupiah($payableAmount),
         ]);
 
         if ($expiry) {
-            $lines[] = '⏳ Batas bayar QRIS: '.$this->formatDate($expiry);
-            $lines[] = 'Lewat batas ini order otomatis expired dan stok dilepas. Jangan bayar QR lama; checkout ulang kalau masih mau beli.';
+            $lines[] = ($locale === 'en' ? '⏳ QRIS payment deadline: ' : '⏳ Batas bayar QRIS: ').$this->formatDate($expiry, $locale);
+            $lines[] = $locale === 'en'
+                ? 'After this deadline, the order expires automatically and the stock is released. Do not pay with an old QR code; check out again if you still want to buy.'
+                : 'Lewat batas ini order otomatis expired dan stok dilepas. Jangan bayar QR lama; checkout ulang kalau masih mau beli.';
         }
 
         $lines[] = '';
-        $lines[] = '📲 Scan QRIS di atas langsung dari Telegram. Tidak perlu buka browser kalau QR bisa discan.';
-        $lines[] = '🌐 Kalau QR tidak bisa discan, tap tombol Bayar via Website sebagai fallback.';
+        $lines[] = $locale === 'en'
+            ? '📲 Scan the QRIS code above directly from Telegram. You do not need to open a browser if the QR code can be scanned.'
+            : '📲 Scan QRIS di atas langsung dari Telegram. Tidak perlu buka browser kalau QR bisa discan.';
+        $lines[] = $locale === 'en'
+            ? '🌐 If the QR code cannot be scanned, tap the Pay via Website button as a fallback.'
+            : '🌐 Kalau QR tidak bisa discan, tap tombol Bayar via Website sebagai fallback.';
         $lines[] = '';
-        $lines[] = '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
-        $lines[] = 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
+        $lines[] = $locale === 'en'
+            ? '✅ After payment succeeds, it will be verified automatically and the product will be sent directly to this chat.'
+            : '✅ Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
+        $lines[] = $locale === 'en'
+            ? 'If no automatic message arrives after payment, tap the Check Payment button.'
+            : 'Kalau belum ada pesan otomatis setelah bayar, tap tombol Cek Pembayaran.';
 
         return new TelegramPaymentInstruction(
             photoContents: $this->qrCodes->png($transaction->paymentNumber()),
             filename: 'qris-'.$payment->merchant_ref.'.png',
             captionLines: $lines,
-            replyMarkup: $this->paymentActions($order, $paymentUrl),
+            replyMarkup: $this->paymentActions($order, $paymentUrl, $locale),
         );
     }
 
     /**
      * @return list<string>
      */
-    private function pakasirOrderHeaderLines(Order $order): array
+    private function pakasirOrderHeaderLines(Order $order, string $locale): array
     {
         return [
             '🧾 Invoice: '.$order->invoice_number,
             '━━━━━━━━━━━━━━',
-            '📦 Produk: '.$this->orderItemsSummary($order),
-            '🔢 Jumlah: '.$order->orderItems->sum('quantity'),
+            ($locale === 'en' ? '📦 Products: ' : '📦 Produk: ').$this->orderItemsSummary($order),
+            ($locale === 'en' ? '🔢 Quantity: ' : '🔢 Jumlah: ').$order->orderItems->sum('quantity'),
         ];
     }
 
@@ -206,22 +230,26 @@ class TelegramPaymentInstructionRenderer
     /**
      * @return array{inline_keyboard: list<list<array{text: string, url?: string, callback_data?: string}>>}
      */
-    private function paymentActions(Order $order, string $paymentUrl): array
+    private function paymentActions(Order $order, string $paymentUrl, string $locale): array
     {
         return [
             'inline_keyboard' => [
-                [['text' => '💳 Bayar via Website', 'url' => $paymentUrl]],
-                [['text' => '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
-                [['text' => '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                [['text' => $locale === 'en' ? '💳 Pay via Website' : '💳 Bayar via Website', 'url' => $paymentUrl]],
+                [['text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
             ],
         ];
     }
 
-    private function formatDate(CarbonInterface $date): string
+    private function formatDate(CarbonInterface $date, string $locale): string
     {
         $timezone = (string) config('app.timezone');
+        $localized = $date->copy()->timezone($timezone);
+        $months = $locale === 'en'
+            ? [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            : [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
-        return $date->timezone($timezone)->format('d M Y H:i').' '.$this->timezoneLabel($timezone);
+        return $localized->format('d').' '.$months[(int) $localized->format('n')].$localized->format(' Y H:i').' '.$this->timezoneLabel($timezone);
     }
 
     private function timezoneLabel(string $timezone): string

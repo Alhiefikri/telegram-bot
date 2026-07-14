@@ -40,7 +40,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_hosted_pakasir_instruction_uses_hosted_url_qr_shared_caption_pieces_and_buyer_actions(): void
+    public function test_hosted_pakasir_instruction_uses_indonesian_caption_and_buyer_actions_for_id_locale(): void
     {
         $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
         $order = $this->orderWithItems($expiresAt);
@@ -50,12 +50,12 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         ]);
         $paymentUrl = 'https://pakasir.example/pay/PKS-HOSTED-103?token=hosted-token';
 
-        $instruction = $this->renderer()->hostedPakasir($order, $payment, $paymentUrl);
+        $instruction = $this->renderer()->hostedPakasir($order, $payment, $paymentUrl, false, 'id');
 
         $this->assertSame([$paymentUrl], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentUrl, $instruction->photoContents);
         $this->assertSame('qris-checkout-PKS-HOSTED-103.png', $instruction->filename);
-        $this->assertPakasirActions($instruction, $order, $paymentUrl);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
             '📦 Produk: Sourdough Starter x2, Kefir Kit',
@@ -64,11 +64,79 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '⏳ Order aktif sampai: 04 Jul 2026 16:30 WIB',
         ]);
         $this->assertStringContainsString('📲 Scan QRIS di atas, atau tap tombol bayar untuk buka halaman pembayaran.', $instruction->caption());
+        $this->assertStringContainsString('sistem akan verifikasi otomatis', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
     }
 
-    public function test_native_qris_instruction_uses_payment_number_qr_payable_caption_pieces_and_buyer_actions(): void
+    public function test_hosted_pakasir_instruction_uses_english_caption_and_buyer_actions_for_en_locale(): void
+    {
+        $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
+        $order = $this->orderWithItems($expiresAt);
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-HOSTED-EN-103',
+            'amount' => 125000,
+        ]);
+        $paymentUrl = 'https://pakasir.example/pay/PKS-HOSTED-EN-103?token=hosted-token';
+
+        $instruction = $this->renderer()->hostedPakasir($order, $payment, $paymentUrl, false, 'en');
+
+        $this->assertSame([$paymentUrl], $this->qrCodes->renderedContents);
+        $this->assertSame('qr-png:'.$paymentUrl, $instruction->photoContents);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
+        $this->assertCaptionIncludes($instruction, [
+            '🧾 Invoice: INV-RENDERER-103',
+            '📦 Products: Sourdough Starter x2, Kefir Kit',
+            '🔢 Quantity: 3',
+            '💰 Total: Rp125.000',
+            '⏳ Order active until: 04 Jul 2026 16:30 WIB',
+        ]);
+        $this->assertStringContainsString('Scan the QRIS code above', $instruction->caption());
+        $this->assertStringContainsString('payment page', $instruction->caption());
+        $this->assertStringContainsString('verified automatically', $instruction->caption());
+        $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
+    }
+
+    public function test_fallback_hosted_instruction_explains_redirect_in_indonesian_for_id_locale(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-FALLBACK-ID-103',
+            'amount' => 125000,
+        ]);
+        $paymentUrl = 'https://pakasir.example/pay/PKS-FALLBACK-ID-103?token=fallback-token';
+
+        $instruction = $this->renderer()->hostedPakasir($order, $payment, $paymentUrl, true, 'id');
+
+        $this->assertCaptionIncludes($instruction, [
+            '⚠️ Checkout QRIS dialihkan',
+            'QRIS langsung belum bisa dibuat otomatis. Order tetap pending dan stok tetap dipegang.',
+            'Gunakan QR/link website di bawah untuk lanjut bayar.',
+            '📦 Produk: Sourdough Starter x2, Kefir Kit',
+        ]);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
+    }
+
+    public function test_fallback_hosted_instruction_explains_redirect_in_english_for_en_locale(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-FALLBACK-EN-103',
+            'amount' => 125000,
+        ]);
+        $paymentUrl = 'https://pakasir.example/pay/PKS-FALLBACK-EN-103?token=fallback-token';
+
+        $instruction = $this->renderer()->hostedPakasir($order, $payment, $paymentUrl, true, 'en');
+
+        $this->assertStringContainsString('QRIS checkout', $instruction->caption());
+        $this->assertStringContainsString('could not be created automatically', $instruction->caption());
+        $this->assertStringContainsString('payment link below', $instruction->caption());
+        $this->assertContains('📦 Products: Sourdough Starter x2, Kefir Kit', $instruction->captionLines());
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
+        $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
+    }
+
+    public function test_native_qris_instruction_uses_indonesian_caption_and_buyer_actions_for_id_locale(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
         $payment = Payment::factory()->for($order)->create([
@@ -79,25 +147,14 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         ]);
         $paymentNumber = '00020101021226610016ID.CO.QRIS.ISSUE103';
         $paymentUrl = 'https://pakasir.example/pay/PKS-QRIS-103?token=native-token';
-        $transaction = PakasirQrisTransaction::fromPayload([
-            'payment' => [
-                'project' => 'warung-ai',
-                'order_id' => 'PKS-QRIS-103',
-                'amount' => 125000,
-                'fee' => 875,
-                'total_payment' => 125875,
-                'payment_method' => 'qris',
-                'payment_number' => $paymentNumber,
-                'expired_at' => '2026-07-04T08:45:00+00:00',
-            ],
-        ]);
+        $transaction = $this->nativeTransaction($paymentNumber);
 
-        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl);
+        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl, 'id');
 
         $this->assertSame([$paymentNumber], $this->qrCodes->renderedContents);
         $this->assertSame('qr-png:'.$paymentNumber, $instruction->photoContents);
         $this->assertSame('qris-PKS-QRIS-103.png', $instruction->filename);
-        $this->assertPakasirActions($instruction, $order, $paymentUrl);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
             '📦 Produk: Sourdough Starter x2, Kefir Kit',
@@ -107,9 +164,43 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '💳 Total bayar QRIS: Rp125.875',
             '⏳ Batas bayar QRIS: 04 Jul 2026 15:45 WIB',
         ]);
-        $this->assertStringContainsString('🌐 Kalau QR tidak bisa discan, tap tombol Bayar via Website sebagai fallback.', $instruction->caption());
+        $this->assertStringContainsString('QR tidak bisa discan', $instruction->caption());
+        $this->assertStringContainsString('Bayar via Website', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
+    }
+
+    public function test_native_qris_instruction_uses_english_caption_and_buyer_actions_for_en_locale(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-QRIS-EN-103',
+            'amount' => 125000,
+            'provider_expires_at' => CarbonImmutable::parse('2026-07-04 16:00:00', 'Asia/Jakarta'),
+            'expired_at' => CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'),
+        ]);
+        $paymentNumber = '00020101021226610016EN.CO.QRIS.ISSUE103';
+        $paymentUrl = 'https://pakasir.example/pay/PKS-QRIS-EN-103?token=native-token';
+        $transaction = $this->nativeTransaction($paymentNumber);
+
+        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl, 'en');
+
+        $this->assertSame([$paymentNumber], $this->qrCodes->renderedContents);
+        $this->assertSame('qr-png:'.$paymentNumber, $instruction->photoContents);
+        $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
+        $this->assertCaptionIncludes($instruction, [
+            '🧾 Invoice: INV-RENDERER-103',
+            '📦 Products: Sourdough Starter x2, Kefir Kit',
+            '🔢 Quantity: 3',
+            '💰 Product total: Rp125.000',
+            '🏷️ QRIS fee: Rp875',
+            '💳 Total QRIS payment: Rp125.875',
+            '⏳ QRIS payment deadline: 04 Jul 2026 15:45 WIB',
+        ]);
+        $this->assertStringContainsString('If the QR code cannot be scanned', $instruction->caption());
+        $this->assertStringContainsString('Pay via Website', $instruction->caption());
+        $this->assertStringContainsString('verified automatically', $instruction->caption());
+        $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
     }
 
     public function test_native_qris_expiry_from_provider_utc_is_rendered_in_configured_app_timezone(): void
@@ -136,7 +227,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             ],
         ]);
 
-        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl);
+        $instruction = $this->renderer()->nativePakasir($order, $payment, $transaction, $paymentUrl, 'id');
 
         $this->assertContains(
             '⏳ Batas bayar QRIS: 04 Jul 2026 16:45 Asia/Singapore',
@@ -147,7 +238,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringNotContainsString('UTC', $instruction->caption());
     }
 
-    public function test_manual_instruction_uses_manual_qr_file_proof_upload_caption_and_no_website_button(): void
+    public function test_manual_instruction_uses_indonesian_caption_and_no_buyer_actions_for_id_locale(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'));
         $manualQrContents = file_get_contents(public_path('qr-lhie.jpg'));
@@ -156,23 +247,58 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $instruction = $this->renderer()->manual($order, [
             'label' => 'QR Manual BCA',
             'name' => 'Lhie Store QRIS',
-        ], 'warung_support');
+        ], 'warung_support', 'id');
 
         $this->assertSame([], $this->qrCodes->renderedContents);
         $this->assertSame($manualQrContents, $instruction->photoContents);
         $this->assertSame('qr-lhie.jpg', $instruction->filename);
         $this->assertSame([], $instruction->replyMarkup);
         $this->assertCaptionIncludes($instruction, [
+            '✅ Checkout berhasil dibuat',
             '🧾 Invoice: INV-RENDERER-103',
             '💰 Total: Rp 125.000',
             '💳 Bayar via: QR Manual BCA',
+            '📲 Scan QR manual di atas.',
             '• Nama QR: Lhie Store QRIS',
             '• Nominal wajib sama persis: Rp 125.000',
+            '⏳ Batas bayar:',
             '📦 Pesanan: Sourdough Starter x2, Kefir Kit',
             '/payment',
             'Kalau kesusahan, chat admin @warung_support.',
         ]);
         $this->assertStringContainsString('Setelah bayar, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:', $instruction->caption());
+    }
+
+    public function test_manual_instruction_uses_english_caption_and_no_buyer_actions_for_en_locale(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta'));
+        $manualQrContents = file_get_contents(public_path('qr-lhie.jpg'));
+        $this->assertIsString($manualQrContents);
+
+        $instruction = $this->renderer()->manual($order, [
+            'label' => 'BCA Manual QR',
+            'name' => 'Lhie Store QRIS',
+        ], 'warung_support', 'en');
+
+        $this->assertSame([], $this->qrCodes->renderedContents);
+        $this->assertSame($manualQrContents, $instruction->photoContents);
+        $this->assertSame('qr-lhie.jpg', $instruction->filename);
+        $this->assertSame([], $instruction->replyMarkup);
+        $this->assertCaptionIncludes($instruction, [
+            '✅ Checkout created',
+            '🧾 Invoice: INV-RENDERER-103',
+            '💰 Total: Rp 125.000',
+            '💳 Pay via: BCA Manual QR',
+            '📲 Scan the manual QR above.',
+            '• QR name: Lhie Store QRIS',
+            '• Amount must match exactly: Rp 125.000',
+            '⏳ Payment deadline:',
+            '📦 Order: Sourdough Starter x2, Kefir Kit',
+            '/payment',
+            'Need help? Chat admin @warung_support.',
+        ]);
+        $this->assertStringContainsString('After paying, send a payment screenshot to this bot as a PHOTO with this caption:', $instruction->caption());
+        $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
     }
 
     private function renderer(): TelegramPaymentInstructionRenderer
@@ -204,6 +330,57 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         return $order;
     }
 
+    private function nativeTransaction(string $paymentNumber): PakasirQrisTransaction
+    {
+        return PakasirQrisTransaction::fromPayload([
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => 'PKS-QRIS-103',
+                'amount' => 125000,
+                'fee' => 875,
+                'total_payment' => 125875,
+                'payment_method' => 'qris',
+                'payment_number' => $paymentNumber,
+                'expired_at' => '2026-07-04T08:45:00+00:00',
+            ],
+        ]);
+    }
+
+    private function assertEnglishCaptionOmitsIndonesianPaymentCopy(TelegramPaymentInstruction $instruction): void
+    {
+        $caption = $instruction->caption();
+        $indonesianSystemPhrases = [
+            'Checkout berhasil dibuat',
+            'Checkout QRIS dialihkan',
+            '📦 Produk:',
+            '🔢 Jumlah:',
+            '💰 Total produk:',
+            '🏷️ Biaya QRIS:',
+            '💳 Total bayar QRIS:',
+            '💳 Bayar via:',
+            '⏳ Batas bayar',
+            '⏳ Order aktif sampai:',
+            '📦 Pesanan:',
+            'Bayar dengan nominal',
+            'QRIS langsung belum bisa dibuat otomatis',
+            'Gunakan QR/link website',
+            'Scan QRIS di atas',
+            'Scan QR manual di atas',
+            'Sebelum bayar, pastikan',
+            'Nama QR:',
+            'Nominal wajib sama persis',
+            'Stok dipegang',
+            'Setelah bayar',
+            'Setelah pembayaran berhasil',
+            'Kalau belum ada pesan otomatis',
+            'Kalau kesusahan',
+        ];
+
+        foreach ($indonesianSystemPhrases as $phrase) {
+            $this->assertStringNotContainsString($phrase, $caption, "Unexpected Indonesian payment copy in English caption:\n{$caption}");
+        }
+    }
+
     /**
      * @param  list<string>  $expectedLines
      */
@@ -214,25 +391,28 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         }
     }
 
-    private function assertPakasirActions(TelegramPaymentInstruction $instruction, Order $order, string $paymentUrl): void
+    private function assertPakasirActions(TelegramPaymentInstruction $instruction, Order $order, string $paymentUrl, string $locale): void
     {
         $rows = $instruction->replyMarkup['inline_keyboard'] ?? [];
         $buttons = array_merge(...$rows);
+        $expectedLabels = $locale === 'en'
+            ? ['website' => '💳 Pay via Website', 'check' => '✅ Check Payment', 'cancel' => '❌ Cancel Order']
+            : ['website' => '💳 Bayar via Website', 'check' => '✅ Cek Pembayaran', 'cancel' => '❌ Batalkan Order'];
 
         $this->assertTrue(
             $this->hasButton($buttons, fn (array $button): bool => ($button['url'] ?? null) === $paymentUrl
-                && str_contains((string) ($button['text'] ?? ''), 'Bayar via Website')),
-            'Expected a Pakasir website payment button.',
+                && ($button['text'] ?? null) === $expectedLabels['website']),
+            'Expected a localized Pakasir website payment button.',
         );
         $this->assertTrue(
             $this->hasButton($buttons, fn (array $button): bool => ($button['callback_data'] ?? null) === 'order:'.$order->invoice_number
-                && str_contains((string) ($button['text'] ?? ''), 'Cek Pembayaran')),
-            'Expected a check-payment button that refreshes the order detail.',
+                && ($button['text'] ?? null) === $expectedLabels['check']),
+            'Expected a localized check-payment button that refreshes the order detail.',
         );
         $this->assertTrue(
             $this->hasButton($buttons, fn (array $button): bool => ($button['callback_data'] ?? null) === 'buyer:cancel-pending:'.$order->id
-                && str_contains((string) ($button['text'] ?? ''), 'Batalkan Order')),
-            'Expected a buyer cancel-pending button.',
+                && ($button['text'] ?? null) === $expectedLabels['cancel']),
+            'Expected a localized buyer cancel-pending button.',
         );
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Customer;
 use App\Models\Product;
 use Throwable;
 
@@ -24,15 +25,27 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
-        return $this->broadcast->sendToActiveUsers(implode("\n", [
-            'Produk baru sudah masuk nih 👀',
-            '📦 '.$product->name,
-            '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
-            '📦 Stok: '.$availableStock,
-            '',
-            '📝 Deskripsi',
-            $this->descriptionText($product),
-        ]), '🆕 Produk Baru', $this->productReplyMarkup($product, $availableStock));
+        return $this->broadcast->sendToActiveUsers(
+            fn (Customer $customer) => implode("\n", $customer->locale === 'en' ? [
+                'A new product just arrived 👀',
+                '📦 '.$product->name,
+                '💰 Price: Rp'.number_format($product->price_amount, 0, ',', '.'),
+                '📦 Stock: '.$availableStock,
+                '',
+                '📝 Description',
+                $this->descriptionText($product, true),
+            ] : [
+                'Produk baru sudah masuk nih 👀',
+                '📦 '.$product->name,
+                '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
+                '📦 Stok: '.$availableStock,
+                '',
+                '📝 Deskripsi',
+                $this->descriptionText($product, false),
+            ]),
+            fn (Customer $customer) => $customer->locale === 'en' ? '🆕 New Product' : '🆕 Produk Baru',
+            fn (Customer $customer) => $this->productReplyMarkup($product, $availableStock, $customer->locale === 'en'),
+        );
     }
 
     public function notifyStockAdded(Product $product, int $addedQuantity, ?int $availableBefore = null): array
@@ -47,18 +60,30 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
-        return $this->broadcast->sendToActiveUsers(implode("\n", [
-            'Stok sudah ready lagi 🔥',
-            '📦 '.$product->name,
-            '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
-            '📦 Stok: '.$availableStock,
-            '',
-            '📝 Deskripsi',
-            $this->descriptionText($product),
-        ]), '✅ Stok Ready', $this->productReplyMarkup($product, $availableStock));
+        return $this->broadcast->sendToActiveUsers(
+            fn (Customer $customer) => implode("\n", $customer->locale === 'en' ? [
+                'Back in stock 🔥',
+                '📦 '.$product->name,
+                '💰 Price: Rp'.number_format($product->price_amount, 0, ',', '.'),
+                '📦 Stock: '.$availableStock,
+                '',
+                '📝 Description',
+                $this->descriptionText($product, true),
+            ] : [
+                'Stok tersedia lagi 🔥',
+                '📦 '.$product->name,
+                '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
+                '📦 Stok: '.$availableStock,
+                '',
+                '📝 Deskripsi',
+                $this->descriptionText($product, false),
+            ]),
+            fn (Customer $customer) => $customer->locale === 'en' ? '✅ Back in Stock' : '✅ Stok Tersedia',
+            fn (Customer $customer) => $this->productReplyMarkup($product, $availableStock, $customer->locale === 'en'),
+        );
     }
 
-    private function productReplyMarkup(Product $product, int $availableStock): array
+    private function productReplyMarkup(Product $product, int $availableStock, bool $english): array
     {
         if ($availableStock < 1) {
             return [];
@@ -66,16 +91,16 @@ class TelegramProductNotificationService
 
         return [
             'inline_keyboard' => [[
-                ['text' => '👀 Intip Produk', 'callback_data' => 'product:'.$product->id],
+                ['text' => $english ? '👀 View Product' : '👀 Lihat Produk', 'callback_data' => 'product:'.$product->id],
             ]],
         ];
     }
 
-    private function descriptionText(Product $product): string
+    private function descriptionText(Product $product, bool $english): string
     {
-        $description = trim((string) $product->description);
+        $description = (string) $product->description;
 
-        return $description !== '' ? $description : 'Deskripsi produk belum ditambahkan.';
+        return trim($description) !== '' ? $description : ($english ? 'No product description has been added yet.' : 'Deskripsi produk belum ditambahkan.');
     }
 
     private function skippedResult(): array

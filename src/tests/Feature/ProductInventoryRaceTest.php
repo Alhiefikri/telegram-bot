@@ -119,13 +119,13 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         app(TelegramProductNotificationService::class)->notifyStockAdded($product, 1);
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], '✅ Stok Ready'));
+            && str_contains((string) $request['text'], '✅ Stok Tersedia'));
 
         $product->forceFill(['reserved_stock' => 0])->save();
         app(TelegramProductNotificationService::class)->notifyStockAdded($product, 1);
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], '✅ Stok Ready')
+            && str_contains((string) $request['text'], '✅ Stok Tersedia')
             && str_contains((string) json_encode($request->data()), 'product:'.$product->id)
             && ! str_contains((string) $request['text'], 'notify-secret')
             && ! str_contains((string) json_encode($request->data()), 'notify-secret'));

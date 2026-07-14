@@ -26,13 +26,190 @@ use Tests\Support\TelegramBotTestSupport;
 
 class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 {
+    public function test_english_customer_is_told_when_no_manual_order_is_waiting_for_payment_proof(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(201, '/payment'))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(1, $messages);
+        $text = (string) ($messages->first()[0]['text'] ?? '');
+        $this->assertStringContainsString('No manual order is awaiting payment', $text);
+        $this->assertStringContainsString('send a payment screenshot as a PHOTO', $text);
+        $this->assertStringNotContainsString('Belum ada pesanan manual', $text);
+        $this->assertStringNotContainsString('kirim screenshot bukti transfer', $text);
+    }
+
+    public function test_english_customer_is_told_payment_proof_must_be_a_photo(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BRIVA',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(202, '/payment '.$order->invoice_number))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(1, $messages);
+        $text = (string) ($messages->first()[0]['text'] ?? '');
+        $this->assertStringContainsString('Payment proof must be sent as a PHOTO', $text);
+        $this->assertStringContainsString('Upload the transfer screenshot', $text);
+        $this->assertStringNotContainsString('Bukti pembayaran harus dikirim', $text);
+        $this->assertStringNotContainsString('Isi caption dengan', $text);
+    }
+
+    public function test_english_customer_gets_localized_payment_proof_received_and_duplicate_responses(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BRIVA',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(203, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(204, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+
+        $texts = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345')
+            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''));
+        $this->assertCount(2, $texts);
+        $this->assertSame([
+            'accepted' => true,
+            'duplicate' => true,
+        ], [
+            'accepted' => $texts->contains(fn (string $text): bool => str_contains($text, 'Payment proof received')
+                && str_contains($text, 'sent to the admin')),
+            'duplicate' => $texts->contains(fn (string $text): bool => str_contains($text, 'Payment proof has already been received')
+                && str_contains($text, 'awaiting admin verification')),
+        ]);
+        $customerCopy = $texts->implode("\n");
+        $this->assertStringNotContainsString('Bukti pembayaran sudah masuk', $customerCopy);
+        $this->assertStringNotContainsString('Bukti pembayaran sudah diterima', $customerCopy);
+        $this->assertStringNotContainsString('menunggu verifikasi admin', $customerCopy);
+    }
+
+    public function test_english_paid_account_receipt_localizes_delivery_note_label_and_contains_only_the_buyers_secret(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $this->fakeTelegramHttp();
+
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 54321, 'username' => 'other', 'locale' => 'id']);
+        $product = Product::factory()->create(['name' => 'Netflix Premium', 'delivery_note' => 'Rotate the password and MFA after signing in.', 'stock' => 0, 'reserved_stock' => 0]);
+        app(StockAdjustmentService::class)->adjust($product, 1, 'seed credential', null, null, [
+            'email: buyer@example.test | password: Secret-123',
+        ]);
+
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
+        $this->postTelegramWebhook($this->callbackUpdate(221, 'cb-checkout-secret', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+
+        $this->postTelegramWebhook($this->callbackUpdate(222, 'approve-secret', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $receiptMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'Secret-123'));
+        $this->assertCount(1, $receiptMessages);
+        $receiptRequest = $receiptMessages->first()[0];
+        $receiptText = (string) ($receiptRequest['text'] ?? '');
+        $this->assertStringContainsString('Payment received', $receiptText);
+        $this->assertStringContainsString('Account details', $receiptText);
+        $this->assertStringContainsString('email: buyer@example.test | password: Secret-123', $receiptText);
+        $this->assertStringContainsString('Delivery note:', $receiptText);
+        $this->assertStringContainsString('Rotate the password and MFA after signing in.', $receiptText);
+        $this->assertStringContainsString('Need help signing in and securing the account?', $receiptText);
+        $this->assertStringContainsString(route('storefront.login-guide'), $receiptText);
+        $this->assertSame('Login & Security Guide', $receiptRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertSame(route('storefront.login-guide'), $receiptRequest['reply_markup']['inline_keyboard'][0][0]['url'] ?? null);
+        $visibleReceipt = json_encode($receiptRequest->data(), JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('Pembayaran diterima', $visibleReceipt);
+        $this->assertStringNotContainsString('Data akun', $visibleReceipt);
+        $this->assertStringNotContainsString('Catatan pengiriman', $visibleReceipt);
+        $this->assertStringNotContainsString('Bingung cara masuk', $visibleReceipt);
+        $this->assertStringNotContainsString('Panduan Login & Keamanan', $visibleReceipt);
+
+        $this->postTelegramWebhook($this->messageUpdate(223, '/order '.$order->invoice_number, ['id' => 54321, 'username' => 'other'], 54321))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '54321'
+            && str_contains((string) $r['text'], 'Pesanan tidak ditemukan'));
+        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '54321'
+            && str_contains((string) ($r['text'] ?? ''), 'Secret-123'));
+        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '999'
+            && str_contains((string) (($r['text'] ?? '').($r['caption'] ?? '')), 'Secret-123'));
+    }
+
+    public function test_admin_can_reject_manual_payment_callback_and_english_buyer_gets_localized_message(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'proof_support', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 2, 'reserved_stock' => 0]);
+        app(StockAdjustmentService::class)->adjust($product, 1, 'credential', null, null, ['buyer@example.test | pass']);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product->fresh(), 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(231, 'cb-manual', 'checkout'))->assertOk();
+        $order = Order::firstOrFail();
+        $orderItem = $order->orderItems()->firstOrFail();
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertSame($orderItem->id, ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(232, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(233, 'reject-payment', 'admin:reject-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'order.manual_rejected', 'subject_id' => (string) $order->id]);
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'reject-payment'
+            && $r['text'] === 'Pembayaran ditolak. Pembeli sudah diberi info.');
+        $buyerMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), $order->invoice_number));
+        $this->assertCount(1, $buyerMessages);
+        $buyerText = (string) ($buyerMessages->first()[0]['text'] ?? '');
+        $this->assertStringContainsString('Payment could not be accepted', $buyerText);
+        $this->assertStringContainsString('Status: Rejected by admin', $buyerText);
+        $this->assertStringContainsString('Possible reasons:', $buyerText);
+        $this->assertStringContainsString('resend a clearer payment proof', $buyerText);
+        $this->assertStringContainsString('@proof_support', $buyerText);
+        $this->assertStringNotContainsString('Pembayaran belum bisa diterima', $buyerText);
+        $this->assertStringNotContainsString('Ditolak admin', $buyerText);
+        $this->assertStringNotContainsString('Kemungkinan penyebab', $buyerText);
+        $this->assertStringNotContainsString('kirim ulang bukti', $buyerText);
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === 12345
+            && str_contains((string) ($r['text'] ?? ''), 'buyer@example.test | pass'));
+    }
+
     public function test_payment_photo_is_forwarded_to_admin_and_admin_approval_sends_receipt(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -85,7 +262,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         $this->fakeTelegramHttp(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 88]])]);
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'AdamSecret']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'AdamSecret', 'locale' => 'id']);
         $first = Product::factory()->create(['name' => 'Email Account', 'stock' => 5, 'price_amount' => 12000]);
         $second = Product::factory()->create(['name' => 'Canva Pro', 'stock' => 5, 'price_amount' => 34000]);
         $cart = app(CartService::class)->activeCartFor($customer);
@@ -212,52 +389,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame(SalesProofPost::STATUS_SENDING, $order->salesProofPost()->firstOrFail()->status);
     }
 
-    public function test_paid_account_order_receipt_contains_only_the_buyers_allocated_secret(): void
-    {
-        config()->set('services.telegram.payment_mode', 'manual');
-        config()->set('services.telegram.admin_user_id', '999');
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $this->fakeTelegramHttp();
-
-        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
-        Customer::factory()->create(['telegram_id' => 54321, 'username' => 'other']);
-        $product = Product::factory()->create(['name' => 'Netflix Premium', 'delivery_note' => 'Ganti password dan MFA setelah berhasil login.', 'stock' => 0, 'reserved_stock' => 0]);
-        app(StockAdjustmentService::class)->adjust($product, 1, 'seed credential', null, null, [
-            'email: buyer@example.test | password: Secret-123',
-        ]);
-
-        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
-        $this->postTelegramWebhook($this->callbackUpdate(221, 'cb-checkout-secret', 'checkout'))->assertOk();
-        $order = Order::firstOrFail();
-
-        $this->postTelegramWebhook($this->callbackUpdate(222, 'approve-secret', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
-
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === 12345
-            && str_contains((string) $r['text'], 'Pembayaran diterima')
-            && str_contains((string) $r['text'], 'email: buyer@example.test | password: Secret-123')
-            && str_contains((string) $r['text'], 'Ganti password dan MFA setelah berhasil login.')
-            && str_contains((string) $r['text'], 'Bingung cara masuk dan amankan akunnya?')
-            && str_contains((string) $r['text'], route('storefront.login-guide'))
-            && (($r['reply_markup']['inline_keyboard'][0][0]['url'] ?? null) === route('storefront.login-guide')));
-
-        $this->postTelegramWebhook($this->messageUpdate(223, '/order '.$order->invoice_number, ['id' => 54321, 'username' => 'other'], 54321))->assertOk();
-
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && (string) $r['chat_id'] === '54321'
-            && str_contains((string) $r['text'], 'Pesanan tidak ditemukan'));
-        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '54321'
-            && str_contains((string) ($r['text'] ?? ''), 'Secret-123'));
-        Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '999'
-            && str_contains((string) (($r['text'] ?? '').($r['caption'] ?? '')), 'Secret-123'));
-    }
-
     public function test_admin_can_broadcast_message_from_bot_to_active_users(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 111]);
-        Customer::factory()->create(['telegram_id' => 222]);
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 222, 'locale' => 'en']);
         $product = Product::factory()->create(['name' => 'Canva Pro', 'price_amount' => 75000, 'stock' => 3]);
 
         $this->postTelegramWebhook($this->messageUpdate(224, '/broadcast Stok Canva ready malam ini.', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
@@ -273,12 +410,35 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', 'broadcast:select:'.$product->id.':1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
-        foreach ([111, 222, 999] as $chatId) {
-            Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-                && (string) $r['chat_id'] === (string) $chatId
-                && str_contains((string) $r['text'], 'Stok Canva ready malam ini.')
-                && (($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$product->id));
-        }
+        $localizedRecipientMessages = collect(Http::recorded())
+            ->map(fn (array $record) => $record[0])
+            ->filter(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && in_array((string) ($request['chat_id'] ?? ''), ['111', '222'], true));
+        $this->assertCount(2, $localizedRecipientMessages);
+        $this->assertSame([
+            '111' => [
+                'text' => "📣 Info dari Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nButuh bantuan? Balas /support ya.",
+                'button_text' => '🛍️ Beli: Canva Pro',
+                'callback_data' => 'product:'.$product->id,
+            ],
+            '222' => [
+                'text' => "📣 Info from Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nNeed help? Reply with /support.",
+                'button_text' => '🛍️ Buy: Canva Pro',
+                'callback_data' => 'product:'.$product->id,
+            ],
+        ], $localizedRecipientMessages
+            ->mapWithKeys(fn ($request): array => [(string) $request['chat_id'] => [
+                'text' => (string) ($request['text'] ?? ''),
+                'button_text' => $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null,
+                'callback_data' => $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null,
+            ]])
+            ->sortKeys()
+            ->all());
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '999'
+            && str_contains((string) $r['text'], 'Stok Canva ready malam ini.')
+            && (($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$product->id));
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
@@ -298,7 +458,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -322,7 +482,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '-100123', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -354,53 +514,13 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && $r['text'] === 'Order tidak ditemukan.');
     }
 
-    public function test_admin_can_reject_manual_payment_callback_and_buyer_gets_human_message(): void
-    {
-        config()->set('services.telegram.payment_mode', 'manual');
-        config()->set('services.telegram.admin_user_id', '999');
-        $this->fakeTelegramHttp();
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
-        $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 2, 'reserved_stock' => 0]);
-        app(StockAdjustmentService::class)->adjust($product, 1, 'credential', null, null, ['buyer@example.test | pass']);
-        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product->fresh(), 1);
-
-        $this->postTelegramWebhook($this->callbackUpdate(231, 'cb-manual', 'checkout'))->assertOk();
-        $order = Order::firstOrFail();
-        $orderItem = $order->orderItems()->firstOrFail();
-        $this->assertSame(1, $product->fresh()->reserved_stock);
-        $this->assertSame($orderItem->id, ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
-
-        $this->postTelegramWebhook($this->paymentPhotoUpdate(232, $order->invoice_number, ['username' => 'buyer']))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(233, 'reject-payment', 'admin:reject-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
-
-        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
-        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'order.manual_rejected', 'subject_id' => (string) $order->id]);
-
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
-            && $r['callback_query_id'] === 'reject-payment'
-            && $r['text'] === 'Pembayaran ditolak. Pembeli sudah diberi info.');
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === 12345
-            && str_contains($r['text'], 'Pembayaran belum bisa diterima')
-            && str_contains($r['text'], $order->invoice_number)
-            && str_contains($r['text'], 'kirim ulang bukti')
-            && str_contains($r['text'], '@Alhie02'));
-        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === 12345
-            && str_contains((string) ($r['text'] ?? ''), 'buyer@example.test | pass'));
-    }
-
     public function test_telegram_admin_cancel_command_releases_pending_order_without_payment_proof(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 1, 'reserved_stock' => 0]);
         app(StockAdjustmentService::class)->adjust($product, 1, 'credential', null, null, ['cancel-command@example.test | pass']);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
@@ -425,7 +545,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -446,8 +566,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $owner = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
-        $attacker = Customer::factory()->create(['telegram_id' => 54321, 'username' => 'mallory']);
+        $owner = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+        $attacker = Customer::factory()->create(['telegram_id' => 54321, 'username' => 'mallory', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Email Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($owner), $product, 1);
 
@@ -467,7 +587,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_receipt_notifier_sends_paid_order_receipt(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 777]);
+        $customer = Customer::factory()->create(['telegram_id' => 777, 'locale' => 'id']);
         $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
         Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
 
@@ -479,7 +599,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_legacy_pending_order_uses_current_product_delivery_note_as_fallback(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 778]);
+        $customer = Customer::factory()->create(['telegram_id' => 778, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Legacy Account', 'delivery_note' => 'Catatan fallback untuk order lama.']);
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
@@ -511,7 +631,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_receipt_retry_skips_started_send_after_worker_crash(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 777]);
+        $customer = Customer::factory()->create(['telegram_id' => 777, 'locale' => 'id']);
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'payment_status' => PaymentStatus::Paid,
@@ -528,7 +648,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_pakasir_paid_callback_sends_telegram_receipt_once_on_duplicate_callback(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 888]);
+        $customer = Customer::factory()->create(['telegram_id' => 888, 'locale' => 'id']);
         $product = Product::factory()->create(['stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'hosted', 'pakasir');

@@ -18,7 +18,7 @@ class TelegramMenuIntents
 
     public function sendWelcome(Customer $customer, string $chatId): void
     {
-        $firstName = trim((string) $customer->first_name) ?: 'there';
+        $firstName = trim((string) $customer->first_name) ?: $this->locale->text($customer, 'Kak', 'there');
         [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
         $caption = implode("\n", $this->locale->code($customer) === 'en' ? [
             $greetingIcon.' '.$greetingText.', '.$firstName.' — Welcome to LHIE STORE 👋',
@@ -26,7 +26,7 @@ class TelegramMenuIntents
             'A simple, fast way to shop for digital products directly from Telegram.',
             '', '🛍️ Browse products', '💳 Pay by QRIS / transfer', '📦 Check your orders anytime', '⚡ Accounts are delivered automatically after payment is confirmed', '', 'Where would you like to start?',
         ] : [
-            $greetingIcon.' '.$greetingText.', '.$firstName.' — welcome ke LHIE STORE 👋',
+            $greetingIcon.' '.$greetingText.', '.$firstName.' — selamat datang di LHIE STORE 👋',
             '━━━━━━━━━━━━━━',
             'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
             '',
@@ -100,8 +100,13 @@ class TelegramMenuIntents
             $hour >= 15 && $hour < 18 => ['🌇', 'Selamat sore'],
             default => ['🌙', 'Selamat malam'],
         };
-        if ($this->locale->code($customer) !== 'en') return $greeting;
-        return match ($greeting[1]) { 'Selamat pagi' => [$greeting[0], 'Good morning'], 'Selamat siang' => [$greeting[0], 'Good afternoon'], 'Selamat sore' => [$greeting[0], 'Good evening'], default => [$greeting[0], 'Good evening'] };
+        if ($this->locale->code($customer) !== 'en') {
+            return $greeting;
+        }
+
+        return match ($greeting[1]) {
+            'Selamat pagi' => [$greeting[0], 'Good morning'], 'Selamat siang' => [$greeting[0], 'Good afternoon'], 'Selamat sore' => [$greeting[0], 'Good evening'], default => [$greeting[0], 'Good evening']
+        };
     }
 
     private function welcomeInlineKeyboard(Customer $customer, string $chatId): array
@@ -130,9 +135,9 @@ class TelegramMenuIntents
         $adminUsername = config('services.telegram.admin_username');
         $replyMarkup = [];
         if ($adminContactUrl) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => '💬 Chat Admin', 'url' => $adminContactUrl]]]];
+            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => $adminContactUrl]]]];
         } elseif ($adminUsername) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => '💬 Chat Admin', 'url' => 'https://t.me/'.ltrim((string) $adminUsername, '@')]]]];
+            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => 'https://t.me/'.ltrim((string) $adminUsername, '@')]]]];
         }
 
         $this->bot->sendMessage($chatId, $this->locale->text($customer, "💬 Support\n━━━━━━━━━━━━━━\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", "💬 Support\n━━━━━━━━━━━━━━\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help."), $replyMarkup);
@@ -150,7 +155,7 @@ class TelegramMenuIntents
             $this->locale->text($customer, 'Total pesanan: ', 'Total orders: ').$ordersCount,
         ];
         if ($latestOrder) {
-            $lines[] = $this->locale->text($customer, 'Pesanan terakhir: ', 'Latest order: ').$latestOrder->invoice_number.' · '.$latestOrder->payment_status->value;
+            $lines[] = $this->locale->text($customer, 'Pesanan terakhir: ', 'Latest order: ').$latestOrder->invoice_number.' · '.$this->locale->paymentStatus($customer, $latestOrder->payment_status);
         }
         $lines[] = '';
         $lines[] = $this->locale->text($customer, 'Mau cek pesanan kamu?', 'Want to check your orders?');

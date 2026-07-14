@@ -46,6 +46,15 @@ class TelegramCommunityGate
             return false;
         }
 
+        $this->clearPrompt($customer);
+        $this->menu->sendWelcome($customer, $chatId);
+        $this->menu->sendMainMenu($customer, $chatId);
+
+        return true;
+    }
+
+    public function clearPrompt(Customer $customer): void
+    {
         $prompt = TelegramCommunityGatePrompt::query()
             ->where('customer_id', $customer->id)
             ->first();
@@ -53,16 +62,13 @@ class TelegramCommunityGate
             try {
                 $this->bot->deleteMessage($prompt->chat_id, $prompt->message_id);
             } catch (Throwable) {
-                // Telegram may reject deletion (old/already deleted); gate verification still succeeds.
+                // Prompt cleanup is best-effort; the stored prompt must still be removed.
             }
         }
+
         TelegramCommunityGatePrompt::query()
             ->where('customer_id', $customer->id)
             ->delete();
-        $this->menu->sendWelcome($customer, $chatId);
-        $this->menu->sendMainMenu($customer, $chatId);
-
-        return true;
     }
 
     private function hasValidatedSetup(StoreChannelSetting $setting): bool
@@ -99,14 +105,14 @@ class TelegramCommunityGate
         $url = $setting->channel_link ?: ($setting->channel_username ? 'https://t.me/'.ltrim($setting->channel_username, '@') : null);
         $keyboard = [[]];
         if ($url) {
-            $keyboard[0][] = ['text' => $this->locale->text($customer, '📢 Gabung Channel', '📢 Join Channel'), 'url' => $url];
+            $keyboard[0][] = ['text' => $this->locale->text($customer, '📢 Gabung kanal', '📢 Join Channel'), 'url' => $url];
         }
-        $keyboard[0][] = ['text' => $this->locale->text($customer, '✅ Saya Sudah Join', '✅ I Have Joined'), 'callback_data' => self::VERIFY_CALLBACK];
+        $keyboard[0][] = ['text' => $this->locale->text($customer, '✅ Saya sudah bergabung', '✅ I Have Joined'), 'callback_data' => self::VERIFY_CALLBACK];
 
         $message = $this->bot->sendMessage($chatId, $this->locale->text(
             $customer,
-            '🔒 Join channel dulu ya' . "\n━━━━━━━━━━━━━━\n" . 'Biar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu join channel Store Channel dulu.' . "\n\n" . 'Kalau sudah join tapi status kamu belum bisa dicek, tekan tombol “Saya sudah join” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
-            '🔒 Join the channel first' . "\n━━━━━━━━━━━━━━\n" . 'Before you can continue shopping, please join the Store Channel. Then press “I Have Joined” to verify.',
+            '🔒 Gabung kanal dulu ya'."\n━━━━━━━━━━━━━━\n".'Biar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu bergabung dengan kanal Store Channel dulu.'."\n\n".'Kalau sudah bergabung tapi status kamu belum bisa dicek, tekan tombol “Saya sudah bergabung” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
+            '🔒 Join the channel first'."\n━━━━━━━━━━━━━━\n".'Before you can continue shopping, please join the Store Channel. Then press “I Have Joined” to verify.',
         ), [
             'inline_keyboard' => $keyboard,
         ]);
