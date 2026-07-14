@@ -17,29 +17,26 @@ use Tests\Support\TelegramBotTestSupport;
 
 class CatalogSearchTest extends TelegramBotTestSupport
 {
-    public function test_start_creates_customer_and_sends_welcome(): void
+    public function test_start_creates_customer_and_shows_language_picker_before_welcome(): void
     {
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(11, '/start', ['first_name' => 'Ali', 'username' => 'ali']))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Menu utama')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
-            && ($r['reply_markup']['keyboard'][0][1]['text'] ?? null) === '📦 Pesanan'
-            && ($r['reply_markup']['keyboard'][1][0]['text'] ?? null) === '💬 Support'
-            && ! str_contains(json_encode($r->data()), '☰ Menu')
-            && ! str_contains(json_encode($r->data()), 'Akun Saya')
-            && ! str_contains(json_encode($r->data()), 'Admin Dashboard')
-            && ! str_contains(json_encode($r->data()), 'Broadcast Info'));
+            && str_contains($r['text'], 'Pilih bahasa')
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🇮🇩 Bahasa Indonesia'
+            && ($r['reply_markup']['inline_keyboard'][0][1]['text'] ?? null) === '🇬🇧 English'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'locale:id'
+            && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en');
     }
 
     public function test_start_uses_welcome_banner_caption_when_configured(): void
     {
         Carbon::setTestNow('2026-07-04 09:00:00');
         config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(110, '/start', ['first_name' => 'Ayu']))->assertOk();

@@ -29,6 +29,7 @@ class TelegramCallbackRouter
         private TelegramCatalogIntents $catalog,
         private TelegramCartIntents $cart,
         private TelegramOrderIntents $orders,
+        private TelegramMenuIntents $menu,
         private TelegramCheckoutIntents $checkoutIntents,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramCommunityGate $communityGate,
@@ -44,6 +45,9 @@ class TelegramCallbackRouter
             $customer->update(['locale' => $matches[1]]);
             $customer->refresh();
             $this->bot->answerCallbackQuery($id);
+            if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+                return;
+            }
             $this->menu->sendWelcome($customer, $chatId);
             $this->menu->sendMainMenu($customer, $chatId, $this->chatPrivacy->isPrivate($chatType));
             return;

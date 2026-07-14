@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Models\Customer;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
@@ -149,6 +150,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(304, '/start', ['id' => 999], 12345))->assertOk();
@@ -165,6 +167,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.mini_app_url', 'http://localhost/admin');
         $this->fakeTelegramHttp();
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(308, '/start', ['id' => 999], 12345))->assertOk();
 
@@ -182,6 +185,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         $this->fakeTelegramHttp();
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(305, '/start', ['id' => 111], 12345))->assertOk();
 

@@ -11,7 +11,7 @@ class TelegramCommunityGate
 {
     public const VERIFY_CALLBACK = 'community_gate:verify';
 
-    public function __construct(private TelegramBotClient $bot, private TelegramMenuIntents $menu) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramMenuIntents $menu, private TelegramLocale $locale) {}
 
     public function allows(Customer $customer): bool
     {
@@ -99,11 +99,15 @@ class TelegramCommunityGate
         $url = $setting->channel_link ?: ($setting->channel_username ? 'https://t.me/'.ltrim($setting->channel_username, '@') : null);
         $keyboard = [[]];
         if ($url) {
-            $keyboard[0][] = ['text' => '📢 Join Channel', 'url' => $url];
+            $keyboard[0][] = ['text' => $this->locale->text($customer, '📢 Gabung Channel', '📢 Join Channel'), 'url' => $url];
         }
-        $keyboard[0][] = ['text' => '✅ Saya Sudah Join', 'callback_data' => self::VERIFY_CALLBACK];
+        $keyboard[0][] = ['text' => $this->locale->text($customer, '✅ Saya Sudah Join', '✅ I Have Joined'), 'callback_data' => self::VERIFY_CALLBACK];
 
-        $message = $this->bot->sendMessage($chatId, "🔒 Join channel dulu ya\n━━━━━━━━━━━━━━\nBiar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu join channel Store Channel dulu.\n\nKalau sudah join tapi status kamu belum bisa dicek, tekan tombol “Saya sudah join” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.", [
+        $message = $this->bot->sendMessage($chatId, $this->locale->text(
+            $customer,
+            '🔒 Join channel dulu ya' . "\n━━━━━━━━━━━━━━\n" . 'Biar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu join channel Store Channel dulu.' . "\n\n" . 'Kalau sudah join tapi status kamu belum bisa dicek, tekan tombol “Saya sudah join” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
+            '🔒 Join the channel first' . "\n━━━━━━━━━━━━━━\n" . 'Before you can continue shopping, please join the Store Channel. Then press “I Have Joined” to verify.',
+        ), [
             'inline_keyboard' => $keyboard,
         ]);
 

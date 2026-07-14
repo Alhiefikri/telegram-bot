@@ -117,6 +117,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
     public function test_duplicate_update_is_not_processed_twice(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
 
         $payload = $this->messageUpdate(10, '/start');
         $this->postTelegramWebhook($payload)->assertOk();
@@ -131,6 +132,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
     public function test_duplicate_direct_job_does_not_send_twice(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $update = TelegramUpdate::create(['update_id' => 103, 'payload' => $this->messageUpdate(103, '/start'), 'created_at' => now()]);
 
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
@@ -257,6 +259,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
     {
         Carbon::setTestNow(Carbon::parse('2026-07-04 14:15:00', 'UTC'));
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(210, '/start', from: ['first_name' => 'Fikri']))->assertOk();
@@ -276,6 +279,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
     {
         Carbon::setTestNow('2026-07-04 09:00:00');
         config()->set('services.telegram.welcome_banner_url', null);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(211, '/start', from: ['first_name' => 'Fikri']))->assertOk();

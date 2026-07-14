@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\CartItem;
+use App\Models\Customer;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramCommunityGatePrompt;
@@ -12,6 +13,41 @@ use Tests\Support\TelegramBotTestSupport;
 
 class CommunityGateTest extends TelegramBotTestSupport
 {
+    public function test_language_selection_requires_channel_membership_before_welcome(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        $this->fakeGateHttp('left');
+
+        $this->postTelegramWebhook($this->messageUpdate(500, '/start'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(501, 'locale-en', 'locale:en'))->assertOk();
+
+        $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'locale' => 'en']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Join the channel first')
+            && str_contains(json_encode($r->data()), 'I Have Joined'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Welcome to LHIE STORE'));
+    }
+
+    public function test_language_command_can_change_an_existing_customer_locale(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(502, '/language'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(503, 'locale-en-again', 'locale:en'))->assertOk();
+
+        $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'locale' => 'en']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Welcome to LHIE STORE'));
+    }
+
     public function test_non_member_is_blocked_from_store_flow_and_prompt_is_reused(): void
     {
         StoreChannelSetting::create([
