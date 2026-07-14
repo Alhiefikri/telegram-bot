@@ -100,6 +100,49 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('QR payment_number dikirim di Telegram');
     }
 
+    public function test_owner_can_toggle_binance_pay_while_pakasir_mode_is_active(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        config()->set('services.pakasir.slug', 'sedulur-digital');
+        config()->set('services.pakasir.api_key', 'pakasir-key');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_pay_enabled' => false,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+
+        $html = $this->get('/admin')->assertOk()->getContent();
+
+        $this->assertMatchesRegularExpression(
+            '/<form[^>]*class="mt-3"[^>]*>[\s\S]*name="payment_mode" value="pakasir"[\s\S]*name="pakasir_checkout_flow" value="api_qris"[\s\S]*name="binance_pay_enabled" value="1"/',
+            $html,
+        );
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'pakasir',
+                'pakasir_checkout_flow' => 'api_qris',
+                'binance_pay_enabled' => '1',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionDoesntHaveErrors(['pakasir_checkout_flow'], null, 'paymentMode');
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'id' => $setting->id,
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+    }
+
     public function test_saved_pakasir_mode_is_reported_unready_and_effectively_manual_when_config_missing(): void
     {
         config()->set('services.pakasir.slug', '');

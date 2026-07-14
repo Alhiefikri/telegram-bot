@@ -173,6 +173,9 @@
                         <form method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3">
                             @csrf
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
+                            @if ($paymentControl['requested_mode'] === 'pakasir')
+                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
+                            @endif
                             <input type="hidden" name="binance_pay_enabled" value="{{ $paymentControl['binance_pay_enabled'] ? 0 : 1 }}">
                             <x-admin-dashboard.button type="submit" :variant="$paymentControl['binance_pay_enabled'] ? 'primary' : 'neutral'" size="sm" class="w-full text-[11px]">
                                 {{ $paymentControl['binance_pay_enabled'] ? 'Binance Pay USDT: Aktif' : 'Aktifkan Binance Pay USDT' }}
