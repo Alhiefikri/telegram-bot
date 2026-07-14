@@ -166,7 +166,7 @@ class PakasirWebhookTest extends TestCase
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
-            && str_contains((string) ($request['text'] ?? ''), 'Order sukses'));
+            && str_contains((string) ($request['text'] ?? ''), 'Successful orders'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') !== '-100123'
             && str_contains((string) ($request['text'] ?? ''), 'Produk terjual'));

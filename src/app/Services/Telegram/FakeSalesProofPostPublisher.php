@@ -349,7 +349,7 @@ class FakeSalesProofPostPublisher
     private function shoppingButtonMarkup(): array
     {
         return [
-            'inline_keyboard' => [[['text' => '🛒 Belanja Sekarang', 'url' => self::SHOPPING_BUTTON_URL]]],
+            'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => self::SHOPPING_BUTTON_URL]]],
         ];
     }
 }

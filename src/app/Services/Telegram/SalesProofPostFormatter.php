@@ -13,9 +13,9 @@ class SalesProofPostFormatter
     {
         $order->loadMissing(['customer', 'orderItems']);
         $successfulPostNumber ??= $this->nextSuccessfulPostNumber($order);
-        $primary = $order->orderItems->first()?->product_name ?? 'Produk digital';
+        $primary = $order->orderItems->first()?->product_name ?? 'Digital product';
         $otherCount = max(0, $order->orderItems->count() - 1);
-        $other = $otherCount > 0 ? " + {$otherCount} produk lainnya" : '';
+        $other = $otherCount > 0 ? " + {$otherCount} other products" : '';
 
         return $this->formatMessage($this->maskBuyer($order), $primary.$other, (int) $order->orderItems->sum('quantity'), $successfulPostNumber);
     }
@@ -42,12 +42,12 @@ class SalesProofPostFormatter
 
     private function formatMessage(string $buyerMask, string $productName, int $quantity, int $successfulPostNumber): string
     {
-        return "🎉 PEMBELIAN SUKSES 🎉\n\n"
-            .'👤 Pembeli: '.$buyerMask."\n"
-            .'🛍️ Produk: '.$productName."\n"
-            .'📦 Jumlah: '.$quantity."x\n"
-            .'🏆 Order sukses: #'.$successfulPostNumber."\n\n"
-            ."✨ Terima kasih telah berbelanja!\n"
-            .'Mau order juga? Tap tombol di bawah 👇';
+        return "🎉 SUCCESSFUL PURCHASE 🎉\n\n"
+            .'👤 Buyer: '.$buyerMask."\n"
+            .'🛍️ Product: '.$productName."\n"
+            .'📦 Quantity: '.$quantity."x\n"
+            .'🏆 Successful orders: #'.$successfulPostNumber."\n\n"
+            ."✨ Thank you for shopping with us!\n"
+            .'Want to order too? Tap the button below 👇';
     }
 }

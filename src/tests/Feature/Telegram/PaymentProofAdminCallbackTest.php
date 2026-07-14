@@ -101,9 +101,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
         $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
-        $this->assertMatchesRegularExpression('/Pembeli: [A-Za-z0-9_]{2}\*\*\*/', $copy);
-        $this->assertStringContainsString('+ 1 produk lainnya', $copy);
-        $this->assertStringContainsString('Order sukses: #1', $copy);
+        $this->assertMatchesRegularExpression('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $copy);
+        $this->assertStringContainsString('+ 1 other products', $copy);
+        $this->assertStringContainsString('Successful orders: #1', $copy);
         $this->assertStringNotContainsString($order->invoice_number, $copy);
         $this->assertStringNotContainsString('12000', $copy);
         $this->assertStringNotContainsString('34000', $copy);

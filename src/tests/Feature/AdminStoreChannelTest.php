@@ -293,13 +293,13 @@ class AdminStoreChannelTest extends TestCase
 
             return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
                 && $request['chat_id'] === '-100123'
-                && str_contains($text, 'PEMBELIAN SUKSES')
-                && preg_match('/Pembeli: [A-Za-z0-9_]{2}\*\*\*/', $text) === 1
+                && str_contains($text, 'SUCCESSFUL PURCHASE')
+                && preg_match('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $text) === 1
                 && str_contains($text, $selectedProduct->name)
                 && ! str_contains($text, $otherActiveProduct->name)
-                && str_contains($text, 'Jumlah: 1x')
-                && str_contains($text, 'Order sukses: #1')
-                && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Belanja Sekarang'
+                && str_contains($text, 'Quantity: 1x')
+                && str_contains($text, 'Successful orders: #1')
+                && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Shop Now'
                 && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=from_channel';
         });
 
@@ -449,12 +449,12 @@ class AdminStoreChannelTest extends TestCase
 
                 return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
                     && $request['chat_id'] === '-100123'
-                    && str_contains($text, 'PEMBELIAN SUKSES')
+                    && str_contains($text, 'SUCCESSFUL PURCHASE')
                     && str_contains($text, $product->name);
             });
 
             $this->assertCount(2, $matchingSends);
-            preg_match_all('/Order sukses: #(\d+)/', implode("\n", $matchingSends->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))->all()), $orderNumberMatches);
+            preg_match_all('/Successful orders: #(\d+)/', implode("\n", $matchingSends->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))->all()), $orderNumberMatches);
             $this->assertSame(['1', '2'], $orderNumberMatches[1]);
             $this->assertSame(4, $product->refresh()->stock);
             $this->assertSame(0, $product->reserved_stock);
@@ -494,7 +494,7 @@ class AdminStoreChannelTest extends TestCase
 
                 return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
                     && $request['chat_id'] === '-100123'
-                    && str_contains($text, 'PEMBELIAN SUKSES')
+                    && str_contains($text, 'SUCCESSFUL PURCHASE')
                     && str_contains($text, $availableProduct->name)
                     && ! str_contains($text, $inactiveProduct->name)
                     && ! str_contains($text, $soldOutProduct->name);
