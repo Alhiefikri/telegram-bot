@@ -119,6 +119,27 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $this->assertStringContainsString('Earning: Rp30.000 (setelah fee)', $text);
     }
 
+    public function test_paid_binance_order_notification_keeps_earning_in_usdt(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 321]])]);
+
+        $order = $this->paidOrderWithItems(1);
+        $order->payments()->first()->update([
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500000,
+            'currency' => 'USDT',
+            'provider_fee' => 0,
+        ]);
+
+        app(TelegramAdminPaidOrderNotifier::class)->send($order);
+
+        $text = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->first()[0]['text'];
+        $this->assertStringContainsString('Earning: 0.5 USDT', $text);
+        $this->assertStringNotContainsString('Earning: Rp500.000', $text);
+    }
+
     private function paidOrderWithItems(int $itemCount): Order
     {
         $paidAt = Carbon::parse('2026-07-07 18:16:00', 'Asia/Makassar');

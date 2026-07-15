@@ -33,4 +33,21 @@ class CredentialDeliveryFormatterTest extends TestCase
         $this->assertStringContainsString('Password-123', $formatted);
         $this->assertStringContainsString('MFA-SECRET', $formatted);
     }
+
+    public function test_it_exposes_copyable_credential_parts(): void
+    {
+        $this->assertSame([
+            'email' => 'premium@example.test',
+            'password' => ' Password-123 ',
+            'mfa' => ' MFA-SECRET ',
+        ], (new CredentialDeliveryFormatter)->parts(' premium@example.test | Password-123 | MFA-SECRET '));
+    }
+
+    public function test_it_preserves_password_and_mfa_whitespace(): void
+    {
+        $parts = (new CredentialDeliveryFormatter)->parts('premium@example.test| Password-123 | MFA-SECRET ');
+
+        $this->assertSame(' Password-123 ', $parts['password']);
+        $this->assertSame(' MFA-SECRET ', $parts['mfa']);
+    }
 }

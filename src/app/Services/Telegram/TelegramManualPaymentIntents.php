@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class TelegramManualPaymentIntents
@@ -60,17 +61,6 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        $payment = $order->payments()->where('status', PaymentStatus::Pending)->first();
-        if ($payment?->payment_proof_submitted_at) {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.',
-                '📸 Payment proof has already been received and is awaiting admin verification.',
-            ));
-
-            return;
-        }
-
         $adminTelegramChatId = $this->adminTelegramChatId();
         if (! $adminTelegramChatId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
@@ -82,29 +72,47 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        // Claim before forwarding so Telegram retries cannot create duplicate admin actions.
-        $claimed = $payment?->newQuery()
-            ->whereKey($payment->id)
-            ->whereNull('payment_proof_submitted_at')
-            ->update([
+        $claim = DB::transaction(function () use ($order, $photoFileId, $adminTelegramChatId): ?array {
+            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            if ($lockedOrder->order_status !== OrderStatus::PendingPayment || $lockedOrder->payment_status !== PaymentStatus::Pending) {
+                return null;
+            }
+
+            $payment = $lockedOrder->payments()
+                ->where('provider', 'manual')
+                ->where('status', PaymentStatus::Pending)
+                ->whereNull('payment_proof_submitted_at')
+                ->lockForUpdate()
+                ->first();
+            if (! $payment) {
+                return null;
+            }
+
+            $payment->update([
                 'payment_proof_file_id' => $photoFileId,
                 'payment_proof_submitted_at' => now(),
                 'payment_proof_admin_chat_id' => $adminTelegramChatId,
                 'expired_at' => null,
             ]);
-        if ($claimed !== 1) {
+            $lockedOrder->update(['expires_at' => null]);
+
+            return [
+                'order' => $lockedOrder->fresh(['customer', 'orderItems', 'payments']),
+                'payment' => $payment->fresh(),
+            ];
+        });
+        if ($claim === null) {
             $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
-                '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin.',
-                '📸 Payment proof has already been received and is awaiting admin verification.',
+                '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin, atau order sudah tidak menunggu pembayaran.',
+                '📸 Payment proof has already been received and is awaiting admin verification, or this order is no longer awaiting payment.',
             ));
 
             return;
         }
-        $order->update(['expires_at' => null]);
-
-        $order->loadMissing(['customer', 'orderItems', 'payments']);
-        $payment ??= $order->payments->first();
+        $order = $claim['order'];
+        $payment = $claim['payment'];
+        $isBinance = $payment?->method === 'BINANCE_PAY_ID';
         $caption = [
             '📸 Bukti pembayaran masuk',
             '━━━━━━━━━━━━━━',
@@ -119,7 +127,9 @@ class TelegramManualPaymentIntents
             $caption[] = '- '.$item->product_name.' x '.$item->quantity;
         }
         $caption[] = '';
-        $caption[] = 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
+        $caption[] = $isBinance
+            ? 'Cek pembayaran Binance Pay dan pastikan nominalnya sama persis, lalu setujui.'
+            : 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
         $caption[] = 'Kalau belum cocok, tolak agar stok balik lagi.';
 
         $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [

@@ -102,6 +102,31 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('menunggu verifikasi admin', $customerCopy);
     }
 
+    public function test_binance_payment_photo_with_invoice_caption_reaches_admin_without_auto_approval(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(205, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(1, $adminPhotos);
+        $this->assertStringContainsString('Cek pembayaran Binance Pay', (string) ($adminPhotos->first()[0]['caption'] ?? ''));
+        $this->assertSame(PaymentStatus::Pending, $order->payments()->firstOrFail()->fresh()->status);
+        $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
+    }
+
     public function test_english_paid_account_receipt_localizes_delivery_note_label_and_contains_only_the_buyers_secret(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');

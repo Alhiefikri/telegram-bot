@@ -78,8 +78,13 @@ class TelegramCheckoutIntents
 
     public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): void
     {
-        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, (string) config('services.binance.pay_id'), $this->locale->code($customer)), [
-            'inline_keyboard' => [[['text' => $this->locale->text($customer, '📸 Kirim Bukti Pembayaran', '📸 Send Payment Proof'), 'callback_data' => 'payment-proof:'.$order->id]]],
+        // Manual Binance Pay payments are confirmed from a photo sent with /payment.
+        $payId = (string) config('services.binance.pay_id');
+        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer)), [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->text($customer, '📋 Salin Binance Pay ID', '📋 Copy Binance Pay ID'),
+                'copy_text' => ['text' => $payId],
+            ]]],
         ]);
     }
 

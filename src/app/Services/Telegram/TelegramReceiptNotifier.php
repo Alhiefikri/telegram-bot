@@ -11,7 +11,13 @@ use Illuminate\Support\Facades\DB;
 
 class TelegramReceiptNotifier
 {
-    public function __construct(private TelegramBotClient $bot, private TelegramLocale $locale, private CredentialDeliveryFormatter $credentialFormatter) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private TelegramLocale $locale,
+        private CredentialDeliveryFormatter $credentialFormatter,
+        private TelegramCredentialCopyMarkup $credentialCopyMarkup,
+        private TelegramMessageChunker $messageChunker,
+    ) {}
 
     public function send(Order $order, bool $force = false): void
     {
@@ -49,6 +55,10 @@ class TelegramReceiptNotifier
 
             $claimed->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
             if (! $claimed->customer?->telegram_id) {
+                Order::whereKey($claimed->id)
+                    ->whereNull('telegram_receipt_sent_at')
+                    ->update(['telegram_receipt_send_started_at' => null]);
+
                 return;
             }
 
@@ -85,7 +95,14 @@ class TelegramReceiptNotifier
             }
 
             try {
-                $this->bot->sendMessage($claimed->customer->telegram_id, implode("\n", $lines), $this->receiptReplyMarkup($claimed->customer));
+                $chunks = $this->messageChunker->fromLines($lines);
+                foreach ($chunks as $index => $chunk) {
+                    $this->bot->sendMessage(
+                        $claimed->customer->telegram_id,
+                        $chunk,
+                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer, $claimed) : [],
+                    );
+                }
             } catch (\Throwable $e) {
                 Order::whereKey($claimed->id)
                     ->whereNull('telegram_receipt_sent_at')
@@ -132,12 +149,16 @@ class TelegramReceiptNotifier
         return $lines;
     }
 
-    private function receiptReplyMarkup(Customer $customer): array
+    private function receiptReplyMarkup(Customer $customer, Order $order): array
     {
+        $rows = [[
+            ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
+        ]];
+        $copyRows = $this->credentialCopyMarkup->rows($order->orderItems->flatMap(fn ($item) => $item->stockItems));
+        array_push($rows, ...$copyRows);
+
         return [
-            'inline_keyboard' => [[
-                ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
-            ]],
+            'inline_keyboard' => $rows,
         ];
     }
 }

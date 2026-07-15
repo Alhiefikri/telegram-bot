@@ -10,6 +10,7 @@ use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendAdminOrderPendingNotification;
+use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
 use App\Models\Product;
@@ -389,7 +390,7 @@ class TelegramCallbackRouter
 
         $payment = $order->payments()->latest()->first();
         if ($payment?->method === 'BINANCE_PAY_ID') {
-            $this->checkoutIntents->sendBinancePaymentInstructions($chatId, $order, $payment, $customer);
+            SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         } elseif ($payment?->provider === 'pakasir') {
             $this->checkoutIntents->sendPakasirPaymentInstructions($chatId, $order, $payment);

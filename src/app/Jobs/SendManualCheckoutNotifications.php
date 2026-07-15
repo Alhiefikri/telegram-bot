@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 
 class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
 {
@@ -49,12 +50,23 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
             $chatId = (string) $order->customer->telegram_id;
 
-            if ($order->manual_checkout_customer_notified_at === null && $order->manual_checkout_customer_notification_started_at === null) {
+            $claimed = DB::transaction(function () use ($order): ?Order {
+                $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+                if ($locked->manual_checkout_customer_notified_at !== null
+                    || $locked->manual_checkout_customer_notification_started_at !== null) {
+                    return null;
+                }
+
+                $locked->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
+
+                return $locked->fresh(['customer', 'orderItems']);
+            });
+            if ($claimed !== null) {
+                $order = $claimed;
+                $chatId = (string) $order->customer->telegram_id;
                 // Claim before Telegram I/O. If the worker dies after Telegram accepts
                 // the photo but before notified_at is written, retries skip this
                 // customer effect instead of sending duplicate payment instructions.
-                $order->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
-
                 try {
                     DogfoodTiming::time('dogfood.telegram.checkout_step', [
                         'step' => 'manual_payment_instructions',

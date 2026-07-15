@@ -160,7 +160,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         );
     }
 
-    public function test_binance_payment_proof_button_follows_customer_locale(): void
+    public function test_binance_payment_instructions_follow_customer_locale_without_extra_action_button(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
@@ -183,13 +183,13 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41061),
-            ['💎 CHECKOUT USDT', '📸 Kirim Bukti Pembayaran'],
-            ['💎 USDT CHECKOUT', '📸 Send Payment Proof'],
+            ['💎 CHECKOUT USDT', '/payment', 'Nominal harus tepat', 'dicek manual oleh admin'],
+            ['💎 USDT CHECKOUT', 'Send Payment Proof'],
         );
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41062),
-            ['💎 USDT CHECKOUT', '📸 Send Payment Proof'],
-            ['💎 CHECKOUT USDT', '📸 Kirim Bukti Pembayaran'],
+            ['💎 USDT CHECKOUT', '/payment', 'amount must match exactly', 'checked manually by admin'],
+            ['💎 CHECKOUT USDT', 'Kirim Bukti Pembayaran'],
         );
     }
 

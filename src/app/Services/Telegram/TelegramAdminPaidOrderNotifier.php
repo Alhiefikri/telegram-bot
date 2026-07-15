@@ -104,6 +104,13 @@ class TelegramAdminPaidOrderNotifier
         $amount = $payment?->amount ?? $order->total_amount;
         $fee = $payment?->provider_fee ?? 0;
 
+        if ($payment?->currency === 'USDT') {
+            $net = $amount - $fee;
+            $label = rtrim(rtrim(number_format($net / 1_000_000, 6, '.', ''), '0'), '.').' USDT';
+
+            return $fee > 0 ? $label.' (setelah fee)' : $label;
+        }
+
         if ($fee > 0) {
             return $this->rupiah($amount - $fee).' (setelah fee)';
         }

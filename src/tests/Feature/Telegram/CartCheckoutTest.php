@@ -6,6 +6,7 @@ use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendAdminOrderPendingNotification;
+use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -139,7 +140,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '12345'
             && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID')
             && str_contains((string) ($request['text'] ?? ''), '987654321')
-            && str_contains((string) ($request['text'] ?? ''), '5.000000 USDT'));
+            && str_contains((string) ($request['text'] ?? ''), '5 USDT')
+            && (($request['reply_markup']['inline_keyboard'][0][0]['copy_text']['text'] ?? null) === '987654321'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
                 || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));
@@ -513,6 +515,31 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertNull($order->fresh()->manual_checkout_admin_notified_at);
         $this->assertNull($order->fresh()->admin_pending_order_notified_at);
+    }
+
+    public function test_binance_checkout_enqueues_instructions_without_inline_message_send(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        Queue::fake([SendBinanceCheckoutInstructions::class, SendAdminOrderPendingNotification::class]);
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['name' => 'AI Premium', 'stock' => 5, 'usdt_price_amount' => 2_500_000]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(174, 'cb-binance-queued', 'checkout:binance'))->assertOk();
+
+        $order = Order::firstOrFail();
+        Queue::assertPushedOn('telegram-outbound', SendBinanceCheckoutInstructions::class, fn (SendBinanceCheckoutInstructions $job): bool => $job->orderId === $order->id);
+        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID'));
     }
 
     public function test_manual_checkout_notification_retry_does_not_resend_customer_photo(): void

@@ -16,7 +16,16 @@ use Throwable;
 
 class TelegramOrderIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness, private TelegramLocale $locale, private CredentialDeliveryFormatter $credentialFormatter) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private PakasirProviderAdapter $pakasir,
+        private PakasirCallbackProcessor $pakasirProcessor,
+        private PakasirProviderReadiness $pakasirReadiness,
+        private TelegramLocale $locale,
+        private CredentialDeliveryFormatter $credentialFormatter,
+        private TelegramCredentialCopyMarkup $copyMarkup,
+        private TelegramMessageChunker $messageChunker,
+    ) {}
 
     public function sendOrderHistory(Customer $customer, string $chatId): void
     {
@@ -91,7 +100,14 @@ class TelegramOrderIntents
         $lines[] = '';
         $lines[] = $this->orderInstruction($customer, $order, $payment);
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines));
+        $chunks = $this->messageChunker->fromLines($lines);
+        foreach ($chunks as $index => $chunk) {
+            $this->bot->sendMessage(
+                $chatId,
+                $chunk,
+                $index === array_key_last($chunks) ? $this->credentialCopyMarkup($order, $paymentStatus) : [],
+            );
+        }
     }
 
     public function orderInstruction(Customer $customer, Order $order, ?Payment $payment): string
@@ -171,6 +187,17 @@ class TelegramOrderIntents
         }
 
         return $lines;
+    }
+
+    private function credentialCopyMarkup(Order $order, PaymentStatus $paymentStatus): array
+    {
+        if ($paymentStatus !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+            return [];
+        }
+
+        $rows = $this->copyMarkup->rows($order->orderItems->flatMap(fn ($item) => $item->stockItems));
+
+        return $rows === [] ? [] : ['inline_keyboard' => $rows];
     }
 
     private function text(Customer $customer, string $id, string $en): string
