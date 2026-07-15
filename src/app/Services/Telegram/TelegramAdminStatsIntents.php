@@ -18,9 +18,11 @@ class TelegramAdminStatsIntents
         private readonly TelegramBotClient $bot,
     ) {}
 
-    public function showDailyStats(Customer $customer, string $chatId, string $callbackQueryId): void
+    public function showDailyStats(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
     {
-        $this->bot->answerCallbackQuery($callbackQueryId);
+        if ($callbackQueryId !== null) {
+            $this->bot->answerCallbackQuery($callbackQueryId);
+        }
         $this->sendStats($chatId, $this->calculateTodayStats(), '📊 Statistik Hari Ini');
     }
 

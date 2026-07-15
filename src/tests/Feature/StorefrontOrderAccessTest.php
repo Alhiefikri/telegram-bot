@@ -18,6 +18,14 @@ class StorefrontOrderAccessTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_order_access_page_explains_that_recovery_keys_are_only_for_website_orders(): void
+    {
+        $this->get(route('storefront.order-access.create'))
+            ->assertOk()
+            ->assertSee('Halaman ini hanya untuk pesanan yang dibeli melalui website.')
+            ->assertSee('pesanan via Telegram tidak menggunakan Recovery Key.');
+    }
+
     public function test_paid_credentials_require_the_recovery_key_and_can_be_opened_again_with_it(): void
     {
         [$order, $key, $secret] = $this->paidOrderWithAccessKey();

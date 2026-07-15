@@ -17,6 +17,7 @@ class TelegramMessageRouter
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramAdminAccess $adminAccess,
+        private TelegramAdminStatsIntents $adminStats,
         private TelegramBroadcastIntents $broadcasts,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
@@ -55,6 +56,19 @@ class TelegramMessageRouter
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
             $this->session->forget($customer);
+
+            return;
+        }
+
+        if ($text === '📊 Statistik Harian') {
+            $this->session->forget($customer);
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, $this->text($customer, 'Akses ditolak.', 'Access denied.'));
+
+                return;
+            }
+
+            $this->adminStats->showDailyStats($customer, $chatId);
 
             return;
         }
@@ -195,7 +209,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik Harian'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || str_starts_with($text, '/broadcast ');

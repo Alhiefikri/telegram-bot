@@ -28,7 +28,7 @@ class StorefrontShopCatalogTest extends TestCase
                 && $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all() === ['ChatGPT Plus Ready', 'Claude Pro Ready'])
             ->assertSee('Belanja Produk Digital | Lhie Store')
             ->assertSee('Marketplace produk digital siap pakai')
-            ->assertSee('Pilih produk, bayar QRIS di website, lalu simpan invoice dan recovery key untuk akses ulang.')
+            ->assertSee('Pilih produk, bayar QRIS di website, lalu simpan invoice dan Recovery Key khusus pesanan website untuk akses ulang.')
             ->assertSee('Mulai belanja')
             ->assertSee('Tentang Lhie Store')
             ->assertSee('action="'.route('storefront.shop.index').'#products"', false)

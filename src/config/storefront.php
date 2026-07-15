@@ -39,7 +39,7 @@ return [
         ],
         [
             'title' => 'Akses mandiri',
-            'body' => 'Invoice dan recovery key membantu membuka kembali data pesanan.',
+            'body' => 'Untuk pesanan website, invoice dan Recovery Key membantu membuka kembali data pesanan.',
         ],
         [
             'title' => 'Harga jelas',
@@ -60,7 +60,7 @@ return [
 
     'shop' => [
         'title' => 'Marketplace produk digital siap pakai',
-        'body' => 'Pilih produk, bayar QRIS di website, lalu simpan invoice dan recovery key untuk akses ulang.',
+        'body' => 'Pilih produk, bayar QRIS di website, lalu simpan invoice dan Recovery Key khusus pesanan website untuk akses ulang.',
         'empty_title' => 'Belum ada produk siap dibeli.',
         'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',
         'buyer_handle_label' => 'Nama pembeli',
@@ -86,14 +86,14 @@ return [
         ],
         [
             'title' => 'Akses mandiri',
-            'body' => 'Nomor invoice dan recovery key memberi akses ulang tanpa perlu membuat akun toko.',
+            'body' => 'Untuk pesanan website, nomor invoice dan Recovery Key memberi akses ulang tanpa perlu membuat akun toko.',
         ],
     ],
 
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
         'title' => 'Belanja produk digital dalam tiga langkah.',
-        'body' => 'Pilih produk dari katalog, checkout sebagai tamu, lalu simpan invoice dan recovery key untuk akses ulang.',
+        'body' => 'Pilih produk dari katalog, checkout sebagai tamu di website, lalu simpan invoice dan Recovery Key untuk akses ulang pesanan website.',
         'steps' => [
             [
                 'title' => 'Pilih produk',
@@ -105,7 +105,7 @@ return [
             ],
             [
                 'title' => 'Terima akses',
-                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi. Simpan invoice dan recovery key untuk membuka kembali data akun.',
+                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi. Simpan invoice dan Recovery Key untuk membuka kembali pesanan website; pesanan Telegram tidak memakai key ini.',
             ],
         ],
     ],
@@ -119,13 +119,13 @@ return [
     'qris' => [
         'eyebrow' => 'QRIS Website',
         'title' => 'QRIS web dibuat per order',
-        'body' => 'QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan recovery key sebelum melanjutkan pembayaran.',
+        'body' => 'QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan Recovery Key sebelum melanjutkan pembayaran; key ini hanya untuk pesanan website.',
     ],
 
     'recovery_access' => [
         'eyebrow' => 'Akses ulang',
-        'title' => 'Invoice dan recovery key menjaga akses pesanan.',
-        'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun tanpa membuat akun Lhie Store.',
+        'title' => 'Invoice dan Recovery Key untuk pesanan website.',
+        'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun dari pesanan website tanpa membuat akun Lhie Store. Pesanan Telegram dicek lewat bot.',
     ],
 
     'testimonial' => [
@@ -142,7 +142,7 @@ return [
     'faq' => [
         [
             'question' => 'Bagaimana cara membeli produk digital di Lhie Store?',
-            'answer' => 'Pilih produk dari katalog, checkout sebagai tamu, lalu bayar QRIS dari halaman invoice. Setelah pembayaran terkonfirmasi, buka data produk dengan nomor invoice dan recovery key yang Anda simpan saat checkout.',
+            'answer' => 'Pilih produk dari katalog, checkout sebagai tamu di website, lalu bayar QRIS dari halaman invoice. Setelah pembayaran terkonfirmasi, buka data produk dengan nomor invoice dan Recovery Key yang Anda simpan saat checkout website.',
         ],
         [
             'question' => 'Apakah saya harus login untuk membeli?',
@@ -158,18 +158,18 @@ return [
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
-            'answer' => 'Buka Akses Pesanan menggunakan nomor invoice dan recovery key. Pastikan pembayaran sudah terverifikasi dan ikuti panduan login yang tersedia sebelum mencoba akun.',
+            'answer' => 'Untuk pesanan website, buka Akses Pesanan menggunakan nomor invoice dan Recovery Key. Pesanan Telegram dicek lewat bot. Pastikan pembayaran sudah terverifikasi dan ikuti panduan login yang tersedia sebelum mencoba akun.',
         ],
         [
             'question' => 'Bagaimana cara membuka data pesanan lagi?',
-            'answer' => 'Buka halaman Akses Pesanan, lalu masukkan nomor invoice dan recovery key yang Anda simpan saat checkout. Recovery key tidak dapat ditampilkan ulang jika hilang.',
+            'answer' => 'Untuk pesanan website, buka halaman Akses Pesanan lalu masukkan nomor invoice dan Recovery Key yang Anda simpan saat checkout. Recovery Key tidak dipakai untuk pesanan Telegram dan tidak dapat ditampilkan ulang jika hilang.',
         ],
     ],
 
     'support' => [
         'eyebrow' => 'Siap belanja?',
         'title' => 'Butuh membuka pesanan lagi?',
-        'body' => 'Gunakan nomor invoice dan recovery key yang Anda simpan saat checkout untuk membuka kembali data akun setelah pembayaran terverifikasi.',
+        'body' => 'Untuk pesanan website, gunakan nomor invoice dan Recovery Key yang Anda simpan saat checkout untuk membuka kembali data akun setelah pembayaran terverifikasi. Pesanan Telegram tidak memakai Recovery Key.',
         'primary_cta' => 'Akses Pesanan',
         'secondary_cta' => 'Login Admin',
     ],

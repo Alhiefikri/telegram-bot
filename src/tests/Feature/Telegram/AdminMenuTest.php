@@ -212,6 +212,20 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
     }
 
+    public function test_admin_can_open_daily_stats_from_the_reply_keyboard_button(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(315, '📊 Statistik Harian', ['id' => 999], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '999'
+            && str_contains($request['text'], '📊 Statistik Hari Ini'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Aku belum paham perintah itu'));
+    }
+
     public function test_daily_stats_callback_from_group_is_denied_before_sending_stats(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
