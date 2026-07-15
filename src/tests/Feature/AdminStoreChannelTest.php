@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
+use App\Services\Telegram\TelegramAdminStatsIntents;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -309,6 +310,12 @@ class AdminStoreChannelTest extends TestCase
         $this->assertSame(1, $otherActiveProduct->reserved_stock);
         $this->assertNoRealOrderPersistence();
         $this->assertNoFakeSalesProofPosts();
+
+        $stats = app(TelegramAdminStatsIntents::class)->calculateTodayStats();
+        $this->assertSame(0, $stats['new_orders']);
+        $this->assertSame(0, $stats['paid_orders']);
+        $this->assertSame(0, $stats['sold_products']);
+        $this->assertSame(0, $stats['earning']);
     }
 
     public function test_fake_sales_proof_cooldown_labels_render_in_configured_app_timezone(): void

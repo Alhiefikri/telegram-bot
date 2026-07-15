@@ -19,7 +19,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_calculate_today_stats_counts_only_orders_and_payments_from_last_24_hours(): void
+    public function test_calculate_today_stats_counts_only_orders_and_payments_from_today(): void
     {
         Carbon::setTestNow('2026-07-08 15:00:00');
 
@@ -30,15 +30,15 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $oldOrder = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
-            'created_at' => now()->subDay()->subSecond(),
-            'updated_at' => now()->subDay()->subSecond(),
+            'created_at' => now()->startOfDay()->subSecond(),
+            'updated_at' => now()->startOfDay()->subSecond(),
         ]);
         OrderItem::factory()->for($oldOrder)->for($product)->create(['quantity' => 2]);
         Payment::factory()->for($oldOrder)->create([
             'status' => PaymentStatus::Paid,
             'amount' => 20000,
             'provider_fee' => 1000,
-            'paid_at' => now()->subDay()->subSecond(),
+            'paid_at' => now()->startOfDay()->subSecond(),
         ]);
 
         // 2. Pending order in the reporting window (Counts as new order, but not paid/earning/sold product)
@@ -92,7 +92,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame(38000, $stats['earning']);
     }
 
-    public function test_calculate_today_stats_includes_orders_since_yesterdays_report_time(): void
+    public function test_calculate_today_stats_ignores_orders_from_previous_calendar_day(): void
     {
         Carbon::setTestNow('2026-07-08 22:00:00');
 
@@ -113,14 +113,14 @@ class TelegramAdminStatsIntentsTest extends TestCase
             'paid_at' => '2026-07-07 21:59:59',
         ]);
 
-        $insideReportWindow = Order::factory()->for($customer)->create([
+        $previousCalendarDayOrder = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Processing,
             'payment_status' => PaymentStatus::Paid,
             'created_at' => '2026-07-07 22:10:00',
             'updated_at' => '2026-07-07 22:10:00',
         ]);
-        OrderItem::factory()->for($insideReportWindow)->for($product)->create(['quantity' => 2]);
-        Payment::factory()->for($insideReportWindow)->create([
+        OrderItem::factory()->for($previousCalendarDayOrder)->for($product)->create(['quantity' => 2]);
+        Payment::factory()->for($previousCalendarDayOrder)->create([
             'status' => PaymentStatus::Paid,
             'amount' => 20000,
             'provider_fee' => 1000,
@@ -130,10 +130,10 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $intents = app(TelegramAdminStatsIntents::class);
         $stats = $intents->calculateTodayStats();
 
-        $this->assertSame(1, $stats['new_orders']);
-        $this->assertSame(1, $stats['paid_orders']);
-        $this->assertSame(2, $stats['sold_products']);
-        $this->assertSame(19000, $stats['earning']);
+        $this->assertSame(0, $stats['new_orders']);
+        $this->assertSame(0, $stats['paid_orders']);
+        $this->assertSame(0, $stats['sold_products']);
+        $this->assertSame(0, $stats['earning']);
     }
 
     public function test_send_automated_daily_stats_formats_and_sends_correctly(): void
@@ -152,13 +152,15 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $order = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Processing,
             'payment_status' => PaymentStatus::Paid,
+            'created_at' => '2026-07-07 23:00:00',
+            'updated_at' => '2026-07-07 23:00:00',
         ]);
         OrderItem::factory()->for($order)->for($product)->create(['quantity' => 2]);
         Payment::factory()->for($order)->create([
             'status' => PaymentStatus::Paid,
             'amount' => 100000,
             'provider_fee' => 5000,
-            'paid_at' => now(),
+            'paid_at' => '2026-07-07 23:00:00',
         ]);
 
         $intents = app(TelegramAdminStatsIntents::class);
@@ -171,7 +173,7 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame('admin-chat-123', (string) $request['chat_id']);
 
         $text = $request['text'];
-        $this->assertStringContainsString('📊 Statistik Hari Ini', $text);
+        $this->assertStringContainsString('📊 Rekap Kemarin', $text);
         $this->assertStringContainsString('Order Baru: 1', $text);
         $this->assertStringContainsString('Order Dibayar: 1', $text);
         $this->assertStringContainsString('Produk Terjual: 2', $text);

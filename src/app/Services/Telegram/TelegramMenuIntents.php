@@ -76,6 +76,7 @@ class TelegramMenuIntents
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];
             }
+            $keyboard[] = [['text' => '📊 Statistik Harian', 'callback_data' => 'statistik_harian']];
             $keyboard[] = [['text' => '📣 Broadcast Info']];
         }
 
@@ -123,7 +124,6 @@ class TelegramMenuIntents
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];
             }
-            $keyboard[] = [['text' => '📊 Statistik Harian', 'callback_data' => 'statistik_harian']];
         }
 
         return ['inline_keyboard' => $keyboard];

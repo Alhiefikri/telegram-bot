@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
+use Illuminate\Support\Carbon;
 
 class TelegramAdminStatsIntents
 {
@@ -20,13 +21,20 @@ class TelegramAdminStatsIntents
     public function showDailyStats(Customer $customer, string $chatId, string $callbackQueryId): void
     {
         $this->bot->answerCallbackQuery($callbackQueryId);
-        $this->sendAutomatedDailyStats($chatId);
+        $this->sendStats($chatId, $this->calculateTodayStats(), '📊 Statistik Hari Ini');
     }
 
     public function sendAutomatedDailyStats(string $chatId): void
     {
-        $stats = $this->calculateTodayStats();
-        $message = $this->formatMessage($stats);
+        $this->sendStats($chatId, $this->calculateYesterdayStats(), '📊 Rekap Kemarin');
+    }
+
+    /**
+     * @param  array{new_orders: int, paid_orders: int, sold_products: int, earning: int}  $stats
+     */
+    private function sendStats(string $chatId, array $stats, string $title): void
+    {
+        $message = $this->formatMessage($stats, $title);
 
         $keyboard = [];
         $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
@@ -45,17 +53,40 @@ class TelegramAdminStatsIntents
     public function calculateTodayStats(): array
     {
         $reportEndAt = now();
+        $reportStartAt = $reportEndAt->copy()->startOfDay();
+
+        return $this->calculateStats($reportStartAt, $reportEndAt, true);
+    }
+
+    /**
+     * @return array{new_orders: int, paid_orders: int, sold_products: int, earning: int}
+     */
+    private function calculateYesterdayStats(): array
+    {
+        $reportEndAt = now()->copy()->startOfDay();
         $reportStartAt = $reportEndAt->copy()->subDay();
 
+        return $this->calculateStats($reportStartAt, $reportEndAt);
+    }
+
+    /**
+     * @return array{new_orders: int, paid_orders: int, sold_products: int, earning: int}
+     */
+    private function calculateStats(Carbon $reportStartAt, Carbon $reportEndAt, bool $includeEnd = false): array
+    {
+        $endOperator = $includeEnd ? '<=' : '<';
+
         $newOrders = Order::query()
-            ->whereBetween('created_at', [$reportStartAt, $reportEndAt])
+            ->where('created_at', '>=', $reportStartAt)
+            ->where('created_at', $endOperator, $reportEndAt)
             ->count();
 
-        // Daily admin stats are a 24-hour reporting window ending when the report is sent.
+        // Reporting periods use the configured application timezone and exclude the end boundary.
         $paidPayments = Payment::query()
             ->where('status', PaymentStatus::Paid)
             ->whereNotNull('paid_at')
-            ->whereBetween('paid_at', [$reportStartAt, $reportEndAt])
+            ->where('paid_at', '>=', $reportStartAt)
+            ->where('paid_at', $endOperator, $reportEndAt)
             ->get(['order_id', 'amount', 'provider_fee']);
 
         $paidOrderIds = $paidPayments->pluck('order_id')->unique()->all();
@@ -83,10 +114,10 @@ class TelegramAdminStatsIntents
     /**
      * @param  array{new_orders: int, paid_orders: int, sold_products: int, earning: int}  $stats
      */
-    private function formatMessage(array $stats): string
+    private function formatMessage(array $stats, string $title): string
     {
         $lines = [
-            '📊 Statistik Hari Ini',
+            $title,
             '━━━━━━━━━━━━━━',
             'Order Baru: '.$stats['new_orders'],
             'Order Dibayar: '.$stats['paid_orders'],

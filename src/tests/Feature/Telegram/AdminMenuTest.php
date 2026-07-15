@@ -21,6 +21,8 @@ class AdminMenuTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'Menu utama')
             && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
+            && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik Harian'
+            && ($request['reply_markup']['keyboard'][3][0]['callback_data'] ?? null) === 'statistik_harian'
             && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
             && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
             && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya'));
@@ -158,7 +160,8 @@ class AdminMenuTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'selamat datang di LHIE STORE')
             && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '🌐 Mini App Dashboard'
-            && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][1][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v='));
+            && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][1][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
+            && ! str_contains(json_encode($request['reply_markup']), '📊 Statistik Harian'));
     }
 
     public function test_start_welcome_hides_mini_app_dashboard_when_admin_url_is_local(): void
