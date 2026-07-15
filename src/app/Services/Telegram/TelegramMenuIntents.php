@@ -61,7 +61,7 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, $this->locale->text($customer, '☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀', '☰ Main menu\nWhat would you like to do?'), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
+        $this->bot->sendMessage($chatId, $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", "☰ Main menu\nWhat would you like to do?"), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
 
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array

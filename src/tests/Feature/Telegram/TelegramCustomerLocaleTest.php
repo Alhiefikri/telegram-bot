@@ -21,13 +21,18 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41001, '/menu', ['id' => 41001], 41001))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(41002, '/menu', ['id' => 41002], 41002))->assertOk();
 
+        $idPayload = $this->customerPayload('/sendMessage', 41001);
+        $enPayload = $this->customerPayload('/sendMessage', 41002);
+        $this->assertStringNotContainsString('\\n', (string) ($idPayload['text'] ?? ''));
+        $this->assertStringNotContainsString('\\n', (string) ($enPayload['text'] ?? ''));
+
         $this->assertLocalizedCopy(
-            $this->customerPayload('/sendMessage', 41001),
+            $idPayload,
             ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk'],
             ['Main menu', 'Browse Products', 'Choose a button or type /products'],
         );
         $this->assertLocalizedCopy(
-            $this->customerPayload('/sendMessage', 41002),
+            $enPayload,
             ['Main menu', 'Browse Products', 'Choose a button or type /products'],
             ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk'],
         );
