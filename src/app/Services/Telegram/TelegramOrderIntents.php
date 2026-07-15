@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\CredentialDeliveryFormatter;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -15,7 +16,7 @@ use Throwable;
 
 class TelegramOrderIntents
 {
-    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness, private TelegramLocale $locale) {}
+    public function __construct(private TelegramBotClient $bot, private PakasirProviderAdapter $pakasir, private PakasirCallbackProcessor $pakasirProcessor, private PakasirProviderReadiness $pakasirReadiness, private TelegramLocale $locale, private CredentialDeliveryFormatter $credentialFormatter) {}
 
     public function sendOrderHistory(Customer $customer, string $chatId): void
     {
@@ -160,7 +161,7 @@ class TelegramOrderIntents
 
             $lines[] = $item->product_name;
             foreach ($item->stockItems->values() as $index => $stockItem) {
-                $lines[] = ($index + 1).'. '.$stockItem->secret;
+                $lines[] = ($index + 1).'. '.$this->credentialFormatter->format((string) $stockItem->secret);
             }
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {

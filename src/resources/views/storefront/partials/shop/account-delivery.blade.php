@@ -41,4 +41,7 @@
     <a href="{{ route('storefront.login-guide') }}" class="mt-5 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 py-3 text-center font-display text-sm font-black uppercase tracking-[0.18em] text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
         Panduan login &amp; keamanan
     </a>
+    <a href="{{ route('customer.account') }}" class="mt-3 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-5 py-3 text-center font-display text-sm font-black uppercase tracking-[0.18em] text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:ml-3 sm:w-auto">
+        Masuk / klaim ke akun
+    </a>
 </x-storefront.panel>

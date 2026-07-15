@@ -14,6 +14,7 @@
             <a href="{{ $shopUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
             <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
             <a href="{{ route('storefront.order-access.create') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
+            <a href="{{ route('customer.account') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akun</a>
             <a href="{{ route('storefront.login-guide') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan Login</a>
             <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
         </nav>
@@ -90,6 +91,7 @@
                 <a href="{{ route('storefront.order-access.create') }}" class="neo-button mt-2 inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-xs font-black text-white">
                     <span>Akses Pesanan</span>
                 </a>
+                <a href="{{ route('customer.account') }}" class="flex items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-sm font-black shadow-[4px_4px_0_var(--sf-shadow)]">Akun pelanggan</a>
             </nav>
 
             <div class="border-t-[3px] border-[var(--sf-border)] px-5 py-3 text-center text-[10px] font-bold text-[var(--sf-muted)]">

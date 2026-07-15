@@ -60,6 +60,10 @@ return [
         'credential_access_session_minutes' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_SESSION_MINUTES', 30),
     ],
 
+    'customer' => [
+        'login_link_expiry_minutes' => 15,
+    ],
+
     'telegram' => [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),

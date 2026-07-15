@@ -18,6 +18,7 @@ use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
+use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
@@ -42,6 +43,19 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
 });
 Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
+
+Route::prefix('akun')->name('customer.')->group(function (): void {
+    Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
+    Route::post('login-link', [CustomerAccountController::class, 'requestLink'])->middleware('throttle:customer-login-link')->name('login-link.request');
+    Route::get('login-link/{token}', [CustomerAccountController::class, 'consume'])->middleware('throttle:customer-login-consume')->name('login-link.consume');
+    Route::middleware('auth:customer')->group(function (): void {
+        Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
+        Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
+        Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->name('orders.show');
+        Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
+        Route::post('klaim-pesanan', [CustomerAccountController::class, 'claim'])->middleware('throttle:customer-order-claim')->name('claim.store');
+    });
+});
 
 Route::middleware('admin.no-cache')->group(function (): void {
     Route::redirect('/telegram-mini-app', '/admin')->name('telegram-mini-app.dashboard');

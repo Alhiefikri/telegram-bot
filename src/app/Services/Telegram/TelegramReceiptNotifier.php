@@ -5,12 +5,13 @@ namespace App\Services\Telegram;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Services\CredentialDeliveryFormatter;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class TelegramReceiptNotifier
 {
-    public function __construct(private TelegramBotClient $bot, private TelegramLocale $locale) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramLocale $locale, private CredentialDeliveryFormatter $credentialFormatter) {}
 
     public function send(Order $order, bool $force = false): void
     {
@@ -113,7 +114,7 @@ class TelegramReceiptNotifier
 
             $lines[] = $item->product_name;
             foreach ($item->stockItems->values() as $index => $stockItem) {
-                $lines[] = ($index + 1).'. '.$stockItem->secret;
+                $lines[] = ($index + 1).'. '.$this->credentialFormatter->format((string) $stockItem->secret);
             }
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {

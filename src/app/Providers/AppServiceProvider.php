@@ -137,6 +137,16 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        RateLimiter::for('customer-login-link', function (Request $request) {
+            $email = strtolower(trim((string) $request->input('email', 'unknown')));
+            $ip = $request->ip() ?: 'unknown';
+
+            return [Limit::perMinutes(15, 3)->by('customer:login:email:'.$email.':'.$ip), Limit::perHour(10)->by('customer:login:ip:'.$ip)];
+        });
+
+        RateLimiter::for('customer-login-consume', fn (Request $request) => Limit::perMinutes(15, 10)->by('customer:login:consume:'.($request->ip() ?: 'unknown')));
+        RateLimiter::for('customer-order-claim', fn (Request $request) => Limit::perMinutes(15, 5)->by('customer:claim:'.($request->user('customer')?->getAuthIdentifier() ?? 'unknown').':'.($request->ip() ?: 'unknown')));
+
     }
 
     private function configureUrlGeneration(): void

@@ -64,13 +64,18 @@ class StorefrontOrderAccess
 
     public function authenticate(Request $request, Order $order, string $key): bool
     {
-        if (! $this->matches($order, $key)) {
+        if (! $this->verifyKey($order, $key)) {
             return false;
         }
 
         $this->grant($request, $order);
 
         return true;
+    }
+
+    public function verifyKey(Order $order, string $key): bool
+    {
+        return $this->matches($order, $key);
     }
 
     public function canAccess(Request $request, Order $order): bool

@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Services\CredentialDeliveryFormatter;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramQrCodeRenderer;
@@ -19,6 +20,7 @@ class StorefrontShopSignedInvoice
         private readonly PakasirProviderAdapter $pakasir,
         private readonly PakasirCallbackProcessor $processor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
+        private readonly CredentialDeliveryFormatter $credentialFormatter,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -154,7 +156,7 @@ class StorefrontShopSignedInvoice
                 'product_name' => (string) $item->product_name,
                 'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
                 'secrets' => $item->stockItems
-                    ->map(fn ($stockItem): string => (string) $stockItem->secret)
+                    ->map(fn ($stockItem): string => $this->credentialFormatter->format((string) $stockItem->secret))
                     ->filter(fn (string $secret): bool => trim($secret) !== '')
                     ->values()
                     ->all(),
