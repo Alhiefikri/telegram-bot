@@ -47,6 +47,7 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         $this->assertRouteContract('storefront.shop.index', 'GET', 'shop');
         $this->assertRouteContract('storefront.shop.checkout', 'POST', 'shop/checkout');
+        $this->assertRouteContract('storefront.shop.checkout.start', 'GET', 'shop/checkout');
         $this->assertRouteContract('storefront.products.show', 'GET', 'produk/{product}');
         $this->assertFalse(Route::has('storefront.products.payment'));
         $this->assertFalse(Route::has('storefront.products.checkout-manual'));
@@ -66,6 +67,12 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame('/shop/orders/'.$order->getKey().'/status', parse_url($statusUrl, PHP_URL_PATH));
         $this->assertTrue(URL::hasValidSignature(Request::create($showUrl, 'GET'), false));
         $this->assertTrue(URL::hasValidSignature(Request::create($statusUrl, 'POST'), false));
+    }
+
+    public function test_direct_checkout_url_redirects_to_the_shop_instead_of_returning_method_not_allowed(): void
+    {
+        $this->get(route('storefront.shop.checkout.start'))
+            ->assertRedirect(route('storefront.shop.index'));
     }
 
     public function test_checkout_module_normalizes_buyer_identity_from_input_handle(): void
