@@ -23,7 +23,6 @@ class TelegramOrderIntents
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
-        private TelegramCredentialCopyMarkup $copyMarkup,
         private TelegramMessageChunker $messageChunker,
     ) {}
 
@@ -105,7 +104,8 @@ class TelegramOrderIntents
             $this->bot->sendMessage(
                 $chatId,
                 $chunk,
-                $index === array_key_last($chunks) ? $this->credentialCopyMarkup($order, $paymentStatus) : [],
+                [],
+                $this->credentialOptions($chunk),
             );
         }
     }
@@ -189,15 +189,11 @@ class TelegramOrderIntents
         return $lines;
     }
 
-    private function credentialCopyMarkup(Order $order, PaymentStatus $paymentStatus): array
+    private function credentialOptions(string $text): array
     {
-        if ($paymentStatus !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
-            return [];
-        }
+        $entities = $this->credentialFormatter->codeEntities($text);
 
-        $rows = $this->copyMarkup->rows($order->orderItems->flatMap(fn ($item) => $item->stockItems));
-
-        return $rows === [] ? [] : ['inline_keyboard' => $rows];
+        return $entities === [] ? [] : ['entities' => $entities];
     }
 
     private function text(Customer $customer, string $id, string $en): string

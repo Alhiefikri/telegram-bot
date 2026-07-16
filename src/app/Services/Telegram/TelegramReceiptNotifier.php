@@ -15,7 +15,6 @@ class TelegramReceiptNotifier
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
-        private TelegramCredentialCopyMarkup $credentialCopyMarkup,
         private TelegramMessageChunker $messageChunker,
     ) {}
 
@@ -100,7 +99,8 @@ class TelegramReceiptNotifier
                     $this->bot->sendMessage(
                         $claimed->customer->telegram_id,
                         $chunk,
-                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer, $claimed) : [],
+                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer) : [],
+                        $this->credentialOptions($chunk),
                     );
                 }
             } catch (\Throwable $e) {
@@ -149,17 +149,22 @@ class TelegramReceiptNotifier
         return $lines;
     }
 
-    private function receiptReplyMarkup(Customer $customer, Order $order): array
+    private function receiptReplyMarkup(Customer $customer): array
     {
         $rows = [[
             ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
         ]];
-        $copyRows = $this->credentialCopyMarkup->rows($order->orderItems->flatMap(fn ($item) => $item->stockItems));
-        array_push($rows, ...$copyRows);
 
         return [
             'inline_keyboard' => $rows,
         ];
+    }
+
+    private function credentialOptions(string $text): array
+    {
+        $entities = $this->credentialFormatter->codeEntities($text);
+
+        return $entities === [] ? [] : ['entities' => $entities];
     }
 
     private function hasActiveClaim($startedAt): bool

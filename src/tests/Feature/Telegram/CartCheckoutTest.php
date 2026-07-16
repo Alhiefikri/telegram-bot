@@ -141,7 +141,11 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID')
             && str_contains((string) ($request['text'] ?? ''), '987654321')
             && str_contains((string) ($request['text'] ?? ''), '5 USDT')
-            && (($request['reply_markup']['inline_keyboard'][0][0]['copy_text']['text'] ?? null) === '987654321'));
+            && (($request['entities'][0]['type'] ?? null) === 'code')
+            && (($request['entities'][0]['length'] ?? null) === 1)
+            && (($request['entities'][1]['type'] ?? null) === 'code')
+            && (($request['entities'][1]['length'] ?? null) === 9)
+            && ! isset($request['reply_markup']));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
                 || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));

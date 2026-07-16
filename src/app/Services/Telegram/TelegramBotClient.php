@@ -26,9 +26,9 @@ class TelegramBotClient
         return $this->timed('getChatMember', fn () => $this->requests->request()->post($this->requests->url('getChatMember'), ['chat_id' => $chatId, 'user_id' => $userId])->throw()->json());
     }
 
-    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
+    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = [], array $options = []): array
     {
-        $payload = ['chat_id' => $chatId, 'text' => $text];
+        $payload = array_merge(['chat_id' => $chatId, 'text' => $text], $options);
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = $replyMarkup;
         }

@@ -80,12 +80,37 @@ class TelegramCheckoutIntents
     {
         // Manual Binance Pay payments are confirmed from a photo sent with /payment.
         $payId = (string) config('services.binance.pay_id');
-        $this->bot->sendMessage($chatId, $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer)), [
-            'inline_keyboard' => [[[
-                'text' => $this->locale->text($customer, '📋 Salin Binance Pay ID', '📋 Copy Binance Pay ID'),
-                'copy_text' => ['text' => $payId],
-            ]]],
+        $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer));
+        $amount = $this->formatUsdt($payment->amount);
+
+        $this->bot->sendMessage($chatId, $text, [], [
+            'entities' => [
+                $this->codeEntityForLine($text, $amount.' USDT', $amount),
+                $this->codeEntityForLine($text, $payId, $payId),
+            ],
         ]);
+    }
+
+    /** @return array{type: 'code', offset: int, length: int} */
+    private function codeEntityForLine(string $text, string $line, string $value): array
+    {
+        $lineOffset = strpos($text, "\n{$line}\n");
+        if ($lineOffset === false) {
+            throw new \LogicException('Binance payment value was not found in the instruction.');
+        }
+
+        $valueOffset = $lineOffset + 1;
+
+        return [
+            'type' => 'code',
+            'offset' => $this->utf16Length(substr($text, 0, $valueOffset)),
+            'length' => $this->utf16Length($value),
+        ];
+    }
+
+    private function utf16Length(string $value): int
+    {
+        return intdiv(strlen(mb_convert_encoding($value, 'UTF-16LE', 'UTF-8')), 2);
     }
 
     private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, string $locale, bool $fallback = false): void

@@ -20,7 +20,7 @@ class FakeTelegramBotClient extends TelegramBotClient
         return ['ok' => true, 'result' => ['status' => 'member', 'user' => ['id' => $userId, 'is_bot' => false]]];
     }
 
-    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
+    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = [], array $options = []): array
     {
         $this->record('sendMessage');
 
@@ -31,6 +31,7 @@ class FakeTelegramBotClient extends TelegramBotClient
                 'chat' => ['id' => $chatId],
                 'text' => $text,
                 'reply_markup' => $replyMarkup,
+                ...$options,
             ],
         ];
     }

@@ -112,9 +112,9 @@ final class MeasuredTelegramBotClient extends TelegramBotClient
         return $this->measure('POST', 'getChatMember', fn () => parent::getChatMember($chatId, $userId));
     }
 
-    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = []): array
+    public function sendMessage(int|string $chatId, string $text, array $replyMarkup = [], array $options = []): array
     {
-        return $this->measure('POST', 'sendMessage', fn () => parent::sendMessage($chatId, $text, $replyMarkup));
+        return $this->measure('POST', 'sendMessage', fn () => parent::sendMessage($chatId, $text, $replyMarkup, $options));
     }
 
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): void

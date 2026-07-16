@@ -22,6 +22,7 @@ class CredentialDeliveryFormatterTest extends TestCase
         $this->assertSame('username|Password-123|MFA|extra', $formatter->format('username|Password-123|MFA|extra'));
         $this->assertSame('not-an-email|Password-123|MFA', $formatter->format('not-an-email|Password-123|MFA'));
         $this->assertSame('premium@example.test||MFA', $formatter->format('premium@example.test||MFA'));
+        $this->assertSame("premium@example.test|Password-123\nsecond-line|MFA", $formatter->format("premium@example.test|Password-123\nsecond-line|MFA"));
     }
 
     public function test_it_does_not_change_or_log_the_stored_credential(): void
@@ -49,5 +50,16 @@ class CredentialDeliveryFormatterTest extends TestCase
 
         $this->assertSame(' Password-123 ', $parts['password']);
         $this->assertSame(' MFA-SECRET ', $parts['mfa']);
+    }
+
+    public function test_it_marks_credential_values_as_utf16_code_entities(): void
+    {
+        $text = "1. email : premium@example.test\npassword : Password-123\nMFA : ABCD EFGH";
+
+        $this->assertSame([
+            ['type' => 'code', 'offset' => 11, 'length' => 20],
+            ['type' => 'code', 'offset' => 43, 'length' => 12],
+            ['type' => 'code', 'offset' => 62, 'length' => 9],
+        ], (new CredentialDeliveryFormatter)->codeEntities($text));
     }
 }
