@@ -198,6 +198,42 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_payment_options_prioritize_binance_for_english_and_explain_qris_is_indonesia_only(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $indonesian = Customer::factory()->create(['telegram_id' => 41071, 'locale' => 'id']);
+        $english = Customer::factory()->create(['telegram_id' => 41072, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'price_amount' => 50000,
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41071, 'payment-options-id', 'product:'.$product->id, ['id' => 41071], 41071))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41072, 'payment-options-en', 'product:'.$product->id, ['id' => 41072], 41072))->assertOk();
+
+        $idPayload = $this->customerPayload('/sendMessage', 41071);
+        $enPayload = $this->customerPayload('/sendMessage', 41072);
+        $idButtons = collect($idPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+        $enButtons = collect($enPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+
+        $this->assertSame('buy:qris:'.$product->id, $idButtons[0]);
+        $this->assertSame('buy:binance:'.$product->id, $idButtons[1]);
+        $this->assertSame('buy:binance:'.$product->id, $enButtons[0]);
+        $this->assertSame('buy:qris:'.$product->id, $enButtons[1]);
+        $this->assertLocalizedCopy($idPayload, ['QRIS khusus aplikasi bank dan e-wallet Indonesia'], ['QRIS is for Indonesian bank and e-wallet apps only']);
+        $this->assertLocalizedCopy($enPayload, ['QRIS is for Indonesian bank and e-wallet apps only'], ['QRIS khusus aplikasi bank dan e-wallet Indonesia']);
+    }
+
     /**
      * @param  list<string>  $expected
      * @param  list<string>  $oppositeLocale

@@ -51,6 +51,11 @@ class StorefrontPresenter
         return 'Rp'.number_format((int) $amount, 0, ',', '.');
     }
 
+    public function usdt(int $microAmount): string
+    {
+        return rtrim(rtrim(number_format($microAmount / 1_000_000, 6, '.', ''), '0'), '.').' USDT';
+    }
+
     public function productPresentation(Product $product, ?int $stockAvailable = null): StorefrontProductPresentation
     {
         return $this->products->present($product, $stockAvailable);

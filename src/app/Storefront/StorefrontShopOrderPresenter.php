@@ -38,6 +38,8 @@ class StorefrontShopOrderPresenter
             'payableAmount' => $invoice->payableAmount,
             'payableAmountFromProvider' => $invoice->payableAmountFromProvider,
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
+            'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
+            'binancePayId' => (string) config('services.binance.pay_id'),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
             'canRevealCredentials' => $canRevealCredentials,

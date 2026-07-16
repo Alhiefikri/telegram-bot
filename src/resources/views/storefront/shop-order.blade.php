@@ -15,13 +15,13 @@
 
                 <div class="mx-auto mt-6 max-w-xl text-center">
                     <div class="mx-auto grid h-16 w-16 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent-soft)] shadow-[6px_6px_0_var(--sf-shadow)]">
-                        <span class="font-display text-2xl font-black">{{ $isPaid ? 'OK' : 'QR' }}</span>
+                        <span class="font-display text-2xl font-black">{{ $isPaid ? 'OK' : ($isBinancePay ? 'USDT' : 'QR') }}</span>
                     </div>
                     <h1 class="mt-5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">
-                        {{ $isPaid ? 'Pembayaran terverifikasi' : 'Order QRIS dibuat' }}
+                        {{ $isPaid ? 'Pembayaran terverifikasi' : ($isBinancePay ? 'Order Binance Pay dibuat' : 'Order QRIS dibuat') }}
                     </h1>
                     <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                        Invoice {{ $order->invoice_number }} {{ $isPaid ? 'sudah lunas. Data akun tersedia di bawah.' : 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' }}
+                        Invoice {{ $order->invoice_number }} {{ $isPaid ? 'sudah lunas. Data akun tersedia di bawah.' : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.') }}
                     </p>
                 </div>
 
@@ -29,7 +29,11 @@
                 @if ($accessKey)
                     @include('storefront.partials.shop.recovery-key')
                 @endif
-                @include('storefront.partials.shop.qris-payment')
+                @if ($isBinancePay)
+                    @include('storefront.partials.shop.binance-payment')
+                @else
+                    @include('storefront.partials.shop.qris-payment')
+                @endif
                 @include('storefront.partials.shop.account-delivery')
             </section>
         </main>

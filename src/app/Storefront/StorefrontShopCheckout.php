@@ -48,7 +48,7 @@ class StorefrontShopCheckout
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $payment = $existing->payments()->latest('created_at')->first();
-            if ($payment !== null) {
+            if ($payment?->provider === 'pakasir') {
                 try {
                     $this->nativeQris->ensureCreated($payment);
                 } catch (Throwable $exception) {
@@ -61,7 +61,7 @@ class StorefrontShopCheckout
 
         $product = $this->product($input->productId);
 
-        $this->assertNativeQrisReady();
+        $this->assertPaymentMethodReady($input->paymentMethod, $product);
 
         if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
@@ -80,12 +80,23 @@ class StorefrontShopCheckout
 
         $order = $this->orders->checkout(
             $cart,
-            PakasirCheckoutFlow::API_QRIS,
-            'pakasir',
+            $input->paymentMethod === 'binance_pay' ? 'BINANCE_PAY_ID' : PakasirCheckoutFlow::API_QRIS,
+            $input->paymentMethod === 'binance_pay' ? 'manual' : 'pakasir',
             null,
             $checkoutKey,
         );
         $payment = $order->payments()->latest('created_at')->firstOrFail();
+
+        if ($input->paymentMethod === 'binance_pay') {
+            $recoveryKey = $this->orderAccess->issue($order);
+            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+
+            return new StorefrontShopCheckoutResult(
+                redirectUrl: $this->invoiceUrls->show($order),
+                orderId: $order->getKey(),
+                recoveryKey: $recoveryKey,
+            );
+        }
 
         try {
             $this->nativeQris->ensureCreated($payment);
@@ -143,8 +154,17 @@ class StorefrontShopCheckout
         ];
     }
 
-    private function assertNativeQrisReady(): void
+    private function assertPaymentMethodReady(string $paymentMethod, Product $product): void
     {
+        if ($paymentMethod === 'binance_pay') {
+            $settings = ManualPaymentSetting::current();
+            if (! $settings?->binance_pay_enabled || ! filled(config('services.binance.pay_id')) || $product->usdt_price_amount === null) {
+                throw new InvalidCheckout('Binance Pay belum tersedia untuk produk ini.');
+            }
+
+            return;
+        }
+
         $settings = ManualPaymentSetting::current();
 
         if ($settings?->payment_mode !== 'pakasir'
@@ -165,6 +185,7 @@ class StorefrontShopCheckout
             $input->productId,
             $input->quantity,
             mb_strtolower(trim($input->buyerHandle)),
+            $input->paymentMethod,
         ]);
 
         return hash_hmac('sha256', $payload, (string) config('app.key'));

@@ -380,6 +380,7 @@ export function storefrontModal() {
         quantity: 1,
         notes: '',
         buyerHandle: '',
+        paymentMethod: 'qris',
         openProductModal(product) {
             if (!product?.availability?.canOpenModal) {
                 return;
@@ -389,6 +390,7 @@ export function storefrontModal() {
             this.quantity = 1;
             this.notes = '';
             this.buyerHandle = '';
+            this.paymentMethod = this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris';
             this.productModalOpen = true;
             document.body.style.overflow = 'hidden';
         },
@@ -421,6 +423,22 @@ export function storefrontModal() {
         },
         formatIdr(amount) {
             return `Rp${Number.parseInt(amount, 10).toLocaleString('id-ID')}`;
+        },
+        isEnglishBrowser() {
+            return window.navigator.language.toLowerCase().startsWith('en');
+        },
+        orderedCheckoutChoices() {
+            if (!this.selectedProduct) {
+                return [];
+            }
+
+            const choices = [this.selectedProduct.checkout.websiteQris, this.selectedProduct.checkout.websiteBinancePay].filter(Boolean);
+            return this.isEnglishBrowser() ? choices.reverse() : choices;
+        },
+        selectedCheckoutChoice() {
+            return this.paymentMethod === 'binance_pay'
+                ? this.selectedProduct?.checkout?.websiteBinancePay
+                : this.selectedProduct?.checkout?.websiteQris;
         },
     };
 }

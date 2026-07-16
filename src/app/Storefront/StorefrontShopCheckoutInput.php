@@ -8,10 +8,11 @@ final readonly class StorefrontShopCheckoutInput
         public int $productId,
         public int $quantity,
         public string $buyerHandle,
+        public string $paymentMethod = 'qris',
     ) {}
 
     /**
-     * @param  array{product_id: int|string, quantity: int|string, buyer_handle: string}  $validated
+     * @param  array{product_id: int|string, quantity: int|string, buyer_handle: string, payment_method: string}  $validated
      */
     public static function fromValidated(array $validated): self
     {
@@ -19,6 +20,7 @@ final readonly class StorefrontShopCheckoutInput
             productId: (int) $validated['product_id'],
             quantity: (int) $validated['quantity'],
             buyerHandle: $validated['buyer_handle'],
+            paymentMethod: $validated['payment_method'] ?? 'qris',
         );
     }
 }

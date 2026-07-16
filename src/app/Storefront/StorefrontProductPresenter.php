@@ -4,11 +4,14 @@ namespace App\Storefront;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
 
 class StorefrontProductPresenter
 {
+    private ?bool $binancePayEnabled = null;
+
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
     {
         $stockAvailable ??= $product->availableStock();
@@ -89,7 +92,7 @@ class StorefrontProductPresenter
      */
     private function checkoutChoices(Product $product, array $copy): array
     {
-        return [
+        $choices = [
             'website_qris' => new StorefrontProductCheckoutChoice(
                 key: 'website_qris',
                 label: $copy['checkout_cta'] ?? 'Bayar QRIS di Website',
@@ -100,6 +103,27 @@ class StorefrontProductPresenter
                 productId: (int) $product->id,
             ),
         ];
+
+        if ($this->binancePayEnabled()
+            && $product->usdt_price_amount !== null) {
+            $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
+                key: 'website_binance_pay',
+                label: 'Binance Pay · '.rtrim(rtrim(number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
+                description: 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.',
+                url: route('storefront.shop.checkout'),
+                method: 'POST',
+                enabled: true,
+                productId: (int) $product->id,
+            );
+        }
+
+        return $choices;
+    }
+
+    private function binancePayEnabled(): bool
+    {
+        return $this->binancePayEnabled ??= (bool) ManualPaymentSetting::current()?->binance_pay_enabled
+            && filled(config('services.binance.pay_id'));
     }
 
     /**

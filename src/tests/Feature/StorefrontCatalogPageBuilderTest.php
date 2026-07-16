@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Storefront\StorefrontCatalogPageBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
@@ -193,5 +195,35 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->get('/?q[]=chat')
             ->assertOk()
             ->assertSee('value=""', false);
+    }
+
+    public function test_binance_payment_choice_is_available_without_catalog_n_plus_one_queries(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        $this->availableProduct(['name' => 'One USDT Product', 'usdt_price_amount' => 1_500_000]);
+
+        $singleProductQueries = $this->catalogQueryCount();
+        collect(range(2, 6))->each(fn (int $number) => $this->availableProduct([
+            'name' => 'USDT Product '.$number,
+            'usdt_price_amount' => 1_500_000,
+        ]));
+
+        $page = app(StorefrontCatalogPageBuilder::class)->home(null);
+        $manyProductQueries = $this->catalogQueryCount();
+
+        $this->assertSame($singleProductQueries, $manyProductQueries);
+        $this->assertNotNull($page->products->first()->presentation->checkoutChoice('website_binance_pay'));
+    }
+
+    private function catalogQueryCount(): int
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        app(StorefrontCatalogPageBuilder::class)->home(null);
+        $count = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return $count;
     }
 }

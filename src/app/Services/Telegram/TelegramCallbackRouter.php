@@ -336,12 +336,13 @@ class TelegramCallbackRouter
             return;
         }
         $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
-        $buttons = [
-            [['text' => '💳 QRIS', 'callback_data' => 'checkout:current']],
-            [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']],
-        ];
+        $qrisButton = [['text' => '💳 QRIS', 'callback_data' => 'checkout:current']];
+        $binanceButton = [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']];
+        $buttons = $customer->locale === 'en'
+            ? [$binanceButton, $qrisButton]
+            : [$qrisButton, $binanceButton];
         $this->bot->answerCallbackQuery($id);
-        $this->bot->sendMessage($chatId, $this->text($customer, 'Pilih metode pembayaran:', 'Choose a payment method:'), ['inline_keyboard' => $buttons]);
+        $this->bot->sendMessage($chatId, $this->text($customer, 'Pilih metode pembayaran. QRIS hanya untuk aplikasi bank dan e-wallet Indonesia:', 'Choose a payment method. QRIS is for Indonesian bank and e-wallet apps only:'), ['inline_keyboard' => $buttons]);
     }
 
     private function checkout(Customer $customer, string $chatId, string $id, bool $binance = false, bool $answerCallback = true): void

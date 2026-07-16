@@ -85,6 +85,7 @@
                                     @csrf
                                     <input type="hidden" name="product_id" x-bind:value="selectedProduct?.checkout?.websiteQris?.productId || selectedProduct?.id || ''">
                                     <input type="hidden" name="quantity" x-bind:value="quantity">
+                                    <input type="hidden" name="payment_method" x-bind:value="paymentMethod">
 
                                     <div class="grid gap-2">
                                         <label for="storefront-buyer-handle" class="text-xs font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['buyer_handle_label'] }}</label>
@@ -101,14 +102,24 @@
                                         </p>
                                     </div>
 
-                                    <p class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-[11px] font-bold leading-relaxed text-[var(--sf-muted)]">Setelah QRIS dibuat, simpan link invoice ini. Data akses hanya muncul setelah pembayaran terverifikasi.</p>
+                                    <div class="grid gap-2" x-show="selectedProduct?.checkout?.websiteBinancePay || selectedProduct?.checkout?.websiteQris">
+                                        <p class="text-xs font-black uppercase tracking-wider text-[var(--sf-ink)]">Metode pembayaran</p>
+                                        <template x-for="choice in orderedCheckoutChoices()" :key="choice.key">
+                                            <button type="button" x-on:click="paymentMethod = choice.key === 'websiteBinancePay' ? 'binance_pay' : 'qris'" x-bind:class="paymentMethod === (choice.key === 'websiteBinancePay' ? 'binance_pay' : 'qris') ? 'bg-[var(--sf-yellow)]' : 'bg-white'" class="rounded-md border-2 border-[var(--sf-border)] px-3 py-2 text-left text-sm font-black text-[var(--sf-ink)]">
+                                                <span x-text="choice.label"></span>
+                                                <span class="mt-1 block text-[11px] font-semibold text-[var(--sf-muted)]" x-text="choice.description"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                    <p x-show="paymentMethod === 'qris'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-[11px] font-bold leading-relaxed text-[var(--sf-muted)]">QRIS hanya untuk aplikasi bank dan e-wallet Indonesia. Simpan link invoice setelah QRIS dibuat.</p>
+                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-[11px] font-bold leading-relaxed text-[var(--sf-muted)]">Binance Pay dibayar dalam USDT dan diverifikasi manual. Instruksi serta nomor invoice tersedia setelah checkout.</p>
 
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-xs font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedProduct.checkout.websiteQris || !selectedProduct.checkout.websiteQris.enabled" class="neo-button hover-rubber-band flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        <span x-text="selectedProduct?.checkout?.websiteQris?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
+                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                        <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
 

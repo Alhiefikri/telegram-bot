@@ -69,6 +69,7 @@ final readonly class StorefrontProductPresentation
             'cover' => $this->cover->toModalPayload(),
             'checkout' => [
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
+                'websiteBinancePay' => $this->checkoutChoice('website_binance_pay')?->toModalPayload(),
             ],
         ];
     }

@@ -100,7 +100,7 @@ class StorefrontCatalogPageBuilder
     private function publicProducts(string $search): Collection
     {
         return Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->withAvailability()
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
@@ -164,7 +164,7 @@ class StorefrontCatalogPageBuilder
     private function featuredProduct(): ?StorefrontCatalogProduct
     {
         $product = Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'stock', 'reserved_stock', 'image_path'])
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->withAvailability()
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query

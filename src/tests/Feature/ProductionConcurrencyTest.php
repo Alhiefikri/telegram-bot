@@ -98,6 +98,33 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertManagedInventoryInvariants($product);
     }
 
+    public function test_concurrent_binance_checkout_for_same_stock_allows_only_one_reservation(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'only-binance-secret']);
+        $firstCart = $this->cartForProduct($product);
+        $secondCart = $this->cartForProduct($product);
+
+        $results = $this->runConcurrently([
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), 'BINANCE_PAY_ID', 'manual')->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), 'BINANCE_PAY_ID', 'manual')->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([InsufficientStock::class], $this->failedResultClasses($results));
+        $payment = Payment::sole();
+        $product->refresh();
+
+        $this->assertSame('BINANCE_PAY_ID', $payment->method);
+        $this->assertSame('USDT', $payment->currency);
+        $this->assertSame(2_000_000, $payment->amount);
+        $this->assertSame(1, $product->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+        $this->assertManagedInventoryInvariants($product);
+    }
+
     public function test_concurrent_cart_quantity_holds_last_stock_once(): void
     {
         $this->requireConcurrencyLane();

@@ -10,6 +10,7 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -367,6 +368,116 @@ class StorefrontShopCheckoutTest extends TestCase
             && $request['order_id'] === $payment->merchant_ref
             && $request['amount'] === 30000
             && $request['api_key'] === 'secret-key');
+    }
+
+    public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'name' => 'International Checkout Product',
+            'price_amount' => 50000,
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 2,
+        ]);
+        Http::fake();
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 2,
+            'buyer_handle' => '@international_buyer',
+            'payment_method' => 'binance_pay',
+        ]);
+
+        $response->assertRedirect();
+        $order = Order::with('payments')->sole();
+        $payment = $order->payments->sole();
+        $this->assertSame('manual', $payment->provider);
+        $this->assertSame('BINANCE_PAY_ID', $payment->method);
+        $this->assertSame(6_000_000, $payment->amount);
+        $this->assertSame('USDT', $payment->currency);
+        Http::assertNothingSent();
+        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Binance Pay (USDT)')
+            ->assertSee('6 USDT')
+            ->assertSee('987654321')
+            ->assertSee('/payment '.$order->invoice_number);
+    }
+
+    public function test_shop_checkout_rejects_unrecognized_payment_method_before_creating_rows(): void
+    {
+        $product = $this->availableProduct(['stock' => 1]);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+            'payment_method' => 'manual;DROP TABLE payments',
+        ])->assertSessionHasErrors('payment_method');
+
+        $this->assertNoLocalCheckoutRowsCreated('invalid payment method');
+    }
+
+    public function test_shop_checkout_rechecks_binance_availability_after_the_payment_option_was_rendered(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $settings = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 1]);
+
+        $this->get(route('storefront.shop.index'))->assertOk()->assertSee('Binance Pay');
+        $settings->update(['binance_pay_enabled' => false]);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+            'payment_method' => 'binance_pay',
+        ])->assertRedirect(route('storefront.shop.index'))
+            ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
+
+        $this->assertNoLocalCheckoutRowsCreated('disabled Binance Pay after render');
+    }
+
+    public function test_repeated_binance_checkout_from_the_same_session_reuses_the_existing_order(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 2]);
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+            'payment_method' => 'binance_pay',
+        ];
+
+        $first = $this->withSession(['storefront.checkout_client_key' => 'same-binance-browser-session'])
+            ->post(route('storefront.shop.checkout'), $payload);
+        $second = $this->withSession(['storefront.checkout_client_key' => 'same-binance-browser-session'])
+            ->post(route('storefront.shop.checkout'), $payload);
+
+        $first->assertRedirect();
+        $second->assertRedirect($first->headers->get('Location'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
     public function test_repeated_web_checkout_from_the_same_session_reuses_the_existing_order(): void
