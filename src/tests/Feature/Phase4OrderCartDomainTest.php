@@ -44,6 +44,20 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(1, Order::where('cart_id', $cart->id)->count());
     }
 
+    public function test_binance_checkout_persists_usdt_payment_currency(): void
+    {
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), 'BINANCE_PAY_ID', 'manual');
+
+        $this->assertSame('USDT', $order->payments()->sole()->currency);
+        $this->assertSame(2_500_000, $order->payments()->sole()->amount);
+    }
+
     public function test_two_carts_stock_one_only_first_checkout_succeeds(): void
     {
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);

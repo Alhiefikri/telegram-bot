@@ -39,6 +39,14 @@ class Phase2CoreDatabaseTest extends TestCase
         $this->assertTrue(Schema::hasColumns('payments', ['id', 'merchant_ref', 'provider_reference', 'status']));
     }
 
+    public function test_payments_currency_schema_supports_usdt(): void
+    {
+        $order = Order::factory()->create();
+        $payment = Payment::factory()->create(['order_id' => $order->id, 'currency' => 'USDT']);
+
+        $this->assertSame('USDT', $payment->fresh()->currency);
+    }
+
     public function test_uuid_models_persist_with_uuid_primary_keys(): void
     {
         $order = Order::factory()->create();
