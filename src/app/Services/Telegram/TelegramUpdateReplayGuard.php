@@ -16,7 +16,7 @@ class TelegramUpdateReplayGuard
      */
     public function processOnce(TelegramUpdate $update, callable $handler): void
     {
-        if ($update->processed_at || $update->processing_started_at) {
+        if ($update->processed_at || $update->hasActiveClaim()) {
             return;
         }
 
@@ -27,15 +27,21 @@ class TelegramUpdateReplayGuard
 
         try {
             $update->refresh();
-            if ($update->processed_at || $update->processing_started_at) {
+            if ($update->processed_at || $update->hasActiveClaim()) {
                 return;
             }
 
             $update->update(['processing_started_at' => now()]);
 
-            $handler($update);
+            try {
+                $handler($update);
+            } catch (\Throwable $exception) {
+                $update->update(['processing_started_at' => null]);
 
-            $update->update(['processed_at' => now()]);
+                throw $exception;
+            }
+
+            $update->update(['processed_at' => now(), 'processing_started_at' => null]);
         } finally {
             $lock->release();
         }

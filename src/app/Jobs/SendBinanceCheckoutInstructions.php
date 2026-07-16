@@ -50,7 +50,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
             $claimed = DB::transaction(function (): ?Order {
                 $order = Order::whereKey($this->orderId)->lockForUpdate()->firstOrFail();
                 if ($order->manual_checkout_customer_notified_at !== null
-                    || $order->manual_checkout_customer_notification_started_at !== null) {
+                    || $this->hasActiveClaim($order->manual_checkout_customer_notification_started_at)) {
                     return null;
                 }
 
@@ -86,7 +86,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                 throw $e;
             }
 
-            $order->forceFill(['manual_checkout_customer_notified_at' => now()])->save();
+            $order->forceFill(['manual_checkout_customer_notified_at' => now(), 'manual_checkout_customer_notification_started_at' => null])->save();
         } finally {
             DogfoodTiming::log('dogfood.telegram.binance_checkout_instructions_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),
@@ -95,5 +95,11 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                 'memory_after_bytes' => memory_get_usage(true),
             ]);
         }
+    }
+
+    private function hasActiveClaim($startedAt): bool
+    {
+        return $startedAt !== null
+            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

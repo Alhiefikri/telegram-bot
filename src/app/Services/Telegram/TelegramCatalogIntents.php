@@ -134,7 +134,7 @@ class TelegramCatalogIntents
             $title = $category->name;
         }
 
-        $products = $query->limit(12)->get();
+        $products = $query->withAvailability()->limit(12)->get();
         $lines = [$this->locale->text($customer, '🛍️ Daftar Produk', '🛍️ Product List'), '━━━━━━━━━━━━━━', $this->locale->text($customer, 'Kategori: ', 'Category: ').$title];
         if ($category?->description) {
             $lines[] = '';
@@ -162,6 +162,7 @@ class TelegramCatalogIntents
             })
             ->orderBy('name')
             ->limit($limit + 1)
+            ->withAvailability()
             ->get();
 
         if ($products->isEmpty()) {

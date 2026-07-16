@@ -53,7 +53,7 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
             $claimed = DB::transaction(function () use ($order): ?Order {
                 $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
                 if ($locked->manual_checkout_customer_notified_at !== null
-                    || $locked->manual_checkout_customer_notification_started_at !== null) {
+                    || $this->hasActiveClaim($locked->manual_checkout_customer_notification_started_at)) {
                     return null;
                 }
 
@@ -80,7 +80,7 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
                     throw $e;
                 }
 
-                $order->forceFill(['manual_checkout_customer_notified_at' => now()])->save();
+                $order->forceFill(['manual_checkout_customer_notified_at' => now(), 'manual_checkout_customer_notification_started_at' => null])->save();
             }
 
         } finally {
@@ -91,5 +91,11 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
                 'memory_after_bytes' => memory_get_usage(true),
             ]);
         }
+    }
+
+    private function hasActiveClaim($startedAt): bool
+    {
+        return $startedAt !== null
+            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

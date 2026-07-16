@@ -10,7 +10,7 @@ class RecoverTelegramUpdates extends Command
 {
     protected $signature = 'telegram:recover-updates {--chunk=100} {--queue=default}';
 
-    protected $description = 'Redispatch stored Telegram updates that have not been processed or claimed yet.';
+    protected $description = 'Redispatch stored Telegram updates that are unclaimed or whose processing lease expired.';
 
     public function handle(): int
     {
@@ -18,7 +18,9 @@ class RecoverTelegramUpdates extends Command
 
         TelegramUpdate::query()
             ->whereNull('processed_at')
-            ->whereNull('processing_started_at')
+            ->where(fn ($query) => $query
+                ->whereNull('processing_started_at')
+                ->orWhere('processing_started_at', '<=', now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)))))
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($updates) use (&$dispatched): void {
                 foreach ($updates as $update) {

@@ -43,7 +43,7 @@ class TelegramAdminPaidOrderNotifier
 
         $claimed = DB::transaction(function () use ($order, $startedAtColumn, $sentAtColumn, $canSend): ?Order {
             $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($locked->{$sentAtColumn} !== null || $locked->{$startedAtColumn} !== null || ! $canSend($locked)) {
+            if ($locked->{$sentAtColumn} !== null || $this->hasActiveClaim($locked->{$startedAtColumn}) || ! $canSend($locked)) {
                 return null;
             }
 
@@ -56,19 +56,25 @@ class TelegramAdminPaidOrderNotifier
             return;
         }
 
-        $claimed->loadMissing(['customer', 'orderItems', 'payments']);
-        $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
-            'step' => $step,
-            'payment_mode' => $this->paymentMode($claimed),
-            'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
-            'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
+        try {
+            $claimed->loadMissing(['customer', 'orderItems', 'payments']);
+            DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                'step' => $step,
+                'payment_mode' => $this->paymentMode($claimed),
+                'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
+                'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
+            ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
+        } catch (\Throwable $exception) {
+            Order::query()->whereKey($claimed->id)->whereNull($sentAtColumn)->update([$startedAtColumn => null]);
+
+            throw $exception;
+        }
 
         Order::query()
             ->whereKey($claimed->id)
             ->whereNotNull($startedAtColumn)
             ->whereNull($sentAtColumn)
-            ->update([$sentAtColumn => now()]);
+            ->update([$sentAtColumn => now(), $startedAtColumn => null]);
     }
 
     private function paidMessage(Order $order): string
@@ -236,5 +242,11 @@ class TelegramAdminPaidOrderNotifier
         return $chatId !== null && preg_match('/^[1-9][0-9]*$/', $chatId) === 1
             ? $chatId
             : null;
+    }
+
+    private function hasActiveClaim($startedAt): bool
+    {
+        return $startedAt !== null
+            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

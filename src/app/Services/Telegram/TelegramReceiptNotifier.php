@@ -37,7 +37,7 @@ class TelegramReceiptNotifier
                     return null;
                 }
 
-                if (! $force && ($locked->telegram_receipt_sent_at !== null || $locked->telegram_receipt_send_started_at !== null)) {
+                if (! $force && ($locked->telegram_receipt_sent_at !== null || $this->hasActiveClaim($locked->telegram_receipt_send_started_at))) {
                     return null;
                 }
 
@@ -115,7 +115,7 @@ class TelegramReceiptNotifier
             if (! $force) {
                 $receiptSentAt->whereNotNull('telegram_receipt_send_started_at')->whereNull('telegram_receipt_sent_at');
             }
-            $receiptSentAt->update(['telegram_receipt_sent_at' => now()]);
+            $receiptSentAt->update(['telegram_receipt_sent_at' => now(), 'telegram_receipt_send_started_at' => null]);
         } finally {
             $lock->release();
         }
@@ -160,5 +160,11 @@ class TelegramReceiptNotifier
         return [
             'inline_keyboard' => $rows,
         ];
+    }
+
+    private function hasActiveClaim($startedAt): bool
+    {
+        return $startedAt !== null
+            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

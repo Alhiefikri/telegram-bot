@@ -36,6 +36,13 @@ class StorefrontShopCheckoutTest extends TestCase
     use StorefrontCheckoutScenarios;
     use StorefrontShopAssertions;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.storefront.telegram_reservation_floor', 0);
+    }
+
     public function test_shop_named_route_contracts_are_registered(): void
     {
         $this->assertRouteContract('storefront.shop.index', 'GET', 'shop');
@@ -522,7 +529,7 @@ class StorefrontShopCheckoutTest extends TestCase
         }
     }
 
-    public function test_failed_native_qris_create_releases_reserved_stock_and_credentials(): void
+    public function test_failed_native_qris_create_keeps_pending_reservation_for_safe_recovery(): void
     {
         $this->pakasirNativeQrisIsReady();
         $product = $this->availableProductWithCredentials(
@@ -538,22 +545,21 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response = $this->postStorefrontShopCheckout($product, 1, '@RetryBuyer');
 
-        $response
-            ->assertRedirect(route('storefront.shop.index'))
-            ->assertInvalid(['product_id' => 'QRIS belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.']);
+        $response->assertRedirect();
 
         $order = Order::with(['payments', 'orderItems'])->firstOrFail();
         $payment = $order->payments->first();
 
-        $this->assertSame(OrderStatus::Cancelled, $order->order_status);
-        $this->assertSame(PaymentStatus::Failed, $order->payment_status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->payment_status);
         $this->assertNotNull($payment);
-        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame('outcome_unknown', $payment->provider_create_state);
         $this->assertSame(1, $product->fresh()->stock);
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertNotNull($stockItem->fresh()->order_item_id);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'POST'
             && $request->url() === 'https://app.pakasir.test/api/transactioncreate/qris');
     }

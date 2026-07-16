@@ -24,4 +24,15 @@ class TelegramUpdate extends Model
     {
         return $this->belongsTo(Customer::class);
     }
+
+    public function hasActiveClaim(): bool
+    {
+        return $this->processing_started_at !== null
+            && $this->processing_started_at->gt(now()->subSeconds($this->claimLeaseSeconds()));
+    }
+
+    private function claimLeaseSeconds(): int
+    {
+        return max(60, (int) config('services.telegram.claim_lease_seconds', 600));
+    }
 }

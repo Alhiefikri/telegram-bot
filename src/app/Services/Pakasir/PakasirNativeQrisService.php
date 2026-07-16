@@ -32,8 +32,26 @@ class PakasirNativeQrisService
                     return $this->transactionFromPayment($payment);
                 }
 
-                $transaction = $this->pakasir->createQrisTransaction($payment);
-                $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+                if ($payment->provider_create_state !== null) {
+                    $this->recoverCreationOutcome($payment);
+                    $payment->refresh();
+                    if ($this->hasPersistedQris($payment)) {
+                        return $this->transactionFromPayment($payment);
+                    }
+
+                    throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.');
+                }
+
+                $this->markCreationAttempted($payment);
+
+                try {
+                    $transaction = $this->pakasir->createQrisTransaction($payment);
+                    $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+                } catch (\Throwable $exception) {
+                    $this->markCreationOutcomeUnknown($payment, $exception);
+
+                    throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.', 0, $exception);
+                }
 
                 return $this->persistCreatedTransaction($payment, $transaction);
             });
@@ -61,6 +79,8 @@ class PakasirNativeQrisService
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_payment_number' => $transaction->paymentNumber(),
                 'provider_payment_number_hash' => hash('sha256', $transaction->paymentNumber()),
+                'provider_create_state' => 'created',
+                'provider_create_last_error' => null,
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -83,6 +103,45 @@ class PakasirNativeQrisService
     private function hasPersistedQris(Payment $payment): bool
     {
         return $payment->provider_payment_method === 'qris' && filled($payment->provider_payment_number);
+    }
+
+    private function markCreationAttempted(Payment $payment): void
+    {
+        DB::transaction(function () use ($payment): void {
+            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            if ($this->hasPersistedQris($locked) || $locked->provider_create_state !== null) {
+                return;
+            }
+
+            $locked->update([
+                'provider_create_state' => 'creating',
+                'provider_create_attempted_at' => now(),
+            ]);
+        });
+
+        $payment->refresh();
+    }
+
+    private function markCreationOutcomeUnknown(Payment $payment, \Throwable $exception): void
+    {
+        Payment::query()
+            ->whereKey($payment->id)
+            ->whereNull('provider_payment_number_hash')
+            ->update([
+                'provider_create_state' => 'outcome_unknown',
+                'provider_create_last_error' => substr($exception::class, 0, 500),
+            ]);
+    }
+
+    private function recoverCreationOutcome(Payment $payment): void
+    {
+        try {
+            $transaction = PakasirQrisTransaction::fromPayload($this->pakasir->transactionDetail($payment));
+            $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+            $this->persistCreatedTransaction($payment, $transaction);
+        } catch (\Throwable $exception) {
+            $this->markCreationOutcomeUnknown($payment, $exception);
+        }
     }
 
     private function transactionFromPayment(Payment $payment): PakasirQrisTransaction

@@ -164,7 +164,6 @@ class OrderStateMachine
         $order->update([
             'payment_status' => PaymentStatus::Paid,
             'order_status' => $this->paidOrderStatus($payment),
-            'checkout_key' => null,
         ]);
         $this->dispatchAdminPendingNotificationDelete($order);
 
@@ -246,7 +245,6 @@ class OrderStateMachine
         $order->update([
             'order_status' => $orderStatus,
             'payment_status' => $paymentStatus,
-            'checkout_key' => null,
         ]);
         $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {

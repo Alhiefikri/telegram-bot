@@ -115,7 +115,7 @@ class TelegramAdminOrderNotifier
 
         $claimed = DB::transaction(function () use ($order, $startedAtColumn, $sentAtColumn, $canSend): ?Order {
             $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($locked->{$sentAtColumn} !== null || $locked->{$startedAtColumn} !== null || ! $canSend($locked)) {
+            if ($locked->{$sentAtColumn} !== null || $this->hasActiveClaim($locked->{$startedAtColumn}) || ! $canSend($locked)) {
                 return null;
             }
 
@@ -145,7 +145,7 @@ class TelegramAdminOrderNotifier
             throw $e;
         }
 
-        $updates = [$sentAtColumn => now()];
+        $updates = [$sentAtColumn => now(), $startedAtColumn => null];
         if ($sentUpdates !== null) {
             $updates += $sentUpdates(is_array($response) ? $response : [], $claimed, $chatId);
         }
@@ -325,5 +325,11 @@ class TelegramAdminOrderNotifier
         return $chatId !== null && preg_match('/^[1-9][0-9]*$/', $chatId) === 1
             ? $chatId
             : null;
+    }
+
+    private function hasActiveClaim($startedAt): bool
+    {
+        return $startedAt !== null
+            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

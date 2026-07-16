@@ -67,12 +67,16 @@ class OrderCheckoutService
         }
 
         $products = $this->inventory->lockedCheckoutProducts($items);
+        $this->assertWebReservationBudget($lockedCart, $items, $products);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $usdtTotal = $provider === 'manual' && $paymentMethod === 'BINANCE_PAY_ID'
             ? $items->sum(function ($item) use ($products): int {
                 $price = $products[$item->product_id]->usdt_price_amount;
-                if ($price === null) { throw new InvalidCheckout('A cart item has no USDT price.'); }
+                if ($price === null) {
+                    throw new InvalidCheckout('A cart item has no USDT price.');
+                }
+
                 return $price * $item->quantity;
             }) : null;
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => 'IDR', 'expires_at' => $expiresAt]);
@@ -93,5 +97,24 @@ class OrderCheckoutService
     private function isUniqueViolation(QueryException $e): bool
     {
         return in_array((string) ($e->errorInfo[0] ?? ''), ['23000', '23505'], true) || str_contains(strtolower($e->getMessage()), 'unique');
+    }
+
+    private function assertWebReservationBudget(Cart $cart, $items, $products): void
+    {
+        if ($cart->customer?->telegram_id !== null) {
+            return;
+        }
+
+        $floor = max(0, (int) config('services.storefront.telegram_reservation_floor', 1));
+        if ($floor === 0) {
+            return;
+        }
+
+        foreach ($items as $item) {
+            $product = $products[$item->product_id];
+            if ($product->availableStock() - $item->quantity < $floor) {
+                throw new InvalidCheckout('Stok terakhir disisakan untuk pembelian lewat Telegram. Pilih jumlah lebih kecil atau coba lagi nanti.');
+            }
+        }
     }
 }

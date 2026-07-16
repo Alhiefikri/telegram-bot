@@ -77,6 +77,19 @@ class Product extends Model
                 ->orWhereHas('stockItems', fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')));
     }
 
+    /**
+     * Add the stock projection used by product lists without per-product queries.
+     *
+     * @param  Builder<Product>  $query
+     * @return Builder<Product>
+     */
+    public function scopeWithAvailability(Builder $query): Builder
+    {
+        return $query
+            ->withExists('stockItems')
+            ->withCount(['stockItems as available_stock_items_count' => fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')]);
+    }
+
     public function availableStock(): int
     {
         $numericAvailable = max(0, $this->stock - $this->reserved_stock);
@@ -123,7 +136,9 @@ class Product extends Model
     {
         return $this->is_active
             && ! $this->trashed()
-            && ($this->category_id === null || $this->category()->where('is_active', true)->exists());
+            && ($this->category_id === null || ($this->relationLoaded('category')
+                ? $this->category !== null && $this->category->is_active
+                : $this->category()->where('is_active', true)->exists()));
     }
 
     public function cartItems()

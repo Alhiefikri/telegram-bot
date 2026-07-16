@@ -55,6 +55,7 @@ return [
 
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
+        'telegram_reservation_floor' => (int) env('STOREFRONT_TELEGRAM_RESERVATION_FLOOR', 1),
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
         'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),
         'credential_access_session_minutes' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_SESSION_MINUTES', 30),
@@ -78,6 +79,7 @@ return [
         'mini_app_url' => env('TELEGRAM_MINI_APP_URL'),
         'welcome_banner_url' => env('TELEGRAM_WELCOME_BANNER_URL'),
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
+        'claim_lease_seconds' => (int) env('TELEGRAM_CLAIM_LEASE_SECONDS', 600),
     ],
 
     'dogfood_timing' => [

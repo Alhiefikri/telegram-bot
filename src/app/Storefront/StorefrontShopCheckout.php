@@ -11,7 +11,6 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
-use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
@@ -26,7 +25,6 @@ class StorefrontShopCheckout
         private readonly OrderCheckoutService $orders,
         private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirProviderReadiness $readiness,
-        private readonly OrderStateMachine $orderStates,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
     ) {}
@@ -49,6 +47,15 @@ class StorefrontShopCheckout
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            $payment = $existing->payments()->latest('created_at')->first();
+            if ($payment !== null) {
+                try {
+                    $this->nativeQris->ensureCreated($payment);
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            }
+
             return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey());
         }
 
@@ -85,13 +92,10 @@ class StorefrontShopCheckout
         } catch (Throwable $exception) {
             report($exception);
 
-            try {
-                $this->orderStates->cancelPendingOrder($order);
-            } catch (Throwable $cancellationException) {
-                report($cancellationException);
-            }
-
-            throw new InvalidCheckout('QRIS belum bisa dibuat. Stok sudah dilepas; coba lagi beberapa menit.', 0, $exception);
+            return new StorefrontShopCheckoutResult(
+                redirectUrl: $this->invoiceUrls->show($order),
+                orderId: $order->getKey(),
+            );
         }
 
         $payment->refresh();

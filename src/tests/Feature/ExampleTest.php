@@ -73,7 +73,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('aria-label="Ilustrasi QRIS Lhie Store"', $qrisHtml);
         $this->assertStringContainsString('QRIS Website', $qrisHtml);
         $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
-        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan recovery key sebelum melanjutkan pembayaran.', $qrisHtml);
+        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan Recovery Key sebelum melanjutkan pembayaran; key ini hanya untuk pesanan website.', $qrisHtml);
         $this->assertStringNotContainsString('Pakasir', $qrisHtml);
         $this->assertHtmlContainsLink($qrisHtml, route('storefront.shop.index'), 'Belanja Web via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
         $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
@@ -144,9 +144,9 @@ class ExampleTest extends TestCase
             ->assertSee('Akses Pesanan')
             ->assertSee('Belanja produk digital dalam tiga langkah')
             ->assertSee('/panduan-login-akun', false)
-            ->assertSee('Pilih produk dari katalog, checkout sebagai tamu, lalu simpan invoice dan recovery key untuk akses ulang.')
+            ->assertSee('Pilih produk dari katalog, checkout sebagai tamu di website, lalu simpan invoice dan Recovery Key untuk akses ulang pesanan website.')
             ->assertSee('Pengiriman digital')
-            ->assertSee('Invoice dan recovery key menjaga akses pesanan.')
+            ->assertSee('Invoice dan Recovery Key untuk pesanan website.')
             ->assertSee('Produk siap pakai')
             ->assertSee('Tanpa tebak stok')
             ->assertSee('Akses mandiri')
