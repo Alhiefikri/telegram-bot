@@ -47,6 +47,7 @@ class StorefrontShopCheckout
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
             $payment = $existing->payments()->latest('created_at')->first();
             if ($payment?->provider === 'pakasir') {
                 try {
@@ -56,7 +57,7 @@ class StorefrontShopCheckout
                 }
             }
 
-            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey());
+            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey(), recoveryKey: $recoveryKey);
         }
 
         $product = $this->product($input->productId);
@@ -98,6 +99,8 @@ class StorefrontShopCheckout
             );
         }
 
+        $recoveryKey = $this->issueRecoveryKeyIfMissing($order);
+
         try {
             $this->nativeQris->ensureCreated($payment);
         } catch (Throwable $exception) {
@@ -106,12 +109,12 @@ class StorefrontShopCheckout
             return new StorefrontShopCheckoutResult(
                 redirectUrl: $this->invoiceUrls->show($order),
                 orderId: $order->getKey(),
+                recoveryKey: $recoveryKey,
             );
         }
 
         $payment->refresh();
         $order->refresh();
-        $recoveryKey = $this->orderAccess->issue($order);
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(
@@ -130,6 +133,11 @@ class StorefrontShopCheckout
         }
 
         return $product;
+    }
+
+    private function issueRecoveryKeyIfMissing(Order $order): ?string
+    {
+        return $this->orderAccess->hasKey($order) ? null : $this->orderAccess->issue($order);
     }
 
     /**

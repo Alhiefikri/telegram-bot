@@ -90,4 +90,25 @@ class CustomerAccountTest extends TestCase
         $this->assertNotNull($service->claim($customer, $order->invoice_number, $key));
         $this->assertDatabaseHas('audit_logs', ['action' => 'order.customer_claimed', 'subject_id' => $order->id]);
     }
+
+    public function test_failed_order_claim_does_not_flash_recovery_key_to_old_input(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
+        $submittedKey = 'LHIE-THISKEYMUSTNOTFLASH';
+
+        $this->actingAs($customer, 'customer')
+            ->from(route('customer.claim.create'))
+            ->post(route('customer.claim.store'), [
+                'invoice_number' => 'INV-NOT-FOUND',
+                'access_key' => $submittedKey,
+            ])
+            ->assertRedirect(route('customer.claim.create'))
+            ->assertSessionHas('customer_claim_error', 'Nomor invoice atau recovery key tidak cocok.');
+
+        $oldInput = session()->getOldInput();
+
+        $this->assertSame('INV-NOT-FOUND', $oldInput['invoice_number'] ?? null);
+        $this->assertArrayNotHasKey('access_key', $oldInput);
+        $this->assertStringNotContainsString($submittedKey, (string) json_encode($oldInput));
+    }
 }

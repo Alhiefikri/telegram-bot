@@ -514,6 +514,37 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
+    public function test_repeated_failed_qris_checkout_keeps_the_original_recovery_key_hash(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Idempotent Failed QRIS Checkout',
+            'price_amount' => 15000,
+            'stock' => 2,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        $this->providerQrisCreateFails();
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+        ];
+
+        $first = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), $payload);
+        $hash = Order::sole()->credential_access_key_hash;
+        $second = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), $payload);
+
+        $first->assertRedirect();
+        $second->assertRedirect($first->headers->get('Location'));
+        $this->assertNotEmpty($hash);
+        $this->assertSame($hash, Order::sole()->credential_access_key_hash);
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+    }
+
     public function test_shop_checkout_accepts_non_telegram_buyer_name(): void
     {
         $product = $this->availableProduct([
@@ -677,7 +708,25 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, $product->fresh()->reserved_stock);
         $this->assertNotNull($stockItem->fresh()->order_item_id);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+        $this->assertNotEmpty($order->credential_access_key_hash);
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+
+        $location = $response->headers->get('Location');
+        $this->assertIsString($location);
+        $this->get($location)
+            ->assertOk()
+            ->assertSee('Simpan Recovery Key pesanan website ini.')
+            ->assertSee('LHIE-', false)
+            ->assertDontSee('web-checkout@example.test|Secret-123', false);
+
+        app(OrderStateMachine::class)->markPaymentPaid($payment);
+        $this->flushSession();
+        $this->get($location)
+            ->assertOk()
+            ->assertSee('Data akun siap dibuka')
+            ->assertSee('Akses data pesanan')
+            ->assertDontSee('web-checkout@example.test|Secret-123', false);
+
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'POST'
             && $request->url() === 'https://app.pakasir.test/api/transactioncreate/qris');
     }

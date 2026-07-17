@@ -103,7 +103,7 @@ class CustomerAccountController extends Controller
         $order = $claims->claim($request->user('customer'), (string) $request->validated('invoice_number'), (string) $request->validated('access_key'));
 
         if (! $order) {
-            return back()->withInput()->with('customer_claim_error', 'Nomor invoice atau recovery key tidak cocok.');
+            return back()->withInput($request->except('access_key'))->with('customer_claim_error', 'Nomor invoice atau recovery key tidak cocok.');
         }
 
         return redirect()->route('customer.orders.show', $order);

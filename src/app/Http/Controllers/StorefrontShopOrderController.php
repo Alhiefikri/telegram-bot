@@ -17,7 +17,7 @@ class StorefrontShopOrderController extends Controller
         return response()
             ->view('storefront.shop-order', $presenter->viewData(
                 $order,
-                canRevealCredentials: ! $access->hasKey($order) || $access->canAccess($request, $order),
+                canRevealCredentials: (! $access->hasKey($order) && blank($order->checkout_key)) || $access->canAccess($request, $order),
                 accessKey: $access->issuedKey($request, $order),
             ))
             ->header('Cache-Control', 'no-store, private')
