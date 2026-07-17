@@ -33,6 +33,19 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en');
     }
 
+    public function test_start_with_sales_proof_deep_link_shows_welcome_instead_of_command_fallback(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(110, '/start from_channel'))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'selamat datang di LHIE STORE'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Aku belum paham perintah itu'));
+    }
+
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void
     {
         Carbon::setTestNow('2026-07-04 09:00:00');

@@ -35,7 +35,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '/start') {
+        if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->session->forget($customer);
             if ($customer->locale === null) {
                 $this->menu->sendLanguagePicker($chatId);
