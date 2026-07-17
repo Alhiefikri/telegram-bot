@@ -304,38 +304,54 @@ function initShopPaymentStatus() {
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     const terminalStatuses = new Set(['expired', 'cancelled', 'failed']);
+    const secondsLabel = (seconds) => `${Math.max(1, Number.parseInt(seconds, 10) || 60)} detik`;
     const isTerminalStatus = (data) => {
         const paymentStatus = String(data?.payment_status || '').toLowerCase();
         const orderStatus = String(data?.order_status || '').toLowerCase();
 
-        return terminalStatuses.has(paymentStatus) || terminalStatuses.has(orderStatus);
+        return data?.is_terminal === true || terminalStatuses.has(paymentStatus) || terminalStatuses.has(orderStatus);
     };
 
     containers.forEach((container) => {
         const statusUrl = container.getAttribute('data-status-url');
         const redirectUrl = container.getAttribute('data-redirect-url');
-        const pollMs = Number.parseInt(container.getAttribute('data-poll-ms') || '6000', 10) || 6000;
-        let timer = null;
-        let stopped = false;
+        const title = container.querySelector('[data-payment-status-title]');
+        const message = container.querySelector('[data-payment-status-message]');
+        const button = container.querySelector('[data-payment-status-check]');
+        let waiting = false;
 
-        if (!statusUrl || container.getAttribute('data-terminal') === 'true') {
+        if (!statusUrl || !button || container.getAttribute('data-terminal') === 'true') {
             return;
         }
 
-        const stop = () => {
-            stopped = true;
+        const setStatus = (titleText, messageText) => {
+            if (title) {
+                title.textContent = titleText;
+            }
 
-            if (timer !== null) {
-                window.clearInterval(timer);
-                timer = null;
+            if (message) {
+                message.textContent = messageText;
             }
         };
 
-        const poll = async () => {
-            if (stopped || container.getAttribute('data-terminal') === 'true') {
-                stop();
+        const cooldown = (seconds) => {
+            waiting = true;
+            button.disabled = true;
+            window.setTimeout(() => {
+                waiting = false;
+                if (container.getAttribute('data-terminal') !== 'true') {
+                    button.disabled = false;
+                }
+            }, (Math.max(1, Number.parseInt(seconds, 10) || 60)) * 1000);
+        };
+
+        button.addEventListener('click', async () => {
+            if (waiting) {
                 return;
             }
+
+            button.disabled = true;
+            setStatus('Mengecek pembayaran', 'Tunggu sebentar, status QRIS sedang dicek.');
 
             try {
                 const response = await window.fetch(statusUrl, {
@@ -349,27 +365,45 @@ function initShopPaymentStatus() {
                 });
                 const data = await response.json().catch(() => null);
 
+                if (response.status === 429) {
+                    const retryAfter = data?.retry_after || response.headers.get('Retry-After') || 60;
+                    setStatus('Terlalu sering cek status', data?.message || `Coba lagi dalam ${secondsLabel(retryAfter)}.`);
+                    cooldown(retryAfter);
+                    return;
+                }
+
                 if (!data || typeof data !== 'object') {
+                    setStatus('Status belum bisa dibaca', 'Coba cek lagi beberapa saat lagi.');
+                    button.disabled = false;
                     return;
                 }
 
                 if (data.is_paid === true) {
-                    stop();
+                    setStatus('Pembayaran terverifikasi', data.message || 'Invoice akan dibuka ulang untuk menampilkan data akun.');
+                    container.setAttribute('data-terminal', 'true');
                     window.location.href = data.redirect_url || redirectUrl || window.location.href;
                     return;
                 }
 
                 if (isTerminalStatus(data)) {
+                    setStatus('Status pembayaran final', data.message || 'QRIS ini tidak bisa dibayar lagi. Buat order baru dari katalog.');
                     container.setAttribute('data-terminal', 'true');
-                    stop();
+                    return;
                 }
-            } catch {
-                // Keep the current invoice UI and retry on the next interval.
-            }
-        };
 
-        timer = window.setInterval(poll, pollMs);
-        poll();
+                if (data.ok === false) {
+                    setStatus('Status belum bisa dicek', data.message || 'Coba lagi beberapa saat lagi.');
+                    button.disabled = false;
+                    return;
+                }
+
+                setStatus('Pembayaran belum masuk', data.message || 'Jika sudah bayar, coba cek lagi beberapa saat lagi.');
+                button.disabled = false;
+            } catch {
+                setStatus('Koneksi gagal', 'Cek internet lalu coba lagi.');
+                button.disabled = false;
+            }
+        });
     });
 }
 

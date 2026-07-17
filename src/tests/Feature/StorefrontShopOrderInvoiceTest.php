@@ -58,7 +58,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('/shop/orders/'.$order->getKey().'/status', false)
             ->assertSee('data-redirect-url=', false)
             ->assertSee('/shop/orders/'.$order->getKey(), false)
-            ->assertSee('data-poll-ms="6000"', false)
+            ->assertSee('Batas bayar')
+            ->assertSee('Cek status pembayaran')
+            ->assertSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.')
+            ->assertDontSee('data-poll-ms', false)
             ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
             ->assertDontSee('/qr-lhie.jpg', false)
             ->assertDontSee($secret, false);
@@ -106,6 +109,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
             ->assertJsonPath('order_status', OrderStatus::Completed->value)
             ->assertJsonPath('is_paid', true)
+            ->assertJsonPath('is_terminal', false)
+            ->assertJsonPath('message', 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.')
             ->assertJsonPath('redirect_url', $redirectUrl);
 
         $payment->refresh();
@@ -260,12 +265,76 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
             ->assertJsonPath('ok', false)
-            ->assertJsonPath('message', 'Status pembayaran belum bisa dicek otomatis sekarang.');
+            ->assertJsonPath('message', 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.');
 
         $payment->refresh();
         $order->refresh();
         $this->assertSame(PaymentStatus::Pending, $payment->status);
         $this->assertSame(PaymentStatus::Pending, $order->payment_status);
         $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+    }
+
+    public function test_signed_status_endpoint_returns_terminal_payment_messages_without_provider_call(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$expiredOrder, $expiredPayment] = $this->pendingNativeQrisOrder(42000, 300, 42300, '00020101021226610016ID.CO.QRIS.EXPIRED99');
+        [$failedOrder, $failedPayment] = $this->pendingNativeQrisOrder(43000, 300, 43300, '00020101021226610016ID.CO.QRIS.FAILED99');
+        [$cancelledOrder, $cancelledPayment] = $this->pendingNativeQrisOrder(44000, 300, 44300, '00020101021226610016ID.CO.QRIS.CANCELLED99');
+
+        $expiredOrder->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
+        $expiredPayment->update(['status' => PaymentStatus::Expired]);
+        $failedPayment->update(['status' => PaymentStatus::Failed]);
+        $cancelledOrder->update(['order_status' => OrderStatus::Cancelled, 'payment_status' => PaymentStatus::Failed]);
+        Http::fake();
+
+        foreach ([
+            [$expiredOrder, PaymentStatus::Expired->value, OrderStatus::Expired->value, 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.'],
+            [$failedOrder, PaymentStatus::Failed->value, OrderStatus::PendingPayment->value, 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.'],
+            [$cancelledOrder, PaymentStatus::Pending->value, OrderStatus::Cancelled->value, 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.'],
+        ] as [$order, $paymentStatus, $orderStatus, $message]) {
+            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+                ->assertOk()
+                ->assertJsonPath('ok', true)
+                ->assertJsonPath('payment_status', $paymentStatus)
+                ->assertJsonPath('order_status', $orderStatus)
+                ->assertJsonPath('is_paid', false)
+                ->assertJsonPath('is_terminal', true)
+                ->assertJsonPath('message', $message);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_signed_status_endpoint_rate_limit_returns_wait_time_json(): void
+    {
+        config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 1);
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(45000, 300, 45300, '00020101021226610016ID.CO.QRIS.RATELIMIT99');
+        $order->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
+        $payment->update(['status' => PaymentStatus::Expired]);
+        $url = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
+
+        $this->postJson($url)->assertOk();
+        $this->postJson($url)
+            ->assertTooManyRequests()
+            ->assertHeader('Retry-After')
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('retry_after', 60)
+            ->assertJsonPath('message', 'Terlalu sering cek status. Coba lagi dalam 60 detik.');
+    }
+
+    public function test_terminal_invoice_replaces_pending_status_card_with_human_instruction(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(46000, 300, 46300, '00020101021226610016ID.CO.QRIS.RENDEREXPIRED99');
+        $order->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
+        $payment->update(['status' => PaymentStatus::Expired]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Status pembayaran final')
+            ->assertSee('Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.')
+            ->assertDontSee('data-shop-payment-status', false)
+            ->assertDontSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.');
     }
 }

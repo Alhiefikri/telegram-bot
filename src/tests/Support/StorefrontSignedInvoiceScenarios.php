@@ -78,6 +78,7 @@ trait StorefrontSignedInvoiceScenarios
             'amount' => $totalAmount,
             'currency' => 'IDR',
             'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addMinutes(15),
         ]);
 
         return [$order->fresh(['orderItems.stockItems', 'payments']), $payment->fresh()];

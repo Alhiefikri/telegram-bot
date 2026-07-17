@@ -119,7 +119,9 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             'payment_status' => PaymentStatus::Paid->value,
             'order_status' => OrderStatus::Completed->value,
             'is_paid' => true,
+            'is_terminal' => false,
             'redirect_url' => $result->redirectUrl,
+            'message' => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
         ], $result->payload());
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
@@ -141,7 +143,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
             'ok' => false,
-            'message' => 'Status pembayaran belum bisa dicek otomatis sekarang.',
+            'message' => 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.',
         ], $result->payload());
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
@@ -169,6 +171,34 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             ], $result->payload());
         }
 
+        Http::assertNothingSent();
+    }
+
+    public function test_refresh_status_returns_terminal_message_without_provider_reconciliation(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 42000,
+            providerFee: 300,
+            providerTotalPayment: 42300,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.MODULEEXPIRED99',
+        );
+        $order->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
+        $payment->update(['status' => PaymentStatus::Expired]);
+        Http::fake();
+
+        $result = app(StorefrontShopSignedInvoice::class)->refreshStatus($order);
+
+        $this->assertSame(200, $result->statusCode());
+        $this->assertSame([
+            'ok' => true,
+            'payment_status' => PaymentStatus::Expired->value,
+            'order_status' => OrderStatus::Expired->value,
+            'is_paid' => false,
+            'is_terminal' => true,
+            'redirect_url' => $result->redirectUrl,
+            'message' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
+        ], $result->payload());
         Http::assertNothingSent();
     }
 }

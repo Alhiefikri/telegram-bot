@@ -98,8 +98,17 @@ class AppServiceProvider extends ServiceProvider
             $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
                 ? (string) $routeOrder->getKey()
                 : ($request->ip() ?: 'unknown');
+            $rateLimitedResponse = function (Request $request, array $headers) {
+                $retryAfter = max(1, (int) ($headers['Retry-After'] ?? 60));
 
-            return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity);
+                return response()->json([
+                    'ok' => false,
+                    'retry_after' => $retryAfter,
+                    'message' => 'Terlalu sering cek status. Coba lagi dalam '.$retryAfter.' detik.',
+                ], 429, $headers);
+            };
+
+            return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity)->response($rateLimitedResponse);
         });
 
         RateLimiter::for('storefront-checkout', function (Request $request) {

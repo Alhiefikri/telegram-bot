@@ -9,7 +9,7 @@ class StorefrontShopSignedStatusRefreshResult
 {
     private const PAKASIR_NOT_FOUND = 'Pembayaran QRIS tidak ditemukan.';
 
-    private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek otomatis sekarang.';
+    private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.';
 
     private function __construct(
         public readonly bool $ok,
@@ -17,6 +17,7 @@ class StorefrontShopSignedStatusRefreshResult
         public readonly ?PaymentStatus $paymentStatus = null,
         public readonly ?OrderStatus $orderStatus = null,
         public readonly bool $isPaid = false,
+        public readonly bool $isTerminal = false,
         public readonly ?string $redirectUrl = null,
         public readonly ?string $message = null,
     ) {}
@@ -43,7 +44,9 @@ class StorefrontShopSignedStatusRefreshResult
         ?PaymentStatus $paymentStatus,
         ?OrderStatus $orderStatus,
         bool $isPaid,
+        bool $isTerminal,
         string $redirectUrl,
+        ?string $message = null,
     ): self {
         return new self(
             ok: true,
@@ -51,7 +54,9 @@ class StorefrontShopSignedStatusRefreshResult
             paymentStatus: $paymentStatus,
             orderStatus: $orderStatus,
             isPaid: $isPaid,
+            isTerminal: $isTerminal,
             redirectUrl: $redirectUrl,
+            message: $message,
         );
     }
 
@@ -77,7 +82,9 @@ class StorefrontShopSignedStatusRefreshResult
             'payment_status' => $this->paymentStatus?->value,
             'order_status' => $this->orderStatus?->value,
             'is_paid' => $this->isPaid,
+            'is_terminal' => $this->isTerminal,
             'redirect_url' => $this->redirectUrl,
+            'message' => $this->message,
         ];
     }
 }

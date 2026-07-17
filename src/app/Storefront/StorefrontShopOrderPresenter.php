@@ -35,6 +35,8 @@ class StorefrontShopOrderPresenter
             'redirectUrl' => $invoice->redirectUrl,
             'isPaid' => $invoice->isPaid(),
             'isPendingPayment' => $invoice->isPendingPayment(),
+            'isTerminal' => $invoice->isTerminal(),
+            'statusMessage' => $invoice->statusMessage,
             'payableAmount' => $invoice->payableAmount,
             'payableAmountFromProvider' => $invoice->payableAmountFromProvider,
             'qrisImageDataUri' => $invoice->qrisImageDataUri,

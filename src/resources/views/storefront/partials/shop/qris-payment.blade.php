@@ -1,5 +1,7 @@
 @php
     $hasNativeQris = $isPendingPayment && filled($qrisImageDataUri);
+    $paymentDeadline = $payment?->provider_expires_at ?? $payment?->expired_at ?? $order->expires_at;
+    $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
 @endphp
 
 <x-storefront.panel as="section" class="mt-5" aria-label="Pembayaran QRIS">
@@ -25,6 +27,10 @@
         <div class="flex items-center justify-between gap-4">
             <dt class="text-[var(--sf-muted)]">Biaya QRIS</dt>
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $payment?->provider_fee !== null ? $storefront->idr($payment->provider_fee) : '-' }}</dd>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+            <dt class="text-[var(--sf-muted)]">Batas bayar</dt>
+            <dd class="text-right font-black text-[var(--sf-ink)]">{{ $paymentDeadlineLabel ?? '-' }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">
             <dt class="font-black text-[var(--sf-ink)]">Total bayar QRIS</dt>
@@ -58,10 +64,17 @@
         <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]"
              data-shop-payment-status
              data-status-url="{{ $statusUrl }}"
-             data-redirect-url="{{ $redirectUrl }}"
-            data-poll-ms="6000">
-            <p class="font-black text-[var(--sf-ink)]">Status pembayaran dicek otomatis.</p>
-            <p>Halaman ini akan membuka ulang invoice setelah pembayaran terkonfirmasi.</p>
+             data-redirect-url="{{ $redirectUrl }}">
+            <p class="font-black text-[var(--sf-ink)]" data-payment-status-title>Cek status pembayaran</p>
+            <p data-payment-status-message>Setelah membayar, tekan tombol ini untuk mengecek status QRIS.</p>
+            <button type="button" class="mt-4 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" data-payment-status-check>
+                Cek status pembayaran
+            </button>
+        </div>
+    @elseif (! $isPaid)
+        <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" data-terminal="true">
+            <p class="font-black text-[var(--sf-ink)]">Status pembayaran final</p>
+            <p>{{ $statusMessage }}</p>
         </div>
     @endif
 </x-storefront.panel>

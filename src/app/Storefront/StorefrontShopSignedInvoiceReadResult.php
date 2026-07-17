@@ -21,6 +21,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly ?string $qrisImageDataUri,
         public readonly ?string $hostedPaymentUrl,
         public readonly array $accountGroups,
+        public readonly string $statusMessage,
     ) {}
 
     public function isPaid(): bool

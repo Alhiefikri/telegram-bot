@@ -42,6 +42,7 @@ class StorefrontShopSignedInvoice
             qrisImageDataUri: $this->qrisImageDataUri($payment),
             hostedPaymentUrl: $this->hostedPaymentUrl($payment),
             accountGroups: $this->accountGroups($order, $state),
+            statusMessage: $this->statusMessage($order, $payment),
         );
     }
 
@@ -70,7 +71,9 @@ class StorefrontShopSignedInvoice
             paymentStatus: $payment->status,
             orderStatus: $order->order_status,
             isPaid: $this->isPaid($order, $payment),
+            isTerminal: $this->state($order, $payment) === StorefrontShopSignedInvoiceState::Terminal,
             redirectUrl: $this->redirectUrl($order),
+            message: $this->statusMessage($order, $payment),
         );
     }
 
@@ -140,6 +143,17 @@ class StorefrontShopSignedInvoice
 
             return null;
         }
+    }
+
+    public function statusMessage(Order $order, ?Payment $payment): string
+    {
+        return match (true) {
+            $this->isPaid($order, $payment) => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
+            $payment?->status === PaymentStatus::Expired || $order->order_status === OrderStatus::Expired => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
+            $payment?->status === PaymentStatus::Failed => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
+            $order->order_status === OrderStatus::Cancelled => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
+            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
+        };
     }
 
     /**
