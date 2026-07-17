@@ -1,9 +1,16 @@
 <x-storefront.panel as="section" class="mt-5" aria-label="Pengiriman data akun">
     @if (! $isPaid)
-        <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun aman sampai pembayaran masuk</h2>
-        <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-            Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.
-        </p>
+        @if ($isTerminal)
+            <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun tidak dikirim dari invoice ini</h2>
+            <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
+                Invoice ini sudah tidak aktif. Buat order baru jika masih ingin membeli produk ini.
+            </p>
+        @else
+            <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun aman sampai pembayaran masuk</h2>
+            <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
+                Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.
+            </p>
+        @endif
     @elseif ($accountGroups !== [] && $canRevealCredentials)
         <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun</h2>
         <div class="mt-5 space-y-4">

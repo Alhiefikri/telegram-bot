@@ -4,7 +4,11 @@
             <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Invoice</p>
             <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ $order->invoice_number }}</h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                Stok sudah dicadangkan untuk {{ $order->customer?->first_name ?? 'Pelanggan' }}.
+                @if ($isTerminal && ! $isPaid)
+                    Stok tidak lagi dicadangkan untuk invoice ini.
+                @else
+                    Stok sudah dicadangkan untuk {{ $order->customer?->first_name ?? 'Pelanggan' }}.
+                @endif
             </p>
         </div>
 

@@ -16,6 +16,8 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly StorefrontShopSignedInvoiceState $state,
         public readonly string $statusUrl,
         public readonly string $redirectUrl,
+        public readonly string $cancelUrl,
+        public readonly bool $canCancel,
         public readonly ?int $payableAmount,
         public readonly bool $payableAmountFromProvider,
         public readonly ?string $qrisImageDataUri,

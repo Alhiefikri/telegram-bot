@@ -17,6 +17,11 @@ class StorefrontInvoiceUrl
         return URL::temporarySignedRoute('storefront.shop.orders.status', $this->expiresAt($order), $order, false);
     }
 
+    public function cancel(Order $order): string
+    {
+        return URL::temporarySignedRoute('storefront.shop.orders.cancel', $this->expiresAt($order), $order, false);
+    }
+
     private function expiresAt(Order $order): \DateTimeInterface
     {
         $days = max(1, (int) config('services.storefront.invoice_url_ttl_days', 7));

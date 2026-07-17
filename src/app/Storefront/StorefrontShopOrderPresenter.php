@@ -33,6 +33,8 @@ class StorefrontShopOrderPresenter
             'supportDestination' => $this->storefront->supportDestination(),
             'statusUrl' => $invoice->statusUrl,
             'redirectUrl' => $invoice->redirectUrl,
+            'cancelUrl' => $invoice->cancelUrl,
+            'canCancel' => $invoice->canCancel,
             'isPaid' => $invoice->isPaid(),
             'isPendingPayment' => $invoice->isPendingPayment(),
             'isTerminal' => $invoice->isTerminal(),

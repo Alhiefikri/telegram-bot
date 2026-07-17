@@ -37,6 +37,8 @@ class StorefrontShopSignedInvoice
             state: $state,
             statusUrl: $this->invoiceUrls->status($order),
             redirectUrl: $redirectUrl,
+            cancelUrl: $this->invoiceUrls->cancel($order),
+            canCancel: $this->canCancel($order, $payment),
             payableAmount: $payment?->provider_total_payment ?? $payment?->amount,
             payableAmountFromProvider: $payment?->provider_total_payment !== null,
             qrisImageDataUri: $this->qrisImageDataUri($payment),
@@ -114,6 +116,12 @@ class StorefrontShopSignedInvoice
     {
         return $payment->status === PaymentStatus::Pending
             && $order->order_status === OrderStatus::PendingPayment;
+    }
+
+    private function canCancel(Order $order, ?Payment $payment): bool
+    {
+        return $this->isPendingPayment($order, $payment)
+            && ! $order->payments()->whereNotNull('payment_proof_submitted_at')->exists();
     }
 
     private function isPakasirPayment(?Payment $payment): bool

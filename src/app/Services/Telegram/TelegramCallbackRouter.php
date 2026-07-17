@@ -309,7 +309,7 @@ class TelegramCallbackRouter
         }
 
         try {
-            $cancelled = $this->orderStates->cancelPendingOrder($order);
+            $cancelled = $this->orderStates->cancelPendingOrder($order, requireNoPaymentProof: true);
         } catch (InvalidOrderTransition) {
             $this->bot->answerCallbackQuery($id, $this->text($customer, 'Pesanan sudah tidak bisa dibatalkan.', 'This order can no longer be cancelled.'));
             $this->bot->sendMessage($chatId, $this->text($customer, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.", "This order has been processed or can no longer be cancelled.\n\nCheck the latest status with /status."));

@@ -26,5 +26,15 @@
             <p class="font-black text-[var(--sf-ink)]">Setelah membayar, kirim screenshot bukti pembayaran ke bot Telegram.</p>
             <p class="mt-2">Gunakan caption: <code class="rounded bg-white px-1">/payment {{ $order->invoice_number }}</code>. Jangan mengirim nominal yang berbeda.</p>
         </div>
+        @if ($canCancel)
+            <form method="POST" action="{{ $cancelUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" onsubmit="return confirm('Batalkan order ini dan lepas stok? Jangan lanjutkan jika kamu sudah membayar.');">
+                @csrf
+                <p class="font-black text-[var(--sf-ink)]">Belum membayar?</p>
+                <p>Batalkan order agar stok dilepas kembali. Jangan gunakan tombol ini jika kamu sudah membayar.</p>
+                <button type="submit" class="mt-4 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[#ffd9df] px-4 py-3 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
+                    Batalkan order &amp; lepas stok
+                </button>
+            </form>
+        @endif
     @endif
 </x-storefront.panel>

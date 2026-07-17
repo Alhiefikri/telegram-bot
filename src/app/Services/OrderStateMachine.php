@@ -124,15 +124,27 @@ class OrderStateMachine
         return $this->releasePendingByOrderId($order->id, OrderStatus::Expired, PaymentStatus::Expired, true);
     }
 
-    public function cancelPendingOrder(Order $order): Order
+    public function cancelPendingOrder(Order $order, bool $requireNoPaymentProof = false): Order
     {
-        return $this->releasePendingByOrderId($order->id, OrderStatus::Cancelled, PaymentStatus::Failed, false);
+        return $this->releasePendingByOrderId($order->id, OrderStatus::Cancelled, PaymentStatus::Failed, false, $requireNoPaymentProof);
     }
 
-    private function releasePendingByOrderId(int|string $orderId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
+    private function releasePendingByOrderId(int|string $orderId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue, bool $requireNoPaymentProof = false): ?Order
     {
-        return DB::transaction(function () use ($orderId, $orderStatus, $paymentStatus, $mustBeDue) {
-            return $this->withLockedOrderPayments($orderId, fn (Order $order, $payments): ?Order => $this->applyReleaseTransition($order, $payments, $orderStatus, $paymentStatus, $mustBeDue));
+        return DB::transaction(function () use ($orderId, $orderStatus, $paymentStatus, $mustBeDue, $requireNoPaymentProof) {
+            return $this->withLockedOrderPayments($orderId, function (Order $order, $payments) use ($orderStatus, $paymentStatus, $mustBeDue, $requireNoPaymentProof): ?Order {
+                if ($requireNoPaymentProof && $order->order_status === OrderStatus::PendingPayment) {
+                    if ($order->payment_status !== PaymentStatus::Pending || ! $payments->contains(fn (Payment $payment): bool => $payment->status === PaymentStatus::Pending)) {
+                        throw new InvalidOrderTransition('Only pending payments can be cancelled by the customer.');
+                    }
+
+                    if ($payments->contains(fn (Payment $payment): bool => $payment->payment_proof_submitted_at !== null)) {
+                        throw new InvalidOrderTransition('Payment proof is being processed.');
+                    }
+                }
+
+                return $this->applyReleaseTransition($order, $payments, $orderStatus, $paymentStatus, $mustBeDue);
+            });
         }, 5);
     }
 

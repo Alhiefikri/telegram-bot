@@ -2,11 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\AuditLog;
+use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Storefront\StorefrontInvoiceUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -87,6 +92,90 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Rp88.000')
             ->assertSee('Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.')
             ->assertDontSee('Pakasir');
+    }
+
+    public function test_signed_cancel_endpoint_cancels_pending_order_releases_resources_audits_and_is_idempotent(): void
+    {
+        $this->pakasirConfigIsReady();
+        $secret = 'cancel-me@example.test|ReleaseMe';
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 97000,
+            providerFee: 700,
+            providerTotalPayment: 97700,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE131CANCEL99',
+            secret: $secret,
+        );
+        $productId = $order->orderItems->first()->product_id;
+        $stockItemId = $order->orderItems->first()->stockItems->first()->id;
+        $cancelUrl = app(StorefrontInvoiceUrl::class)->cancel($order);
+
+        $this->post($cancelUrl)
+            ->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertSessionHas('status', 'Pesanan dibatalkan. Stok dan data akun sudah dilepas.');
+
+        $order->refresh();
+        $payment->refresh();
+        $this->assertSame(OrderStatus::Cancelled, $order->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->payment_status);
+        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        $this->assertSame(0, Product::findOrFail($productId)->reserved_stock);
+        $this->assertNull(ProductStockItem::findOrFail($stockItemId)->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+
+        $audit = AuditLog::where('action', 'order.pending_cancelled_released')->where('subject_id', (string) $order->id)->firstOrFail();
+        $this->assertSame('customer', $audit->new_values['actor']);
+        $this->assertSame($order->customer_id, $audit->new_values['actor_id']);
+        $this->assertSame('storefront_web', $audit->new_values['channel']);
+        $this->assertSame('customer_requested_cancel', $audit->new_values['reason']);
+
+        $this->post($cancelUrl)->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order));
+        $this->assertSame(0, Product::findOrFail($productId)->reserved_stock);
+        $this->assertNull(ProductStockItem::findOrFail($stockItemId)->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(1, AuditLog::where('action', 'order.pending_cancelled_released')->where('subject_id', (string) $order->id)->count());
+
+        $this->get(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertOk()
+            ->assertSee('Order dibatalkan')
+            ->assertSee('Stok dan data akun sudah dilepas')
+            ->assertSee('Stok tidak lagi dicadangkan untuk invoice ini.')
+            ->assertSee('Data akun tidak dikirim dari invoice ini')
+            ->assertDontSee('data-shop-payment-status', false)
+            ->assertDontSee('Batalkan order &amp; lepas stok', false)
+            ->assertDontSee($secret, false);
+    }
+
+    public function test_signed_cancel_endpoint_rejects_pending_order_when_payment_proof_is_being_processed(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 98000,
+            providerFee: 700,
+            providerTotalPayment: 98700,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE131PROOF99',
+            secret: 'proof@example.test|KeepReserved',
+        );
+        $productId = $order->orderItems->first()->product_id;
+        $stockItemId = $order->orderItems->first()->stockItems->first()->id;
+        $payment->update(['payment_proof_submitted_at' => now()]);
+
+        $this->post(app(StorefrontInvoiceUrl::class)->cancel($order))
+            ->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertSessionHasErrors(['order']);
+
+        $order->refresh();
+        $payment->refresh();
+        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->payment_status);
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame(1, Product::findOrFail($productId)->reserved_stock);
+        $this->assertNotNull(ProductStockItem::findOrFail($stockItemId)->order_item_id);
+        $this->assertSame(0, AuditLog::where('action', 'order.pending_cancelled_released')->where('subject_id', (string) $order->id)->count());
+
+        $this->followingRedirects()
+            ->post(app(StorefrontInvoiceUrl::class)->cancel($order))
+            ->assertOk()
+            ->assertSee('Pesanan sudah diproses atau bukti pembayaran sedang diverifikasi, jadi tidak bisa dibatalkan.');
     }
 
     public function test_signed_status_endpoint_reconciles_completed_pakasir_transaction_and_returns_paid_redirect_payload(): void
