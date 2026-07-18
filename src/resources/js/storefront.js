@@ -585,48 +585,8 @@ export function storefrontModal() {
     };
 }
 
-export function fomoTimer() {
-    return {
-        timeRemaining: 15 * 60,
-        timeDisplay: '15:00',
-        init() {
-            const savedTime = localStorage.getItem('fomo_timer');
-            const savedTimestamp = localStorage.getItem('fomo_timestamp');
-            const now = Math.floor(Date.now() / 1000);
-
-            if (savedTime && savedTimestamp) {
-                const elapsed = now - Number.parseInt(savedTimestamp, 10);
-
-                this.timeRemaining = Number.parseInt(savedTime, 10) - elapsed;
-                if (this.timeRemaining <= 0) {
-                    this.timeRemaining = 15 * 60;
-                }
-            }
-
-            this.updateDisplay();
-
-            window.setInterval(() => {
-                this.timeRemaining -= 1;
-                if (this.timeRemaining <= 0) {
-                    this.timeRemaining = 15 * 60;
-                }
-                this.updateDisplay();
-                localStorage.setItem('fomo_timer', this.timeRemaining);
-                localStorage.setItem('fomo_timestamp', Math.floor(Date.now() / 1000));
-            }, 1000);
-        },
-        updateDisplay() {
-            const minutes = Math.floor(this.timeRemaining / 60).toString().padStart(2, '0');
-            const seconds = (this.timeRemaining % 60).toString().padStart(2, '0');
-
-            this.timeDisplay = `${minutes}:${seconds}`;
-        },
-    };
-}
-
 export function registerStorefrontAlpine(Alpine) {
     Alpine.data('storefrontModal', storefrontModal);
-    Alpine.data('fomoTimer', fomoTimer);
 }
 
 export default function initStorefront() {

@@ -31,7 +31,6 @@ class StorefrontProductPresenter
             description: (string) $product->description,
             descriptionSnippet: $this->descriptionSnippet($product),
             priceAmount: (int) $product->price_amount,
-            fakeDiscountPrice: $product->fake_discount_price,
             stockAvailable: $stockAvailable,
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,

@@ -14,7 +14,6 @@ final readonly class StorefrontProductPresentation
         public string $description,
         public string $descriptionSnippet,
         public int $priceAmount,
-        public ?int $fakeDiscountPrice,
         public int $stockAvailable,
         public int $soldQuantity,
         public bool $isAvailable,
@@ -51,7 +50,6 @@ final readonly class StorefrontProductPresentation
             'descriptionSnippet' => $this->descriptionSnippet,
             'price' => [
                 'amount' => $this->priceAmount,
-                'fakeDiscountAmount' => $this->fakeDiscountPrice,
             ],
             'stock' => [
                 'available' => $this->stockAvailable,

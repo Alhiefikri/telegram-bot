@@ -19,6 +19,7 @@ class StorefrontProductCheckoutTest extends TestCase
             'name' => 'CapCut Pro',
             'description' => 'Akun Private dari dashboard',
             'price_amount' => 60000,
+            'fake_discount_price' => 85000,
             'stock' => 8,
             'reserved_stock' => 0,
         ]);
@@ -30,6 +31,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('CapCut Pro')
             ->assertSee('Akun Private dari dashboard')
             ->assertSee('Rp60.000')
+            ->assertDontSee('Rp85.000')
+            ->assertDontSee('line-through', false)
             ->assertSee('Stok: 8')
             ->assertSee('Bayar QRIS di Website')
             ->assertDontSee('Beli lewat Telegram')

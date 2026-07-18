@@ -59,9 +59,6 @@
 
                             <div class="flex flex-wrap items-center gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
                                 <div class="flex items-center gap-2">
-                                    <template x-if="selectedProduct.price.fakeDiscountAmount">
-                                        <span class="text-sm font-black text-[var(--sf-muted)] line-through" x-text="formatIdr(selectedProduct.price.fakeDiscountAmount)"></span>
-                                    </template>
                                     <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]" x-text="formatIdr(selectedProduct.price.amount)"></span>
                                 </div>
                                 <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct.stock.label"></span>
@@ -142,7 +139,7 @@
                                             <p id="storefront-payment-method-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
                                     </fieldset>
-                                    <p x-show="paymentMethod === 'qris'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">QRIS hanya untuk aplikasi bank dan e-wallet Indonesia. Simpan link invoice setelah QRIS dibuat.</p>
+                                    <p x-show="paymentMethod === 'qris'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Total produk ditampilkan di atas. Biaya dan total QRIS final ditentukan setelah QRIS dibuat; cek invoice sebelum membayar.</p>
                                     <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Binance Pay dibayar dalam USDT dan diverifikasi manual. Instruksi serta nomor invoice tersedia setelah checkout.</p>
 
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">

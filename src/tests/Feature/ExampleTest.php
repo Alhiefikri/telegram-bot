@@ -350,6 +350,10 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
         $this->assertStringContainsString('Pilih Checkout', $featuredHtml);
+        $this->assertStringNotContainsString('fomoTimer', $featuredHtml);
+        $this->assertStringNotContainsString('timeDisplay', $featuredHtml);
+        $this->assertStringNotContainsString('15:00', $featuredHtml);
+        $this->assertStringNotContainsString('Slot cek stok diperbarui', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);

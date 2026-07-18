@@ -20,11 +20,6 @@
 
                 <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
                     <div class="flex flex-wrap items-center gap-2">
-                        @if ($presentation->fakeDiscountPrice)
-                            <span class="text-[10px] font-black text-[var(--sf-muted)] line-through">
-                                {{ $storefront->idr($presentation->fakeDiscountPrice) }}
-                            </span>
-                        @endif
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 font-display text-xs font-black text-[var(--sf-ink)]">
                             {{ $storefront->idr($presentation->priceAmount) }}
                         </span>
@@ -59,11 +54,6 @@
 
                 <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
                     <div class="flex flex-wrap items-center gap-2">
-                        @if ($presentation->fakeDiscountPrice)
-                            <span class="text-[10px] font-black text-[var(--sf-muted)] line-through">
-                                {{ $storefront->idr($presentation->fakeDiscountPrice) }}
-                            </span>
-                        @endif
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 font-display text-xs font-black text-[var(--sf-ink)]">
                             {{ $storefront->idr($presentation->priceAmount) }}
                         </span>

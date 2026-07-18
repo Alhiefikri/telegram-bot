@@ -46,8 +46,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame($product->id, $modalPayload['id']);
         $this->assertSame('Claude Pro Ready', $modalPayload['name']);
         $this->assertSame("Akun private siap pakai.\nGaransi login.", $modalPayload['description']);
-        $this->assertSame(60000, $modalPayload['price']['amount']);
-        $this->assertSame(85000, $modalPayload['price']['fakeDiscountAmount']);
+        $this->assertSame(['amount' => 60000], $modalPayload['price']);
         $this->assertSame(7, $modalPayload['stock']['available']);
         $this->assertSame('Stok: 7', $modalPayload['stock']['label']);
         $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $modalPayload['sold']);
@@ -162,7 +161,7 @@ class StorefrontProductPresentationTest extends TestCase
         ], array_keys($payload));
         $this->assertSame('Deskripsi produk segera dilengkapi.', $payload['descriptionSnippet']);
         $this->assertSame('', $payload['description']);
-        $this->assertSame(['amount' => 42000, 'fakeDiscountAmount' => null], $payload['price']);
+        $this->assertSame(['amount' => 42000], $payload['price']);
         $this->assertSame([
             'available' => 2,
             'label' => 'Stok: 2',
