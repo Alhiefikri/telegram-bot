@@ -38,6 +38,23 @@ class WebhookIngressTest extends TelegramBotTestSupport
         Bus::assertDispatched(ProcessTelegramUpdate::class);
     }
 
+    public function test_webhook_persists_minimized_message_payload(): void
+    {
+        Bus::fake();
+        $payload = $this->messageUpdate(303, '/start', ['username' => 'tester']);
+        $payload['message']['contact'] = ['phone_number' => '08123456789'];
+        $payload['message']['location'] = ['latitude' => -6.2, 'longitude' => 106.8];
+
+        $this->postTelegramWebhook($payload)->assertOk();
+
+        $stored = TelegramUpdate::firstOrFail()->payload;
+        $this->assertSame('/start', $stored['message']['text']);
+        $this->assertSame('tester', $stored['message']['from']['username']);
+        $this->assertArrayNotHasKey('contact', $stored['message']);
+        $this->assertArrayNotHasKey('location', $stored['message']);
+        $this->assertStringNotContainsString('08123456789', json_encode($stored, JSON_THROW_ON_ERROR));
+    }
+
     public function test_malformed_message_updates_are_rejected_before_persistence_or_dispatch(): void
     {
         Bus::fake();
@@ -187,6 +204,22 @@ class WebhookIngressTest extends TelegramBotTestSupport
             $this->messageUpdate(113002, '/start', ['id' => 9002], 9102),
             'bad-secret-two'
         )->assertTooManyRequests();
+
+        $this->assertSame(0, TelegramUpdate::count());
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
+    }
+
+    public function test_bad_secret_webhook_rate_limit_does_not_cross_source_ips(): void
+    {
+        config()->set('services.telegram.webhook_rate_limit_per_minute', 1);
+        Bus::fake();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.113'])
+            ->postTelegramWebhook($this->messageUpdate(113101, '/start', ['id' => 9001], 9101), 'bad-secret-one')
+            ->assertForbidden();
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.114'])
+            ->postTelegramWebhook($this->messageUpdate(113102, '/start', ['id' => 9002], 9102), 'bad-secret-two')
+            ->assertForbidden();
 
         $this->assertSame(0, TelegramUpdate::count());
         Bus::assertNotDispatched(ProcessTelegramUpdate::class);

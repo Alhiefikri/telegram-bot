@@ -42,9 +42,19 @@ class CustomerAccountController extends Controller
             ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
     }
 
-    public function consume(Request $request, string $token, CustomerAuthenticationService $authentication): RedirectResponse
+    public function loginLink(Request $request): Response
     {
-        if (! $authentication->consume($token, $request)) {
+        return $this->view($request, 'customer.login-link', [
+            'consumeUrl' => route('customer.login-link.consume'),
+            'accountUrl' => route('customer.account'),
+        ]);
+    }
+
+    public function consume(Request $request, CustomerAuthenticationService $authentication): RedirectResponse
+    {
+        $validated = $request->validate(['token' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/i']]);
+
+        if (! $authentication->consume((string) $validated['token'], $request)) {
             return redirect()->route('customer.account')->with('customer_login_error', 'Link login tidak valid atau sudah kedaluwarsa.')
                 ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
         }

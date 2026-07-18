@@ -62,10 +62,7 @@ class AppServiceProvider extends ServiceProvider
             if (! $this->hasTrustedTelegramWebhookSecret($request)) {
                 $source = $request->ip() ?: 'unknown';
 
-                return [
-                    Limit::perMinute($limit)->by('telegram:webhook:bad-secret:global'),
-                    Limit::perMinute($limit)->by('telegram:webhook:bad-secret:source:'.$source),
-                ];
+                return Limit::perMinute($limit)->by('telegram:webhook:bad-secret:source:'.$source);
             }
 
             $payload = $request->all();
@@ -86,10 +83,7 @@ class AppServiceProvider extends ServiceProvider
             $limit = (int) config('services.pakasir.webhook_rate_limit_per_minute', 30);
             $source = $request->ip() ?: 'unknown';
 
-            return [
-                Limit::perMinute($limit)->by('pakasir:webhook:global'),
-                Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source),
-            ];
+            return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
         });
 
         RateLimiter::for('pakasir-status-refresh', function (Request $request) {
@@ -192,6 +186,10 @@ class AppServiceProvider extends ServiceProvider
 
         if ((bool) config('app.debug')) {
             throw new RuntimeException('APP_DEBUG must be false in production.');
+        }
+
+        if (config('mail.default') === 'log') {
+            throw new RuntimeException('MAIL_MAILER=log is not allowed in production.');
         }
 
         $pakasirBaseUrl = (string) config('services.pakasir.base_url', '');

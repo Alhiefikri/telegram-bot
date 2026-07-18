@@ -15,6 +15,14 @@ final class PakasirPayloadSanitizer
         'password',
         'authorization',
         'signature',
+        'telegramid',
+        'email',
+        'phone',
+        'username',
+        'accesskey',
+        'recoverykey',
+        'paymentproof',
+        'deliverynote',
     ];
 
     /**

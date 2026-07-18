@@ -6,6 +6,7 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
 class TelegramWebhookIngress
@@ -32,6 +33,8 @@ class TelegramWebhookIngress
             return new TelegramWebhookIngressResult(['message' => 'Unsupported update type'], 422);
         }
 
+        $payload = $this->minimizedPayload($payload);
+
         $inserted = DB::table('telegram_updates')->insertOrIgnore([
             'update_id' => (int) $validated['update_id'],
             'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
@@ -57,6 +60,41 @@ class TelegramWebhookIngress
         ]);
 
         return new TelegramWebhookIngressResult(['ok' => true]);
+    }
+
+    private function minimizedPayload(array $payload): array
+    {
+        if (isset($payload['message']) && is_array($payload['message'])) {
+            return ['update_id' => $payload['update_id'], 'message' => $this->minimizedMessage($payload['message'])];
+        }
+
+        $callback = $payload['callback_query'];
+
+        return [
+            'update_id' => $payload['update_id'],
+            'callback_query' => [
+                'id' => $callback['id'],
+                'from' => Arr::only((array) $callback['from'], ['id', 'first_name', 'username']),
+                'message' => ['chat' => Arr::only((array) Arr::get($callback, 'message.chat', []), ['id', 'type'])],
+                'data' => $callback['data'],
+            ],
+        ];
+    }
+
+    private function minimizedMessage(array $message): array
+    {
+        $minimized = Arr::only($message, ['message_id', 'text', 'caption']);
+        $minimized['from'] = Arr::only((array) $message['from'], ['id', 'first_name', 'username']);
+        $minimized['chat'] = Arr::only((array) $message['chat'], ['id', 'type']);
+
+        if (isset($message['photo']) && is_array($message['photo'])) {
+            $minimized['photo'] = array_values(array_filter(array_map(
+                fn (mixed $photo): ?array => is_array($photo) ? Arr::only($photo, ['file_id', 'file_size', 'width', 'height']) : null,
+                $message['photo']
+            )));
+        }
+
+        return $minimized;
     }
 
     private function dispatchProcessor(int $telegramUpdateId, string $jobEnqueuedAt): void

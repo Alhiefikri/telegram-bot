@@ -348,6 +348,24 @@ class PakasirWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_pakasir_webhook_rate_limit_does_not_cross_source_ips(): void
+    {
+        config()->set('services.pakasir.webhook_rate_limit_per_minute', 1);
+        Queue::fake();
+        Http::fake();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.121'])
+            ->postJson('/api/webhook/pakasir', $this->payload('issue-134-unknown-a', 10000))
+            ->assertUnprocessable();
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.122'])
+            ->postJson('/api/webhook/pakasir', $this->payload('issue-134-unknown-b', 10000))
+            ->assertUnprocessable();
+
+        $this->assertSame(2, PaymentEvent::count());
+        Http::assertNothingSent();
+        Queue::assertNothingPushed();
+    }
+
     public function test_unknown_pakasir_callbacks_with_rotating_order_ids_share_webhook_rate_limit(): void
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 1);
@@ -427,6 +445,33 @@ class PakasirWebhookTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_callback_payload_sensitive_fields_are_sanitized_before_storage(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount, [
+            'email' => 'customer@example.test',
+            'phone_number' => '08123456789',
+            'metadata' => [
+                'telegram_id' => '12345',
+                'recovery_key' => 'LHIE-SECRET',
+            ],
+        ]))->assertOk();
+
+        $rawPayload = PaymentEvent::where('event_type', PaymentEventType::Callback)->firstOrFail()->raw_payload;
+        $json = json_encode($rawPayload, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('customer@example.test', $json);
+        $this->assertStringNotContainsString('08123456789', $json);
+        $this->assertStringNotContainsString('LHIE-SECRET', $json);
+        $this->assertArrayNotHasKey('email', $rawPayload);
+        $this->assertArrayNotHasKey('phone_number', $rawPayload);
+        $this->assertArrayNotHasKey('telegram_id', $rawPayload['metadata'] ?? []);
+        $this->assertArrayNotHasKey('recovery_key', $rawPayload['metadata'] ?? []);
     }
 
     public function test_noisy_pakasir_payload_is_rejected_before_audit_logging_or_provider_lookup(): void

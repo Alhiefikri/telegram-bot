@@ -18,7 +18,7 @@ class CustomerAccountTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_login_request_is_generic_and_stores_only_a_token_hash(): void
+    public function test_login_request_is_generic_stores_only_a_token_hash_and_emails_fragment_link(): void
     {
         Notification::fake();
 
@@ -28,7 +28,13 @@ class CustomerAccountTest extends TestCase
         $link = CustomerLoginLink::query()->firstOrFail();
         $this->assertSame('customer@example.test', $link->email);
         $this->assertSame(64, strlen($link->token_hash));
-        Notification::assertSentOnDemand(CustomerLoginLinkNotification::class);
+        Notification::assertSentOnDemand(CustomerLoginLinkNotification::class, function (CustomerLoginLinkNotification $notification): bool {
+            $url = (string) $notification->toMail((object) [])->actionUrl;
+
+            return str_starts_with($url, route('customer.login-link.show').'#token=')
+                && ! str_contains($url, '?token=')
+                && preg_match('/\/akun\/login-link#token=[a-f0-9]{64}$/i', $url) === 1;
+        });
     }
 
     public function test_valid_login_link_is_single_use_and_sets_verified_customer_session(): void
@@ -40,16 +46,34 @@ class CustomerAccountTest extends TestCase
             'expires_at' => now()->addMinutes(15),
         ]);
 
-        $this->get(route('customer.login-link.consume', ['token' => $token]))
+        $this->post(route('customer.login-link.consume'), ['token' => $token])
             ->assertRedirect(route('customer.orders.index'))
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
 
         $this->assertAuthenticated('customer');
         $this->assertNotNull(Customer::query()->firstOrFail()->email_verified_at);
-        $this->get(route('customer.login-link.consume', ['token' => $token]))
+        $this->post(route('customer.login-link.consume'), ['token' => $token])
             ->assertRedirect(route('customer.account'))
             ->assertSessionHas('customer_login_error');
+    }
+
+    public function test_customer_serialization_hides_sensitive_fields(): void
+    {
+        $customer = Customer::factory()->create([
+            'telegram_id' => 12345,
+            'username' => 'private-user',
+            'phone_number' => '08123456789',
+            'email' => 'customer@example.test',
+            'email_verified_at' => now(),
+        ]);
+
+        $serialized = $customer->toArray();
+
+        foreach (['telegram_id', 'username', 'phone_number', 'email', 'email_verified_at'] as $key) {
+            $this->assertArrayNotHasKey($key, $serialized);
+        }
+        $this->assertSame($customer->first_name, $serialized['first_name'] ?? null);
     }
 
     public function test_customer_order_list_is_scoped_to_paid_orders(): void

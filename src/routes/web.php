@@ -50,7 +50,8 @@ Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
 Route::prefix('akun')->name('customer.')->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
     Route::post('login-link', [CustomerAccountController::class, 'requestLink'])->middleware('throttle:customer-login-link')->name('login-link.request');
-    Route::get('login-link/{token}', [CustomerAccountController::class, 'consume'])->middleware('throttle:customer-login-consume')->name('login-link.consume');
+    Route::get('login-link', [CustomerAccountController::class, 'loginLink'])->name('login-link.show');
+    Route::post('login-link/consume', [CustomerAccountController::class, 'consume'])->middleware('throttle:customer-login-consume')->name('login-link.consume');
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');

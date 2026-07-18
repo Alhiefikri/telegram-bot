@@ -40,11 +40,15 @@ class PakasirPayloadSanitizerTest extends TestCase
                 'password' => $sensitiveValues[6],
                 'Authorization' => $sensitiveValues[7],
                 'callback_signature' => $sensitiveValues[8],
+                'customer_email' => 'customer@example.test',
+                'phone_number' => '08123456789',
                 'metadata' => [
                     'status' => 'metadata-pending',
                     'safe_note' => 'keep this',
                     'refresh_token' => $sensitiveValues[5],
                     'nestedPaymentNumber' => $sensitiveValues[0],
+                    'telegram_id' => '12345',
+                    'recovery_key' => 'LHIE-SECRET',
                 ],
             ],
         ];
@@ -87,6 +91,12 @@ class PakasirPayloadSanitizerTest extends TestCase
             'password',
             'Authorization',
             'callback_signature',
+            'customer_email',
+            'phone_number',
+            'telegram_id',
+            'recovery_key',
+            'payment_proof_file_id',
+            'delivery_note',
         ] as $key) {
             $this->assertTrue(PakasirPayloadSanitizer::isSensitiveKey($key), $key);
         }
@@ -100,6 +110,7 @@ class PakasirPayloadSanitizerTest extends TestCase
             'total_payment',
             'payment_method',
             'expired_at',
+            'safe_note',
         ] as $key) {
             $this->assertFalse(PakasirPayloadSanitizer::isSensitiveKey($key), $key);
         }
