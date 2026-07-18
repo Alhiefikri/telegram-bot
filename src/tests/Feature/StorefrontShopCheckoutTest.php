@@ -291,6 +291,56 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Bayar QRIS di Website');
     }
 
+    public function test_shop_modal_renders_accessible_native_checkout_controls(): void
+    {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        config()->set('services.binance.pay_id', '987654321');
+        $this->availableProduct([
+            'name' => 'Accessible Checkout Product',
+            'stock' => 3,
+            'usdt_price_amount' => 2_000_000,
+        ]);
+
+        $this->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->assertSee('role="dialog"', false)
+            ->assertSee('aria-modal="true"', false)
+            ->assertSee('aria-labelledby="modal-title"', false)
+            ->assertSee('id="modal-title"', false)
+            ->assertSee('x-ref="dialogPanel"', false)
+            ->assertSee('@keydown="handleModalKeydown($event)"', false)
+            ->assertSee('type="radio"', false)
+            ->assertSee('name="payment_method"', false)
+            ->assertDontSee('type="hidden" name="payment_method"', false);
+    }
+
+    public function test_failed_checkout_reopens_modal_state_and_renders_inline_buyer_error(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Retry Checkout Product',
+            'stock' => 3,
+        ]);
+
+        $this->followingRedirects()
+            ->from(route('storefront.shop.index'))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'buyer_handle' => 'x',
+                'payment_method' => 'qris',
+            ])
+            ->assertOk()
+            ->assertSee('data-checkout-restore=', false)
+            ->assertSee('Retry Checkout Product')
+            ->assertSee('id="storefront-buyer-handle-error"', false)
+            ->assertSee('aria-invalid="true"', false)
+            ->assertSee('aria-describedby="storefront-buyer-handle-help storefront-buyer-handle-error"', false);
+    }
+
     public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
@@ -409,7 +459,11 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Binance Pay (USDT)')
             ->assertSee('6 USDT')
             ->assertSee('987654321')
-            ->assertSee('/payment '.$order->invoice_number);
+            ->assertSee('/payment '.$order->invoice_number)
+            ->assertSee('data-copy-text="6 USDT"', false)
+            ->assertSee('data-copy-text="987654321"', false)
+            ->assertSee('data-copy-text="/payment '.$order->invoice_number.'"', false)
+            ->assertSee('data-copy-status', false);
     }
 
     public function test_shop_checkout_rejects_unrecognized_payment_method_before_creating_rows(): void
@@ -716,7 +770,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->get($location)
             ->assertOk()
             ->assertSee('Simpan Recovery Key pesanan website ini.')
+            ->assertSee('Salin ke password manager atau catatan pribadi yang aman.')
+            ->assertSee('data-copy-status', false)
             ->assertSee('LHIE-', false)
+            ->assertDontSee('Ambil screenshot atau salin', false)
             ->assertDontSee('web-checkout@example.test|Secret-123', false);
 
         app(OrderStateMachine::class)->markPaymentPaid($payment);

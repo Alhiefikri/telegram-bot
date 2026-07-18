@@ -15,7 +15,7 @@
             <div class="flex flex-grow flex-col justify-between space-y-4 border-t-[3px] border-[var(--sf-border)] p-4">
                 <div>
                     <h3 class="h-10 overflow-hidden font-display text-sm font-black leading-tight text-[var(--sf-ink)] transition-colors duration-300 line-clamp-2">{{ $presentation->name }}</h3>
-                    <p class="mt-2 h-10 overflow-hidden text-[11px] font-semibold leading-5 text-[var(--sf-muted)] line-clamp-2">{{ $presentation->descriptionSnippet }}</p>
+                    <p class="mt-2 h-12 overflow-hidden text-sm font-semibold leading-6 text-[var(--sf-muted)] line-clamp-2">{{ $presentation->descriptionSnippet }}</p>
                 </div>
 
                 <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
@@ -36,7 +36,7 @@
                         </span>
                     </div>
 
-                    <span class="inline-flex h-10 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-3 text-[11px] font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)]">
+                    <span class="inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-3 text-sm font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)]">
                         {{ $presentation->cardActionLabel }}
                     </span>
                 </div>
@@ -54,7 +54,7 @@
             <div class="flex flex-grow flex-col justify-between space-y-4 border-t-[3px] border-[var(--sf-border)] p-4">
                 <div>
                     <h3 class="h-10 overflow-hidden font-display text-sm font-black leading-tight text-[var(--sf-ink)] line-clamp-2">{{ $presentation->name }}</h3>
-                    <p class="mt-2 h-10 overflow-hidden text-[11px] font-semibold leading-5 text-[var(--sf-muted)] line-clamp-2">{{ $presentation->descriptionSnippet }}</p>
+                    <p class="mt-2 h-12 overflow-hidden text-sm font-semibold leading-6 text-[var(--sf-muted)] line-clamp-2">{{ $presentation->descriptionSnippet }}</p>
                 </div>
 
                 <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
@@ -72,7 +72,7 @@
                         </span>
                     </div>
 
-                    <span class="inline-flex h-10 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 text-[11px] font-black text-[var(--sf-ink)]">
+                    <span class="inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 text-sm font-black text-[var(--sf-ink)]">
                         {{ $presentation->cardActionLabel }}
                     </span>
                 </div>
