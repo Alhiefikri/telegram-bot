@@ -315,7 +315,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('@keydown="handleModalKeydown($event)"', false)
             ->assertSee('type="radio"', false)
             ->assertSee('name="payment_method"', false)
-            ->assertSee('Biaya dan total QRIS final ditentukan setelah QRIS dibuat; cek invoice sebelum membayar.')
+            ->assertSee('Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.')
             ->assertDontSee('type="hidden" name="payment_method"', false);
     }
 

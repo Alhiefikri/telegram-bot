@@ -19,7 +19,6 @@ class StorefrontProductCheckoutTest extends TestCase
             'name' => 'CapCut Pro',
             'description' => 'Akun Private dari dashboard',
             'price_amount' => 60000,
-            'fake_discount_price' => 85000,
             'stock' => 8,
             'reserved_stock' => 0,
         ]);

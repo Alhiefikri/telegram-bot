@@ -354,6 +354,7 @@ class ExampleTest extends TestCase
         $this->assertStringNotContainsString('timeDisplay', $featuredHtml);
         $this->assertStringNotContainsString('15:00', $featuredHtml);
         $this->assertStringNotContainsString('Slot cek stok diperbarui', $featuredHtml);
+        $this->assertStringNotContainsString('Promo pilihan', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
         $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
         $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
@@ -380,7 +381,7 @@ class ExampleTest extends TestCase
 
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
 
-        $this->assertStringContainsString('Promo pilihan menunggu stok siap', $featuredHtml);
+        $this->assertStringContainsString('Belum ada produk tersedia.', $featuredHtml);
         $this->assertStringContainsString('Lihat katalog', $featuredHtml);
         $this->assertStringNotContainsString('Pesan via Admin', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);

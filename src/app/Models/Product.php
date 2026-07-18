@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['category_id', 'name', 'description', 'delivery_note', 'price_amount', 'usdt_price_amount', 'fake_discount_price', 'currency', 'image_path', 'is_active'])]
+#[Fillable(['category_id', 'name', 'description', 'delivery_note', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
@@ -17,7 +17,7 @@ class Product extends Model
 
     protected function casts(): array
     {
-        return ['category_id' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'fake_discount_price' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean'];
+        return ['category_id' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean'];
     }
 
     /**

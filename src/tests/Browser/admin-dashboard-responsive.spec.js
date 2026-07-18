@@ -80,6 +80,33 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
     await expectNoDocumentOverflow(page);
 });
 
+test('keeps the mobile navigation focus contained and restores its trigger', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
+
+    const trigger = page.getByRole('button', { name: 'Buka menu navigasi' });
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+
+    const menu = page.getByLabel(/Menu navigasi Lhie Store/);
+    const closeButton = menu.getByRole('button', { name: 'Tutup menu' });
+    await expect(menu).toBeVisible();
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu.getByRole('link', { name: /Beranda Lhie Store/ })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu.getByRole('link', { name: 'Akun pelanggan' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(menu.getByRole('link', { name: /Beranda Lhie Store/ })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
+});
+
 test('lets admins reveal and hide the password field from an accessible control', async ({ page }) => {
     await page.goto(`${baseUrl}/admin/login`);
 

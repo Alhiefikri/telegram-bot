@@ -423,6 +423,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertOk()
             ->assertSee('Status pembayaran final')
             ->assertSee('Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.')
+            ->assertSee('Belanja lagi')
+            ->assertSee('Butuh bantuan?')
             ->assertDontSee('data-shop-payment-status', false)
             ->assertDontSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.');
     }

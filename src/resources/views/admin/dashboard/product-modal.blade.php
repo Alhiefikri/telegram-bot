@@ -73,27 +73,6 @@
                             </div>
 
                             <div>
-                                <x-admin-dashboard.field-label for="product-fake-discount">Harga Coret (Opsional)</x-admin-dashboard.field-label>
-                                <x-admin-dashboard.input
-                                    type="number"
-                                    id="product-fake-discount"
-                                    name="fake_discount_price"
-                                    min="0"
-                                    step="1"
-                                    inputmode="numeric"
-                                    placeholder="50000"
-                                    class="mt-1.5"
-                                    x-model="productFakeDiscountPrice"
-                                />
-                                @error('fake_discount_price', 'productCreate')
-                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                @enderror
-                                @error('fake_discount_price', 'productUpdate')
-                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                                @enderror
-                            </div>
-
-                            <div>
                                 <x-admin-dashboard.field-label for="product-category">Kategori</x-admin-dashboard.field-label>
                                 <x-admin-dashboard.select id="product-category" name="category_id" class="mt-1.5" x-model="productCategoryId">
                                     <option value="">— Pilih —</option>

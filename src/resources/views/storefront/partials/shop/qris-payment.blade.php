@@ -67,9 +67,14 @@
              data-redirect-url="{{ $redirectUrl }}">
             <p class="font-black text-[var(--sf-ink)]" data-payment-status-title>Cek status pembayaran</p>
             <p data-payment-status-message>Setelah membayar, tekan tombol ini untuk mengecek status QRIS.</p>
+            <p class="sr-only" aria-live="polite" data-payment-status-announcement></p>
             <button type="button" class="mt-4 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" data-payment-status-check>
                 Cek status pembayaran
             </button>
+            <div class="mt-4 hidden flex-wrap gap-3" data-payment-status-followup>
+                <a href="{{ $homeUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">Belanja lagi</a>
+                <a href="{{ $supportHref }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Butuh bantuan?</a>
+            </div>
         </div>
         @if ($canCancel)
             <form method="POST" action="{{ $cancelUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" onsubmit="return confirm('Batalkan order ini dan lepas stok? Jangan lanjutkan jika kamu sudah membayar.');">
@@ -85,6 +90,10 @@
         <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" data-terminal="true">
             <p class="font-black text-[var(--sf-ink)]">Status pembayaran final</p>
             <p>{{ $statusMessage }}</p>
+            <div class="mt-4 flex flex-wrap gap-3">
+                <a href="{{ $homeUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">Belanja lagi</a>
+                <a href="{{ $supportHref }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Butuh bantuan?</a>
+            </div>
         </div>
     @endif
 </x-storefront.panel>

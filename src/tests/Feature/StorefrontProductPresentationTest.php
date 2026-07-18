@@ -22,7 +22,6 @@ class StorefrontProductPresentationTest extends TestCase
             'name' => 'Claude Pro Ready',
             'description' => "Akun private siap pakai.\nGaransi login.",
             'price_amount' => 60000,
-            'fake_discount_price' => 85000,
             'stock' => 8,
             'reserved_stock' => 1,
         ]);

@@ -57,22 +57,67 @@ function initMobileMenu() {
         return;
     }
 
-    const closeMenu = () => toggleMobileMenu(mobileMenu, menuIconTop, menuIconMiddle, menuIconBottom, menuButton, backdrop, true);
+    const isOpen = () => mobileMenu.getAttribute('aria-hidden') === 'false';
+    let opener = null;
+    const closeMenu = (restoreFocus = true) => {
+        if (!isOpen()) {
+            return;
+        }
+
+        toggleMobileMenu(mobileMenu, menuIconTop, menuIconMiddle, menuIconBottom, menuButton, backdrop, true);
+        if (restoreFocus) {
+            (opener || menuButton).focus();
+        }
+        opener = null;
+    };
 
     menuButton.addEventListener('click', () => {
+        if (isOpen()) {
+            closeMenu();
+            return;
+        }
+
+        opener = document.activeElement;
         toggleMobileMenu(mobileMenu, menuIconTop, menuIconMiddle, menuIconBottom, menuButton, backdrop);
+        window.requestAnimationFrame(() => (closeButton || mobileMenu.querySelector(MODAL_FOCUSABLE_SELECTOR))?.focus());
     });
 
-    closeButton?.addEventListener('click', closeMenu);
-    backdrop?.addEventListener('click', closeMenu);
+    closeButton?.addEventListener('click', () => closeMenu());
+    backdrop?.addEventListener('click', () => closeMenu());
 
     mobileMenu.querySelectorAll('a').forEach((link) => {
-        link.addEventListener('click', closeMenu);
+        link.addEventListener('click', () => closeMenu(false));
     });
 
     document.addEventListener('keydown', (event) => {
+        if (!isOpen()) {
+            return;
+        }
+
         if (event.key === 'Escape') {
+            event.preventDefault();
             closeMenu();
+            return;
+        }
+
+        if (event.key !== 'Tab') {
+            return;
+        }
+
+        const focusable = Array.from(mobileMenu.querySelectorAll(MODAL_FOCUSABLE_SELECTOR))
+            .filter((element) => element.offsetParent !== null);
+        const first = focusable[0];
+        const last = focusable.at(-1);
+
+        if (!first || !last) {
+            event.preventDefault();
+            closeButton?.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
         }
     });
 }
@@ -327,7 +372,10 @@ function initShopPaymentStatus() {
         const redirectUrl = container.getAttribute('data-redirect-url');
         const title = container.querySelector('[data-payment-status-title]');
         const message = container.querySelector('[data-payment-status-message]');
+        const announcement = container.querySelector('[data-payment-status-announcement]');
+        const followup = container.querySelector('[data-payment-status-followup]');
         const button = container.querySelector('[data-payment-status-check]');
+        let lastAnnouncement = '';
         let waiting = false;
 
         if (!statusUrl || !button || container.getAttribute('data-terminal') === 'true') {
@@ -341,6 +389,12 @@ function initShopPaymentStatus() {
 
             if (message) {
                 message.textContent = messageText;
+            }
+
+            const nextAnnouncement = `${titleText}. ${messageText}`;
+            if (announcement && nextAnnouncement !== lastAnnouncement) {
+                announcement.textContent = nextAnnouncement;
+                lastAnnouncement = nextAnnouncement;
             }
         };
 
@@ -398,6 +452,8 @@ function initShopPaymentStatus() {
                 if (isTerminalStatus(data)) {
                     setStatus('Status pembayaran final', data.message || 'QRIS ini tidak bisa dibayar lagi. Buat order baru dari katalog.');
                     container.setAttribute('data-terminal', 'true');
+                    button.hidden = true;
+                    followup?.classList.remove('hidden');
                     return;
                 }
 
@@ -425,6 +481,7 @@ export function storefrontModal() {
         notes: '',
         buyerHandle: '',
         paymentMethod: 'qris',
+        quantityAnnouncement: '',
         modalOpener: null,
         restoreCheckout: null,
         init() {
@@ -450,6 +507,7 @@ export function storefrontModal() {
             this.modalOpener = options.opener || document.activeElement;
             this.selectedProduct = product;
             this.quantity = Number.parseInt(options.quantity, 10) || 1;
+            this.quantityAnnouncement = '';
             this.notes = '';
             this.buyerHandle = options.buyerHandle || '';
             this.paymentMethod = options.paymentMethod || (this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris');
@@ -470,14 +528,22 @@ export function storefrontModal() {
             document.body.style.overflow = '';
         },
         decreaseQuantity() {
-            this.quantity = Math.max(1, this.quantity - 1);
+            this.setQuantity(Math.max(1, this.quantity - 1));
         },
         increaseQuantity() {
             if (!this.selectedProduct) {
                 return;
             }
 
-            this.quantity = Math.min(this.availableStock(), this.quantity + 1);
+            this.setQuantity(Math.min(this.availableStock(), this.quantity + 1));
+        },
+        setQuantity(quantity) {
+            if (quantity === this.quantity) {
+                return;
+            }
+
+            this.quantity = quantity;
+            this.quantityAnnouncement = `Jumlah ${quantity}. Total produk ${this.formatIdr(this.selectedTotal())}.`;
         },
         selectedTotal() {
             if (!this.selectedProduct) {
