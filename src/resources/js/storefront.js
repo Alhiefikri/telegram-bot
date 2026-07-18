@@ -122,37 +122,6 @@ function initMobileMenu() {
     });
 }
 
-function initRevealItems() {
-    const revealItems = document.querySelectorAll('.reveal-item');
-
-    if (!revealItems.length) {
-        return;
-    }
-
-    if (!('IntersectionObserver' in window)) {
-        revealItems.forEach((item) => item.classList.add('revealed'));
-        return;
-    }
-
-    const revealObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry, index) => {
-            if (!entry.isIntersecting) {
-                return;
-            }
-
-            window.setTimeout(() => {
-                entry.target.classList.add('revealed');
-            }, index * 60);
-            revealObserver.unobserve(entry.target);
-        });
-    }, {
-        threshold: 0.05,
-        rootMargin: '0px 0px -40px 0px',
-    });
-
-    revealItems.forEach((item) => revealObserver.observe(item));
-}
-
 function initCategoryFilters() {
     const categoryButtons = document.querySelectorAll('.category-btn');
     const productCards = document.querySelectorAll('.product-card');
@@ -660,7 +629,6 @@ export default function initStorefront() {
         document.body.classList.add('js-enabled');
 
         initMobileMenu();
-        initRevealItems();
         initCategoryFilters();
         initCounters();
         initFaqAccordion();

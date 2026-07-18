@@ -37,6 +37,7 @@ class Phase2CoreDatabaseTest extends TestCase
         $this->assertTrue(Schema::hasColumns('payment_events', ['merchant_ref', 'provider_status', 'raw_payload', 'received_at']));
         $this->assertTrue(Schema::hasColumns('orders', ['id', 'invoice_number', 'order_status', 'payment_status']));
         $this->assertTrue(Schema::hasColumns('payments', ['id', 'merchant_ref', 'provider_reference', 'status']));
+        $this->assertFalse(Schema::hasColumn('products', 'fake_discount_price'));
     }
 
     public function test_payments_currency_schema_supports_usdt(): void

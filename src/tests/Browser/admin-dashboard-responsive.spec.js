@@ -11,6 +11,7 @@ const appDir = path.resolve(__dirname, '../..');
 
 let baseUrl;
 let dbPath;
+let qrisInvoice;
 let serverProcess;
 
 test.describe.configure({ mode: 'serial' });
@@ -24,7 +25,7 @@ test.beforeAll(async () => {
 
     runArtisan(['optimize:clear']);
     runArtisan(['migrate:fresh', '--force']);
-    runArtisan(['tinker', '--execute', responsiveSeedScript]);
+    qrisInvoice = JSON.parse(runArtisan(['tinker', '--execute', responsiveSeedScript]));
 
     serverProcess = spawn('php', ['artisan', 'serve', '--host=127.0.0.1', `--port=${new URL(baseUrl).port}`], {
         cwd: appDir,
@@ -68,6 +69,8 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
     dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await dialog.getByLabel('Tambah jumlah').click();
+    await expect(dialog.locator('[aria-live="polite"]')).toHaveText('Jumlah 2. Total produk Rp90.000.');
     await dialog.locator('#storefront-buyer-handle').fill('@browser_buyer');
     await dialog.getByRole('button', { name: /Bayar/i }).click();
     await page.waitForLoadState('domcontentloaded');
@@ -77,6 +80,32 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
     await expect(dialog.locator('#storefront-buyer-handle')).toHaveValue('@browser_buyer');
     await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
     await expect(dialog.locator('#storefront-checkout-error')).toBeVisible();
+    await expectNoDocumentOverflow(page);
+});
+
+test('announces terminal QRIS status and exposes buyer next steps', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto(`${baseUrl}${qrisInvoice.showUrl}`, { waitUntil: 'domcontentloaded' });
+
+    const statusCard = page.locator('[data-shop-payment-status]');
+    await expect(statusCard.getByText('Cek status pembayaran', { exact: true }).first()).toBeVisible();
+
+    runArtisan(['tinker', '--execute', `
+        $order = App\\Models\\Order::findOrFail('${qrisInvoice.orderId}');
+        $order->update([
+            'order_status' => App\\Enums\\OrderStatus::Cancelled,
+            'payment_status' => App\\Enums\\PaymentStatus::Failed,
+        ]);
+        App\\Models\\Payment::where('order_id', $order->id)->update(['status' => App\\Enums\\PaymentStatus::Failed]);
+    `]);
+
+    await statusCard.getByRole('button', { name: 'Cek status pembayaran' }).click();
+    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Status pembayaran final');
+    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.');
+    await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.');
+    await expect(statusCard.getByRole('button', { name: 'Cek status pembayaran' })).toBeHidden();
+    await expect(statusCard.getByRole('link', { name: 'Belanja lagi' })).toBeVisible();
+    await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
     await expectNoDocumentOverflow(page);
 });
 
@@ -466,6 +495,8 @@ function runArtisan(args) {
     if (result.status !== 0) {
         throw new Error(`php artisan ${args.join(' ')} failed\n${result.stdout}\n${result.stderr}`);
     }
+
+    return result.stdout.trim();
 }
 
 function appEnv() {
@@ -533,6 +564,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\URL;
 
 User::query()->updateOrCreate(
     ['email' => 'test@example.com'],
@@ -559,10 +591,11 @@ $productA = Product::factory()->create([
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,
     'stock' => 9,
-    'reserved_stock' => 2,
+    'reserved_stock' => 1,
     'is_active' => true,
 ]);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-a@example.test|pass']);
+ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-b@example.test|pass']);
 
 Product::factory()->create([
     'category_id' => $category->id,
@@ -626,5 +659,27 @@ Payment::factory()->create([
     'status' => PaymentStatus::Paid,
     'amount' => 75000,
     'paid_at' => now()->subHours(2),
+]);
+
+$qrisOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-QRIS',
+    'order_status' => OrderStatus::PendingPayment,
+    'payment_status' => PaymentStatus::Pending,
+    'total_amount' => 45000,
+]);
+
+Payment::factory()->create([
+    'order_id' => $qrisOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'qris',
+    'provider_payment_method' => 'qris',
+    'amount' => 45000,
+    'status' => PaymentStatus::Pending,
+]);
+
+echo json_encode([
+    'orderId' => $qrisOrder->id,
+    'showUrl' => URL::signedRoute('storefront.shop.orders.show', $qrisOrder, null, false),
 ]);
 `;
