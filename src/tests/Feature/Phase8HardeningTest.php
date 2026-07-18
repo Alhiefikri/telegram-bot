@@ -46,6 +46,28 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringStartsWith('https://', URL::to('/up'));
     }
 
+    public function test_production_rejects_log_mailer(): void
+    {
+        config([
+            'app.debug' => false,
+            'app.env' => 'production',
+            'app.key' => 'base64:test-key',
+            'app.url' => 'https://lhiestore.example',
+            'mail.default' => 'log',
+            'services.telegram.token' => 'telegram-token',
+            'services.telegram.webhook_secret' => 'telegram-secret',
+            'services.pakasir.slug' => 'warung-ai',
+            'services.pakasir.api_key' => 'pakasir-key',
+            'services.pakasir.base_url' => 'https://app.pakasir.test',
+        ]);
+        app()->detectEnvironment(fn () => 'production');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('MAIL_MAILER=log is not allowed in production.');
+
+        (new AppServiceProvider(app()))->boot();
+    }
+
     public function test_production_public_requests_generate_urls_from_app_url_not_request_host(): void
     {
         config([
@@ -98,6 +120,10 @@ class Phase8HardeningTest extends TestCase
         $env = file_get_contents(base_path('.env.example'));
         $this->assertStringContainsString('LOG_STACK=daily', $env);
         $this->assertStringContainsString('LOG_DAILY_DAYS=14', $env);
+        $this->assertStringContainsString('MAIL_MAILER=smtp', $env);
+        $this->assertStringContainsString('GPG_RECIPIENT=', $env);
+        $this->assertStringContainsString('GPG_PASSPHRASE=', $env);
+        $this->assertStringContainsString('DATA_RETENTION_DAYS=90', $env);
         $this->assertStringNotContainsString('DOGFOOD_TIMING_LOG_CHANNEL=', $env);
     }
 
@@ -353,11 +379,41 @@ SH);
         }
     }
 
-    public function test_backup_script_writes_gzip_to_safe_temp_path_with_fake_compose(): void
+    public function test_backup_script_fails_closed_without_encryption(): void
+    {
+        $workspace = $this->makeShellWorkspace('backup-missing-encryption');
+        $backupDir = $workspace.'/backups';
+        $fakeCompose = $workspace.'/fake-compose';
+
+        try {
+            mkdir($backupDir, 0700);
+            $this->writeExecutable($fakeCompose, <<<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'compose must not run\n' >&2
+exit 99
+SH);
+
+            $result = $this->runShellScript(['bash', base_path('../scripts/backup-db.sh')], [
+                'BACKUP_DIR' => $backupDir,
+                'COMPOSE' => $fakeCompose,
+            ]);
+
+            $this->assertSame(2, $result['exitCode'], $result['stderr']);
+            $this->assertStringContainsString('Backup encryption is required', $result['stderr']);
+            $this->assertStringNotContainsString('compose must not run', $result['stderr']);
+            $this->assertSame([], glob($backupDir.'/*') ?: []);
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public function test_backup_script_writes_encrypted_gzip_with_fake_compose_and_gpg(): void
     {
         $workspace = $this->makeShellWorkspace('backup');
         $backupDir = $workspace.'/backups';
-        $fakeCompose = $workspace.'/fake-compose';
+        $fakeCompose = $workspace.'/docker-compose';
+        $fakeGpg = $workspace.'/gpg';
         $argsFile = $workspace.'/compose-args';
 
         try {
@@ -368,12 +424,27 @@ set -euo pipefail
 printf '%s\n' "$*" > "$FAKE_COMPOSE_ARGS_FILE"
 printf '%s\n' 'create table shell_smoke(id int);'
 SH);
+            $this->writeExecutable($fakeGpg, <<<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--output' ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+cat > "$out"
+SH);
 
             $result = $this->runShellScript(['bash', base_path('../scripts/backup-db.sh')], [
                 'BACKUP_DIR' => $backupDir,
                 'COMPOSE' => $fakeCompose,
                 'DB_SERVICE' => 'safe-db',
                 'FAKE_COMPOSE_ARGS_FILE' => $argsFile,
+                'GPG_RECIPIENT' => 'backup@example.test',
+                'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
                 'POSTGRES_DB' => 'shell_smoke',
                 'POSTGRES_PASSWORD' => 'local-password',
                 'POSTGRES_USER' => 'shell_user',
@@ -382,7 +453,7 @@ SH);
             $this->assertSame(0, $result['exitCode'], $result['stderr']);
             $this->assertStringContainsString('Backup written to ', $result['stdout']);
 
-            $backups = glob($backupDir.'/shell_smoke_*.sql.gz') ?: [];
+            $backups = glob($backupDir.'/shell_smoke_*.sql.gz.gpg') ?: [];
             $this->assertCount(1, $backups);
             $this->assertSame("create table shell_smoke(id int);\n", gzdecode((string) file_get_contents($backups[0])));
             $this->assertSame('600', substr(sprintf('%o', fileperms($backups[0]) & 0777), -3));

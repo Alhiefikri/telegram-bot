@@ -33,7 +33,7 @@ class CustomerAuthenticationService
         ]);
 
         Notification::route('mail', $email)->notify(new CustomerLoginLinkNotification(
-            route('customer.login-link.consume', ['token' => $token]),
+            route('customer.login-link.show').'#token='.$token,
         ));
     }
 

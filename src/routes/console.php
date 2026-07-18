@@ -9,4 +9,5 @@ Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->wi
 Schedule::command('telegram:recover-outbound --queue=notifications')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();
+Schedule::command('ops:cleanup-retained-data --chunk=500')->daily()->withoutOverlapping();
 Schedule::job(new SendDailyAdminStatsNotification, 'notifications')->dailyAt('00:00')->withoutOverlapping()->onOneServer();

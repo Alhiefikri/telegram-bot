@@ -65,6 +65,8 @@ return [
         'login_link_expiry_minutes' => 15,
     ],
 
+    'data_retention_days' => (int) env('DATA_RETENTION_DAYS', 90),
+
     'telegram' => [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
