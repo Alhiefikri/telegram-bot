@@ -45,6 +45,41 @@ test.afterAll(async () => {
     }
 });
 
+test('keeps customer checkout modal keyboard accessible and restores failed state', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
+
+    const productCard = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
+    await productCard.scrollIntoViewIfNeeded();
+    await productCard.focus();
+    await page.keyboard.press('Enter');
+
+    let dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input[type="radio"][name="payment_method"]').first()).toBeAttached();
+    await expectTouchTargetAtLeast44px(dialog.getByLabel('Tutup detail produk'));
+    await expectTouchTargetAtLeast44px(dialog.getByLabel('Tambah jumlah'));
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(productCard).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await dialog.locator('#storefront-buyer-handle').fill('@browser_buyer');
+    await dialog.getByRole('button', { name: /Bayar/i }).click();
+    await page.waitForLoadState('domcontentloaded');
+
+    dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('#storefront-buyer-handle')).toHaveValue('@browser_buyer');
+    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await expect(dialog.locator('#storefront-checkout-error')).toBeVisible();
+    await expectNoDocumentOverflow(page);
+});
+
 test('lets admins reveal and hide the password field from an accessible control', async ({ page }) => {
     await page.goto(`${baseUrl}/admin/login`);
 

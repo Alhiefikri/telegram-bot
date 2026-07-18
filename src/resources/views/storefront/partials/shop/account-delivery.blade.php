@@ -32,7 +32,7 @@
             @endforeach
         </div>
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-            Simpan data ini di password manager pribadi atau screenshot pribadi yang aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.
+            Simpan data ini di password manager pribadi. Screenshot pribadi hanya cadangan aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.
         </p>
     @elseif ($accountGroups !== [])
         <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun siap dibuka</h2>

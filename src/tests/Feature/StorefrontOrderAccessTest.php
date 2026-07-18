@@ -26,6 +26,21 @@ class StorefrontOrderAccessTest extends TestCase
             ->assertSee('pesanan via Telegram tidak menggunakan Recovery Key.');
     }
 
+    public function test_order_access_validation_errors_are_described_inline(): void
+    {
+        $this->post(route('storefront.order-access.store'), [
+            'invoice_number' => '',
+            'access_key' => '',
+        ]);
+
+        $this->get(route('storefront.order-access.create'))
+            ->assertOk()
+            ->assertSee('aria-invalid="true"', false)
+            ->assertSee('aria-describedby="invoice-number-error"', false)
+            ->assertSee('aria-describedby="access-key-help access-key-error"', false)
+            ->assertSee('id="access-key-help"', false);
+    }
+
     public function test_paid_credentials_require_the_recovery_key_and_can_be_opened_again_with_it(): void
     {
         [$order, $key, $secret] = $this->paidOrderWithAccessKey();
@@ -45,7 +60,7 @@ class StorefrontOrderAccessTest extends TestCase
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
             ->assertSee($secret, false)
-            ->assertSee('Simpan data ini di password manager pribadi atau screenshot pribadi yang aman.')
+            ->assertSee('Simpan data ini di password manager pribadi. Screenshot pribadi hanya cadangan aman.')
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }

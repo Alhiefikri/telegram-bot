@@ -95,6 +95,49 @@ jobs:
         working-directory: src
         run: ../scripts/smoke-admin-assets.sh
 
+  customer-browser-smoke:
+    name: Customer browser smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, gd, intl, pdo_sqlite, sqlite3, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Prepare Laravel browser environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+          mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
+
+      - name: Run customer browser smoke
+        run: npm run test:browser:customer
+
   docker-build:
     name: Production Docker image builds
     runs-on: ubuntu-latest

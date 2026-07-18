@@ -4,7 +4,18 @@
     @include('storefront.partials.head')
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden" x-data="storefrontModal()">
+    @php
+        $checkoutRestore = [
+            'productId' => old('product_id'),
+            'quantity' => old('quantity', 1),
+            'buyerHandle' => old('buyer_handle', ''),
+            'paymentMethod' => old('payment_method'),
+        ];
+    @endphp
+
+    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden"
+         x-data="storefrontModal()"
+         data-checkout-restore='@json($checkoutRestore, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'>
         @include('storefront.partials.header')
 
         <main class="flex-grow pb-24">

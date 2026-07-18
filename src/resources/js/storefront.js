@@ -1,5 +1,6 @@
 const ACTIVE_CATEGORY_CLASSES = ['neo-filter-active'];
 const INACTIVE_CATEGORY_CLASSES = ['neo-filter-inactive'];
+const MODAL_FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function toggleMobileMenu(menu, iconTop, iconMiddle, iconBottom, menuButton, backdrop, forceClosed = null) {
     const isClosed = menu.classList.contains('hidden') || menu.getAttribute('aria-hidden') !== 'false';
@@ -259,10 +260,19 @@ async function writeClipboard(text) {
 
 function markCopied(button) {
     const originalText = button.textContent;
+    const status = button.closest('[data-copy-group]')?.querySelector('[data-copy-status]');
+    const statusText = button.getAttribute('data-copy-success') || 'Tersalin.';
+
+    if (status) {
+        status.textContent = statusText;
+    }
 
     button.textContent = 'Tersalin';
     window.setTimeout(() => {
         button.textContent = originalText;
+        if (status) {
+            status.textContent = '';
+        }
     }, 1200);
 }
 
@@ -415,23 +425,47 @@ export function storefrontModal() {
         notes: '',
         buyerHandle: '',
         paymentMethod: 'qris',
-        openProductModal(product) {
+        modalOpener: null,
+        restoreCheckout: null,
+        init() {
+            const restore = this.$root?.dataset.checkoutRestore;
+
+            if (!restore) {
+                return;
+            }
+
+            try {
+                this.restoreCheckout = JSON.parse(restore);
+            } catch {
+                return;
+            }
+
+            this.$nextTick(() => this.reopenFailedCheckout());
+        },
+        openProductModal(product, options = {}) {
             if (!product?.availability?.canOpenModal) {
                 return;
             }
 
+            this.modalOpener = options.opener || document.activeElement;
             this.selectedProduct = product;
-            this.quantity = 1;
+            this.quantity = Number.parseInt(options.quantity, 10) || 1;
             this.notes = '';
-            this.buyerHandle = '';
-            this.paymentMethod = this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris';
+            this.buyerHandle = options.buyerHandle || '';
+            this.paymentMethod = options.paymentMethod || (this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris');
             this.productModalOpen = true;
             document.body.style.overflow = 'hidden';
+            this.$nextTick(() => this.focusModal(options.focusInvalid));
         },
         closeProductModal() {
+            const opener = this.modalOpener;
+
             this.productModalOpen = false;
             window.setTimeout(() => {
                 this.selectedProduct = null;
+                if (opener && typeof opener.focus === 'function') {
+                    opener.focus();
+                }
             }, 300);
             document.body.style.overflow = '';
         },
@@ -473,6 +507,80 @@ export function storefrontModal() {
             return this.paymentMethod === 'binance_pay'
                 ? this.selectedProduct?.checkout?.websiteBinancePay
                 : this.selectedProduct?.checkout?.websiteQris;
+        },
+        paymentMethodForChoice(choice) {
+            return ['websiteBinancePay', 'website_binance_pay'].includes(choice?.key) ? 'binance_pay' : 'qris';
+        },
+        focusModal(focusInvalid = false) {
+            const panel = this.$refs.dialogPanel;
+            const focusTarget = () => {
+                const target = focusInvalid
+                    ? panel?.querySelector('[aria-invalid="true"], #storefront-buyer-handle')
+                    : panel?.querySelector('#storefront-buyer-handle');
+
+                (target || panel)?.focus?.();
+            };
+
+            focusTarget();
+            window.requestAnimationFrame(focusTarget);
+            window.setTimeout(focusTarget, 50);
+            window.setTimeout(focusTarget, 300);
+        },
+        handleModalKeydown(event) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                this.closeProductModal();
+                return;
+            }
+
+            if (event.key !== 'Tab') {
+                return;
+            }
+
+            const focusable = Array.from(this.$refs.dialogPanel?.querySelectorAll(MODAL_FOCUSABLE_SELECTOR) || [])
+                .filter((element) => element.offsetParent !== null);
+
+            if (!focusable.length) {
+                event.preventDefault();
+                this.$refs.dialogPanel?.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        },
+        reopenFailedCheckout() {
+            if (!this.restoreCheckout?.productId) {
+                return;
+            }
+
+            const card = document.getElementById(`product-${this.restoreCheckout.productId}`);
+            const payload = card?.dataset?.product;
+
+            if (!payload) {
+                return;
+            }
+
+            try {
+                this.openProductModal(JSON.parse(payload), {
+                    opener: card,
+                    quantity: this.restoreCheckout.quantity,
+                    buyerHandle: this.restoreCheckout.buyerHandle,
+                    paymentMethod: this.restoreCheckout.paymentMethod,
+                    focusInvalid: true,
+                });
+                window.setTimeout(() => this.focusModal(true), 800);
+            } catch {
+                // Keep the global checkout error visible if the product payload is stale.
+            }
         },
     };
 }
