@@ -110,6 +110,24 @@ trait PakasirNativeQrisScenarios
         ]);
     }
 
+    protected function providerTransactionDetailIsPending(Payment $payment, ?int $amount = null): void
+    {
+        $amount ??= $payment->amount;
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response([
+                'transaction' => [
+                    'project' => 'lhie-test',
+                    'order_id' => $payment->merchant_ref,
+                    'amount' => $amount,
+                    'payment_method' => 'qris',
+                    'status' => 'pending',
+                ],
+            ], 200),
+        ]);
+    }
+
     protected function providerTransactionDetailCompletesPayment(Payment $payment, ?int $amount = null): void
     {
         $amount ??= $payment->amount;

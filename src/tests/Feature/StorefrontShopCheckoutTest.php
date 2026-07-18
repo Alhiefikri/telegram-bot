@@ -535,6 +535,37 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
+    public function test_cancelled_checkout_can_be_retried_with_identical_payload_and_session(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        $product = $this->availableProduct(['name' => 'Retryable Cancelled Checkout', 'price_amount' => 15000, 'stock' => 3]);
+        $this->pakasirNativeQrisIsReady();
+        $this->providerQrisCreateSucceedsWithProviderTotal(15000, '00020101021226610016ID.CO.QRIS.RETRY99');
+        $payload = ['product_id' => $product->id, 'quantity' => 1, 'buyer_handle' => '@buyer_test'];
+        $session = ['storefront.checkout_client_key' => 'cancel-retry-session'];
+
+        $first = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
+        $old = Order::sole();
+        $firstOrder = $old->id;
+        $this->providerTransactionDetailIsPending($old->payments()->firstOrFail());
+        $this->post(app(StorefrontInvoiceUrl::class)->cancel($old));
+        $old->refresh();
+
+        $this->providerQrisCreateSucceedsWithProviderTotal(15000, '00020101021226610016ID.CO.QRIS.RETRY100');
+        $second = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
+        $new = Order::whereKeyNot($old->id)->sole();
+
+        $first->assertRedirect();
+        $second->assertRedirect(app(StorefrontInvoiceUrl::class)->show($new));
+        $this->assertSame(2, Order::count());
+        $this->assertSame(OrderStatus::Cancelled, $old->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $old->fresh()->payment_status);
+        $this->assertNull($old->fresh()->checkout_key);
+        $this->assertSame(OrderStatus::PendingPayment, $new->order_status);
+        $this->assertSame(PaymentStatus::Pending, $new->payment_status);
+        $this->assertNotSame($firstOrder, $new->id);
+    }
+
     public function test_repeated_web_checkout_from_the_same_session_reuses_the_existing_order(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);

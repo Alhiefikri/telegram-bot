@@ -107,6 +107,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         );
         $productId = $order->orderItems->first()->product_id;
         $stockItemId = $order->orderItems->first()->stockItems->first()->id;
+        $this->providerTransactionDetailIsPending($payment);
         $cancelUrl = app(StorefrontInvoiceUrl::class)->cancel($order);
 
         $this->post($cancelUrl)
@@ -143,6 +144,29 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertDontSee('data-shop-payment-status', false)
             ->assertDontSee('Batalkan order &amp; lepas stok', false)
             ->assertDontSee($secret, false);
+    }
+
+    public function test_signed_cancel_endpoint_rejects_provider_paid_order_before_webhook(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 99000,
+            providerFee: 700,
+            providerTotalPayment: 99700,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE131PAIDRACE99',
+        );
+        $productId = $order->orderItems->first()->product_id;
+        $this->providerTransactionDetailCompletesPayment($payment);
+
+        $this->post(app(StorefrontInvoiceUrl::class)->cancel($order))
+            ->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertSessionHasErrors(['order' => 'Pembayaran QRIS sudah diterima, jadi pesanan tidak bisa dibatalkan.']);
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(0, Product::findOrFail($productId)->reserved_stock);
+        $this->assertSame(0, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(0, AuditLog::where('action', 'order.pending_cancelled_released')->where('subject_id', (string) $order->id)->count());
     }
 
     public function test_signed_cancel_endpoint_rejects_pending_order_when_payment_proof_is_being_processed(): void

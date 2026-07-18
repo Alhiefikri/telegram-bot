@@ -2,6 +2,8 @@
 
 namespace App\Storefront;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -46,7 +48,11 @@ class StorefrontShopCheckout
 
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
-        if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+        if ($checkoutKey !== null && ($existing = Order::query()
+            ->where('checkout_key', $checkoutKey)
+            ->where('order_status', OrderStatus::PendingPayment)
+            ->where('payment_status', PaymentStatus::Pending)
+            ->first()) !== null) {
             $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
             $payment = $existing->payments()->latest('created_at')->first();
             if ($payment?->provider === 'pakasir') {

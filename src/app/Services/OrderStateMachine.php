@@ -237,6 +237,9 @@ class OrderStateMachine
                 $this->inventory->releaseOrderReservations($order);
             }
             $this->credentials()->release($order);
+            if ($orderStatus === OrderStatus::Cancelled && $order->checkout_key !== null) {
+                $order->update(['checkout_key' => null]);
+            }
 
             return $order->fresh(['payments']);
         }
@@ -258,6 +261,7 @@ class OrderStateMachine
         $order->update([
             'order_status' => $orderStatus,
             'payment_status' => $paymentStatus,
+            ...($orderStatus === OrderStatus::Cancelled ? ['checkout_key' => null] : []),
         ]);
         $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {

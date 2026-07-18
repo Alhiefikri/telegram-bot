@@ -51,8 +51,10 @@ class OrderCheckoutService
         $lockedCart = Cart::whereKey($cart->id)->lockForUpdate()->firstOrFail();
 
         if ($lockedCart->status === CartStatus::CheckedOut) {
-            $existing = Order::where('cart_id', $lockedCart->id)->first();
-            if ($existing) {
+            $existing = Order::where('cart_id', $lockedCart->id)->latest('id')->first();
+            if ($existing?->order_status === OrderStatus::Cancelled) {
+                $lockedCart->update(['status' => CartStatus::Active]);
+            } elseif ($existing) {
                 return $existing;
             }
         }
