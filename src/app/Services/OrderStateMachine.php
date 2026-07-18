@@ -97,6 +97,8 @@ class OrderStateMachine
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
 
+                $this->releaseRefundedOrderResources($order);
+
                 if ($lockedPayment->status !== PaymentStatus::Refunded) {
                     $lockedPayment->update(['status' => PaymentStatus::Refunded]);
                 }
@@ -231,10 +233,9 @@ class OrderStateMachine
     private function applyReleaseTransition(Order $order, $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
     {
         if ($order->order_status === $orderStatus) {
-            if (! $this->inventory->hasReleaseProofForOrder($order)) {
-                throw new InvalidOrderTransition('Release movement proof is missing.');
+            if (! $this->inventory->hasSaleProofForOrder($order)) {
+                $this->inventory->releaseOrderReservations($order);
             }
-
             $this->credentials()->release($order);
 
             return $order->fresh(['payments']);
@@ -272,6 +273,15 @@ class OrderStateMachine
             && $order->payment_status === PaymentStatus::Pending
             && $payment?->provider === 'manual'
             && $payment->status === PaymentStatus::Pending;
+    }
+
+    private function releaseRefundedOrderResources(Order $order): void
+    {
+        if (! $this->inventory->hasSaleProofForOrder($order)) {
+            $this->inventory->releaseOrderReservations($order);
+        }
+
+        $this->credentials()->release($order);
     }
 
     private function credentials(): ProductCredentialAllocator

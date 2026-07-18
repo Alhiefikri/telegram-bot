@@ -159,6 +159,19 @@ class EloquentInventoryLedger implements InventoryLedger
         foreach ($items as $item) {
             $product = $products[$item->product_id] ?? throw new InvalidOrderTransition('Order product is missing.');
             $this->assertMatchingReservation($item, $movements);
+            $release = $movements
+                ->where('product_id', $item->product_id)
+                ->where('type', InventoryMovementType::Release)
+                ->first();
+
+            if ($release) {
+                if ($release->quantity !== -$item->quantity) {
+                    throw new InvalidOrderTransition('Release movement proof is missing or mismatched.');
+                }
+
+                continue;
+            }
+
             if ($product->reserved_stock < $item->quantity) {
                 throw new InvalidOrderTransition('Reserved stock invariant violated.');
             }

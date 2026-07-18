@@ -171,9 +171,30 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
     }
 
-    public function test_refund_updates_payment_and_order_payment_status(): void
+    public function test_pending_refund_releases_reservation_and_credential_once(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1));
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'pending@example.test|pass']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
+        $payment = $order->payments()->first();
+
+        app(OrderStateMachine::class)->markPaymentRefunded($payment);
+        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_processing_refund_releases_credential_without_releasing_sold_stock(): void
+    {
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'processing@example.test|pass']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
         $payment = $order->payments()->first();
         app(OrderStateMachine::class)->markPaymentPaid($payment);
 
@@ -183,7 +204,30 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull($stockItem->fresh()->order_item_id);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_completed_refund_keeps_order_completed_and_releases_credential(): void
+    {
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'completed@example.test|pass']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), provider: 'pakasir');
+        $payment = $order->payments()->first();
+        app(OrderStateMachine::class)->markPaymentPaid($payment);
+
+        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
 
     public function test_checkout_rejects_inactive_soft_deleted_and_understocked_products(): void
@@ -275,6 +319,22 @@ class Phase4OrderCartDomainTest extends TestCase
 
         $orders->each(fn (Order $order) => $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status));
         $this->assertSame(3, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+    }
+
+    public function test_expiry_command_releases_credential_allocation(): void
+    {
+        config(['services.telegram.token' => null]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'expiry@example.test|pass']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), expiresAt: now()->subMinutes(2));
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $order->payments()->firstOrFail()->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
 
     public function test_expiry_command_reports_skipped_orders(): void
