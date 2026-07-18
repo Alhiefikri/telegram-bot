@@ -132,6 +132,17 @@ function initCategoryFilters() {
 
     categoryButtons.forEach((button) => {
         button.addEventListener('click', () => {
+            const filterValue = button.getAttribute('data-filter');
+            const hidesFocusedCard = Array.from(productCards).some((card) => (
+                card.contains(document.activeElement)
+                && filterValue !== 'all'
+                && card.getAttribute('data-category') !== filterValue
+            ));
+
+            if (hidesFocusedCard) {
+                button.focus();
+            }
+
             categoryButtons.forEach((otherButton) => {
                 otherButton.classList.remove(...ACTIVE_CATEGORY_CLASSES);
                 otherButton.classList.add(...INACTIVE_CATEGORY_CLASSES);
@@ -141,8 +152,6 @@ function initCategoryFilters() {
             button.classList.remove(...INACTIVE_CATEGORY_CLASSES);
             button.classList.add(...ACTIVE_CATEGORY_CLASSES);
             button.setAttribute('aria-pressed', 'true');
-
-            const filterValue = button.getAttribute('data-filter');
 
             productCards.forEach((card, index) => {
                 const cardCategory = card.getAttribute('data-category');

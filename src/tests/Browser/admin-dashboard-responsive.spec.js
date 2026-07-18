@@ -109,6 +109,24 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
     await expectNoDocumentOverflow(page);
 });
 
+test('stacks shop cards and keeps focus on the active filter at mobile width', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
+
+    const productA = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
+    const productB = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk B' }).first();
+    await expectOneColumn(productA, productB);
+
+    await productB.focus();
+    await expect(productB).toBeFocused();
+
+    const firstCategory = page.getByRole('button', { name: 'Browser Responsive QA', exact: true });
+    await firstCategory.evaluate((button) => button.click());
+    await expect(firstCategory).toBeFocused();
+    await expect(productB).toBeHidden();
+    await expectNoDocumentOverflow(page);
+});
+
 test('keeps the mobile navigation focus contained and restores its trigger', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
@@ -586,6 +604,16 @@ $category = Category::query()->firstOrCreate(
     ],
 );
 
+$otherCategory = Category::query()->firstOrCreate(
+    ['slug' => 'browser-responsive-other'],
+    [
+        'name' => 'Browser Responsive Other',
+        'description' => 'Second category for storefront filter focus checks.',
+        'sort_order' => 100,
+        'is_active' => true,
+    ],
+);
+
 $productA = Product::factory()->create([
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
@@ -598,7 +626,7 @@ ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-st
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-b@example.test|pass']);
 
 Product::factory()->create([
-    'category_id' => $category->id,
+    'category_id' => $otherCategory->id,
     'name' => 'Browser QA Produk B',
     'price_amount' => 75000,
     'stock' => 6,

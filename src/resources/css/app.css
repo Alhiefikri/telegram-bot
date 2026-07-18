@@ -338,7 +338,8 @@
     .neo-button:focus-visible,
     .neo-input:focus-visible,
     .category-btn:focus-visible,
-    .faq-toggle:focus-visible {
+    .faq-toggle:focus-visible,
+    #mobile-menu-close:focus-visible {
         outline: 3px solid var(--sf-blue);
         outline-offset: 3px;
     }
@@ -402,13 +403,6 @@
         opacity: 1;
         transform: none;
         transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-
-    .animate-marquee {
-        display: flex;
-        width: max-content;
-        animation: marquee 42s linear infinite;
     }
 
     .hero-preview-panel {
@@ -649,16 +643,6 @@
     }
 }
 
-@keyframes marquee {
-    0% {
-        transform: translateX(0%);
-    }
-
-    100% {
-        transform: translateX(-50%);
-    }
-}
-
 @keyframes hero-panel-in {
     from {
         opacity: 0;
@@ -715,15 +699,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .animate-marquee {
-        animation: none !important;
-        flex-wrap: wrap !important;
-        gap: 2rem !important;
-        justify-content: center !important;
-        transform: none !important;
-        width: auto !important;
-    }
-
     .reveal-item {
         opacity: 1 !important;
         transform: none !important;

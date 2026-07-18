@@ -53,7 +53,7 @@
         <div id="storefront-product-grid" @class([
             'storefront-popular-card grid p-1 sm:p-2',
             'mx-auto max-w-xs grid-cols-1 gap-4' => $catalogPage->productCount() === 1,
-            'grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' => $catalogPage->productCount() !== 1,
+            'grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' => $catalogPage->productCount() !== 1,
         ])>
             @forelse ($catalogPage->products as $catalogProduct)
                 @include('storefront.components.product-card', [

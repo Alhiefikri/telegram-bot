@@ -170,7 +170,7 @@ Current motion is mostly transform/opacity based and should stay that way.
 
 - Main shell: `src/resources/views/storefront.blade.php`
 - Pages: `src/resources/views/storefront/product.blade.php`, `src/resources/views/storefront/payment.blade.php`, `src/resources/views/storefront/login-guide.blade.php`
-- Partials: `src/resources/views/storefront/partials/head.blade.php`, `header.blade.php`, `hero.blade.php`, `catalog.blade.php`, `featured-offer.blade.php`, `trust-marquee.blade.php`, `benefits.blade.php`, `purchase-flow.blade.php`, `testimonial.blade.php`, `metrics.blade.php`, `faq.blade.php`, `support.blade.php`, `footer.blade.php`, `floating-support.blade.php`, `product-modal.blade.php`
+- Partials: `src/resources/views/storefront/partials/head.blade.php`, `header.blade.php`, `hero.blade.php`, `catalog.blade.php`, `featured-offer.blade.php`, `benefits.blade.php`, `purchase-flow.blade.php`, `testimonial.blade.php`, `metrics.blade.php`, `faq.blade.php`, `support.blade.php`, `footer.blade.php`, `floating-support.blade.php`, `product-modal.blade.php`
 - Components: `src/resources/views/storefront/components/brand-mark.blade.php`, `product-card.blade.php`, `product-cover.blade.php`, `qris-card.blade.php`
 - CSS: `src/resources/css/app.css`
 - JS: `src/resources/js/app.js`, `src/resources/js/storefront.js`

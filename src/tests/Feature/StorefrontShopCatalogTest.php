@@ -38,7 +38,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
-            ->assertSee('grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false)
+            ->assertSee('grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false)
             ->assertDontSee('storefront.partials.featured-offer')
             ->assertDontSee('Apa kata pelanggan')
             ->assertDontSee('Angka operasional');
@@ -52,7 +52,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertOk()
             ->assertSee('id="storefront-product-grid"', false)
             ->assertSee('mx-auto max-w-xs grid-cols-1', false)
-            ->assertDontSee('grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
+            ->assertDontSee('grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
     public function test_available_shop_products_open_existing_modal_with_dual_checkout_contract(): void
@@ -159,6 +159,13 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
             ->assertSee('action="'.url('/').'#products"', false)
+            ->assertSee('label for="storefront-search" class="sr-only">Cari produk</label>', false)
+            ->assertSee('input id="storefront-search"', false)
+            ->assertSee('stroke-width="3" aria-hidden="true"', false)
+            ->assertSee('id="faq-question-0"', false)
+            ->assertSee('aria-controls="faq-answer-0"', false)
+            ->assertSee('id="faq-answer-0"', false)
+            ->assertSee('role="region" aria-labelledby="faq-question-0"', false)
             ->assertSee('Landing Catalog Product')
             ->assertSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Produk digital siap pakai, checkout tanpa ribet.')
