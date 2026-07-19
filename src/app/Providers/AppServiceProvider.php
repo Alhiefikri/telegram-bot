@@ -188,10 +188,6 @@ class AppServiceProvider extends ServiceProvider
             throw new RuntimeException('APP_DEBUG must be false in production.');
         }
 
-        if (config('mail.default') === 'log') {
-            throw new RuntimeException('MAIL_MAILER=log is not allowed in production.');
-        }
-
         $pakasirBaseUrl = (string) config('services.pakasir.base_url', '');
         if (! blank($pakasirBaseUrl) && ! str_starts_with($pakasirBaseUrl, 'https://')) {
             throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
