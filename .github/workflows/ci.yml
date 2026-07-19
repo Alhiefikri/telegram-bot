@@ -98,6 +98,9 @@ jobs:
   customer-browser-smoke:
     name: Customer browser smoke
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      APP_FORCE_HTTPS: false
     defaults:
       run:
         working-directory: src
