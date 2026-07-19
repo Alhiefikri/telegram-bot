@@ -187,12 +187,12 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(41062, 'binance-en', 'checkout:binance', ['id' => 41062], 41062))->assertOk();
 
         $this->assertLocalizedCopy(
-            $this->customerPayload('/sendMessage', 41061),
+            $this->customerPhotoPayload(41061),
             ['💎 CHECKOUT USDT', '/payment', 'Nominal harus tepat', 'dicek manual oleh admin'],
             ['💎 USDT CHECKOUT', 'Send Payment Proof'],
         );
         $this->assertLocalizedCopy(
-            $this->customerPayload('/sendMessage', 41062),
+            $this->customerPhotoPayload(41062),
             ['💎 USDT CHECKOUT', '/payment', 'amount must match exactly', 'checked manually by admin'],
             ['💎 CHECKOUT USDT', 'Kirim Bukti Pembayaran'],
         );
@@ -256,6 +256,16 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertCount(1, $requests, "Expected one {$endpoint} request for customer chat {$chatId}.");
 
         return $requests->first()[0]->data();
+    }
+
+    private function customerPhotoPayload(int $chatId): array
+    {
+        $requests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains($request->body(), 'name="chat_id"')
+            && str_contains($request->body(), "\r\n{$chatId}\r\n"));
+        $this->assertCount(1, $requests, "Expected one /sendPhoto request for customer chat {$chatId}.");
+
+        return ['caption' => $requests->first()[0]->body()];
     }
 
     private function callbackPayload(string $callbackId): array
