@@ -150,7 +150,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('name="caption_entities[1][type]"', $photoBody);
         $this->assertStringContainsString('name="caption_entities[1][length]"', $photoBody);
         $this->assertStringContainsString("\r\n9\r\n", $photoBody);
-        $this->assertStringNotContainsString('reply_markup', $photoBody);
+        $this->assertStringContainsString('Batalkan Order', $photoBody);
+        $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $photoBody);
+        $this->assertStringContainsString('reply_markup', $photoBody);
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
                 || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));
@@ -855,7 +857,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(1, $otherProduct->fresh()->reserved_stock);
         $this->assertNotNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
 
-        $this->postTelegramWebhook($this->callbackUpdate(21, 'cb-buyer-cancel', 'buyer:cancel-pending:'.$order->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(21, 'cb-buyer-cancel', 'buyer:cancel-pending:'.$order->id, messageId: 321))->assertOk();
 
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
@@ -869,6 +871,37 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
             && $r['callback_query_id'] === 'cb-buyer-cancel'
             && $r['text'] === 'Order dibatalkan dan stok sudah dilepas.');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/deleteMessage')
+            && (string) $r['chat_id'] === '12345'
+            && $r['message_id'] === 321);
+    }
+
+    public function test_buyer_cancel_callback_deletes_binance_checkout_photo_and_releases_stock(): void
+    {
+        $this->fakeTelegramHttp();
+        $buyer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create([
+            'name' => 'Cancelable Binance Checkout',
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cancelable-binance@example.test|pass']);
+        $cart = app(CartService::class)->activeCartFor($buyer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'BINANCE_PAY_ID', 'manual');
+
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+
+        $this->postTelegramWebhook($this->callbackUpdate(22, 'cb-binance-cancel', 'buyer:cancel-pending:'.$order->id, messageId: 654))->assertOk();
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $product->id)->firstOrFail()->order_item_id);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage')
+            && (string) $request['chat_id'] === '12345'
+            && $request['message_id'] === 654);
     }
 
     public function test_persisted_native_qris_create_failure_sends_hosted_fallback_and_keeps_payment_pending(): void

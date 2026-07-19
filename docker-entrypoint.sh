@@ -106,6 +106,10 @@ if [ -d /opt/lhiestore-public-storefront ]; then
     cp -R /opt/lhiestore-public-storefront/. public/storefront/
 fi
 
+if [ -r /opt/lhiestore-public-binance.jpeg ]; then
+    cp /opt/lhiestore-public-binance.jpeg public/binance.jpeg
+fi
+
 
 
 if [ "${APP_AUTO_MIGRATE:-true}" = "true" ]; then

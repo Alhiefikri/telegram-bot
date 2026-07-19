@@ -54,6 +54,15 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString("echo 'post_max_size=10M';", $dockerfile);
     }
 
+    public function test_production_entrypoint_syncs_binance_checkout_image_to_public_volume(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
+
+        $this->assertStringContainsString('COPY src/public/binance.jpeg /opt/lhiestore-public-binance.jpeg', $dockerfile);
+        $this->assertStringContainsString('cp /opt/lhiestore-public-binance.jpeg public/binance.jpeg', $entrypoint);
+    }
+
     public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));

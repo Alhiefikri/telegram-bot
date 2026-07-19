@@ -61,7 +61,7 @@ abstract class TelegramBotTestSupport extends TestCase
         ];
     }
 
-    protected function callbackUpdate(int $id, string $callbackId, string $data, array $from = [], int $chatId = 12345, string $chatType = 'private'): array
+    protected function callbackUpdate(int $id, string $callbackId, string $data, array $from = [], int $chatId = 12345, string $chatType = 'private', ?int $messageId = null): array
     {
         $fromId = $from['id'] ?? $chatId;
 
@@ -70,7 +70,10 @@ abstract class TelegramBotTestSupport extends TestCase
             'callback_query' => [
                 'id' => $callbackId,
                 'from' => array_merge(['id' => $fromId, 'first_name' => 'Tester'], $from),
-                'message' => ['chat' => ['id' => $chatId, 'type' => $chatType]],
+                'message' => array_filter([
+                    'message_id' => $messageId,
+                    'chat' => ['id' => $chatId, 'type' => $chatType],
+                ], fn ($value) => $value !== null),
                 'data' => $data,
             ],
         ];

@@ -89,7 +89,12 @@ class TelegramCheckoutIntents
             throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
         }
 
-        $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [], [
+        $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->text($customer, '❌ Batalkan Order', '❌ Cancel Order'),
+                'callback_data' => 'buyer:cancel-pending:'.$order->id,
+            ]]],
+        ], [
             'caption_entities' => [
                 $this->codeEntityForLine($text, $amount.' USDT', $amount),
                 $this->codeEntityForLine($text, $payId, $payId),

@@ -75,7 +75,10 @@ class TelegramWebhookIngress
             'callback_query' => [
                 'id' => $callback['id'],
                 'from' => Arr::only((array) $callback['from'], ['id', 'first_name', 'username']),
-                'message' => ['chat' => Arr::only((array) Arr::get($callback, 'message.chat', []), ['id', 'type'])],
+                'message' => [
+                    'message_id' => Arr::get($callback, 'message.message_id'),
+                    'chat' => Arr::only((array) Arr::get($callback, 'message.chat', []), ['id', 'type']),
+                ],
                 'data' => $callback['data'],
             ],
         ];

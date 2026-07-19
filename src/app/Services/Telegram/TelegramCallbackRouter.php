@@ -41,7 +41,7 @@ class TelegramCallbackRouter
         private TelegramLocale $locale,
     ) {}
 
-    public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private'): void
+    public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private', ?int $messageId = null): void
     {
         if (preg_match('/^locale:(id|en)$/', $data, $matches)) {
             $this->communityGate->clearPrompt($customer);
@@ -148,7 +148,7 @@ class TelegramCallbackRouter
         }
 
         if (preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $data, $matches)) {
-            $this->cancelPendingOrder($customer, $chatId, $id, $matches[1]);
+            $this->cancelPendingOrder($customer, $chatId, $id, $matches[1], $messageId);
 
             return;
         }
@@ -290,7 +290,7 @@ class TelegramCallbackRouter
         return $this->locale->text($customer, $id, $en);
     }
 
-    private function cancelPendingOrder(Customer $customer, string $chatId, string $id, string $orderId): void
+    private function cancelPendingOrder(Customer $customer, string $chatId, string $id, string $orderId, ?int $messageId): void
     {
         $this->session->forget($customer);
 
@@ -315,6 +315,14 @@ class TelegramCallbackRouter
             $this->bot->sendMessage($chatId, $this->text($customer, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.", "This order has been processed or can no longer be cancelled.\n\nCheck the latest status with /status."));
 
             return;
+        }
+
+        if ($messageId !== null) {
+            try {
+                $this->bot->deleteMessage($chatId, $messageId);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         $this->bot->answerCallbackQuery($id, $this->text($customer, 'Order dibatalkan dan stok sudah dilepas.', 'Order cancelled and stock released.'));
