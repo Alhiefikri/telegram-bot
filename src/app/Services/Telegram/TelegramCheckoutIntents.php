@@ -83,8 +83,14 @@ class TelegramCheckoutIntents
         $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer));
         $amount = $this->formatUsdt($payment->amount);
 
-        $this->bot->sendMessage($chatId, $text, [], [
-            'entities' => [
+        $photoPath = public_path('binance.jpeg');
+        $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
+        if ($photoContents === false) {
+            throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
+        }
+
+        $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [], [
+            'caption_entities' => [
                 $this->codeEntityForLine($text, $amount.' USDT', $amount),
                 $this->codeEntityForLine($text, $payId, $payId),
             ],

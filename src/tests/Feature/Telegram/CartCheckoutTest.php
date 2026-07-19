@@ -136,16 +136,21 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(5_000_000, $payment->amount);
         $this->assertSame('USDT', $payment->currency);
         $this->assertSame(PaymentStatus::Pending, $payment->status);
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '12345'
-            && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID')
-            && str_contains((string) ($request['text'] ?? ''), '987654321')
-            && str_contains((string) ($request['text'] ?? ''), '5 USDT')
-            && (($request['entities'][0]['type'] ?? null) === 'code')
-            && (($request['entities'][0]['length'] ?? null) === 1)
-            && (($request['entities'][1]['type'] ?? null) === 'code')
-            && (($request['entities'][1]['length'] ?? null) === 9)
-            && ! isset($request['reply_markup']));
+        $photoSends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoSends);
+        $photoBody = $photoSends->first()[0]->body();
+        $this->assertStringContainsString('filename="binance.jpeg"', $photoBody);
+        $this->assertStringContainsString('Binance Pay ID', $photoBody);
+        $this->assertStringContainsString('987654321', $photoBody);
+        $this->assertStringContainsString('5 USDT', $photoBody);
+        $this->assertStringContainsString('caption_entities', $photoBody);
+        $this->assertStringContainsString('name="caption_entities[0][type]"', $photoBody);
+        $this->assertStringContainsString('name="caption_entities[0][length]"', $photoBody);
+        $this->assertStringContainsString("\r\n1\r\n", $photoBody);
+        $this->assertStringContainsString('name="caption_entities[1][type]"', $photoBody);
+        $this->assertStringContainsString('name="caption_entities[1][length]"', $photoBody);
+        $this->assertStringContainsString("\r\n9\r\n", $photoBody);
+        $this->assertStringNotContainsString('reply_markup', $photoBody);
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
                 || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));
