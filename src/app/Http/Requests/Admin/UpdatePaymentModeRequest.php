@@ -31,6 +31,8 @@ class UpdatePaymentModeRequest extends FormRequest
             'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir'])],
             'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === 'pakasir'), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
             'binance_pay_enabled' => ['sometimes', 'boolean'],
+            'qris_payment_ttl_minutes' => ['sometimes', 'integer', 'min:1', 'max:1440'],
+            'binance_payment_ttl_minutes' => ['sometimes', 'integer', 'min:1', 'max:1440'],
         ];
     }
 
@@ -44,6 +46,12 @@ class UpdatePaymentModeRequest extends FormRequest
             'payment_mode.in' => 'Mode pembayaran tidak valid.',
             'pakasir_checkout_flow.required' => 'Pilih jenis pembayaran Pakasir.',
             'pakasir_checkout_flow.in' => 'Jenis pembayaran Pakasir tidak valid.',
+            'qris_payment_ttl_minutes.integer' => 'Batas waktu QRIS harus berupa jumlah menit.',
+            'qris_payment_ttl_minutes.min' => 'Batas waktu QRIS minimal 1 menit.',
+            'qris_payment_ttl_minutes.max' => 'Batas waktu QRIS maksimal 1440 menit.',
+            'binance_payment_ttl_minutes.integer' => 'Batas waktu Binance Pay harus berupa jumlah menit.',
+            'binance_payment_ttl_minutes.min' => 'Batas waktu Binance Pay minimal 1 menit.',
+            'binance_payment_ttl_minutes.max' => 'Batas waktu Binance Pay maksimal 1440 menit.',
         ];
     }
 

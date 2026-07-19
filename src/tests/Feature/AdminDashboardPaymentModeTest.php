@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -141,6 +142,50 @@ class AdminDashboardPaymentModeTest extends TestCase
             'binance_pay_enabled' => true,
             'is_active' => true,
         ]);
+    }
+
+    public function test_owner_can_update_payment_deadlines_from_dashboard(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'qris_payment_ttl_minutes' => 10,
+            'binance_payment_ttl_minutes' => 20,
+            'is_active' => true,
+        ]);
+
+        $this->post(route('admin.payment-mode.update'), [
+            'payment_mode' => 'manual',
+            'qris_payment_ttl_minutes' => 7,
+            'binance_payment_ttl_minutes' => 25,
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'id' => $setting->id,
+            'qris_payment_ttl_minutes' => 7,
+            'binance_payment_ttl_minutes' => 25,
+        ]);
+        $this->assertSame(7, AuditLog::query()->latest('id')->firstOrFail()->new_values['qris_payment_ttl_minutes']);
+        $this->assertSame(25, AuditLog::query()->latest('id')->firstOrFail()->new_values['binance_payment_ttl_minutes']);
+    }
+
+    public function test_payment_deadlines_must_be_positive_integers(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Admin,
+        ]));
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'manual',
+                'qris_payment_ttl_minutes' => 0,
+                'binance_payment_ttl_minutes' => 'twenty',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['qris_payment_ttl_minutes', 'binance_payment_ttl_minutes'], null, 'paymentMode');
     }
 
     public function test_saved_pakasir_mode_is_reported_unready_and_effectively_manual_when_config_missing(): void

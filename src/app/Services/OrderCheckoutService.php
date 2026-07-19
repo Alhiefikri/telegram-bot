@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -24,7 +25,7 @@ class OrderCheckoutService
 
     public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null, ?string $checkoutKey = null): Order
     {
-        $expiresAt ??= now()->addMinutes((int) config('orders.pending_payment_ttl_minutes', 60));
+        $expiresAt ??= now()->addMinutes($this->paymentDeadlineMinutes($paymentMethod));
 
         $order = null;
         for ($i = 0; $i < 5; $i++) {
@@ -99,6 +100,17 @@ class OrderCheckoutService
     private function isUniqueViolation(QueryException $e): bool
     {
         return in_array((string) ($e->errorInfo[0] ?? ''), ['23000', '23505'], true) || str_contains(strtolower($e->getMessage()), 'unique');
+    }
+
+    private function paymentDeadlineMinutes(string $paymentMethod): int
+    {
+        $settings = ManualPaymentSetting::current();
+
+        if ($paymentMethod === 'BINANCE_PAY_ID') {
+            return $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES;
+        }
+
+        return $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES;
     }
 
     private function assertWebReservationBudget(Cart $cart, $items, $products): void

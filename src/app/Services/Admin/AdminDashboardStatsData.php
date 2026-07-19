@@ -150,6 +150,8 @@ final class AdminDashboardStatsData
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'binance_pay_enabled' => (bool) $settings?->binance_pay_enabled,
+            'qris_payment_ttl_minutes' => $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
+            'binance_payment_ttl_minutes' => $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES,
             'update_url' => route('admin.payment-mode.update'),
             'status_badge' => [
                 'label' => $statusBadge,

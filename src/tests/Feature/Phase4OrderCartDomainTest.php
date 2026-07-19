@@ -15,6 +15,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -23,6 +24,7 @@ use App\Services\InventoryLedger;
 use App\Services\InvoiceNumberGenerator;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -56,6 +58,35 @@ class Phase4OrderCartDomainTest extends TestCase
 
         $this->assertSame('USDT', $order->payments()->sole()->currency);
         $this->assertSame(2_500_000, $order->payments()->sole()->amount);
+    }
+
+    public function test_checkout_uses_configured_deadline_for_each_payment_method(): void
+    {
+        ManualPaymentSetting::create([
+            'qris_payment_ttl_minutes' => 7,
+            'binance_payment_ttl_minutes' => 25,
+            'is_active' => true,
+        ]);
+
+        $qrisOrder = app(OrderCheckoutService::class)->checkout(
+            $this->cartWithProduct(stock: 2),
+            'QR_MANUAL',
+            'manual',
+        );
+        $binanceOrder = app(OrderCheckoutService::class)->checkout(
+            $this->cartWithProduct(Product::factory()->create([
+                'stock' => 2,
+                'reserved_stock' => 0,
+                'usdt_price_amount' => 2_500_000,
+            ])),
+            'BINANCE_PAY_ID',
+            'manual',
+        );
+
+        $this->assertTrue($qrisOrder->expires_at->between(now()->addMinutes(6), now()->addMinutes(8)));
+        $this->assertTrue($qrisOrder->payments()->sole()->expired_at->between(now()->addMinutes(6), now()->addMinutes(8)));
+        $this->assertTrue($binanceOrder->expires_at->between(now()->addMinutes(24), now()->addMinutes(26)));
+        $this->assertTrue($binanceOrder->payments()->sole()->expired_at->between(now()->addMinutes(24), now()->addMinutes(26)));
     }
 
     public function test_two_carts_stock_one_only_first_checkout_succeeds(): void
@@ -140,7 +171,6 @@ class Phase4OrderCartDomainTest extends TestCase
 
     public function test_default_pending_payment_ttl_is_ten_minutes_and_expiry_releases_credential(): void
     {
-        config()->set('orders.pending_payment_ttl_minutes', 10);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
         $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ttl@example.test|pass']);
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
@@ -153,6 +183,35 @@ class Phase4OrderCartDomainTest extends TestCase
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(1, Product::first()->availableStock());
         $this->assertNull($stockItem->fresh()->order_item_id);
+    }
+
+    public function test_expiry_command_releases_stock_when_configured_qris_deadline_is_due(): void
+    {
+        config(['services.telegram.token' => null]);
+        $startedAt = now()->startOfMinute();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            ManualPaymentSetting::create([
+                'qris_payment_ttl_minutes' => 1,
+                'binance_payment_ttl_minutes' => 20,
+                'is_active' => true,
+            ]);
+            $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+            $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'configured-expiry@example.test|pass']);
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), 'QR_MANUAL', 'manual');
+
+            $this->assertTrue($order->expires_at->equalTo($startedAt->copy()->addMinute()));
+
+            Carbon::setTestNow($startedAt->copy()->addMinutes(2));
+            $this->artisan('orders:expire-pending')->assertSuccessful();
+
+            $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertNull($stockItem->fresh()->order_item_id);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_paid_after_expired_records_payment_without_mutating_stock(): void

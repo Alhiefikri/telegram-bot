@@ -41,11 +41,15 @@ class AdminPaymentModeController extends Controller
                     'payment_mode' => $setting->payment_mode,
                     'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
                     'binance_pay_enabled' => $setting->binance_pay_enabled,
+                    'qris_payment_ttl_minutes' => $setting->qrisPaymentTtlMinutes(),
+                    'binance_payment_ttl_minutes' => $setting->binancePaymentTtlMinutes(),
                 ]
                 : [
                     'payment_mode' => null,
                     'pakasir_checkout_flow' => null,
                     'binance_pay_enabled' => false,
+                    'qris_payment_ttl_minutes' => ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
+                    'binance_payment_ttl_minutes' => ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES,
                 ];
 
             $setting->payment_mode = $mode;
@@ -58,6 +62,12 @@ class AdminPaymentModeController extends Controller
             if (array_key_exists('binance_pay_enabled', $validated)) {
                 $setting->binance_pay_enabled = (bool) $validated['binance_pay_enabled'];
             }
+            if (array_key_exists('qris_payment_ttl_minutes', $validated)) {
+                $setting->qris_payment_ttl_minutes = $validated['qris_payment_ttl_minutes'];
+            }
+            if (array_key_exists('binance_payment_ttl_minutes', $validated)) {
+                $setting->binance_payment_ttl_minutes = $validated['binance_payment_ttl_minutes'];
+            }
             $setting->save();
 
             return [$setting, $oldValues];
@@ -67,6 +77,8 @@ class AdminPaymentModeController extends Controller
             'payment_mode' => $setting->payment_mode,
             'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
             'binance_pay_enabled' => $setting->binance_pay_enabled,
+            'qris_payment_ttl_minutes' => $setting->qrisPaymentTtlMinutes(),
+            'binance_payment_ttl_minutes' => $setting->binancePaymentTtlMinutes(),
         ];
 
         $auditLogger->log(

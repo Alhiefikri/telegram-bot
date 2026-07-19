@@ -40,7 +40,7 @@ class TelegramPaymentInstructionRenderer
             $lines[] = '';
             $lines[] = $locale === 'en' ? '⏳ Payment deadline:' : '⏳ Batas bayar:';
             $lines[] = $this->formatDate($order->expires_at, $locale);
-            $lines[] = $locale === 'en' ? 'Stock is reserved for '.(int) config('orders.pending_payment_ttl_minutes', 5).' minutes. If payment proof is not sent, the order expires automatically and stock is released.' : 'Stok dipegang '.(int) config('orders.pending_payment_ttl_minutes', 5).' menit. Kalau belum bayar/kirim bukti, order otomatis expired dan stok balik.';
+            $lines[] = $locale === 'en' ? 'If payment proof is not sent by this deadline, the order expires automatically and stock is released.' : 'Kalau belum bayar/kirim bukti sampai batas waktu ini, order otomatis expired dan stok kembali.';
         }
 
         $lines[] = '';

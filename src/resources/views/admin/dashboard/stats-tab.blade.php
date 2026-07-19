@@ -181,6 +181,48 @@
                                 {{ $paymentControl['binance_pay_enabled'] ? 'Binance Pay USDT: Aktif' : 'Aktifkan Binance Pay USDT' }}
                             </x-admin-dashboard.button>
                         </form>
+                        <form method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3 space-y-3" aria-label="Batas waktu pembayaran">
+                            @csrf
+                            <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
+                            @if ($paymentControl['requested_mode'] === 'pakasir')
+                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
+                            @endif
+                            <input type="hidden" name="binance_pay_enabled" value="{{ $paymentControl['binance_pay_enabled'] ? 1 : 0 }}">
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Batas bayar QRIS (menit)
+                                    <x-admin-dashboard.input
+                                        class="mt-1"
+                                        min="1"
+                                        max="1440"
+                                        name="qris_payment_ttl_minutes"
+                                        type="number"
+                                        :value="old('qris_payment_ttl_minutes', $paymentControl['qris_payment_ttl_minutes'])"
+                                    />
+                                    @error('qris_payment_ttl_minutes', 'paymentMode')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Batas bayar Binance Pay (menit)
+                                    <x-admin-dashboard.input
+                                        class="mt-1"
+                                        min="1"
+                                        max="1440"
+                                        name="binance_payment_ttl_minutes"
+                                        type="number"
+                                        :value="old('binance_payment_ttl_minutes', $paymentControl['binance_payment_ttl_minutes'])"
+                                    />
+                                    @error('binance_payment_ttl_minutes', 'paymentMode')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                </label>
+                            </div>
+                            <p class="text-[11px] font-semibold text-brand-muted">Berlaku untuk checkout baru. QRIS Pakasir tetap mengikuti batas waktu provider jika lebih cepat.</p>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                Simpan batas waktu pembayaran
+                            </x-admin-dashboard.button>
+                        </form>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             Hanya owner/admin yang bisa mengubah mode pembayaran.

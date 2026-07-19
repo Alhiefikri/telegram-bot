@@ -494,7 +494,7 @@ Sebelum production, cek minimal:
 - [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`; dashboard menolak aktivasi Pakasir tanpa slug/API key.
 - [ ] Gunakan `QR Native Pakasir` hanya setelah staging membuktikan native QRIS dengan `php artisan pakasir:validate-native-qris <payment> --create --reconcile`; rollback cepat dari dashboard ke `Hosted Pakasir` atau `QR Manual`.
 - [ ] `PAKASIR_REDIRECT_URL` opsional; kosongkan jika tidak butuh return URL khusus.
-- [ ] TTL order pending disesuaikan melalui `ORDERS_PENDING_PAYMENT_TTL_MINUTES` bila diperlukan.
+- [ ] Batas waktu checkout QRIS dan Binance Pay disesuaikan melalui dashboard admin bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
 - [ ] Queue worker berjalan di Supervisor/systemd/container process manager.
 - [ ] Scheduler Laravel aktif via cron atau scheduler runner platform deploy.

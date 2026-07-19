@@ -520,25 +520,6 @@ SH);
         $this->assertStringContainsString('max-size: "10m"', $compose);
     }
 
-    public function test_docker_compose_pending_payment_ttl_default_matches_application_default(): void
-    {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-
-        $this->assertMatchesRegularExpression(
-            '/^\s+ORDERS_PENDING_PAYMENT_TTL_MINUTES:\s+\$\{ORDERS_PENDING_PAYMENT_TTL_MINUTES:-(\d+)\}\s*$/m',
-            $compose,
-            'docker-compose.yml must expose ORDERS_PENDING_PAYMENT_TTL_MINUTES with an explicit interpolation default.',
-        );
-        preg_match(
-            '/^\s+ORDERS_PENDING_PAYMENT_TTL_MINUTES:\s+\$\{ORDERS_PENDING_PAYMENT_TTL_MINUTES:-(\d+)\}\s*$/m',
-            $compose,
-            $matches,
-        );
-
-        $this->assertSame(10, (int) config('orders.pending_payment_ttl_minutes'));
-        $this->assertSame((int) config('orders.pending_payment_ttl_minutes'), (int) $matches[1]);
-    }
-
     public function test_docker_image_builds_assets_during_image_build(): void
     {
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
