@@ -65,10 +65,10 @@ class TelegramPaymentInstructionRenderer
         $amount = rtrim(rtrim(number_format($payment->amount / 1_000_000, 6, '.', ''), '0'), '.');
         $items = $this->orderItemsSummary($order);
         if ($locale === 'en') {
-            return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 Send EXACTLY this amount:\n{$amount} USDT\n\n📥 To Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Tap the monospace amount and Binance Pay ID above to copy\n2️⃣ Send exactly {$amount} USDT using Binance Pay\n3️⃣ Send the payment screenshot as a PHOTO\n4️⃣ Put this exact caption:\n   /payment {$order->invoice_number}\n\n⚠️ The amount must match exactly. Your payment will be checked manually by admin.";
+            return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 Send EXACTLY this amount:\n{$amount} USDT\n\n📥 To Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Tap the monospace amount and Binance Pay ID above to copy\n2️⃣ Send exactly {$amount} USDT using Binance Pay\n3️⃣ Send the payment screenshot as a PHOTO\n4️⃣ Put this exact caption:\n   /payment\n\n⚠️ The amount must match exactly. Your payment will be checked manually by admin.";
         }
 
-        return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 Kirim TEPAT sejumlah ini:\n{$amount} USDT\n\n📥 Ke Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Ketuk nominal dan Binance Pay ID monospace di atas untuk menyalin\n2️⃣ Kirim tepat {$amount} USDT melalui Binance Pay\n3️⃣ Kirim screenshot pembayaran sebagai FOTO\n4️⃣ Isi caption persis seperti ini:\n   /payment {$order->invoice_number}\n\n⚠️ Nominal harus tepat. Pembayaran akan dicek manual oleh admin.";
+        return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 Kirim TEPAT sejumlah ini:\n{$amount} USDT\n\n📥 Ke Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Ketuk nominal dan Binance Pay ID monospace di atas untuk menyalin\n2️⃣ Kirim tepat {$amount} USDT melalui Binance Pay\n3️⃣ Kirim screenshot pembayaran sebagai FOTO\n4️⃣ Isi caption persis seperti ini:\n   /payment\n\n⚠️ Nominal harus tepat. Pembayaran akan dicek manual oleh admin.";
     }
 
     public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false, string $locale = 'id'): TelegramPaymentInstruction

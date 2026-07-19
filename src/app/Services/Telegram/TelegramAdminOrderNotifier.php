@@ -185,7 +185,7 @@ class TelegramAdminOrderNotifier
             'Sumber: '.$this->sourceLabel($order),
             'Status: Menunggu pembayaran',
             'Metode: '.$this->paymentLabel($payment),
-            'Total: '.$this->rupiah($order->total_amount),
+            'Total: '.$this->paymentTotal($order, $payment),
             '',
             'Produk:',
             ...$this->itemLines($order),
@@ -214,7 +214,7 @@ class TelegramAdminOrderNotifier
             'Sumber: '.$this->sourceLabel($order),
             'Status: Expired / belum bayar',
             'Metode: '.$this->paymentLabel($payment),
-            'Total: '.$this->rupiah($order->total_amount),
+            'Total: '.$this->paymentTotal($order, $payment),
             '',
             'Produk:',
             ...$this->itemLines($order),
@@ -283,8 +283,18 @@ class TelegramAdminOrderNotifier
         return match ($label) {
             'QR_MANUAL' => 'QR Manual',
             'api_qris', 'hosted' => 'QRIS',
+            'BINANCE_PAY_ID' => 'Binance Pay',
             default => $label,
         };
+    }
+
+    private function paymentTotal(Order $order, ?Payment $payment): string
+    {
+        if ($payment?->currency === 'USDT') {
+            return rtrim(rtrim(number_format($payment->amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT';
+        }
+
+        return $this->rupiah($order->total_amount);
     }
 
     private function paymentMode(Order $order): string

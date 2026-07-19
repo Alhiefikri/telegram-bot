@@ -32,7 +32,7 @@ use Illuminate\Database\Eloquent\Model;
     'status',
     'paid_at',
     'expired_at',
-    'payment_proof_file_id', 'payment_proof_submitted_at', 'payment_proof_admin_chat_id',
+    'payment_proof_file_id', 'payment_proof_submitted_at', 'payment_proof_admin_chat_id', 'payment_proof_forwarding_started_at', 'payment_proof_forwarding_token', 'payment_proof_forwarded_at',
 ])]
 class Payment extends Model
 {
@@ -55,6 +55,8 @@ class Payment extends Model
             'expired_at' => 'datetime',
             'payment_proof_file_id' => 'encrypted',
             'payment_proof_submitted_at' => 'datetime',
+            'payment_proof_forwarding_started_at' => 'datetime',
+            'payment_proof_forwarded_at' => 'datetime',
         ];
     }
 

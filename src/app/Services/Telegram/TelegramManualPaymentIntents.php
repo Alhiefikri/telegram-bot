@@ -40,16 +40,6 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        if ($invoice === '' && $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()) {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                "Untuk pembayaran Binance Pay, caption wajib menyertakan invoice:\n\n/payment {$order->invoice_number}",
-                "For Binance Pay payments, the caption must include the invoice:\n\n/payment {$order->invoice_number}",
-            ));
-
-            return;
-        }
-
         $photoFileId = $this->largestPhotoFileId($message);
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
@@ -112,7 +102,50 @@ class TelegramManualPaymentIntents
         }
         $order = $claim['order'];
         $payment = $claim['payment'];
-        $isBinance = $payment?->method === 'BINANCE_PAY_ID';
+        try {
+            $this->forwardSubmittedManualPaymentProof($order, $payment);
+        } catch (\Throwable $exception) {
+            throw $exception;
+        }
+
+        $this->bot->sendMessage($chatId, $this->locale->text(
+            $customer,
+            "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
+            "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
+        ));
+    }
+
+    public function forwardSubmittedManualPaymentProof(Order $order, $payment): bool
+    {
+        $order->loadMissing(['customer', 'orderItems']);
+        $adminTelegramChatId = $this->adminTelegramChatId();
+        if ($adminTelegramChatId === null) {
+            throw new \RuntimeException('Manual payment proof cannot be forwarded without an admin chat and photo.');
+        }
+
+        $token = (string) Str::uuid();
+        $claimed = DB::table('payments')
+            ->where('id', $payment->id)
+            ->where('provider', 'manual')
+            ->where('status', PaymentStatus::Pending->value)
+            ->whereNotNull('payment_proof_file_id')
+            ->whereNotNull('payment_proof_submitted_at')
+            ->whereNull('payment_proof_forwarded_at')
+            ->where(fn ($query) => $query
+                ->whereNull('payment_proof_forwarding_started_at')
+                ->orWhere('payment_proof_forwarding_started_at', '<=', now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)))))
+            ->update([
+                'payment_proof_forwarding_started_at' => now(),
+                'payment_proof_forwarding_token' => $token,
+                'updated_at' => now(),
+            ]);
+        if ($claimed !== 1) {
+            return false;
+        }
+
+        $photoFileId = (string) $payment->payment_proof_file_id;
+
+        $isBinance = $payment->method === 'BINANCE_PAY_ID';
         $caption = [
             '📸 Bukti pembayaran masuk',
             '━━━━━━━━━━━━━━',
@@ -132,18 +165,38 @@ class TelegramManualPaymentIntents
             : 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
         $caption[] = 'Kalau belum cocok, tolak agar stok balik lagi.';
 
-        $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
-            'inline_keyboard' => [[
-                ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
-                ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
-            ]],
-        ]);
+        try {
+            $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
+                'inline_keyboard' => [[
+                    ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
+                    ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
+                ]],
+            ]);
+        } catch (\Throwable $exception) {
+            DB::table('payments')
+                ->where('id', $payment->id)
+                ->where('payment_proof_forwarding_token', $token)
+                ->update([
+                    'payment_proof_forwarding_started_at' => null,
+                    'payment_proof_forwarding_token' => null,
+                    'updated_at' => now(),
+                ]);
 
-        $this->bot->sendMessage($chatId, $this->locale->text(
-            $customer,
-            "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
-            "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
-        ));
+            throw $exception;
+        }
+
+        DB::table('payments')
+            ->where('id', $payment->id)
+            ->where('payment_proof_forwarding_token', $token)
+            ->update([
+                'payment_proof_admin_chat_id' => $adminTelegramChatId,
+                'payment_proof_forwarding_started_at' => null,
+                'payment_proof_forwarding_token' => null,
+                'payment_proof_forwarded_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        return true;
     }
 
     public function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void

@@ -553,6 +553,25 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID'));
     }
 
+    public function test_binance_pending_checkout_notification_shows_usdt_total_to_admin(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'AI Premium', 'price_amount' => 30000, 'usdt_price_amount' => 2_500_000, 'stock' => 5]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, 'BINANCE_PAY_ID', 'manual');
+
+        (new SendAdminOrderPendingNotification($order->id))->handle(app(\App\Services\Telegram\TelegramAdminOrderNotifier::class));
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), 'Metode: Binance Pay')
+            && str_contains((string) ($request['text'] ?? ''), 'Total: 2.5 USDT')
+            && ! str_contains((string) ($request['text'] ?? ''), 'Total: Rp30.000'));
+    }
+
     public function test_manual_checkout_notification_retry_does_not_resend_customer_photo(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
