@@ -507,6 +507,22 @@ SH);
         $this->assertStringContainsString('Unexpected Telegram Bot Compose project(s) running:', $contents);
     }
 
+    public function test_failed_job_recovery_workflow_requires_manual_confirmation_and_verifies_the_queue(): void
+    {
+        $workflow = base_path('../.github/workflows/recover-failed-jobs.yml');
+
+        $this->assertFileExists($workflow);
+
+        $contents = file_get_contents($workflow);
+        $this->assertStringContainsString('workflow_dispatch:', $contents);
+        $this->assertStringContainsString('RETRY_FAILED_JOBS', $contents);
+        $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
+        $this->assertStringContainsString('php artisan queue:retry all', $contents);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
+        $this->assertStringContainsString('php artisan queue:failed', $contents);
+        $this->assertStringNotContainsString('queue:flush', $contents);
+    }
+
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));

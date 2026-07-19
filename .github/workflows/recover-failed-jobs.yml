@@ -1,0 +1,73 @@
+name: Recover failed jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RETRY_FAILED_JOBS to retry every failed queue job.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recover-failed-jobs
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Retry and verify failed jobs
+    if: inputs.confirm == 'RETRY_FAILED_JOBS'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      COMPOSE_PROJECT_NAME: telegram-bot-prod
+    steps:
+      - name: Configure SSH
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_HOST:?Missing GitHub secret PRODUCTION_HOST}"
+          : "${PRODUCTION_SSH_PRIVATE_KEY:?Missing GitHub secret PRODUCTION_SSH_PRIVATE_KEY}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > ~/.ssh/production_key
+          chmod 600 ~/.ssh/production_key
+          ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts
+
+      - name: Retry failed jobs
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
+          : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
+
+          ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd "$PRODUCTION_PATH"
+
+          ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:failed </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:retry all </dev/null
+
+          for attempt in $(seq 1 12); do
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null; then
+              echo "All failed jobs recovered."
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:failed </dev/null
+          exit 1
+          REMOTE
