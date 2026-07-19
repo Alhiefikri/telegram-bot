@@ -535,7 +535,7 @@ SH);
             $matches,
         );
 
-        $this->assertSame(5, (int) config('orders.pending_payment_ttl_minutes'));
+        $this->assertSame(10, (int) config('orders.pending_payment_ttl_minutes'));
         $this->assertSame((int) config('orders.pending_payment_ttl_minutes'), (int) $matches[1]);
     }
 

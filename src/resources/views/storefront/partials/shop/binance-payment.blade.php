@@ -15,6 +15,10 @@
         </span>
     </div>
 
+    <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
+        <img src="{{ asset('binance.jpeg') }}" alt="QR Binance Pay Alhiefikri" width="614" height="658" loading="lazy" decoding="async" class="mx-auto h-auto w-full max-w-[320px] rounded-md">
+    </div>
+
     <dl class="mt-5 space-y-3 text-sm font-bold">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4" data-copy-group>
             <dt class="text-[var(--sf-muted)]">Kirim tepat</dt>
