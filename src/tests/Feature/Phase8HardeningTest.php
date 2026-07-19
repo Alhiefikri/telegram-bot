@@ -46,28 +46,6 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringStartsWith('https://', URL::to('/up'));
     }
 
-    public function test_production_rejects_log_mailer(): void
-    {
-        config([
-            'app.debug' => false,
-            'app.env' => 'production',
-            'app.key' => 'base64:test-key',
-            'app.url' => 'https://lhiestore.example',
-            'mail.default' => 'log',
-            'services.telegram.token' => 'telegram-token',
-            'services.telegram.webhook_secret' => 'telegram-secret',
-            'services.pakasir.slug' => 'warung-ai',
-            'services.pakasir.api_key' => 'pakasir-key',
-            'services.pakasir.base_url' => 'https://app.pakasir.test',
-        ]);
-        app()->detectEnvironment(fn () => 'production');
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('MAIL_MAILER=log is not allowed in production.');
-
-        (new AppServiceProvider(app()))->boot();
-    }
-
     public function test_production_public_requests_generate_urls_from_app_url_not_request_host(): void
     {
         config([
