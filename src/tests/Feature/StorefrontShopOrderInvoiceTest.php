@@ -16,6 +16,8 @@ use App\Storefront\StorefrontInvoiceUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -55,6 +57,14 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Rp121.500')
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Pembayaran QRIS')
+            ->assertSeeInOrder([
+                'Total bayar QRIS',
+                'Rp121.500',
+                'Batas bayar',
+                $expectedQrDataUri,
+                'Cek status pembayaran',
+                'Ringkasan invoice',
+            ], false)
             ->assertDontSee('Bayar via Website Pakasir')
             ->assertDontSee('https://app.pakasir.test/pay/lhie-test/120000', false)
             ->assertDontSee('Pakasir')
@@ -92,6 +102,41 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Rp88.000')
             ->assertSee('Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.')
             ->assertDontSee('Pakasir');
+    }
+
+    public function test_new_web_order_recovery_key_is_copyable_once_after_primary_payment_action(): void
+    {
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        [$order] = $this->pendingNativeQrisOrder(
+            totalAmount: 66000,
+            providerFee: 500,
+            providerTotalPayment: 66500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.RECOVERYKEYORDER99',
+        );
+        $accessKey = 'LHIE-RECOVERY-KEY-ISSUE-139';
+        $order->forceFill(['credential_access_key_hash' => Hash::make($accessKey)])->save();
+
+        $response = $this->withSession([
+            'storefront.order_access.issued_key.'.$order->getKey() => Crypt::encryptString($accessKey),
+        ])->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false));
+
+        $response
+            ->assertOk()
+            ->assertSeeInOrder([
+                'QRIS invoice',
+                'Total bayar QRIS',
+                'Cek status pembayaran',
+                'Simpan Recovery Key pesanan website ini.',
+                'Salin key',
+                'Ringkasan invoice',
+            ])
+            ->assertSee($accessKey, false)
+            ->assertSee('data-copy-text="'.$accessKey.'"', false)
+            ->assertSee('data-copy-success="Recovery Key tersalin."', false);
+
+        $this->assertSame(2, substr_count($response->getContent(), $accessKey));
+        $this->assertSame(1, substr_count($response->getContent(), 'data-copy-text="'.$accessKey.'"'));
     }
 
     public function test_signed_cancel_endpoint_cancels_pending_order_releases_resources_audits_and_is_idempotent(): void
@@ -295,6 +340,13 @@ class StorefrontShopOrderInvoiceTest extends TestCase
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false))
             ->assertOk()
+            ->assertSeeInOrder([
+                'Data akun',
+                'Alpha Account',
+                'alpha-one@example.test|AlphaSecret1',
+                'Panduan login &amp; keamanan',
+                'Ringkasan invoice',
+            ], false)
             ->assertSee('Data akun')
             ->assertSee('Alpha Account')
             ->assertSee('alpha-one@example.test|AlphaSecret1', false)
@@ -302,7 +354,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Beta Account')
             ->assertSee('beta@example.test|BetaSecret', false)
             ->assertSee('Simpan data ini di password manager pribadi. Screenshot pribadi hanya cadangan aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.')
-            ->assertSee('Panduan login & keamanan');
+            ->assertSee('Panduan login & keamanan')
+            ->assertDontSee('Pembayaran QRIS');
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder, null, false))
             ->assertOk()
@@ -445,11 +498,38 @@ class StorefrontShopOrderInvoiceTest extends TestCase
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
-            ->assertSee('Status pembayaran final')
+            ->assertSee('Status akhir')
+            ->assertSee('Invoice ini tidak bisa dibayar lagi')
             ->assertSee('Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.')
-            ->assertSee('Belanja lagi')
+            ->assertSee('Buat order baru')
             ->assertSee('Butuh bantuan?')
+            ->assertSeeInOrder([
+                'Status akhir',
+                'Invoice ini tidak bisa dibayar lagi',
+                'Buat order baru',
+                'Ringkasan invoice',
+            ])
             ->assertDontSee('data-shop-payment-status', false)
-            ->assertDontSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.');
+            ->assertDontSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.')
+            ->assertDontSee('Pembayaran QRIS')
+            ->assertDontSee('Total bayar QRIS');
+    }
+
+    public function test_cancelled_invoice_replaces_payment_instructions_with_new_order_action(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(47000, 300, 47300, '00020101021226610016ID.CO.QRIS.RENDERCANCELLED99');
+        $order->update(['order_status' => OrderStatus::Cancelled, 'payment_status' => PaymentStatus::Failed]);
+        $payment->update(['status' => PaymentStatus::Failed]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Order dibatalkan')
+            ->assertSee('Invoice ini tidak bisa dibayar lagi')
+            ->assertSee('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.')
+            ->assertSee('Buat order baru')
+            ->assertDontSee('Pembayaran QRIS')
+            ->assertDontSee('Cek status pembayaran')
+            ->assertDontSee('Batalkan order &amp; lepas stok', false);
     }
 }

@@ -28,13 +28,13 @@
             <dt class="text-[var(--sf-muted)]">Biaya QRIS</dt>
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $payment?->provider_fee !== null ? $storefront->idr($payment->provider_fee) : '-' }}</dd>
         </div>
-        <div class="flex items-center justify-between gap-4">
-            <dt class="text-[var(--sf-muted)]">Batas bayar</dt>
-            <dd class="text-right font-black text-[var(--sf-ink)]">{{ $paymentDeadlineLabel ?? '-' }}</dd>
-        </div>
         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">
             <dt class="font-black text-[var(--sf-ink)]">Total bayar QRIS</dt>
             <dd class="text-right font-display text-2xl font-black text-[var(--sf-accent)]">{{ $payableAmount !== null ? $storefront->idr($payableAmount) : '-' }}</dd>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+            <dt class="text-[var(--sf-muted)]">Batas bayar</dt>
+            <dd class="text-right font-black text-[var(--sf-ink)]">{{ $paymentDeadlineLabel ?? '-' }}</dd>
         </div>
     </dl>
 

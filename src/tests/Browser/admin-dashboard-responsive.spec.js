@@ -11,7 +11,7 @@ const appDir = path.resolve(__dirname, '../..');
 
 let baseUrl;
 let dbPath;
-let qrisInvoice;
+let invoiceFixtures;
 let serverProcess;
 
 test.describe.configure({ mode: 'serial' });
@@ -25,7 +25,7 @@ test.beforeAll(async () => {
 
     runArtisan(['optimize:clear']);
     runArtisan(['migrate:fresh', '--force']);
-    qrisInvoice = JSON.parse(runArtisan(['tinker', '--execute', responsiveSeedScript]));
+    invoiceFixtures = JSON.parse(runArtisan(['tinker', '--execute', responsiveSeedScript]));
 
     serverProcess = spawn('php', ['artisan', 'serve', '--host=127.0.0.1', `--port=${new URL(baseUrl).port}`], {
         cwd: appDir,
@@ -85,13 +85,13 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
 
 test('announces terminal QRIS status and exposes buyer next steps', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 900 });
-    await page.goto(`${baseUrl}${qrisInvoice.showUrl}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}${invoiceFixtures.pendingStatusRefresh.showUrl}`, { waitUntil: 'domcontentloaded' });
 
     const statusCard = page.locator('[data-shop-payment-status]');
     await expect(statusCard.getByText('Cek status pembayaran', { exact: true }).first()).toBeVisible();
 
     runArtisan(['tinker', '--execute', `
-        $order = App\\Models\\Order::findOrFail('${qrisInvoice.orderId}');
+        $order = App\\Models\\Order::findOrFail('${invoiceFixtures.pendingStatusRefresh.orderId}');
         $order->update([
             'order_status' => App\\Enums\\OrderStatus::Cancelled,
             'payment_status' => App\\Enums\\PaymentStatus::Failed,
@@ -101,12 +101,48 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
 
     await statusCard.getByRole('button', { name: 'Cek status pembayaran' }).click();
     await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Status pembayaran final');
-    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.');
-    await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.');
+    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
+    await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
     await expect(statusCard.getByRole('button', { name: 'Cek status pembayaran' })).toBeHidden();
     await expect(statusCard.getByRole('link', { name: 'Belanja lagi' })).toBeVisible();
     await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
     await expectNoDocumentOverflow(page);
+});
+
+test('prioritizes invoice content by state without mobile overflow', async ({ page }) => {
+    for (const width of [320, 390, 768, 1280]) {
+        await page.setViewportSize({ width, height: 1000 });
+
+        await page.goto(`${baseUrl}${invoiceFixtures.pendingWithNativeQris.showUrl}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toBeVisible();
+        await expect(page.getByText('Total bayar QRIS')).toBeVisible();
+        await expect(page.getByText('Batas bayar')).toBeVisible();
+        await expect(page.getByAltText(/QRIS invoice/)).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Cek status pembayaran' })).toBeVisible();
+        await expectBefore(page.getByRole('heading', { name: 'QRIS invoice' }), page.locator('section[aria-label="Ringkasan invoice"]'));
+        await expectNoDocumentOverflow(page);
+
+        await page.goto(`${baseUrl}${invoiceFixtures.paid.showUrl}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: 'Data akun' })).toBeVisible();
+        await expect(page.getByText('browser-paid@example.test|BrowserPaidSecret')).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
+        await expectBefore(page.getByRole('heading', { name: 'Data akun' }), page.locator('section[aria-label="Ringkasan invoice"]'));
+        await expectNoDocumentOverflow(page);
+
+        await page.goto(`${baseUrl}${invoiceFixtures.expired.showUrl}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Buat order baru' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
+        await expectBefore(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' }), page.locator('section[aria-label="Ringkasan invoice"]'));
+        await expectNoDocumentOverflow(page);
+
+        await page.goto(`${baseUrl}${invoiceFixtures.cancelled.showUrl}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' })).toBeVisible();
+        await expect(page.getByText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Cek status pembayaran' })).toHaveCount(0);
+        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
+        await expectNoDocumentOverflow(page);
+    }
 });
 
 test('stacks shop cards and keeps focus on the active filter at mobile width', async ({ page }) => {
@@ -207,8 +243,9 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'QR Manual /payment' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
     await expectStoreLinkCopyAndShare(page);
 
     await expectNoDocumentOverflow(page);
@@ -226,8 +263,9 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
     await expectBottomNavUsable(page);
     await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
-    await expect(page.getByRole('button', { name: 'QR Manual /payment' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Pakasir' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
 
     await expect(page.getByRole('region', { name: 'Link toko' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
@@ -245,7 +283,7 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expect(manageModal).toBeVisible();
     await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
     await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).click();
+    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).first().click();
     await expect(manageModal.getByRole('textbox')).toBeVisible();
     await manageModal.getByRole('button', { name: 'Batal' }).click();
     await expect(manageModal.getByRole('textbox')).toBeHidden();
@@ -254,14 +292,14 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     const modal = page.getByRole('dialog', { name: 'Tambah Stok' });
     await expect(modal).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Tambah Stok' })).toBeVisible();
-    await expect(page.getByText('0 item')).toBeVisible();
+    await expect(modal.getByText('0 item')).toBeVisible();
 
-    await page.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234').fill('akun-1@example.test\nakun-2@example.test');
-    await expect(page.getByText('2 item')).toBeVisible();
+    await modal.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234').fill('akun-1@example.test\nakun-2@example.test');
+    await expect(modal.getByText('2 item')).toBeVisible();
 
     await expectElementWithinViewport(page, modal);
-    await expectTouchTargetAtLeast44px(page.getByRole('button', { name: 'Batal' }));
-    await expectTouchTargetAtLeast44px(page.getByRole('button', { name: /Simpan/ }));
+    await expectTouchTargetAtLeast44px(modal.getByRole('button', { name: 'Batal' }));
+    await expectTouchTargetAtLeast44px(modal.getByRole('button', { name: /Simpan/ }));
     await expectNoDocumentOverflow(page);
 
     await page.goto(`${baseUrl}/admin?tab=penjualan`);
@@ -401,7 +439,7 @@ async function exerciseProductManagementModals(page) {
     await expect(manageModal.getByText('#1')).toBeVisible();
     await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
     await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).click();
+    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).first().click();
     await expect(manageModal.getByRole('textbox')).toBeVisible();
     await manageModal.getByRole('button', { name: 'Batal' }).click();
     await expect(manageModal.getByRole('textbox')).toBeHidden();
@@ -461,6 +499,15 @@ async function expectOneColumn(firstLocator, secondLocator) {
 
     const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
     expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
+}
+
+async function expectBefore(firstLocator, secondLocator) {
+    const first = await firstLocator.first().boundingBox();
+    const second = await secondLocator.first().boundingBox();
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(first.y + first.height).toBeLessThanOrEqual(second.y + 2);
 }
 
 async function expectPrimaryActionsAtLeast44px(page) {
@@ -695,10 +742,33 @@ $qrisOrder = Order::factory()->create([
     'order_status' => OrderStatus::PendingPayment,
     'payment_status' => PaymentStatus::Pending,
     'total_amount' => 45000,
+    'checkout_key' => bcrypt('browser-recovery-key'),
+    'expires_at' => now()->addMinutes(15),
 ]);
 
 Payment::factory()->create([
     'order_id' => $qrisOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'api_qris',
+    'provider_payment_method' => 'qris',
+    'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERPENDING99',
+    'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.BROWSERPENDING99'),
+    'provider_fee' => 350,
+    'provider_total_payment' => 45350,
+    'amount' => 45000,
+    'status' => PaymentStatus::Pending,
+    'expired_at' => now()->addMinutes(15),
+]);
+
+$statusPendingOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-STATUS-PENDING',
+    'order_status' => OrderStatus::PendingPayment,
+    'payment_status' => PaymentStatus::Pending,
+    'total_amount' => 45000,
+]);
+Payment::factory()->create([
+    'order_id' => $statusPendingOrder->id,
     'provider' => 'pakasir',
     'method' => 'qris',
     'provider_payment_method' => 'qris',
@@ -706,8 +776,112 @@ Payment::factory()->create([
     'status' => PaymentStatus::Pending,
 ]);
 
+$paidInvoiceOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-PAID-INVOICE',
+    'order_status' => OrderStatus::Processing,
+    'payment_status' => PaymentStatus::Paid,
+    'total_amount' => 65000,
+]);
+$paidInvoiceProduct = Product::factory()->create([
+    'category_id' => $category->id,
+    'name' => 'Browser Paid Invoice Product',
+    'price_amount' => 65000,
+    'stock' => 1,
+    'reserved_stock' => 1,
+    'is_active' => true,
+]);
+$paidInvoiceItem = OrderItem::factory()->create([
+    'order_id' => $paidInvoiceOrder->id,
+    'product_id' => $paidInvoiceProduct->id,
+    'product_name' => $paidInvoiceProduct->name,
+    'quantity' => 1,
+    'unit_price' => 65000,
+    'subtotal' => 65000,
+]);
+ProductStockItem::create([
+    'product_id' => $paidInvoiceProduct->id,
+    'order_item_id' => $paidInvoiceItem->id,
+    'secret' => 'browser-paid@example.test|BrowserPaidSecret',
+]);
+Payment::factory()->create([
+    'order_id' => $paidInvoiceOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'api_qris',
+    'provider_payment_method' => 'qris',
+    'amount' => 65000,
+    'status' => PaymentStatus::Paid,
+    'paid_at' => now()->subMinutes(10),
+]);
+
+$expiredInvoiceOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-EXPIRED-INVOICE',
+    'order_status' => OrderStatus::Expired,
+    'payment_status' => PaymentStatus::Expired,
+    'total_amount' => 55000,
+    'expires_at' => now()->subMinute(),
+]);
+OrderItem::factory()->create([
+    'order_id' => $expiredInvoiceOrder->id,
+    'product_name' => 'Browser Expired Product',
+    'quantity' => 1,
+    'unit_price' => 55000,
+    'subtotal' => 55000,
+]);
+Payment::factory()->create([
+    'order_id' => $expiredInvoiceOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'api_qris',
+    'provider_payment_method' => 'qris',
+    'amount' => 55000,
+    'status' => PaymentStatus::Expired,
+    'expired_at' => now()->subMinute(),
+]);
+
+$cancelledInvoiceOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-CANCELLED-INVOICE',
+    'order_status' => OrderStatus::Cancelled,
+    'payment_status' => PaymentStatus::Failed,
+    'total_amount' => 56000,
+]);
+OrderItem::factory()->create([
+    'order_id' => $cancelledInvoiceOrder->id,
+    'product_name' => 'Browser Cancelled Product',
+    'quantity' => 1,
+    'unit_price' => 56000,
+    'subtotal' => 56000,
+]);
+Payment::factory()->create([
+    'order_id' => $cancelledInvoiceOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'api_qris',
+    'provider_payment_method' => 'qris',
+    'amount' => 56000,
+    'status' => PaymentStatus::Failed,
+]);
+
 echo json_encode([
-    'orderId' => $qrisOrder->id,
-    'showUrl' => URL::signedRoute('storefront.shop.orders.show', $qrisOrder, null, false),
+    'pendingWithNativeQris' => [
+        'orderId' => $qrisOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', ['order' => $qrisOrder, 'key' => 'browser-recovery-key'], null, false),
+    ],
+    'pendingStatusRefresh' => [
+        'orderId' => $statusPendingOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', $statusPendingOrder, null, false),
+    ],
+    'paid' => [
+        'orderId' => $paidInvoiceOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', $paidInvoiceOrder, null, false),
+    ],
+    'expired' => [
+        'orderId' => $expiredInvoiceOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', $expiredInvoiceOrder, null, false),
+    ],
+    'cancelled' => [
+        'orderId' => $cancelledInvoiceOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', $cancelledInvoiceOrder, null, false),
+    ],
 ]);
 `;

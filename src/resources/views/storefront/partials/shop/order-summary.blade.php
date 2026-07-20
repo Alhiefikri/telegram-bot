@@ -1,25 +1,23 @@
 <x-storefront.panel as="section" class="mt-6" aria-label="Ringkasan invoice">
-    <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Invoice</p>
-            <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ $order->invoice_number }}</h2>
-            <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                @if ($isTerminal && ! $isPaid)
-                    Stok tidak lagi dicadangkan untuk invoice ini.
-                @else
-                    Stok sudah dicadangkan untuk {{ $order->customer?->first_name ?? 'Pelanggan' }}.
-                @endif
-            </p>
-        </div>
+    <div class="min-w-0">
+        <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Invoice</p>
+        <code class="mt-2 block max-w-full break-all font-mono text-base font-black leading-6 text-[var(--sf-ink)] sm:text-lg">{{ $order->invoice_number }}</code>
+        <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
+            @if ($isTerminal && ! $isPaid)
+                Stok tidak lagi dicadangkan untuk invoice ini.
+            @else
+                Stok sudah dicadangkan untuk {{ $order->customer?->first_name ?? 'Pelanggan' }}.
+            @endif
+        </p>
 
-        <dl class="grid gap-2 text-sm font-bold sm:min-w-52">
-            <div class="flex items-center justify-between gap-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2">
+        <dl class="mt-5 grid gap-2 text-sm font-bold sm:grid-cols-2">
+            <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2.5">
                 <dt class="text-[var(--sf-muted)]">Status order</dt>
-                <dd class="font-black text-[var(--sf-ink)]">{{ $order->order_status?->value ?? '-' }}</dd>
+                <dd class="break-words text-right font-black text-[var(--sf-ink)]">{{ $order->order_status?->value ?? '-' }}</dd>
             </div>
-            <div class="flex items-center justify-between gap-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2">
+            <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2.5">
                 <dt class="text-[var(--sf-muted)]">Status pembayaran</dt>
-                <dd class="font-black text-[var(--sf-ink)]">{{ $payment?->status?->value ?? $order->payment_status?->value ?? '-' }}</dd>
+                <dd class="break-words text-right font-black text-[var(--sf-ink)]">{{ $payment?->status?->value ?? $order->payment_status?->value ?? '-' }}</dd>
             </div>
         </dl>
     </div>
@@ -28,9 +26,9 @@
         <h3 class="font-display text-xl font-black text-[var(--sf-ink)]">Produk</h3>
         <ul class="mt-4 space-y-3 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
             @foreach ($order->orderItems as $item)
-                <li class="flex items-center justify-between gap-4 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
-                    <span class="font-black text-[var(--sf-ink)]">{{ $item->product_name }}</span>
-                    <span>x{{ $item->quantity }}</span>
+                <li class="flex min-w-0 items-start justify-between gap-3 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
+                    <span class="min-w-0 break-words font-black text-[var(--sf-ink)]">{{ $item->product_name }}</span>
+                    <span class="shrink-0 rounded-md bg-[var(--sf-accent-soft)] px-2 py-0.5 font-black text-[var(--sf-ink)]">x{{ $item->quantity }}</span>
                 </li>
             @endforeach
         </ul>

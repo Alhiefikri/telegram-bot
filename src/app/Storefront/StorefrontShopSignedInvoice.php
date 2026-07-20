@@ -158,8 +158,8 @@ class StorefrontShopSignedInvoice
         return match (true) {
             $this->isPaid($order, $payment) => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
             $payment?->status === PaymentStatus::Expired || $order->order_status === OrderStatus::Expired => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $payment?->status === PaymentStatus::Failed => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
             $order->order_status === OrderStatus::Cancelled => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
+            $payment?->status === PaymentStatus::Failed => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
             default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
         };
     }
