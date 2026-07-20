@@ -10,6 +10,7 @@ use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Mockery;
@@ -180,6 +181,35 @@ class WebhookIngressTest extends TelegramBotTestSupport
             ->expectsOutputToContain('telegram:recover-updates --queue=default')
             ->assertSuccessful();
     }
+    public function test_failed_telegram_update_recovery_reprocesses_only_the_stored_update_and_removes_its_failed_record(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $update = TelegramUpdate::create([
+            'update_id' => 204,
+            'payload' => $this->messageUpdate(204, '/start'),
+            'created_at' => now(),
+        ]);
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode([
+                'displayName' => ProcessTelegramUpdate::class,
+                'data' => ['command' => serialize(new ProcessTelegramUpdate($update->id))],
+            ], JSON_THROW_ON_ERROR),
+            'exception' => 'temporary Telegram failure',
+            'failed_at' => now(),
+        ]);
+
+        $this->artisan('telegram:recover-failed-updates')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=1 failed=0')
+            ->assertSuccessful();
+
+        $this->assertNotNull($update->fresh()->processed_at);
+        $this->assertSame(0, DB::table('failed_jobs')->count());
+    }
+
 
     public function test_telegram_webhook_is_rate_limited_by_user(): void
     {

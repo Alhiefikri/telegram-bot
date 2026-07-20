@@ -8,6 +8,12 @@ on:
         required: false
         default: ''
         type: string
+      recover_failed_telegram_updates:
+        description: Recover failed ProcessTelegramUpdate jobs after the deployment starts healthy.
+        required: false
+        default: false
+        type: boolean
+
 
 env:
   DEPLOY_BRANCH: main
@@ -88,13 +94,14 @@ jobs:
           PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
 
@@ -134,6 +141,10 @@ jobs:
 
             sleep 5
           done
+
+          if [ "$RECOVER_FAILED_TELEGRAM_UPDATES" = "true" ]; then
+            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates
+          fi
 
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
