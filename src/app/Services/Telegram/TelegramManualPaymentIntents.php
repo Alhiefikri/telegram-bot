@@ -102,17 +102,24 @@ class TelegramManualPaymentIntents
         }
         $order = $claim['order'];
         $payment = $claim['payment'];
+        $forwarded = false;
         try {
-            $this->forwardSubmittedManualPaymentProof($order, $payment);
+            $forwarded = $this->forwardSubmittedManualPaymentProof($order, $payment);
         } catch (\Throwable $exception) {
-            throw $exception;
+            report($exception);
         }
 
-        $this->bot->sendMessage($chatId, $this->locale->text(
-            $customer,
-            "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
-            "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
-        ));
+        $this->bot->sendMessage($chatId, $forwarded
+            ? $this->locale->text(
+                $customer,
+                "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
+                "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
+            )
+            : $this->locale->text(
+                $customer,
+                "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBukti sedang diteruskan ke admin untuk diverifikasi. Kamu tidak perlu kirim ulang.\n\nKalau pembayaran sesuai, produk akan dikirim otomatis.",
+                "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt is being forwarded to the admin for verification. You do not need to send it again.\n\nIf the payment matches, the product will be sent automatically.",
+            ));
     }
 
     public function forwardSubmittedManualPaymentProof(Order $order, $payment): bool

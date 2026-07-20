@@ -211,11 +211,14 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $failedUpdate = $this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']);
         $failedUpdate['message']['caption'] = '/payment';
-        $this->postTelegramWebhook($failedUpdate)->assertServerError();
+        $this->postTelegramWebhook($failedUpdate)->assertOk();
 
         $this->assertNotNull($payment->fresh()->payment_proof_submitted_at);
         $this->assertSame('large-photo', $payment->fresh()->payment_proof_file_id);
         $this->assertNull($payment->fresh()->payment_proof_forwarding_started_at);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'Bukti pembayaran sudah masuk'));
 
         $this->artisan('telegram:forward-payment-proofs', ['--chunk' => 1])
             ->expectsOutputToContain('telegram:forward-payment-proofs completed: forwarded=1 failed=0')
