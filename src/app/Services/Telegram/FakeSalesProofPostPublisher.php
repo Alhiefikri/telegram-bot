@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Storefront\StorefrontUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -13,8 +14,6 @@ use Throwable;
 class FakeSalesProofPostPublisher
 {
     public const COOLDOWN_HOUR_OPTIONS = [2, 3, 4, 5];
-
-    private const SHOPPING_BUTTON_URL = 'https://t.me/lhiestore_bot?start=from_channel';
 
     private const CACHE_MANUAL_LAST_SENT_AT = 'fake-sales-proof:manual:last-sent-at';
 
@@ -52,6 +51,7 @@ class FakeSalesProofPostPublisher
         private readonly TelegramBotClient $bot,
         private readonly SalesProofPostFormatter $formatter,
         private readonly SalesProofPostNumbering $numbering,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     /**
@@ -211,7 +211,7 @@ class FakeSalesProofPostPublisher
         $response = $this->bot->sendMessage(
             $chatId,
             $this->formatter->formatFake($this->randomBuyerMask(), $product->name, 1, $this->fakeOrderNumber()),
-            $this->shoppingButtonMarkup(),
+            $this->shoppingButtonMarkup($product),
         );
         $messageId = data_get($response, 'result.message_id');
         if (data_get($response, 'ok') !== true || ! $messageId) {
@@ -346,10 +346,10 @@ class FakeSalesProofPostPublisher
         }
     }
 
-    private function shoppingButtonMarkup(): array
+    private function shoppingButtonMarkup(Product $product): array
     {
         return [
-            'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => self::SHOPPING_BUTTON_URL]]],
+            'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => $this->urls->telegramProductStartUrl($product)]]],
         ];
     }
 }

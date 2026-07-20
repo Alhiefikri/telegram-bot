@@ -653,7 +653,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
         $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
-        $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
+        $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count(), (string) SalesProofPost::first()?->last_error);
         $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
         $this->assertMatchesRegularExpression('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $copy);
         $this->assertStringContainsString('+ 1 other products', $copy);
@@ -686,7 +686,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
 
         $post = $post->fresh();
-        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status);
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status, (string) $post->last_error);
         $this->assertSame(2, $post->attempts);
         $this->assertSame('99', $post->telegram_message_id);
         $this->assertNull($post->last_error);

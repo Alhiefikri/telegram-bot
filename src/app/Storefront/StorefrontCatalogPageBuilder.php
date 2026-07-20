@@ -13,6 +13,7 @@ class StorefrontCatalogPageBuilder
     public function __construct(
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontProductPresenter $products,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     public function home(?string $rawSearch): StorefrontCatalogPage
@@ -58,11 +59,11 @@ class StorefrontCatalogPageBuilder
             copy: $copy,
             pageTitle: $isShop ? 'Belanja Produk Digital | Lhie Store' : str_replace(':brand', $brand, $copy['meta']['title']),
             pageDescription: $isShop
-                ? 'Marketplace Lhie Store untuk membeli produk digital dan akun premium langsung dari web dengan QRIS, invoice, dan akses pesanan mandiri.'
+                ? 'Katalog produk digital Lhie Store untuk membeli produk digital dan akun premium langsung dari web dengan QRIS, invoice, dan akses pesanan mandiri.'
                 : $copy['meta']['description'],
             canonicalUrl: $isShop ? route('storefront.shop.index') : url('/'),
             homeUrl: route('storefront.home'),
-            shopUrl: route('storefront.shop.index'),
+            shopUrl: $this->urls->catalogUrl(),
             supportHref: $this->storefront->supportHref(),
             supportDestination: $this->storefront->supportDestination(),
             supportContext: $this->storefront->support()->general(),
@@ -72,8 +73,8 @@ class StorefrontCatalogPageBuilder
             popularProducts: $catalogProducts->filter->isPopular->values(),
             featuredProduct: $this->featuredProduct(),
             search: $search,
-            searchAction: $isShop ? route('storefront.shop.index').'#products' : url('/').'#products',
-            clearSearchUrl: $isShop ? route('storefront.shop.index').'#products' : url('/').'#products',
+            searchAction: $this->urls->catalogUrl(),
+            clearSearchUrl: $this->urls->catalogUrl(),
             emptyCategoryTitle: $copy['catalog']['empty_category_title'],
             emptyCategoryBody: $copy['catalog']['empty_category_body'],
             emptyProductsTitle: $isShop ? $copy['shop']['empty_title'] : $copy['catalog']['empty_title'],

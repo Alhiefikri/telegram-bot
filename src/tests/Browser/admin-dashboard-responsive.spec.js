@@ -48,7 +48,7 @@ test.afterAll(async () => {
 
 test('keeps customer checkout modal keyboard accessible and restores failed state', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
 
     const productCard = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
     await productCard.scrollIntoViewIfNeeded();
@@ -81,6 +81,61 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
     await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
     await expect(dialog.locator('#storefront-checkout-error')).toBeVisible();
     await expectNoDocumentOverflow(page);
+});
+
+test('opens the selected product checkout from the landing catalog', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+
+    const productCard = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
+    await productCard.scrollIntoViewIfNeeded();
+    await productCard.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await expectNoDocumentOverflow(page);
+});
+
+test('opens the selected product checkout from a direct product URL', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+
+    const productHref = await page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first().getAttribute('href');
+    const productUrl = new URL(productHref, baseUrl);
+    productUrl.searchParams.set('checkout', '1');
+
+    await page.goto(productUrl.toString(), { waitUntil: 'domcontentloaded' });
+
+    const dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+    await expect(page.getByRole('link', { name: 'Kembali ke katalog' })).toHaveAttribute('href', /#product-\d+$/);
+    await expectNoDocumentOverflow(page);
+});
+
+test('keeps the direct product fallback usable without the checkout modal', async ({ browser }) => {
+    const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 900 } });
+    const page = await context.newPage();
+
+    try {
+        await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+        const productHref = await page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first().getAttribute('href');
+        const productUrl = new URL(productHref, baseUrl);
+        productUrl.searchParams.set('checkout', '1');
+
+        await page.goto(productUrl.toString(), { waitUntil: 'domcontentloaded' });
+
+        await expect(page.getByRole('heading', { name: 'Browser QA Produk A' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Bayar QRIS di Website' })).toBeVisible();
+        await expect(page.getByLabel('Jumlah')).toHaveValue('1');
+        await expect(page.getByLabel('Nama pembeli')).toBeVisible();
+        await expect(page.getByRole('dialog', { name: 'Browser QA Produk A' })).toHaveCount(0);
+        await expectNoDocumentOverflow(page);
+    } finally {
+        await context.close();
+    }
 });
 
 test('announces terminal QRIS status and exposes buyer next steps', async ({ page }) => {
@@ -149,8 +204,10 @@ test('stacks shop cards and keeps focus on the active filter at mobile width', a
     await page.setViewportSize({ width: 320, height: 900 });
     await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
 
-    const productA = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
-    const productB = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk B' }).first();
+    const catalogGrid = page.locator('#storefront-product-grid');
+    const productA = catalogGrid.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
+    const productB = catalogGrid.locator('a[data-product]').filter({ hasText: 'Browser QA Produk B' }).first();
+    await page.waitForTimeout(700);
     await expectOneColumn(productA, productB);
 
     await productB.focus();

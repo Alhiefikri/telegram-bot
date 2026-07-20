@@ -196,14 +196,14 @@ class StorefrontShopCheckoutTest extends TestCase
             ]);
 
         $response
-            ->assertRedirect(route('storefront.shop.index'))
+            ->assertRedirect(url('/#products'))
             ->assertSessionHas('storefront_checkout_error', 'Produk tidak ditemukan atau sudah tidak tersedia.')
             ->assertInvalid(['product_id' => 'Produk tidak ditemukan atau sudah tidak tersedia.']);
         $this->assertNoLocalCheckoutRowsCreated('missing product');
         Http::assertNothingSent();
     }
 
-    public function test_shop_checkout_failure_from_homepage_redirects_to_shop_with_visible_error(): void
+    public function test_shop_checkout_failure_from_homepage_redirects_to_selected_product_with_visible_error(): void
     {
         $product = $this->availableProduct([
             'name' => 'Disabled Native QRIS Notice',
@@ -220,20 +220,21 @@ class StorefrontShopCheckoutTest extends TestCase
             ]);
 
         $response
-            ->assertRedirect(route('storefront.shop.index'))
+            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
 
         $this->followingRedirects()
-            ->get(route('storefront.shop.index'))
+            ->get(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertOk()
+            ->assertSee('data-checkout-product=', false)
             ->assertSee('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
 
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS from homepage');
         Http::assertNothingSent();
     }
 
-    public function test_shop_route_renders_marketplace_with_ready_modal_and_empty_stock_state(): void
+    public function test_landing_catalog_renders_ready_modal_and_empty_stock_state(): void
     {
         $ready = $this->availableProduct([
             'name' => 'Claude Pro Ready',
@@ -246,12 +247,12 @@ class StorefrontShopCheckoutTest extends TestCase
             'price_amount' => 45000,
         ]);
 
-        $response = $this->get(route('storefront.shop.index'));
+        $response = $this->get(route('storefront.home'));
         $emptyCard = $this->unavailableProductCardHtml($response->getContent(), $empty);
 
         $response
             ->assertOk()
-            ->assertSee('Marketplace produk digital siap pakai')
+            ->assertSee('Pilih produk digital sesuai kebutuhan.')
             ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
             ->assertSee('data-product=', false)
             ->assertSee('Claude Pro Ready')
@@ -274,14 +275,14 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringNotContainsString('data-product=', $emptyCard);
     }
 
-    public function test_shop_modal_uses_only_the_website_qris_checkout_action(): void
+    public function test_landing_modal_uses_only_the_website_qris_checkout_action(): void
     {
         $this->availableProduct([
             'name' => 'CapCut Pro Web',
             'stock' => 3,
         ]);
 
-        $this->get(route('storefront.shop.index'))
+        $this->get(route('storefront.home'))
             ->assertOk()
             ->assertDontSee('checkoutManual()', false)
             ->assertDontSee('@click="checkoutManual()"', false)
@@ -291,7 +292,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Bayar QRIS di Website');
     }
 
-    public function test_shop_modal_renders_accessible_native_checkout_controls(): void
+    public function test_landing_modal_renders_accessible_native_checkout_controls(): void
     {
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -305,7 +306,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'usdt_price_amount' => 2_000_000,
         ]);
 
-        $this->get(route('storefront.shop.index'))
+        $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('role="dialog"', false)
             ->assertSee('aria-modal="true"', false)
@@ -327,7 +328,7 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
 
         $this->followingRedirects()
-            ->from(route('storefront.shop.index'))
+            ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => $product->id,
                 'quantity' => 2,
@@ -491,7 +492,7 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 1]);
 
-        $this->get(route('storefront.shop.index'))->assertOk()->assertSee('Binance Pay');
+        $this->get(route('storefront.home'))->assertOk()->assertSee('Binance Pay');
         $settings->update(['binance_pay_enabled' => false]);
 
         $this->post(route('storefront.shop.checkout'), [
@@ -499,7 +500,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'quantity' => 1,
             'buyer_handle' => '@buyer_test',
             'payment_method' => 'binance_pay',
-        ])->assertRedirect(route('storefront.shop.index'))
+        ])->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
 
         $this->assertNoLocalCheckoutRowsCreated('disabled Binance Pay after render');
@@ -586,10 +587,10 @@ class StorefrontShopCheckoutTest extends TestCase
             'buyer_handle' => '@buyer_test',
         ];
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
-            ->from(route('storefront.shop.index'))
+            ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $payload);
         $second = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
-            ->from(route('storefront.shop.index'))
+            ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $payload);
 
         $first->assertRedirect();
@@ -616,11 +617,11 @@ class StorefrontShopCheckoutTest extends TestCase
         ];
 
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
-            ->from(route('storefront.shop.index'))
+            ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $payload);
         $hash = Order::sole()->credential_access_key_hash;
         $second = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
-            ->from(route('storefront.shop.index'))
+            ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $payload);
 
         $first->assertRedirect();
@@ -723,7 +724,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $response = $this->postStorefrontShopCheckout($product, 1, '@buyer_test');
 
         $response
-            ->assertRedirect(route('storefront.shop.index'))
+            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS');
@@ -755,7 +756,7 @@ class StorefrontShopCheckoutTest extends TestCase
             $response = $this->postStorefrontShopCheckout($product, 1, 'Web Buyer');
 
             $response
-                ->assertRedirect(route('storefront.shop.index'))
+                ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
                 ->assertInvalid(['product_id' => $message]);
             $this->assertNoLocalCheckoutRowsCreated($case);
             $this->assertSame(3, $product->fresh()->stock, $case);

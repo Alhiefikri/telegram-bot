@@ -27,7 +27,7 @@
         </p>
 
         <div class="mx-auto mt-6 flex max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
-            <a href="{{ route('storefront.shop.index') }}" class="neo-button hover-rubber-band inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
+            <a href="#products" class="neo-button hover-rubber-band inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-accent)] px-7 text-sm font-black text-white">
                 <span>{{ $copy['hero']['primary_cta'] }}</span>
             </a>
             <a href="#cara-beli" class="neo-button hover-tilt-shake inline-flex h-14 items-center justify-center gap-2 bg-[var(--sf-surface)] px-7 text-sm font-black text-[var(--sf-ink)]">

@@ -3,7 +3,7 @@
     $status = $status ?? '500';
     $title = $title ?? 'Terjadi kendala.';
     $body = $body ?? 'Silakan kembali ke katalog atau hubungi support bila masalah berlanjut.';
-    $primaryHref = $primaryHref ?? route('storefront.shop.index');
+    $primaryHref = $primaryHref ?? app(\App\Storefront\StorefrontUrl::class)->catalogUrl();
     $primaryLabel = $primaryLabel ?? 'Kembali ke katalog';
 @endphp
 <!DOCTYPE html>

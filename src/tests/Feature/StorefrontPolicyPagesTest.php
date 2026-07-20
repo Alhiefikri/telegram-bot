@@ -45,7 +45,7 @@ class StorefrontPolicyPagesTest extends TestCase
 
     public function test_storefront_footer_links_to_real_policy_destinations(): void
     {
-        foreach ([route('storefront.home'), route('storefront.shop.index')] as $url) {
+        foreach ([route('storefront.home'), route('storefront.products.show', ['product' => \App\Models\Product::factory()->create()])] as $url) {
             $this->get($url)
                 ->assertOk()
                 ->assertSee('href="'.route('storefront.policies.privacy').'"', false)
@@ -55,6 +55,9 @@ class StorefrontPolicyPagesTest extends TestCase
                 ->assertDontSee('href="'.route('storefront.home').'#faq" class="hover:text-[var(--sf-accent)]">Kebijakan Privasi', false)
                 ->assertDontSee('href="'.route('storefront.home').'#faq" class="hover:text-[var(--sf-accent)]">Syarat Ketentuan', false);
         }
+
+        $this->get(route('storefront.shop.index'))
+            ->assertRedirect(url('/#products'));
     }
 
     public function test_recovery_surfaces_use_the_approved_support_boundary(): void

@@ -3,7 +3,7 @@
         <div class="neo-panel overflow-hidden bg-[var(--sf-surface)]">
             <div class="grid gap-6 border-b-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center sm:px-7">
                 <div>
-                    <p class="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--sf-ink)]">Shop web</p>
+                    <p class="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--sf-ink)]">Katalog web</p>
                     <h1 class="mt-2 max-w-3xl text-balance font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">
                         {{ $copy['shop']['title'] }}
                     </h1>

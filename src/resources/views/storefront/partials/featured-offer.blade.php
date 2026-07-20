@@ -3,6 +3,8 @@
         @php
             $featuredPresentation = $catalogPage->featuredProduct->presentation;
             $featuredPayload = $featuredPresentation->modalPayload();
+            $featuredReturnUrl = $storefront->catalogUrl($featuredPresentation->id, $catalogPage->search);
+            $featuredCheckoutUrl = $featuredPresentation->productUrl.(str_contains($featuredPresentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($featuredReturnUrl);
         @endphp
 
         <div class="neo-panel relative w-full overflow-hidden bg-[var(--sf-surface)] p-6 text-[var(--sf-ink)] sm:p-8">
@@ -33,9 +35,9 @@
                             </div>
                         </div>
 
-                        <button type="button" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
+                        <a href="{{ $featuredCheckoutUrl }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product), { opener: $el })" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
                             Pilih Checkout
-                        </button>
+                        </a>
                     </div>
                 </div>
             </div>
@@ -44,7 +46,7 @@
         <div class="neo-panel mx-auto flex w-full max-w-xl flex-col items-center border-dashed bg-[var(--sf-surface)] p-10 text-center">
             <h2 class="font-display text-xl font-black text-[var(--sf-ink)] sm:text-2xl">Belum ada produk tersedia.</h2>
             <p class="mt-3 max-w-sm text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">Saat ini belum ada produk aktif dengan stok tersedia. Lihat katalog untuk ketersediaan terbaru.</p>
-            <a href="{{ route('storefront.shop.index') }}" class="neo-button mt-6 inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-6 text-xs font-black text-white">
+            <a href="{{ $storefront->catalogUrl() }}" class="neo-button mt-6 inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-6 text-xs font-black text-white">
                 <span>Lihat katalog</span>
             </a>
         </div>

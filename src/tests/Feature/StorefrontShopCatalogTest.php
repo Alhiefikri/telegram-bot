@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\Product;
-use App\Storefront\StorefrontCatalogPage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -12,50 +11,48 @@ class StorefrontShopCatalogTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_shop_renders_compact_marketplace_grid(): void
+    public function test_shop_redirects_to_the_landing_catalog_surface(): void
+    {
+        $this->get(route('storefront.shop.index'))
+            ->assertRedirect(url('/#products'));
+
+        $this->get(route('storefront.shop.index', ['q' => 'chat gpt']))
+            ->assertRedirect(url('/?q=chat%20gpt#products'));
+    }
+
+    public function test_landing_renders_single_catalog_grid(): void
     {
         $category = Category::factory()->create(['name' => 'AI Tools', 'sort_order' => 1, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'Claude Pro Ready', 'stock' => 3, 'reserved_stock' => 0, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Plus Ready', 'stock' => 2, 'reserved_stock' => 0, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Team Restock', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => true]);
 
-        $this->get(route('storefront.shop.index'))
+        $this->get(route('storefront.home'))
             ->assertOk()
-            ->assertViewIs('storefront.shop')
-            ->assertViewHas('catalogPage', fn (StorefrontCatalogPage $page) => $page->isShop()
-                && $page->productCount() === 3
-                && $page->categoryFilters->pluck('name')->all() === ['AI Tools']
-                && $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all() === ['ChatGPT Plus Ready', 'Claude Pro Ready'])
-            ->assertSee('Belanja Produk Digital | Lhie Store')
-            ->assertSee('Marketplace produk digital siap pakai')
-            ->assertSee('Pilih produk, bayar QRIS di website, lalu simpan invoice dan Recovery Key khusus pesanan website untuk akses ulang.')
-            ->assertSee('Mulai belanja')
-            ->assertSee('Tentang Lhie Store')
-            ->assertSee('action="'.route('storefront.shop.index').'#products"', false)
+            ->assertSee('Lhie Store | Akun Premium &amp; Produk Digital', false)
+            ->assertSee('Pilih produk digital sesuai kebutuhan.')
+            ->assertSee('action="'.url('/#products').'"', false)
             ->assertSee('Katalog aktif · 3 produk publik')
-            ->assertSee('Pilih akun, cek stok, lanjut checkout.')
-            ->assertSee('Produk aktif dari Admin Dashboard muncul otomatis di sini. Filter kategori atau cari produk yang siap dibeli.')
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
-            ->assertSee('grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false)
-            ->assertDontSee('storefront.partials.featured-offer')
-            ->assertDontSee('Apa kata pelanggan')
-            ->assertDontSee('Angka operasional');
+            ->assertSee('grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false)
+            ->assertSee('id="featured-offer"', false)
+            ->assertDontSee('Katalog produk digital siap pakai');
     }
 
-    public function test_single_shop_product_is_centered_in_grid(): void
+    public function test_single_landing_product_is_centered_in_grid(): void
     {
         Product::factory()->create(['name' => 'Produk Tunggal Shop', 'stock' => 1, 'reserved_stock' => 0]);
 
-        $this->get(route('storefront.shop.index'))
+        $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('id="storefront-product-grid"', false)
             ->assertSee('mx-auto max-w-xs grid-cols-1', false)
-            ->assertDontSee('grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
+            ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_available_shop_products_open_existing_modal_with_dual_checkout_contract(): void
+    public function test_available_landing_products_open_existing_modal_with_dual_checkout_contract(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro Web',
@@ -65,7 +62,7 @@ class StorefrontShopCatalogTest extends TestCase
             'reserved_stock' => 0,
         ]);
 
-        $response = $this->get(route('storefront.shop.index'));
+        $response = $this->get(route('storefront.home'));
 
         $response
             ->assertOk()
@@ -102,7 +99,7 @@ class StorefrontShopCatalogTest extends TestCase
     }
 
 
-    public function test_unavailable_shop_products_render_disabled_card_without_modal_trigger(): void
+    public function test_unavailable_landing_products_render_disabled_card_without_modal_trigger(): void
     {
         $category = Category::factory()->create(['name' => 'Unavailable Products', 'is_active' => true]);
         Product::factory()->create([
@@ -120,7 +117,7 @@ class StorefrontShopCatalogTest extends TestCase
             'is_active' => true,
         ]);
 
-        $response = $this->get(route('storefront.shop.index'));
+        $response = $this->get(route('storefront.home'));
         $unavailableCard = $this->productArticleHtml($response->getContent(), $unavailableProduct);
 
         $response
@@ -143,12 +140,12 @@ class StorefrontShopCatalogTest extends TestCase
         $this->assertStringNotContainsString(route('storefront.shop.checkout'), $unavailableCard);
     }
 
-    public function test_shop_empty_state_uses_ready_product_copy(): void
+    public function test_landing_empty_state_uses_catalog_copy(): void
     {
-        $this->get(route('storefront.shop.index'))
+        $this->get(route('storefront.home'))
             ->assertOk()
-            ->assertSee('Belum ada produk siap dibeli.')
-            ->assertSee('Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.')
+            ->assertSee('Katalog publik sedang disiapkan.')
+            ->assertSee('Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin.')
             ->assertSee('Katalog aktif · 0 produk publik');
     }
 
@@ -159,7 +156,7 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('action="'.url('/').'#products"', false)
+            ->assertSee('action="'.url('/#products').'"', false)
             ->assertSee('label for="storefront-search" class="sr-only">Cari produk</label>', false)
             ->assertSee('input id="storefront-search"', false)
             ->assertSee('stroke-width="3" aria-hidden="true"', false)
@@ -171,8 +168,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Produk digital siap pakai, checkout tanpa ribet.')
             ->assertSee('Belanja produk digital dalam tiga langkah.')
-            ->assertDontSee('Pilih akun, cek stok, lanjut checkout.')
-            ->assertDontSee('Marketplace produk digital siap pakai')
+            ->assertDontSee('Katalog produk digital siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
     }
 

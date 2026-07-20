@@ -465,17 +465,26 @@ export function storefrontModal() {
         init() {
             const restore = this.$root?.dataset.checkoutRestore;
 
-            if (!restore) {
+            if (restore) {
+                try {
+                    this.restoreCheckout = JSON.parse(restore);
+                } catch {
+                    this.restoreCheckout = null;
+                }
+            }
+
+            if (this.restoreCheckout?.productId) {
+                this.$nextTick(() => this.reopenFailedCheckout());
+
                 return;
             }
 
-            try {
-                this.restoreCheckout = JSON.parse(restore);
-            } catch {
-                return;
+            const checkoutProduct = this.checkoutProductPayload();
+            if (checkoutProduct) {
+                this.$nextTick(() => this.openProductModal(checkoutProduct, {
+                    opener: document.getElementById('product-checkout-cta') || document.activeElement,
+                }));
             }
-
-            this.$nextTick(() => this.reopenFailedCheckout());
         },
         openProductModal(product, options = {}) {
             if (!product?.availability?.canOpenModal) {
@@ -607,15 +616,15 @@ export function storefrontModal() {
             }
 
             const card = document.getElementById(`product-${this.restoreCheckout.productId}`);
-            const payload = card?.dataset?.product;
+            const payload = card?.dataset?.product || this.checkoutProductPayloadFor(this.restoreCheckout.productId);
 
             if (!payload) {
                 return;
             }
 
             try {
-                this.openProductModal(JSON.parse(payload), {
-                    opener: card,
+                this.openProductModal(typeof payload === 'string' ? JSON.parse(payload) : payload, {
+                    opener: card || document.getElementById('product-checkout-cta') || document.activeElement,
                     quantity: this.restoreCheckout.quantity,
                     buyerHandle: this.restoreCheckout.buyerHandle,
                     paymentMethod: this.restoreCheckout.paymentMethod,
@@ -625,6 +634,26 @@ export function storefrontModal() {
             } catch {
                 // Keep the global checkout error visible if the product payload is stale.
             }
+        },
+        checkoutProductPayload() {
+            const payload = this.$root?.dataset.checkoutProduct;
+
+            if (!payload) {
+                return null;
+            }
+
+            try {
+                return JSON.parse(payload);
+            } catch {
+                return null;
+            }
+        },
+        checkoutProductPayloadFor(productId) {
+            const payload = this.checkoutProductPayload();
+
+            return Number.parseInt(payload?.id, 10) === Number.parseInt(productId, 10)
+                ? payload
+                : null;
         },
     };
 }

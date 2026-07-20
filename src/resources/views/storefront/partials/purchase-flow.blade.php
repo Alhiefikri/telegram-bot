@@ -26,7 +26,7 @@
             <h3 class="font-display text-base font-black text-[var(--sf-ink)]">Tidak perlu akun Lhie Store untuk checkout.</h3>
             <p class="mt-1 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Kami hanya meminta kontak agar invoice dan bantuan pesanan bisa ditelusuri dengan cepat.</p>
         </div>
-        <a href="{{ route('storefront.shop.index') }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Pilih Produk</a>
+        <a href="{{ $storefront->catalogUrl() }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Pilih Produk</a>
     </div>
 
     <div class="mt-16 grid gap-8 border-t-[3px] border-dashed border-[var(--sf-border)] pt-12 sm:grid-cols-2">

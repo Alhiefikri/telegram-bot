@@ -69,13 +69,36 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('CapCut Pro')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 8')
-            ->assertSee(route('storefront.shop.index').'#product-'.$product->id, false)
+            ->assertSee(route('storefront.products.show', ['product' => $product, 'checkout' => 1]), false)
+            ->assertSee('data-checkout-restore=', false)
+            ->assertSee('data-product=', false)
+            ->assertSee('x-on:click.prevent="openProductModal', false)
+            ->assertSee('name="product_id" value="'.$product->id.'"', false)
             ->assertSee('Beli via Web QRIS')
             ->assertSee(route('storefront.order-access.create'), false)
             ->assertSee('Akses Pesanan')
             ->assertDontSee('Checkout via Telegram Admin');
 
         $this->assertNoCheckoutSideEffects();
+    }
+
+    public function test_product_detail_back_navigation_preserves_catalog_search_context(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Search Context Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $returnUrl = url('/?q=search#product-'.$product->id);
+
+        $this->get(route('storefront.home', ['q' => 'search']))
+            ->assertOk()
+            ->assertSee('href="'.route('storefront.products.show', ['product' => $product]).'?from='.urlencode($returnUrl).'"', false);
+
+        $this->get(route('storefront.products.show', ['product' => $product, 'from' => $returnUrl]))
+            ->assertOk()
+            ->assertSee('href="'.$returnUrl.'"', false)
+            ->assertSee('Kembali ke katalog');
     }
 
     public function test_product_detail_disables_buy_button_for_empty_product(): void
@@ -90,7 +113,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Stok habis')
             ->assertSee('Restock segera')
-            ->assertDontSee(route('storefront.shop.index').'#product-'.$product->id, false)
+            ->assertDontSee(route('storefront.products.show', ['product' => $product, 'checkout' => 1]), false)
+            ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('Checkout via Telegram Admin');
     }
 

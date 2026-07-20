@@ -39,7 +39,7 @@
 
                 <div class="mt-8 flex flex-wrap gap-3">
                     <a href="{{ route('storefront.order-access.create') }}" class="neo-button inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Akses Pesanan</a>
-                    <a href="{{ route('storefront.shop.index') }}" class="inline-flex min-h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">Katalog</a>
+                    <a href="{{ $storefront->catalogUrl() }}" class="inline-flex min-h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">Katalog</a>
                 </div>
             </article>
         </main>

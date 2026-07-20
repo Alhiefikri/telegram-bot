@@ -10,7 +10,7 @@
         <div>
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Produk</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
-                <li><a href="{{ $shopUrl ?? route('storefront.shop.index') }}" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
+                <li><a href="{{ $shopUrl ?? $storefront->catalogUrl() }}" class="hover:text-[var(--sf-accent)]">Katalog Lengkap</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#cara-beli" class="hover:text-[var(--sf-accent)]">Cara Pembelian</a></li>
                 <li><a href="{{ route('storefront.login-guide') }}" class="hover:text-[var(--sf-accent)]">Panduan Login</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">FAQ</a></li>

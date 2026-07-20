@@ -2,12 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Storefront\StorefrontUrl;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontShopCheckoutRequest extends FormRequest
 {
-    protected $redirectRoute = 'storefront.shop.index';
-
     public function authorize(): bool
     {
         return true;
@@ -38,5 +37,15 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'buyer_handle.regex' => 'Gunakan huruf, angka, spasi, titik, strip, underscore, atau awali dengan @ untuk username Telegram.',
             'payment_method.*' => 'Pilih metode pembayaran yang tersedia.',
         ];
+    }
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->checkoutRecoveryUrl();
+    }
+
+    public function checkoutRecoveryUrl(): string
+    {
+        return app(StorefrontUrl::class)->checkoutRecoveryUrl($this->input('product_id'));
     }
 }

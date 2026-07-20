@@ -301,7 +301,7 @@ class AdminStoreChannelTest extends TestCase
                 && str_contains($text, 'Quantity: 1x')
                 && str_contains($text, 'Successful orders: #1')
                 && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Shop Now'
-                && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=from_channel';
+                && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=product_'.$selectedProduct->id;
         });
 
         $this->assertSame(8, $selectedProduct->refresh()->stock);

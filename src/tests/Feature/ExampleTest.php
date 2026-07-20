@@ -36,7 +36,7 @@ class ExampleTest extends TestCase
 
         $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
 
-        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Belanja Web', 'Akses Pesanan'] as $customerLinkText) {
+        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Katalog Web', 'Akses Pesanan'] as $customerLinkText) {
             $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
         }
 
@@ -47,21 +47,21 @@ class ExampleTest extends TestCase
 
     public function test_landing_header_and_hero_expose_web_shop_and_order_access_paths(): void
     {
-        $shopUrl = route('storefront.shop.index');
+        $shopUrl = url('/#products');
         $accessUrl = route('storefront.order-access.create');
         $html = $this->get('/')->assertOk()->getContent();
         $headerHtml = $this->htmlBetween($html, '<header', '</header>');
         $mobileMenuHtml = $this->htmlBetween($html, '<div id="mobile-menu"', '</header>');
         $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
 
-        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the web shop grid.');
-        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Belanja Web', 'Desktop header should expose the website checkout path.');
+        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the catalog grid.');
+        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Katalog Web', 'Desktop header should expose the website checkout path.');
         $this->assertHtmlContainsLink($headerHtml, $accessUrl, 'Akses Pesanan', 'Desktop header should expose repeat order access.');
 
-        $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Belanja Web', 'Mobile menu should expose the website checkout path.');
+        $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Katalog Web', 'Mobile menu should expose the website checkout path.');
         $this->assertHtmlContainsLink($mobileMenuHtml, $accessUrl, 'Akses Pesanan', 'Mobile menu should expose repeat order access.');
 
-        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Lihat Produk', 'Hero primary CTA should send customers to the web shop.');
+        $this->assertHtmlContainsLink($heroHtml, '#products', 'Lihat Produk', 'Hero primary CTA should send customers to the catalog.');
         $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
     }
 
@@ -75,7 +75,7 @@ class ExampleTest extends TestCase
         $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
         $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan Recovery Key sebelum melanjutkan pembayaran; key ini hanya untuk pesanan website.', $qrisHtml);
         $this->assertStringNotContainsString('Pakasir', $qrisHtml);
-        $this->assertHtmlContainsLink($qrisHtml, route('storefront.shop.index'), 'Belanja Web via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
+        $this->assertHtmlContainsLink($qrisHtml, url('/#products'), 'Pilih Produk via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
         $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
         $this->assertStringNotContainsString('Konfirmasi ke Admin', $qrisHtml);
         $this->assertStringNotContainsString('QRIS pembayaran manual', $qrisHtml);

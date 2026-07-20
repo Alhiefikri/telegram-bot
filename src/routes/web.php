@@ -25,10 +25,11 @@ use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
-use App\Http\Controllers\StorefrontShopController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
 use App\Http\Controllers\StorefrontShopOrderStatusController;
+use App\Storefront\StorefrontUrl;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
@@ -43,7 +44,11 @@ Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])
 Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 'show'])->name('storefront.order-access.show');
 
 Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
-    Route::get('/', StorefrontShopController::class)->name('index');
+    Route::get('/', function (Request $request, StorefrontUrl $urls) {
+        $search = $request->query('q');
+
+        return redirect()->to($urls->catalogUrl(search: is_string($search) ? $search : null));
+    })->name('index');
     Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');

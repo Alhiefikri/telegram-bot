@@ -33,8 +33,8 @@
 
         <p class="mx-auto mt-5 max-w-sm text-center text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $qris['body'] }}</p>
 
-        <a href="{{ route('storefront.shop.index') }}" class="neo-button mt-5 inline-flex h-12 w-full items-center justify-center gap-2 bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
-            <span>Belanja Web via QRIS</span>
+        <a href="{{ $storefront->catalogUrl() }}" class="neo-button mt-5 inline-flex h-12 w-full items-center justify-center gap-2 bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
+            <span>Pilih Produk via QRIS</span>
         </a>
     </div>
 </aside>

@@ -31,7 +31,7 @@ class StorefrontShopCheckoutController extends Controller
             );
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
             return redirect()
-                ->route('storefront.shop.index')
+                ->to($request->checkoutRecoveryUrl())
                 ->withInput()
                 ->with('storefront_checkout_error', $exception->getMessage())
                 ->withErrors(['product_id' => $exception->getMessage()]);

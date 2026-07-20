@@ -10,6 +10,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontShopSignedInvoice $signedInvoices,
         private readonly StorefrontSupport $support,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     /**
@@ -26,7 +27,7 @@ class StorefrontShopOrderPresenter
             'storefront' => $this->storefront,
             'brand' => $brand,
             'copy' => config('storefront'),
-            'homeUrl' => route('storefront.shop.index'),
+            'homeUrl' => $this->urls->catalogUrl(),
             'pageTitle' => 'Order '.$invoice->order->invoice_number.' | '.$brand,
             'pageDescription' => 'Status checkout QRIS untuk invoice '.$invoice->order->invoice_number.'.',
             'canonicalUrl' => $invoice->redirectUrl,

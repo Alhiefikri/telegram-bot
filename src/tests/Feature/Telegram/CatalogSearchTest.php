@@ -47,6 +47,29 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains((string) $request['text'], 'Aku belum paham perintah itu'));
     }
 
+    public function test_start_with_product_deep_link_opens_that_product_checkout_options(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Produk Deep Link',
+            'description' => 'Produk dari tautan Telegram.',
+            'price_amount' => 44000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(112, '/start product_'.$product->id))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Produk Deep Link')
+            && str_contains((string) $request['text'], 'Detail produk')
+            && str_contains(json_encode($request->data()), 'buy:qris:'.$product->id));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'selamat datang di LHIE STORE'));
+    }
+
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void
     {
         Carbon::setTestNow('2026-07-04 09:00:00');

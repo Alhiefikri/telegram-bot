@@ -9,6 +9,7 @@ class StorefrontPresenter
     public function __construct(
         private readonly StorefrontProductPresenter $products,
         private readonly StorefrontSupport $support,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     public function brand(): string
@@ -69,15 +70,28 @@ class StorefrontPresenter
         return $this->products->present($product, $stockAvailable);
     }
 
-    public function productPageViewData(Product $product, int $stock): array
+    public function catalogUrl(?int $productId = null, ?string $search = null): string
+    {
+        return $this->urls->catalogUrl($productId, $search);
+    }
+
+    public function productUrl(Product $product, ?string $returnUrl = null, bool $checkout = false): string
+    {
+        return $this->urls->productUrl($product, $returnUrl, $checkout);
+    }
+
+    public function productPageViewData(Product $product, int $stock, bool $checkoutRequested = false, ?string $returnUrl = null): array
     {
         $brand = $this->brand();
+        $presentation = $this->products->present($product, $stock);
+        $returnUrl ??= $this->urls->catalogUrl((int) $product->id);
 
         return [
             'storefront' => $this,
             'brand' => $brand,
             'copy' => config('storefront'),
-            'homeUrl' => route('storefront.home'),
+            'homeUrl' => $this->urls->catalogUrl(),
+            'shopUrl' => $this->urls->catalogUrl(),
             'pageTitle' => $product->name.' | '.$brand,
             'pageDescription' => $this->descriptionSnippet($product),
             'canonicalUrl' => route('storefront.products.show', $product),
@@ -85,8 +99,12 @@ class StorefrontPresenter
             'supportDestination' => $this->supportDestination(),
             'supportContext' => $this->support->prePurchase($product),
             'product' => $product,
+            'presentation' => $presentation,
             'stock' => $stock,
             'isAvailable' => $stock > 0,
+            'checkoutRequested' => $checkoutRequested,
+            'returnUrl' => $returnUrl,
+            'checkoutUrl' => $this->urls->productUrl($product, $returnUrl, true),
         ];
     }
 

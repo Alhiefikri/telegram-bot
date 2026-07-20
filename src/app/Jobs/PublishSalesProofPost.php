@@ -11,6 +11,7 @@ use App\Services\InventoryLedger;
 use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Services\Telegram\TelegramBotClient;
+use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -123,7 +124,7 @@ class PublishSalesProofPost implements ShouldQueue
             $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
             $successfulPostNumber = $numbering->reserveNextNumber();
             $response = $bot->sendMessage($chatId, $formatter->format($order, $successfulPostNumber), [
-                'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => 'https://t.me/lhiestore_bot?start=from_channel']]],
+                'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => $this->shoppingButtonUrl($order)]]],
             ]);
             $messageId = data_get($response, 'result.message_id');
             if (data_get($response, 'ok') !== true || ! $messageId) {
@@ -137,6 +138,15 @@ class PublishSalesProofPost implements ShouldQueue
                 $this->release($this->backoff()[$post->attempts - 1] ?? 120);
             }
         }
+    }
+
+    private function shoppingButtonUrl(Order $order): string
+    {
+        $productId = $order->orderItems->first()?->product_id;
+
+        return $productId
+            ? app(StorefrontUrl::class)->telegramProductStartUrlForId((int) $productId)
+            : (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
     }
 
     private function paidOrderProofInvariantFailure(Order $order, InventoryLedger $inventory): ?string

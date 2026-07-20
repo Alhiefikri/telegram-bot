@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\CartStatus;
 use App\Models\Customer;
+use App\Models\Product;
 use Illuminate\Support\Arr;
 
 class TelegramMessageRouter
@@ -42,6 +43,18 @@ class TelegramMessageRouter
 
                 return;
             }
+            if (($productId = $this->startProductId($text)) !== null) {
+                if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+                    return;
+                }
+
+                $product = Product::publicVisible()->whereKey($productId)->first();
+                if ($product) {
+                    $this->catalog->sendStockChoices($customer, $chatId, $product, $product->availableStock());
+
+                    return;
+                }
+            }
             $this->menu->sendWelcome($customer, $chatId);
             $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
@@ -73,7 +86,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products', '🛍️ Marketplace'], true)) {
+        if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
             $this->session->forget($customer);
             $this->catalog->sendCategoryCatalog($customer, $chatId);
 
@@ -228,5 +241,14 @@ class TelegramMessageRouter
     private function text(Customer $customer, string $id, string $en): string
     {
         return $this->locale->text($customer, $id, $en);
+    }
+
+    private function startProductId(string $text): ?int
+    {
+        if (preg_match('/^\/start\s+product_([1-9][0-9]*)$/', $text, $matches) !== 1) {
+            return null;
+        }
+
+        return (int) $matches[1];
     }
 }

@@ -1,6 +1,6 @@
 @php
     $homeUrl = $homeUrl ?? route('storefront.home');
-    $shopUrl = $shopUrl ?? route('storefront.shop.index');
+    $shopUrl = $shopUrl ?? $storefront->catalogUrl();
     $supportDestination = $supportDestination ?? $storefront->supportDestination();
 @endphp
 
@@ -21,7 +21,7 @@
 
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
             <a href="{{ $shopUrl }}" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
-                <span>Belanja Web</span>
+                <span>Katalog Web</span>
             </a>
 
             <button
@@ -64,7 +64,7 @@
                     <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
                     </span>
-                    <span>Belanja Web</span>
+                    <span>Katalog Web</span>
                 </a>
 
                 <a href="{{ $homeUrl }}#cara-beli" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">

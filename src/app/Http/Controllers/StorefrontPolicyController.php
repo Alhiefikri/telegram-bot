@@ -37,7 +37,7 @@ class StorefrontPolicyController extends Controller
             'brand' => $brand,
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
-            'shopUrl' => route('storefront.shop.index'),
+            'shopUrl' => $storefront->catalogUrl(),
             'pageTitle' => $policy['title'].' | '.$brand,
             'pageDescription' => $policy['description'],
             'canonicalUrl' => route('storefront.policies.'.$key),

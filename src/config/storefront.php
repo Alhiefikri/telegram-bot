@@ -59,7 +59,7 @@ return [
     ],
 
     'shop' => [
-        'title' => 'Marketplace produk digital siap pakai',
+        'title' => 'Katalog produk digital siap pakai',
         'body' => 'Pilih produk, bayar QRIS di website, lalu simpan invoice dan Recovery Key khusus pesanan website untuk akses ulang.',
         'empty_title' => 'Belum ada produk siap dibeli.',
         'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',

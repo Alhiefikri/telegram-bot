@@ -29,8 +29,8 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
         $this->assertTrue($page->isShop());
         $this->assertSame('chat', $page->search);
-        $this->assertSame(route('storefront.shop.index').'#products', $page->searchAction);
-        $this->assertSame(route('storefront.shop.index').'#products', $page->clearSearchUrl);
+        $this->assertSame(url('/#products'), $page->searchAction);
+        $this->assertSame(url('/#products'), $page->clearSearchUrl);
         $this->assertSame(['Chat GPT Plus'], $page->products->map(fn ($entry) => $entry->presentation->name)->all());
         $this->assertTrue($page->products->first()->presentation->canOpenModal);
     }
@@ -41,13 +41,13 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
         $this->assertTrue($page->isHome());
         $this->assertSame('', $page->search);
-        $this->assertSame(url('/').'#products', $page->searchAction);
-        $this->assertSame(url('/').'#products', $page->clearSearchUrl);
+        $this->assertSame(url('/#products'), $page->searchAction);
+        $this->assertSame(url('/#products'), $page->clearSearchUrl);
         $this->assertSame('Katalog publik sedang disiapkan.', $page->emptyProductsTitle);
         $this->assertSame('Produk populer akan tampil setelah stok aktif tersedia.', $page->popularEmptyMessage);
     }
 
-    public function test_shop_context_exposes_marketplace_empty_state_inputs(): void
+    public function test_shop_context_exposes_catalog_empty_state_inputs(): void
     {
         $page = app(StorefrontCatalogPageBuilder::class)->shop(null);
 

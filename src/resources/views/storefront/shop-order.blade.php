@@ -9,7 +9,7 @@
 
         <main class="flex-grow pb-20 pt-8 sm:pt-12">
             <section class="mx-auto min-w-0 max-w-3xl px-4 pb-2 sm:px-6">
-                <a href="{{ route('storefront.shop.index') }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
+                <a href="{{ $storefront->catalogUrl() }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog
                 </a>
 
