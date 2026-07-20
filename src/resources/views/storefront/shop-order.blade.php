@@ -58,6 +58,10 @@
                     @else
                         @include('storefront.partials.shop.qris-payment')
                     @endif
+                    @include('storefront.partials.support-chooser', [
+                        'supportContext' => $supportContext,
+                        'supportId' => 'invoice-support',
+                    ])
                     @if ($accessKey)
                         @include('storefront.partials.shop.recovery-key')
                     @endif
@@ -65,6 +69,10 @@
                     @include('storefront.partials.shop.order-summary')
                 @elseif ($isPaid)
                     @include('storefront.partials.shop.account-delivery')
+                    @include('storefront.partials.support-chooser', [
+                        'supportContext' => $supportContext,
+                        'supportId' => 'invoice-support',
+                    ])
                     @if ($accessKey)
                         @include('storefront.partials.shop.recovery-key')
                     @endif
@@ -76,9 +84,13 @@
                         <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $statusMessage }}</p>
                         <div class="mt-5 flex flex-wrap gap-3">
                             <a href="{{ $homeUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">Buat order baru</a>
-                            <a href="{{ $supportHref }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Butuh bantuan?</a>
+                            <a href="#invoice-support" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Butuh bantuan?</a>
                         </div>
                     </x-storefront.panel>
+                    @include('storefront.partials.support-chooser', [
+                        'supportContext' => $supportContext,
+                        'supportId' => 'invoice-support',
+                    ])
                     @if ($accessKey)
                         @include('storefront.partials.shop.recovery-key')
                     @endif

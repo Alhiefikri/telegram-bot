@@ -12,6 +12,7 @@ final readonly class StorefrontCatalogPage
 
     /**
      * @param  array<string, mixed>  $copy
+     * @param  array<string, mixed>  $supportContext
      * @param  Collection<int, StorefrontCatalogCategoryFilter>  $categoryFilters
      * @param  Collection<int, StorefrontCatalogProduct>  $products
      * @param  Collection<int, StorefrontCatalogProduct>  $popularProducts
@@ -28,6 +29,7 @@ final readonly class StorefrontCatalogPage
         public string $shopUrl,
         public ?string $supportHref,
         public string $supportDestination,
+        public array $supportContext,
         public bool $hasPublicCategories,
         public Collection $categoryFilters,
         public Collection $products,
@@ -75,6 +77,7 @@ final readonly class StorefrontCatalogPage
             'shopUrl' => $this->shopUrl,
             'supportHref' => $this->supportHref,
             'supportDestination' => $this->supportDestination,
+            'supportContext' => $this->supportContext,
         ];
     }
 }

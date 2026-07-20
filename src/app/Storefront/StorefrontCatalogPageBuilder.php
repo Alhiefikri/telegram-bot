@@ -65,6 +65,7 @@ class StorefrontCatalogPageBuilder
             shopUrl: route('storefront.shop.index'),
             supportHref: $this->storefront->supportHref(),
             supportDestination: $this->storefront->supportDestination(),
+            supportContext: $this->storefront->support()->general(),
             hasPublicCategories: $categories->isNotEmpty(),
             categoryFilters: $this->categoryFilters($categories, $catalogProducts),
             products: $catalogProducts,

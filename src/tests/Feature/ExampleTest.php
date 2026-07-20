@@ -101,9 +101,14 @@ class ExampleTest extends TestCase
         ]);
 
         $html = $this->get('/')->assertOk()->getContent();
-        $telegramLinks = $this->telegramDestinationLinks($html);
+        $telegramLinks = array_filter(
+            $this->telegramDestinationLinks($html),
+            fn (string $linkHtml): bool => ! str_contains($linkHtml, 'data-support-channel="telegram_admin"')
+        );
 
-        $this->assertEmpty($telegramLinks, 'The web checkout flow should not send customers to Telegram.');
+        $this->assertEmpty($telegramLinks, 'The web checkout flow should not send customers to Telegram outside Telegram Admin support.');
+        $this->assertStringContainsString('data-support-channel="telegram_admin"', $html);
+        $this->assertStringContainsString('Telegram Admin', $html);
     }
 
     public function test_storefront_uses_host_relative_vite_assets(): void

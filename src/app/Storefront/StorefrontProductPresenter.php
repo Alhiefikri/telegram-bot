@@ -12,6 +12,8 @@ class StorefrontProductPresenter
 {
     private ?bool $binancePayEnabled = null;
 
+    public function __construct(private readonly StorefrontSupport $support) {}
+
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
     {
         $stockAvailable ??= $product->availableStock();
@@ -47,6 +49,7 @@ class StorefrontProductPresenter
                 imageUrl: $this->publicStorageUrl($product->image_path),
             ),
             checkoutChoices: $isAvailable ? $this->checkoutChoices($product, $copy) : [],
+            support: $this->support->prePurchase($product),
         );
     }
 

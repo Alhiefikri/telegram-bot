@@ -6,7 +6,10 @@ use App\Models\Product;
 
 class StorefrontPresenter
 {
-    public function __construct(private readonly StorefrontProductPresenter $products) {}
+    public function __construct(
+        private readonly StorefrontProductPresenter $products,
+        private readonly StorefrontSupport $support,
+    ) {}
 
     public function brand(): string
     {
@@ -29,6 +32,11 @@ class StorefrontPresenter
     public function supportDestination(): string
     {
         return $this->supportHref() ?: '#support';
+    }
+
+    public function support(): StorefrontSupport
+    {
+        return $this->support;
     }
 
     public function telegramBotHref(): string
@@ -75,6 +83,7 @@ class StorefrontPresenter
             'canonicalUrl' => route('storefront.products.show', $product),
             'supportHref' => $this->supportHref(),
             'supportDestination' => $this->supportDestination(),
+            'supportContext' => $this->support->prePurchase($product),
             'product' => $product,
             'stock' => $stock,
             'isAvailable' => $stock > 0,

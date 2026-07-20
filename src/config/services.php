@@ -61,6 +61,13 @@ return [
         'credential_access_session_minutes' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_SESSION_MINUTES', 30),
     ],
 
+    'support' => [
+        'whatsapp_url' => env('WHATSAPP_SUPPORT_URL'),
+        'whatsapp_number' => env('WHATSAPP_SUPPORT_NUMBER'),
+        'telegram_admin_url' => env('TELEGRAM_ADMIN_CONTACT_URL'),
+        'telegram_admin_username' => env('TELEGRAM_ADMIN_USERNAME', 'alhie02'),
+    ],
+
     'customer' => [
         'login_link_expiry_minutes' => 15,
     ],

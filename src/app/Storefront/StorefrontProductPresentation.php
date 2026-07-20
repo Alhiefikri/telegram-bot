@@ -6,6 +6,7 @@ final readonly class StorefrontProductPresentation
 {
     /**
      * @param  array<string, StorefrontProductCheckoutChoice>  $checkoutChoices
+     * @param  array<string, mixed>  $support
      */
     public function __construct(
         public int $id,
@@ -27,6 +28,7 @@ final readonly class StorefrontProductPresentation
         public string $productUrl,
         public StorefrontProductCoverPresentation $cover,
         public array $checkoutChoices,
+        public array $support,
     ) {}
 
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice
@@ -69,6 +71,7 @@ final readonly class StorefrontProductPresentation
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
                 'websiteBinancePay' => $this->checkoutChoice('website_binance_pay')?->toModalPayload(),
             ],
+            'support' => $this->support,
         ];
     }
 }

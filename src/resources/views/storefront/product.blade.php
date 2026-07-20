@@ -71,6 +71,12 @@
                                     Akses Pesanan
                                 </x-storefront.button>
                             </div>
+
+                            @include('storefront.partials.support-chooser', [
+                                'supportContext' => $supportContext,
+                                'supportId' => 'product-support',
+                                'supportClass' => 'mt-6',
+                            ])
                         </div>
                     </article>
                 </div>

@@ -9,6 +9,7 @@ class StorefrontShopOrderPresenter
     public function __construct(
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontShopSignedInvoice $signedInvoices,
+        private readonly StorefrontSupport $support,
     ) {}
 
     /**
@@ -31,6 +32,7 @@ class StorefrontShopOrderPresenter
             'canonicalUrl' => $invoice->redirectUrl,
             'supportHref' => $this->storefront->supportHref(),
             'supportDestination' => $this->storefront->supportDestination(),
+            'supportContext' => $this->support->order($invoice->order),
             'statusUrl' => $invoice->statusUrl,
             'redirectUrl' => $invoice->redirectUrl,
             'cancelUrl' => $invoice->cancelUrl,

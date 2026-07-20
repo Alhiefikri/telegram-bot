@@ -139,6 +139,50 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(1, substr_count($response->getContent(), 'data-copy-text="'.$accessKey.'"'));
     }
 
+    public function test_invoice_support_links_use_invoice_context_without_recovery_key_or_credentials(): void
+    {
+        config()->set('services.support.whatsapp_number', '6281234567890');
+        config()->set('services.support.telegram_admin_username', 'lhiehuman');
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        $secret = 'buyer-login@example.test|PasswordShouldNotLeak|MFA-SECRET';
+        [$order] = $this->pendingNativeQrisOrder(
+            totalAmount: 67000,
+            providerFee: 500,
+            providerTotalPayment: 67500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.SUPPORTCONTEXT99',
+            secret: $secret,
+        );
+        $accessKey = 'LHIE-SUPPORT-RECOVERY-KEY';
+        $order->forceFill(['credential_access_key_hash' => Hash::make($accessKey)])->save();
+
+        $html = $this->withSession([
+            'storefront.order_access.issued_key.'.$order->getKey() => Crypt::encryptString($accessKey),
+        ])->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Butuh bantuan?')
+            ->assertSee('WhatsApp Support')
+            ->assertSee('Telegram Admin')
+            ->assertSee('QRIS / pembayaran belum terdeteksi')
+            ->assertSee('Pembayaran gagal, expired, atau dibatalkan')
+            ->assertSee('Kredensial atau login bermasalah')
+            ->assertSee('data-support-channel="whatsapp"', false)
+            ->assertSee('data-support-channel="telegram_admin"', false)
+            ->getContent();
+
+        preg_match_all('/href="([^"]+)"[^>]+data-support-channel=/i', $html, $matches);
+        $this->assertNotEmpty($matches[1]);
+
+        foreach ($matches[1] as $href) {
+            $decodedHref = rawurldecode(html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $this->assertStringContainsString('Invoice: '.$order->invoice_number, $decodedHref);
+            $this->assertStringNotContainsString($accessKey, $decodedHref);
+            $this->assertStringNotContainsString($secret, $decodedHref);
+            $this->assertStringNotContainsString('PasswordShouldNotLeak', $decodedHref);
+            $this->assertStringNotContainsString('MFA-SECRET', $decodedHref);
+        }
+    }
+
     public function test_signed_cancel_endpoint_cancels_pending_order_releases_resources_audits_and_is_idempotent(): void
     {
         $this->pakasirConfigIsReady();

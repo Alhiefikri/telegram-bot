@@ -157,6 +157,7 @@ class StorefrontProductPresentationTest extends TestCase
             'availability',
             'cover',
             'checkout',
+            'support',
         ], array_keys($payload));
         $this->assertSame('Deskripsi produk segera dilengkapi.', $payload['descriptionSnippet']);
         $this->assertSame('', $payload['description']);
@@ -169,5 +170,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $payload['sold']);
         $this->assertSame(route('storefront.shop.checkout'), $payload['checkout']['websiteQris']['url']);
         $this->assertArrayNotHasKey('telegram', $payload['checkout']);
+        $this->assertSame('Butuh bantuan?', $payload['support']['title']);
+        $this->assertSame('Tanya produk sebelum beli', $payload['support']['categories'][0]['label']);
     }
 }

@@ -151,6 +151,45 @@
                                         <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
+
+                                <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]" aria-labelledby="product-modal-support-title">
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h4 id="product-modal-support-title" class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct?.support?.title || 'Butuh bantuan?'">Butuh bantuan?</h4>
+                                            <p class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]" x-text="selectedProduct?.support?.body || 'Tanya admin sebelum membeli.'">Tanya admin sebelum membeli.</p>
+                                        </div>
+                                        <span class="inline-flex w-fit rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 text-[11px] font-black text-[var(--sf-ink)]">Support</span>
+                                    </div>
+                                    <template x-for="category in (selectedProduct?.support?.categories || [])" :key="category.key">
+                                        <div class="mt-3">
+                                            <p class="text-sm font-black text-[var(--sf-ink)]" x-text="category.label"></p>
+                                            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                                                <template x-for="option in category.options" :key="option.key">
+                                                    <template x-if="option.available">
+                                                        <a x-bind:href="option.href"
+                                                           target="_blank"
+                                                           rel="noopener noreferrer"
+                                                           class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-3 py-2 text-center text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-[var(--sf-blue)] focus:ring-offset-2"
+                                                           x-bind:data-support-channel="option.key"
+                                                           x-bind:data-support-category="category.key"
+                                                           x-bind:data-support-message="option.message"
+                                                           x-text="option.label"></a>
+                                                    </template>
+                                                </template>
+                                                <template x-for="option in category.options" :key="'disabled-' + option.key">
+                                                    <template x-if="!option.available">
+                                                        <span class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white/70 px-3 py-2 text-center text-sm font-black text-[var(--sf-muted)] opacity-80"
+                                                              aria-disabled="true"
+                                                              x-bind:data-support-channel="option.key"
+                                                              x-bind:data-support-category="category.key"
+                                                              x-bind:data-support-message="option.message"
+                                                              x-text="option.label + ' belum aktif'"></span>
+                                                    </template>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </section>
                             </div>
                         </div>
                     </div>

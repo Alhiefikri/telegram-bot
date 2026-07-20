@@ -22,6 +22,7 @@
             @include('storefront.partials.shop.checkout-error')
             @include('storefront.partials.shop.hero')
             @include('storefront.partials.shop.catalog')
+            @include('storefront.partials.support')
         </main>
 
         @include('storefront.partials.footer')
