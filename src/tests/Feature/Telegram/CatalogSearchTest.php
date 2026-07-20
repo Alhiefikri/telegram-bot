@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramMenuIntents;
@@ -188,9 +189,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
     public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
     {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
         $this->fakeTelegramHttp();
         $category = Category::factory()->create(['name' => 'Games', 'description' => 'Voucher game']);
-        $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'price_amount' => 15000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'price_amount' => 15000, 'usdt_price_amount' => 1_250_000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
         foreach (range(1, 3) as $index) {
             ProductStockItem::create(['product_id' => $product->id, 'secret' => "akun-diamond-{$index}@example.test | password: Secret-123"]);
         }
@@ -205,15 +208,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Daftar Produk')
             && ! str_contains($r['text'], '1. ✅ Diamond')
             && ! str_contains($r['text'], '2. ❌ Diamond Habis')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond | Rp15.000 | 📦 3'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '❌ 🛍️ Diamond Habis | Rp10.000 | 📦 0'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond · Rp 15.000 · 1.25 USDT'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '❌ 🛍️ Diamond Habis · Rp 10.000'
             && ! str_contains($r['text'], 'Stok 3')
             && ! str_contains($r['text'], 'Stok 0')
             && ! str_contains($r['text'], 'Voucher MLBB instant.')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'akun-diamond@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond | Rp15.000 | 📦 3'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond · Rp 15.000 · 1.25 USDT'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories'));
@@ -222,6 +225,50 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
     }
+    public function test_search_product_button_shows_usdt_and_respects_telegram_label_limit(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => str_repeat('Premium Account ', 8),
+            'description' => 'Ready for checkout.',
+            'price_amount' => 35000,
+            'usdt_price_amount' => 1_500_000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(133, '/cari premium'))->assertOk();
+
+        $request = Http::recorded()
+            ->map(fn (array $record) => $record[0])
+            ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+                && str_contains((string) $request['text'], 'Hasil pencarian: premium'));
+        $buttonText = $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? '';
+
+        $this->assertSame('✨ 🛍️ Premium Account Premium Account P... · Rp 35.000 · 1.5 USDT', $buttonText);
+        $this->assertLessThanOrEqual(64, mb_strlen($buttonText));
+        $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
+    }
+
+    public function test_category_product_buttons_hide_usdt_when_payment_is_unavailable(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => false, 'is_active' => true]);
+        $this->fakeTelegramHttp();
+        $category = Category::factory()->create(['name' => 'AI Tools']);
+        Product::factory()->create(['name' => 'Binance Disabled', 'category_id' => $category->id, 'usdt_price_amount' => 1_500_000, 'stock' => 1, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Price Missing', 'category_id' => $category->id, 'usdt_price_amount' => null, 'stock' => 1, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Out of Stock', 'category_id' => $category->id, 'usdt_price_amount' => 1_500_000, 'stock' => 1, 'reserved_stock' => 1]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(134, 'cat-usdt-gates', 'category:'.$category->id))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Daftar Produk')
+            && ! str_contains(json_encode($request['reply_markup']['inline_keyboard']), 'USDT'));
+    }
+
 
     public function test_cari_without_keyword_sends_usage_instruction(): void
     {

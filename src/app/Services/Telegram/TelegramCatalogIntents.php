@@ -229,11 +229,19 @@ class TelegramCatalogIntents
         $customEmojiId = $icon['custom_emoji_id'];
         $fallbackIcon = $customEmojiId ? '' : $icon['fallback'].' ';
         $status = $availableStock > 0 ? '✨' : '❌';
+        $priceParts = ['Rp '.number_format($product->price_amount, 0, ',', '.')];
+
+        if ($availableStock > 0
+            && $product->usdt_price_amount !== null
+            && $this->checkout->binancePayEnabled()) {
+            $priceParts[] = $this->checkout->formatUsdt($product->usdt_price_amount).' USDT';
+        }
+
+        $suffix = ' · '.implode(' · ', $priceParts);
+        $prefix = $status.' '.$fallbackIcon;
 
         $button = [
-            'text' => $status.' '.$fallbackIcon.Str::limit($product->name, 44, '...')
-                .' | Rp'.number_format($product->price_amount, 0, ',', '.')
-                .' | 📦 '.$availableStock,
+            'text' => $this->productButtonLabel($prefix, $product->name, $suffix),
             'callback_data' => 'product:'.$product->id,
             'style' => $availableStock > 0 ? 'success' : 'danger',
         ];
@@ -243,5 +251,24 @@ class TelegramCatalogIntents
         }
 
         return $button;
+    }
+    private function productButtonLabel(string $prefix, string $name, string $suffix): string
+    {
+        $maxLength = 64;
+        $nameLimit = $maxLength - Str::length($prefix.$suffix);
+
+        if ($nameLimit <= 0) {
+            return Str::substr($prefix.$suffix, 0, $maxLength);
+        }
+
+        if (Str::length($name) <= $nameLimit) {
+            return $prefix.$name.$suffix;
+        }
+
+        $nameLabel = $nameLimit > 3
+            ? Str::substr($name, 0, $nameLimit - 3).'...'
+            : Str::substr($name, 0, $nameLimit);
+
+        return $prefix.$nameLabel.$suffix;
     }
 }

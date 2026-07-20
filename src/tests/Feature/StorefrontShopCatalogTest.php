@@ -101,6 +101,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('&amp;quot;', false);
     }
 
+
     public function test_unavailable_shop_products_render_disabled_card_without_modal_trigger(): void
     {
         $category = Category::factory()->create(['name' => 'Unavailable Products', 'is_active' => true]);
