@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Support\DogfoodTiming;
@@ -50,6 +51,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
             $claimed = DB::transaction(function (): ?Order {
                 $order = Order::whereKey($this->orderId)->lockForUpdate()->firstOrFail();
                 if ($order->manual_checkout_customer_notified_at !== null
+                    || $order->order_status !== OrderStatus::PendingPayment
                     || $this->hasActiveClaim($order->manual_checkout_customer_notification_started_at)) {
                     return null;
                 }
@@ -97,6 +99,13 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                 'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
                 'manual_checkout_customer_notification_message_id' => (int) $messageId,
             ])->save();
+
+            $terminalOrder = $order->fresh(['payments']);
+            if (in_array($terminalOrder->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)
+                && $terminalOrder->payments->contains(fn ($payment): bool => $payment->method === 'BINANCE_PAY_ID')) {
+                DeleteBuyerBinanceCheckoutInstruction::dispatch($terminalOrder->id, now()->toISOString())
+                    ->onQueue('notifications');
+            }
         } finally {
             DogfoodTiming::log('dogfood.telegram.binance_checkout_instructions_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

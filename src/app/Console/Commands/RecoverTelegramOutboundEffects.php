@@ -63,8 +63,13 @@ class RecoverTelegramOutboundEffects extends Command
         Order::query()
             ->whereNotNull('manual_checkout_customer_notification_message_id')
             ->whereNull('manual_checkout_customer_notification_deleted_at')
+            ->where(function ($query) use ($cutoff): void {
+                $query->whereNull('manual_checkout_customer_notification_deletion_started_at')
+                    ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
+            })
             ->whereHas('payments', fn ($payments) => $payments->where('method', 'BINANCE_PAY_ID'))
             ->whereIn('order_status', ['completed', 'cancelled'])
+            ->select('id')
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {

@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendBinanceCheckoutInstructions;
@@ -21,12 +22,15 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\Support\TelegramBotTestSupport;
 
 class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
@@ -163,6 +167,34 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertGreaterThan(255, strlen((string) $payment->getRawOriginal('payment_proof_file_id')));
     }
 
+    public function test_group_photo_without_caption_is_not_reused_as_private_payment_proof(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $groupPhoto = $this->paymentPhotoUpdate(206, $order->invoice_number, ['id' => 12345, 'username' => 'buyer'], -100987, 'group-small-photo', 'group-large-photo');
+        unset($groupPhoto['message']['caption']);
+        $groupPhoto['message']['chat']['type'] = 'group';
+
+        $this->postTelegramWebhook($groupPhoto)->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(207, '/payment', ['id' => 12345, 'username' => 'buyer']))->assertOk();
+
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && ($request['photo'] ?? null) === 'group-large-photo');
+        $this->assertNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
+    }
+
     public function test_binance_payment_photo_with_payment_caption_reaches_admin_through_the_database_queue(): void
     {
         config()->set('queue.default', 'database');
@@ -286,6 +318,40 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
     }
 
+    public function test_binance_checkout_instruction_is_deleted_when_order_completes_before_message_id_is_saved(): void
+    {
+        config()->set('services.binance.pay_id', '1251268604');
+        config()->set('services.telegram.admin_user_id', '999');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+        $completedDuringInstructionSend = false;
+
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use (&$completedDuringInstructionSend, $order) {
+            if (str_ends_with($request->url(), '/sendPhoto')) {
+                if (! $completedDuringInstructionSend) {
+                    $completedDuringInstructionSend = true;
+                    app(OrderStateMachine::class)->completeManualOrder(Order::findOrFail($order->id));
+                }
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 703]]);
+            }
+
+            return Http::response(['ok' => true]);
+        });
+
+        (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        $this->assertTrue($completedDuringInstructionSend);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && ($request['message_id'] ?? null) === 703);
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+    }
+
     public function test_rejected_binance_payment_deletes_the_buyers_checkout_instruction(): void
     {
         config()->set('services.binance.pay_id', '1251268604');
@@ -307,6 +373,74 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '12345'
             && ($request['message_id'] ?? null) === 702);
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+    }
+
+    public function test_binance_checkout_instruction_cleanup_only_deletes_once(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/deleteMessage' => Http::response(['ok' => true]),
+        ]);
+        $order = $this->completedTrackedBinanceOrder(['manual_checkout_customer_notification_message_id' => 704]);
+        $job = new DeleteBuyerBinanceCheckoutInstruction($order->id);
+
+        $job->handle(app(TelegramBuyerCheckoutInstructionCleaner::class));
+        $job->handle(app(TelegramBuyerCheckoutInstructionCleaner::class));
+
+        $deletes = Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));
+        $this->assertCount(1, $deletes);
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+    }
+
+    public function test_binance_checkout_instruction_cleanup_treats_missing_telegram_message_as_deleted(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/deleteMessage' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: message to delete not found',
+            ], 400),
+        ]);
+        $order = $this->completedTrackedBinanceOrder(['manual_checkout_customer_notification_message_id' => 705]);
+
+        (new DeleteBuyerBinanceCheckoutInstruction($order->id))
+            ->handle(app(TelegramBuyerCheckoutInstructionCleaner::class));
+
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_deletion_started_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_deletion_token);
+    }
+
+    public function test_recovery_skips_active_binance_checkout_instruction_cleanup_claim(): void
+    {
+        config()->set('services.telegram.claim_lease_seconds', 60);
+        Queue::fake();
+        $this->completedTrackedBinanceOrder([
+            'manual_checkout_customer_notification_message_id' => 706,
+            'manual_checkout_customer_notification_deletion_started_at' => now(),
+            'manual_checkout_customer_notification_deletion_token' => '7d395b5b-57f7-4183-8113-0a0890df49b2',
+        ]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(DeleteBuyerBinanceCheckoutInstruction::class);
+    }
+
+    public function test_recovery_dispatches_stale_binance_checkout_instruction_cleanup_claim(): void
+    {
+        config()->set('services.telegram.claim_lease_seconds', 60);
+        Queue::fake();
+        $order = $this->completedTrackedBinanceOrder([
+            'manual_checkout_customer_notification_message_id' => 707,
+            'manual_checkout_customer_notification_deletion_started_at' => now()->subSeconds(61),
+            'manual_checkout_customer_notification_deletion_token' => '6f32f78e-e3bd-4dff-a534-f07cc08922dd',
+        ]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, fn (DeleteBuyerBinanceCheckoutInstruction $job): bool => $job->orderId === $order->id);
     }
 
     public function test_unforwarded_binance_payment_proof_is_recovered_by_scheduler(): void
@@ -937,6 +1071,30 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'product_id' => $product->id,
             'type' => InventoryMovementType::Sale,
             'quantity' => -1,
+        ]);
+
+        return $order;
+    }
+
+    private function completedTrackedBinanceOrder(array $overrides = []): Order
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $order = Order::factory()->create(array_merge([
+            'customer_id' => $customer->id,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'manual_checkout_customer_notified_at' => now(),
+            'manual_checkout_customer_notification_chat_id' => '12345',
+            'manual_checkout_customer_notification_message_id' => 700,
+            'manual_checkout_customer_notification_deleted_at' => null,
+            'manual_checkout_customer_notification_deletion_started_at' => null,
+            'manual_checkout_customer_notification_deletion_token' => null,
+        ], $overrides));
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'status' => PaymentStatus::Paid,
         ]);
 
         return $order;

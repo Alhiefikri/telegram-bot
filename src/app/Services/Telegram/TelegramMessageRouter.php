@@ -152,7 +152,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '' && $this->manualPayments->rememberPendingProofPhoto($customer, $message)) {
+        if ($isPrivateChat && $text === '' && $this->manualPayments->rememberPendingProofPhoto($customer, $message)) {
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
                 '📸 Screenshot bukti sudah diterima. Sekarang kirim /payment untuk meneruskannya ke admin.',

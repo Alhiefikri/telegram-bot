@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -68,6 +69,15 @@ class TelegramBotClientTest extends TestCase
         $this->assertSame('Timeout regression coverage', $requests['sendMessage']['text']);
         $this->assertTrue($requests['sendPhoto']->isMultipart(), 'sendPhoto should use the multipart attach request path.');
         $this->assertTrue($requests['sendPhoto']->hasFile('photo', 'binary-photo', 'receipt.png'));
+    }
+
+    public function test_fake_telegram_client_matches_send_photo_contract(): void
+    {
+        $response = (new FakeTelegramBotClient)->sendPhoto(12345, 'binary-photo', 'receipt.png', 'Receipt');
+
+        $this->assertTrue($response['ok']);
+        $this->assertIsInt($response['result']['message_id']);
+        $this->assertSame(12345, $response['result']['chat']['id']);
     }
 
     public function test_transport_failures_surface_sanitized_client_visible_errors(): void
