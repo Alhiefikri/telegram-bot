@@ -188,13 +188,13 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41061),
-            ['💎 CHECKOUT USDT', '/payment', 'Nominal harus tepat', 'dicek manual oleh admin'],
-            ['💎 USDT CHECKOUT', 'Send Payment Proof'],
+            ['💎 CHECKOUT USDT', 'Binance Pay ID', 'scan QR code di atas', 'balas foto tersebut dengan /payment'],
+            ['USDT CHECKOUT', 'reply to that photo'],
         );
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41062),
-            ['💎 USDT CHECKOUT', '/payment', 'amount must match exactly', 'checked manually by admin'],
-            ['💎 CHECKOUT USDT', 'Kirim Bukti Pembayaran'],
+            ['💎 USDT CHECKOUT', 'Binance Pay ID', 'scan the QR code above', 'reply to that photo with /payment'],
+            ['CHECKOUT USDT', 'balas foto tersebut'],
         );
     }
 

@@ -143,13 +143,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Binance Pay ID', $photoBody);
         $this->assertStringContainsString('987654321', $photoBody);
         $this->assertStringContainsString('5 USDT', $photoBody);
-        $this->assertStringContainsString('caption_entities', $photoBody);
-        $this->assertStringContainsString('name="caption_entities[0][type]"', $photoBody);
-        $this->assertStringContainsString('name="caption_entities[0][length]"', $photoBody);
-        $this->assertStringContainsString("\r\n1\r\n", $photoBody);
-        $this->assertStringContainsString('name="caption_entities[1][type]"', $photoBody);
-        $this->assertStringContainsString('name="caption_entities[1][length]"', $photoBody);
-        $this->assertStringContainsString("\r\n9\r\n", $photoBody);
+        $this->assertStringContainsString('name="caption_entities"', $photoBody);
+        $this->assertStringContainsString('[{"type":"code"', $photoBody);
+        $this->assertStringContainsString('"length":1}', $photoBody);
+        $this->assertStringContainsString('"length":9}', $photoBody);
         $this->assertStringContainsString('Batalkan Order', $photoBody);
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $photoBody);
         $this->assertStringContainsString('reply_markup', $photoBody);

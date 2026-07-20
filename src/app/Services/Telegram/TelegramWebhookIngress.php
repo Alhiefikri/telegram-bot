@@ -96,6 +96,15 @@ class TelegramWebhookIngress
                 $message['photo']
             )));
         }
+        if (isset($message['reply_to_message']['photo']) && is_array($message['reply_to_message']['photo'])) {
+            $minimized['reply_to_message'] = [
+                'photo' => array_values(array_filter(array_map(
+                    fn (mixed $photo): ?array => is_array($photo) ? Arr::only($photo, ['file_id', 'file_size', 'width', 'height']) : null,
+                    $message['reply_to_message']['photo']
+                ))),
+            ];
+        }
+
 
         return $minimized;
     }

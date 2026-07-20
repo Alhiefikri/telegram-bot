@@ -62,7 +62,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertCount(1, $messages);
         $text = (string) ($messages->first()[0]['text'] ?? '');
         $this->assertStringContainsString('Payment proof must be sent as a PHOTO', $text);
-        $this->assertStringContainsString('Upload the transfer screenshot', $text);
+        $this->assertStringContainsString('reply to that photo with /payment', $text);
         $this->assertStringNotContainsString('Bukti pembayaran harus dikirim', $text);
         $this->assertStringNotContainsString('Isi caption dengan', $text);
     }
@@ -128,6 +128,67 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame(PaymentStatus::Pending, $order->payments()->firstOrFail()->fresh()->status);
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
     }
+    public function test_binance_payment_photo_with_payment_caption_reaches_admin_through_the_database_queue(): void
+    {
+        config()->set('queue.default', 'database');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $update = $this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']);
+        $update['message']['caption'] = '/payment';
+        $this->postTelegramWebhook($update)->assertOk();
+
+        $storedUpdate = \App\Models\TelegramUpdate::firstOrFail();
+        $this->assertNull($storedUpdate->processed_at);
+        (new \App\Jobs\ProcessTelegramUpdate($storedUpdate->id))->handle(app(\App\Services\Telegram\TelegramUpdateProcessor::class));
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && ($request['photo'] ?? null) === 'large-photo');
+        $this->assertNotNull($storedUpdate->fresh()->processed_at);
+    }
+    public function test_binance_payment_proof_replied_to_with_payment_command_reaches_admin(): void
+
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $update = $this->messageUpdate(206, '/payment '.$order->invoice_number, ['username' => 'buyer']);
+        $update['message']['reply_to_message'] = [
+            'message_id' => 205,
+            'photo' => [
+                ['file_id' => 'small-proof', 'width' => 100, 'height' => 100],
+                ['file_id' => 'replied-proof', 'width' => 800, 'height' => 800],
+            ],
+        ];
+
+        $this->postTelegramWebhook($update)->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && ($request['photo'] ?? null) === 'replied-proof');
+    }
+
 
     public function test_binance_payment_proof_is_recovered_after_admin_photo_delivery_fails(): void
     {

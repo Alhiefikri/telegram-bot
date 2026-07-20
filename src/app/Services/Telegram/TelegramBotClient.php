@@ -44,6 +44,10 @@ class TelegramBotClient
         if ($caption !== null && $caption !== '') {
             $payload['caption'] = $caption;
         }
+        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
+            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
+        }
+
 
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);

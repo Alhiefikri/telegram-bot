@@ -44,8 +44,8 @@ class TelegramManualPaymentIntents
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
-                "Bukti pembayaran harus dikirim sebagai FOTO ya.\n\nCaranya:\n1. Upload screenshot transfer\n2. Isi caption dengan:\n\n/payment\n\nKalau punya beberapa order, pakai format:\n\n/payment {$order->invoice_number}",
-                "Payment proof must be sent as a PHOTO.\n\nHow to send it:\n1. Upload the transfer screenshot\n2. Set the caption to:\n\n/payment\n\nIf you have multiple orders, use this format:\n\n/payment {$order->invoice_number}",
+                "Bukti pembayaran harus dikirim sebagai FOTO ya.\n\nPilih salah satu cara:\n1. Upload screenshot dan isi caption dengan /payment\n2. Jika screenshot sudah terkirim, balas foto itu dengan /payment\n\nKalau punya beberapa order, pakai:\n/payment {$order->invoice_number}",
+                "Payment proof must be sent as a PHOTO.\n\nUse either method:\n1. Upload the screenshot with /payment as its caption\n2. If the screenshot was already sent, reply to that photo with /payment\n\nIf you have multiple orders, use:\n/payment {$order->invoice_number}",
             ));
 
             return;
@@ -301,7 +301,7 @@ class TelegramManualPaymentIntents
 
     public function largestPhotoFileId(array $message): ?string
     {
-        $photos = Arr::get($message, 'photo', []);
+        $photos = Arr::get($message, 'photo', Arr::get($message, 'reply_to_message.photo', []));
         if (! is_array($photos) || $photos === []) {
             return null;
         }
