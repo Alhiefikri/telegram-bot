@@ -158,11 +158,11 @@ return [
         ],
         [
             'question' => 'Bagaimana jika pesanan saya bermasalah?',
-            'answer' => 'Untuk pesanan website, buka Akses Pesanan menggunakan nomor invoice dan Recovery Key. Pesanan Telegram dicek lewat bot. Pastikan pembayaran sudah terverifikasi dan ikuti panduan login yang tersedia sebelum mencoba akun.',
+            'answer' => 'Untuk pesanan website, buka Akses Pesanan menggunakan nomor invoice dan Recovery Key. Pesanan Telegram dicek lewat bot. Pastikan pembayaran sudah terverifikasi dan ikuti panduan login yang tersedia sebelum mencoba akun. Support hanya mengecek status dan masalah login, bukan membuka kredensial dari invoice saja.',
         ],
         [
             'question' => 'Bagaimana cara membuka data pesanan lagi?',
-            'answer' => 'Untuk pesanan website, buka halaman Akses Pesanan lalu masukkan nomor invoice dan Recovery Key yang Anda simpan saat checkout. Recovery Key tidak dipakai untuk pesanan Telegram dan tidak dapat ditampilkan ulang jika hilang.',
+            'answer' => 'Untuk pesanan website, buka halaman Akses Pesanan lalu masukkan nomor invoice dan Recovery Key yang Anda simpan saat checkout. Recovery Key tidak dipakai untuk pesanan Telegram, tidak dapat ditampilkan ulang jika hilang, dan tidak dapat diganti oleh support.',
         ],
     ],
 
@@ -172,6 +172,121 @@ return [
         'body' => 'Untuk pesanan website, gunakan nomor invoice dan Recovery Key yang Anda simpan saat checkout untuk membuka kembali data akun setelah pembayaran terverifikasi. Pesanan Telegram tidak memakai Recovery Key.',
         'primary_cta' => 'Akses Pesanan',
         'secondary_cta' => 'Login Admin',
+    ],
+
+    'policies' => [
+        'privacy' => [
+            'eyebrow' => 'Privasi',
+            'title' => 'Kebijakan Privasi',
+            'description' => 'Cara Lhie Store memakai data checkout, invoice, pembayaran, akun pelanggan, dan support.',
+            'updated' => '20 Juli 2026',
+            'sections' => [
+                [
+                    'title' => 'Data yang kami pakai',
+                    'items' => [
+                        'Nama pembeli, email pelanggan bila Anda membuat akun, nomor invoice, item pesanan, status pembayaran, dan catatan operasional yang dibutuhkan untuk memenuhi pesanan.',
+                        'Data pembayaran yang diterima dari penyedia QRIS atau pembayaran lain, seperti status transaksi, nominal, referensi pembayaran, dan waktu konfirmasi.',
+                        'Pesan support yang Anda kirim melalui WhatsApp atau Telegram admin untuk membantu verifikasi masalah pesanan.',
+                    ],
+                ],
+                [
+                    'title' => 'Data rahasia pelanggan',
+                    'items' => [
+                        'Recovery Key hanya ditampilkan satu kali kepada pelanggan dan hanya hash-nya yang disimpan.',
+                        'Magic-link token, Recovery Key, password, MFA secret, dan kredensial akun tidak boleh dicatat ke log, audit metadata, atau pesan support.',
+                        'Support tidak dapat membaca, mengirim ulang, atau menebak Recovery Key dari sistem.',
+                    ],
+                ],
+                [
+                    'title' => 'Pemakaian dan penyimpanan',
+                    'body' => 'Data digunakan untuk membuat invoice, memverifikasi pembayaran, mengirim produk digital, menyediakan akses pesanan, menangani support, audit operasional, keamanan, dan kewajiban pembukuan. Data yang tidak lagi dibutuhkan dapat dibersihkan mengikuti jadwal retensi operasional.',
+                ],
+            ],
+        ],
+        'terms' => [
+            'eyebrow' => 'Syarat',
+            'title' => 'Syarat Penggunaan',
+            'description' => 'Aturan transaksi produk digital, akses pesanan, support, dan batas tanggung jawab Lhie Store.',
+            'updated' => '20 Juli 2026',
+            'sections' => [
+                [
+                    'title' => 'Transaksi produk digital',
+                    'items' => [
+                        'Pelanggan wajib memastikan produk, jumlah, dan harga sebelum checkout.',
+                        'Invoice website harus dibayar sesuai total final yang tampil di halaman invoice.',
+                        'Produk digital dikirim atau dibuka setelah pembayaran terverifikasi dan stok tersedia.',
+                    ],
+                ],
+                [
+                    'title' => 'Akses pesanan',
+                    'items' => [
+                        'Pesanan website dapat dibuka kembali dengan nomor invoice dan Recovery Key yang valid.',
+                        'Nomor invoice saja tidak cukup untuk membuka kredensial atau memindahkan kepemilikan pesanan.',
+                        'Pelanggan bertanggung jawab menyimpan invoice, Recovery Key, dan kredensial di tempat pribadi yang aman.',
+                    ],
+                ],
+                [
+                    'title' => 'Batas kewenangan support',
+                    'body' => 'Support boleh membantu mengecek status invoice, status pembayaran, dan kategori masalah. Support tidak boleh memberikan Recovery Key, password, MFA secret, credential bundle, atau membuka kredensial hanya berdasarkan nomor invoice, nama pembeli, username Telegram, atau email.',
+                ],
+            ],
+        ],
+        'refund' => [
+            'eyebrow' => 'Refund',
+            'title' => 'Kebijakan Refund',
+            'description' => 'Kapan pesanan produk digital dapat dibatalkan, dikembalikan, atau harus ditangani sebagai support.',
+            'updated' => '20 Juli 2026',
+            'sections' => [
+                [
+                    'title' => 'Order belum dibayar',
+                    'body' => 'Order pending yang belum dibayar dapat dibatalkan dari halaman invoice selama tombol pembatalan masih tersedia. Jika invoice sudah expired atau dibatalkan, jangan lakukan pembayaran dan buat order baru bila masih ingin membeli.',
+                ],
+                [
+                    'title' => 'Pembayaran gagal atau expired',
+                    'body' => 'Pembayaran yang gagal, expired, salah nominal, atau tidak terdeteksi harus dicek melalui support dengan nomor invoice dan bukti pembayaran bila ada. Support hanya memverifikasi status pembayaran, bukan membuka kredensial dari invoice saja.',
+                ],
+                [
+                    'title' => 'Produk belum dikirim',
+                    'body' => 'Jika pembayaran sudah valid tetapi produk belum bisa dikirim karena stok, gangguan sistem, atau kesalahan operasional, Lhie Store dapat mengganti produk setara, menunggu restock dengan persetujuan pelanggan, atau memproses refund sesuai hasil audit order.',
+                ],
+                [
+                    'title' => 'Kredensial sudah dibuka',
+                    'body' => 'Produk digital yang kredensialnya sudah tampil atau sudah dikirim tidak dapat direfund karena akses sudah terbuka, kecuali terbukti kredensial tidak valid sejak awal dan pelanggan melapor segera untuk pemeriksaan.',
+                ],
+            ],
+        ],
+        'recovery' => [
+            'eyebrow' => 'Pemulihan',
+            'title' => 'Pemulihan Pesanan',
+            'description' => 'Aturan pemulihan invoice, Recovery Key, kepemilikan order, dan data yang tidak boleh diberikan support.',
+            'updated' => '20 Juli 2026',
+            'sections' => [
+                [
+                    'title' => 'Kebijakan utama',
+                    'body' => 'Order website yang kehilangan Recovery Key tidak dapat dipulihkan secara manual untuk membuka kredensial. Sistem hanya menyimpan hash Recovery Key, sehingga key asli tidak dapat dibaca atau dikirim ulang. Nomor invoice saja tidak pernah cukup untuk membuka credential bundle.',
+                ],
+                [
+                    'title' => 'Bukti kepemilikan yang dapat dicek',
+                    'items' => [
+                        'Nomor invoice dan Recovery Key yang valid untuk akses mandiri.',
+                        'Akun pelanggan yang sudah memiliki order paid, atau klaim order guest dengan invoice dan Recovery Key yang valid.',
+                        'Bukti pembayaran dapat membantu investigasi status pembayaran, tetapi tidak menggantikan Recovery Key untuk membuka kredensial.',
+                    ],
+                ],
+                [
+                    'title' => 'Pelaksana dan audit trail',
+                    'body' => 'Support lini pertama hanya mengumpulkan konteks masalah dan bukti pembayaran yang relevan. Admin atau pemilik produk dapat memeriksa status order, pembayaran, stok, dan audit log. Setiap perubahan manual pada status order, stok, atau follow-up pelanggan harus meninggalkan audit trail internal.',
+                ],
+                [
+                    'title' => 'Data yang tetap tidak boleh diberikan',
+                    'items' => [
+                        'Recovery Key, password, MFA secret, token login, dan credential bundle tidak boleh diberikan melalui support.',
+                        'Kredensial tidak boleh dibuka berdasarkan invoice, nama pembeli, email, username Telegram, atau screenshot invoice saja.',
+                        'Support tidak boleh meminta pelanggan mengirim Recovery Key ke chat publik atau grup.',
+                    ],
+                ],
+            ],
+        ],
     ],
 
     'footer' => [

@@ -21,8 +21,9 @@
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Toko</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#support" class="hover:text-[var(--sf-accent)]">Tentang Kami</a></li>
-                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">Kebijakan Privasi</a></li>
-                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="hover:text-[var(--sf-accent)]">Syarat Ketentuan</a></li>
+                <li><a href="{{ route('storefront.policies.privacy') }}" class="hover:text-[var(--sf-accent)]">Kebijakan Privasi</a></li>
+                <li><a href="{{ route('storefront.policies.terms') }}" class="hover:text-[var(--sf-accent)]">Syarat Ketentuan</a></li>
+                <li><a href="{{ route('storefront.policies.refund') }}" class="hover:text-[var(--sf-accent)]">Kebijakan Refund</a></li>
             </ul>
         </div>
 
@@ -30,6 +31,7 @@
             <h3 class="mb-4 font-display text-sm font-black text-[var(--sf-ink)]">Bantuan</h3>
             <ul class="space-y-3 text-sm font-semibold text-[var(--sf-muted)]">
                 <li><a href="{{ route('storefront.order-access.create') }}" class="font-black text-[var(--sf-accent)] hover:text-[var(--sf-ink)]">Akses Pesanan</a></li>
+                <li><a href="{{ route('storefront.policies.recovery') }}" class="hover:text-[var(--sf-accent)]">Pemulihan Pesanan</a></li>
                 <li><a href="{{ route('storefront.login-guide') }}" class="hover:text-[var(--sf-accent)]">Panduan Login</a></li>
                 <li><span>Simpan invoice dan recovery key</span></li>
             </ul>

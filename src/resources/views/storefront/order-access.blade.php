@@ -11,7 +11,7 @@
             <section class="neo-panel mx-auto max-w-xl bg-[var(--sf-surface)] p-6 sm:p-8" aria-labelledby="order-access-title">
                 <p class="text-sm font-black text-[var(--sf-accent)]">Akses pesanan</p>
                 <h1 id="order-access-title" class="mt-3 font-display text-3xl font-black leading-tight text-[var(--sf-ink)] sm:text-4xl">Buka kembali data akun.</h1>
-                <p class="mt-3 text-sm font-semibold leading-7 text-[var(--sf-muted)]">Halaman ini hanya untuk pesanan yang dibeli melalui website. Masukkan nomor invoice dan Recovery Key yang muncul setelah checkout website; pesanan via Telegram tidak menggunakan Recovery Key. Kami tidak menyimpan key dalam bentuk yang bisa dibaca.</p>
+                <p class="mt-3 text-sm font-semibold leading-7 text-[var(--sf-muted)]">Halaman ini hanya untuk pesanan yang dibeli melalui website. Masukkan nomor invoice dan Recovery Key yang muncul setelah checkout website; pesanan via Telegram tidak menggunakan Recovery Key. Kami tidak menyimpan key dalam bentuk yang bisa dibaca, jadi support tidak dapat mengirim ulang key atau membuka kredensial hanya dari nomor invoice.</p>
 
                 @if (session('storefront_order_access_error'))
                     <x-storefront.notice tone="danger" class="mt-5" role="alert">{{ session('storefront_order_access_error') }}</x-storefront.notice>
@@ -42,12 +42,13 @@
                                @if ($errors->has('access_key')) aria-invalid="true" aria-describedby="access-key-help access-key-error" @else aria-describedby="access-key-help" @endif
                                class="neo-input h-12 w-full px-3 font-mono text-sm font-bold text-[var(--sf-ink)]"
                                placeholder="LHIE-XXXXXXXXXXXXXXXXXXXX">
-                        <p id="access-key-help" class="text-sm font-semibold leading-5 text-[var(--sf-muted)]">Gunakan key persis seperti yang Anda simpan. Jika hilang, data akun tidak bisa dibuka otomatis.</p>
+                        <p id="access-key-help" class="text-sm font-semibold leading-5 text-[var(--sf-muted)]">Gunakan key persis seperti yang Anda simpan. Jika hilang, data akun tidak bisa dibuka otomatis atau dipulihkan manual oleh support.</p>
                         @error('access_key')<p id="access-key-error" class="text-sm font-bold text-[#b42336]">{{ $message }}</p>@enderror
                     </div>
 
                     <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Buka data pesanan</button>
                 </form>
+                <a href="{{ route('storefront.policies.recovery') }}" class="mt-6 block text-center text-sm font-black underline">Baca kebijakan pemulihan pesanan</a>
             </section>
         </main>
 

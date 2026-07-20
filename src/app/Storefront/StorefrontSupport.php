@@ -54,7 +54,7 @@ class StorefrontSupport
     {
         return $this->context(
             title: 'Butuh bantuan?',
-            body: 'Pilih kategori masalah. Pesan hanya membawa nomor invoice dan konteks masalah, tanpa Recovery Key atau data kredensial.',
+            body: 'Pilih kategori masalah. Pesan hanya membawa nomor invoice dan konteks masalah, tanpa Recovery Key atau data kredensial. Support tidak dapat membuka kredensial dari invoice saja.',
             categories: [
                 [
                     'key' => 'payment_pending',
