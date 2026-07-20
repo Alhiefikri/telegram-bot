@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -55,6 +56,20 @@ class RecoverTelegramOutboundEffects extends Command
                         ? SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())
                         : SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
                     $job->onQueue((string) $this->option('queue'));
+                    $dispatched++;
+                }
+            });
+
+        Order::query()
+            ->whereNotNull('manual_checkout_customer_notification_message_id')
+            ->whereNull('manual_checkout_customer_notification_deleted_at')
+            ->whereHas('payments', fn ($payments) => $payments->where('method', 'BINANCE_PAY_ID'))
+            ->whereIn('order_status', ['completed', 'cancelled'])
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
+                foreach ($orders as $order) {
+                    DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
+                        ->onQueue((string) $this->option('queue'));
                     $dispatched++;
                 }
             });

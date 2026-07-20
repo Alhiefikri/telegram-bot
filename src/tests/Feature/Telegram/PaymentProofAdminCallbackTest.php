@@ -5,7 +5,9 @@ namespace Tests\Feature\Telegram;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\PublishSalesProofPost;
+use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
@@ -16,11 +18,14 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
+use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -128,6 +133,36 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame(PaymentStatus::Pending, $order->payments()->firstOrFail()->fresh()->status);
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
     }
+
+    public function test_binance_payment_photo_is_forwarded_when_payment_command_is_sent_after_the_photo(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $largePhotoId = str_repeat('telegram-proof-', 20);
+        $photo = $this->paymentPhotoUpdate(205, $order->invoice_number, ['username' => 'buyer'], 12345, 'small-photo', $largePhotoId);
+        unset($photo['message']['caption']);
+        $this->postTelegramWebhook($photo)->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(206, '/payment', ['username' => 'buyer']))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && ($request['photo'] ?? null) === $largePhotoId);
+        $payment = $order->payments()->firstOrFail()->fresh();
+        $this->assertNotNull($payment->payment_proof_submitted_at);
+        $this->assertGreaterThan(255, strlen((string) $payment->getRawOriginal('payment_proof_file_id')));
+    }
+
     public function test_binance_payment_photo_with_payment_caption_reaches_admin_through_the_database_queue(): void
     {
         config()->set('queue.default', 'database');
@@ -148,17 +183,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $update['message']['caption'] = '/payment';
         $this->postTelegramWebhook($update)->assertOk();
 
-        $storedUpdate = \App\Models\TelegramUpdate::firstOrFail();
+        $storedUpdate = TelegramUpdate::firstOrFail();
         $this->assertNull($storedUpdate->processed_at);
-        (new \App\Jobs\ProcessTelegramUpdate($storedUpdate->id))->handle(app(\App\Services\Telegram\TelegramUpdateProcessor::class));
+        (new ProcessTelegramUpdate($storedUpdate->id))->handle(app(TelegramUpdateProcessor::class));
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'large-photo');
         $this->assertNotNull($storedUpdate->fresh()->processed_at);
     }
-    public function test_binance_payment_proof_replied_to_with_payment_command_reaches_admin(): void
 
+    public function test_binance_payment_proof_replied_to_with_payment_command_reaches_admin(): void
     {
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
@@ -188,7 +223,6 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'replied-proof');
     }
-
 
     public function test_binance_payment_proof_is_recovered_after_admin_photo_delivery_fails(): void
     {
@@ -227,6 +261,52 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'large-photo');
+    }
+
+    public function test_approved_binance_payment_deletes_the_buyers_checkout_instruction(): void
+    {
+        config()->set('services.binance.pay_id', '1251268604');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 701]]),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+
+        (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(207, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(208, 'approve-binance', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && ($request['message_id'] ?? null) === 701);
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+    }
+
+    public function test_rejected_binance_payment_deletes_the_buyers_checkout_instruction(): void
+    {
+        config()->set('services.binance.pay_id', '1251268604');
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 702]]),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+
+        (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(209, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(210, 'reject-binance', 'admin:reject-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && ($request['message_id'] ?? null) === 702);
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
     }
 
     public function test_unforwarded_binance_payment_proof_is_recovered_by_scheduler(): void

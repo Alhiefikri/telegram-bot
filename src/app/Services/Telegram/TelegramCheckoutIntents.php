@@ -76,7 +76,7 @@ class TelegramCheckoutIntents
         return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
     }
 
-    public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): void
+    public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
     {
         // Manual Binance Pay payments are confirmed from a photo sent with /payment.
         $payId = (string) config('services.binance.pay_id');
@@ -89,7 +89,7 @@ class TelegramCheckoutIntents
             throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
         }
 
-        $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [
+        return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [
             'inline_keyboard' => [[[
                 'text' => $this->locale->text($customer, '❌ Batalkan Order', '❌ Cancel Order'),
                 'callback_data' => 'buyer:cancel-pending:'.$order->id,

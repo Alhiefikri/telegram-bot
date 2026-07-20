@@ -152,6 +152,16 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($text === '' && $this->manualPayments->rememberPendingProofPhoto($customer, $message)) {
+            $this->bot->sendMessage($chatId, $this->text(
+                $customer,
+                '📸 Screenshot bukti sudah diterima. Sekarang kirim /payment untuk meneruskannya ke admin.',
+                '📸 Your payment screenshot has been received. Now send /payment to forward it to the admin.',
+            ));
+
+            return;
+        }
+
         if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
             $this->session->forget($customer);
             $order = $customer->orders()->latest()->first();

@@ -62,6 +62,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                 return;
             }
             $order = $claimed;
+            $messageId = null;
 
             try {
                 $payment = $order->payments->firstWhere('method', 'BINANCE_PAY_ID');
@@ -69,7 +70,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                     throw new \RuntimeException('Binance payment is missing for order '.$order->id.'.');
                 }
 
-                DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                     'step' => 'binance_payment_instructions',
                     'payment_mode' => 'manual',
                     'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
@@ -80,13 +81,22 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                     $payment,
                     $order->customer,
                 ));
+                $messageId = data_get($response, 'result.message_id');
+                if (! is_numeric($messageId)) {
+                    throw new \RuntimeException('Telegram Binance checkout instruction did not return a message ID.');
+                }
             } catch (\Throwable $e) {
                 $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
 
                 throw $e;
             }
 
-            $order->forceFill(['manual_checkout_customer_notified_at' => now(), 'manual_checkout_customer_notification_started_at' => null])->save();
+            $order->forceFill([
+                'manual_checkout_customer_notified_at' => now(),
+                'manual_checkout_customer_notification_started_at' => null,
+                'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
+                'manual_checkout_customer_notification_message_id' => (int) $messageId,
+            ])->save();
         } finally {
             DogfoodTiming::log('dogfood.telegram.binance_checkout_instructions_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

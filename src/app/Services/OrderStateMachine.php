@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
@@ -60,8 +61,8 @@ class OrderStateMachine
                 $lockedOrder->refresh();
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
 
-                SendAdminOrderPaidNotification::dispatch($lockedOrder->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
                 SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
+                DeleteBuyerBinanceCheckoutInstruction::dispatch($lockedOrder->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
 
                 return $lockedOrder->fresh(['payments']);
             });
@@ -81,7 +82,10 @@ class OrderStateMachine
                     throw new InvalidOrderTransition('Only pending manual orders can be rejected.');
                 }
 
-                return $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
+                $rejected = $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
+                DeleteBuyerBinanceCheckoutInstruction::dispatch($rejected->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
+
+                return $rejected;
             });
         }, 5);
     }

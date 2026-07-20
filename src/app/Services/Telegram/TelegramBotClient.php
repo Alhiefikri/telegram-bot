@@ -36,7 +36,7 @@ class TelegramBotClient
         return $this->timed('sendMessage', fn () => $this->requests->request()->post($this->requests->url('sendMessage'), $payload)->throw()->json());
     }
 
-    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): void
+    public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $request = $this->requests->request()->attach('photo', $photoContents, $filename);
         $payload = array_merge(['chat_id' => $chatId], $options);
@@ -48,12 +48,16 @@ class TelegramBotClient
             $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
         }
 
-
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
         }
 
-        $this->timed('sendPhoto', fn () => $request->post($this->requests->url('sendPhoto'), $payload)->throw());
+        $response = $this->timed('sendPhoto', fn () => $request->post($this->requests->url('sendPhoto'), $payload)->throw()->json());
+        if (($response['ok'] ?? false) !== true) {
+            throw new \RuntimeException('Telegram Bot API sendPhoto response was not successful.');
+        }
+
+        return $response;
     }
 
     public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): void

@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -40,7 +41,7 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        $photoFileId = $this->largestPhotoFileId($message);
+        $photoFileId = $this->largestPhotoFileId($message) ?? $this->pendingProofPhotoFileId($customer, $order);
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
@@ -100,6 +101,7 @@ class TelegramManualPaymentIntents
 
             return;
         }
+        $this->forgetPendingProofPhoto($customer);
         $order = $claim['order'];
         $payment = $claim['payment'];
         $forwarded = false;
@@ -316,6 +318,44 @@ class TelegramManualPaymentIntents
         $photo = collect($photos)->sortByDesc(fn ($photo) => (int) ($photo['file_size'] ?? (($photo['width'] ?? 0) * ($photo['height'] ?? 0))))->first();
 
         return is_array($photo) ? ($photo['file_id'] ?? null) : null;
+    }
+
+    public function rememberPendingProofPhoto(Customer $customer, array $message): bool
+    {
+        $photoFileId = $this->largestPhotoFileId($message);
+        $order = $this->manualPaymentOrderForCustomer($customer, '');
+        if ($photoFileId === null || $order === null) {
+            return false;
+        }
+
+        Cache::put($this->pendingProofPhotoCacheKey($customer), [
+            'order_id' => $order->id,
+            'file_id' => $photoFileId,
+        ], now()->addMinutes(30));
+
+        return true;
+    }
+
+    private function pendingProofPhotoFileId(Customer $customer, Order $order): ?string
+    {
+        $proof = Cache::get($this->pendingProofPhotoCacheKey($customer));
+        if (! is_array($proof) || ($proof['order_id'] ?? null) !== $order->id) {
+            return null;
+        }
+
+        $photoFileId = $proof['file_id'] ?? null;
+
+        return is_string($photoFileId) && $photoFileId !== '' ? $photoFileId : null;
+    }
+
+    private function forgetPendingProofPhoto(Customer $customer): void
+    {
+        Cache::forget($this->pendingProofPhotoCacheKey($customer));
+    }
+
+    private function pendingProofPhotoCacheKey(Customer $customer): string
+    {
+        return 'telegram:manual-payment-proof:'.$customer->telegram_id;
     }
 
     public function adminTelegramChatId(): ?string
