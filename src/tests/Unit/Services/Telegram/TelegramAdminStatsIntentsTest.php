@@ -131,6 +131,36 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertArrayNotHasKey('USDT', $stats['receipts']);
     }
 
+    public function test_duplicate_paid_payment_in_today_window_is_ignored_when_canonical_payment_was_yesterday(): void
+    {
+        Carbon::setTestNow('2026-07-08 15:00:00');
+
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 50000,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 50000,
+            'provider_fee' => 1000,
+            'currency' => 'IDR',
+            'paid_at' => now()->subDay(),
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'paid_at' => now()->subMinute(),
+        ]);
+
+        $stats = app(TelegramAdminStatsIntents::class)->calculateTodayStats();
+
+        $this->assertSame(0, $stats['paid_orders']);
+        $this->assertSame(0, $stats['sales_value']);
+        $this->assertSame([], $stats['receipts']);
+    }
+
     public function test_calculate_today_stats_counts_only_orders_and_payments_from_today(): void
     {
         Carbon::setTestNow('2026-07-08 15:00:00');

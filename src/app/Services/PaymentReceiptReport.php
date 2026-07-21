@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class PaymentReceiptReport
 {
@@ -15,21 +16,55 @@ class PaymentReceiptReport
     public function canonicalPaidPayments(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): Collection
     {
         $query = Payment::query()
-            ->where('status', PaymentStatus::Paid)
-            ->whereNotNull('paid_at');
+            ->from('payments as canonical_payments')
+            ->where('canonical_payments.status', PaymentStatus::Paid)
+            ->whereNotNull('canonical_payments.paid_at')
+            ->whereNotExists(function ($query): void {
+                $query
+                    ->select(DB::raw(1))
+                    ->from('payments as earlier_payments')
+                    ->whereColumn('earlier_payments.order_id', 'canonical_payments.order_id')
+                    ->where('earlier_payments.status', PaymentStatus::Paid)
+                    ->whereNotNull('earlier_payments.paid_at')
+                    ->where(function ($query): void {
+                        $query
+                            ->whereColumn('earlier_payments.paid_at', '<', 'canonical_payments.paid_at')
+                            ->orWhere(function ($query): void {
+                                $query
+                                    ->whereColumn('earlier_payments.paid_at', 'canonical_payments.paid_at')
+                                    ->whereColumn('earlier_payments.id', '<', 'canonical_payments.id');
+                            });
+                    });
+            });
 
         if ($start !== null) {
-            $query->where('paid_at', '>=', $start);
+            $query->where('canonical_payments.paid_at', '>=', $start);
         }
 
         if ($end !== null) {
-            $query->where('paid_at', $includeEnd ? '<=' : '<', $end);
+            $query->where('canonical_payments.paid_at', $includeEnd ? '<=' : '<', $end);
         }
 
         return $query
-            ->orderBy('paid_at')
-            ->orderBy('id')
-            ->get(['id', 'order_id', 'amount', 'currency', 'provider_fee', 'paid_at'])
+            ->orderBy('canonical_payments.paid_at')
+            ->orderBy('canonical_payments.id')
+            ->get([
+                'canonical_payments.id',
+                'canonical_payments.order_id',
+                'canonical_payments.amount',
+                'canonical_payments.currency',
+                'canonical_payments.provider_fee',
+                'canonical_payments.paid_at',
+            ]);
+    }
+
+    /**
+     * @param  Collection<int, Payment>  $payments
+     * @return Collection<int, Payment>
+     */
+    public function canonicalFromPayments(Collection $payments): Collection
+    {
+        return $payments
             ->groupBy('order_id')
             ->map(fn ($payments): Payment => $payments->sortBy([['paid_at', 'asc'], ['id', 'asc']])->first())
             ->values();

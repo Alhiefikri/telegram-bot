@@ -95,34 +95,17 @@ final class AdminDashboardSalesData
      */
     private function paidReceiptLabel(Order $order): array
     {
-        $canonical = $order->payments
-            ->sortBy([['paid_at', 'asc'], ['id', 'asc']])
-            ->take(1);
+        $payment = $this->receiptReport->canonicalFromPayments($order->payments)->first();
+        if ($payment === null) {
+            return ['label' => Money::idr(0), 'amount' => 0];
+        }
 
-        $payments = $canonical
-            ->groupBy(fn ($payment): string => $this->receiptReport->currency($payment))
-            ->map(fn ($payments): int => (int) $payments->sum(fn ($payment): int => $this->receiptReport->netAmount($payment)));
-
-        if ($payments->count() === 1 && $payments->has('USDT')) {
-            $amount = (int) $payments->get('USDT');
-
+        $amount = $this->receiptReport->netAmount($payment);
+        if ($this->receiptReport->currency($payment) === 'USDT') {
             return ['label' => Money::usdt($amount), 'amount' => $amount];
         }
 
-        $idr = (int) ($payments->get('IDR') ?? 0);
-        if ($payments->count() <= 1) {
-            return ['label' => Money::idr($idr), 'amount' => $idr];
-        }
-
-        $parts = [];
-        if ($idr > 0) {
-            $parts[] = Money::idr($idr);
-        }
-        if (($payments->get('USDT') ?? 0) > 0) {
-            $parts[] = Money::usdt((int) $payments->get('USDT'));
-        }
-
-        return ['label' => implode(' + ', $parts), 'amount' => $idr];
+        return ['label' => Money::idr($amount), 'amount' => $amount];
     }
 
     public function paymentAttention(Order $order): ?array

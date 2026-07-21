@@ -15,11 +15,14 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\TelegramBotClient;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -163,7 +166,7 @@ class ProductPriceChangeNotificationTest extends TestCase
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => function ($request) use (&$failEnglishRecipient) {
                 return $failEnglishRecipient && (string) $request['chat_id'] === '9002'
-                    ? Http::response(['ok' => false, 'description' => 'Bad Gateway'], 502)
+                    ? throw new RuntimeException('https://api.telegram.org/botbot-token/sendMessage failed')
                     : Http::response(['ok' => true, 'result' => ['message_id' => 123]]);
             },
         ]);
@@ -188,7 +191,9 @@ class ProductPriceChangeNotificationTest extends TestCase
         }
 
         $this->assertSame(1, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('sent_at')->count());
-        $this->assertSame(1, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('failed_at')->count());
+        $failedRecipient = ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('failed_at')->sole();
+        $this->assertStringNotContainsString('bot-token', (string) $failedRecipient->last_error);
+        $this->assertStringContainsString('[redacted-telegram-bot-api-url]', (string) $failedRecipient->last_error);
 
         $sendCountBeforeRetry = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->count();
         $failEnglishRecipient = false;
@@ -199,6 +204,42 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertCount(1, $newRetrySends);
         $this->assertSame('9002', (string) $newRetrySends->first()[0]['chat_id']);
         $this->assertSame(2, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('sent_at')->count());
+    }
+
+    public function test_recipient_at_attempt_cap_is_not_retried_or_redispatched_forever(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 9010, 'locale' => 'en']);
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+            'recipients_materialized_at' => now(),
+        ]);
+        ProductPriceChangeNotificationRecipient::create([
+            'event_id' => $event->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => (string) $customer->telegram_id,
+            'locale' => 'en',
+            'attempts' => 5,
+            'failed_at' => now(),
+            'last_error' => 'blocked',
+        ]);
+
+        app(ProductPriceChangeNotificationService::class)->processEvent($event->id);
+
+        Http::assertNothingSent();
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+        Queue::assertNotPushed(SendProductPriceChangeNotifications::class);
     }
 
     public function test_recover_outbound_redispatches_price_change_events_with_failed_or_missing_recipients(): void
@@ -275,6 +316,45 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $this->assertSame(0, ProductPriceChangeEvent::count());
         Queue::assertNotPushed(SendProductPriceChangeNotifications::class);
+    }
+
+    public function test_uploaded_replacement_image_is_removed_when_product_update_transaction_rolls_back(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('products/old.webp', 'old');
+        Queue::fake();
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Image Rollback Product',
+            'image_path' => 'products/old.webp',
+            'price_amount' => 40000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class)) extends ProductPriceChangeNotificationService
+        {
+            public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
+            {
+                throw new RuntimeException('force rollback after image path update');
+            }
+        });
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => $product->name,
+                'price_amount' => '35000',
+                'description' => $product->description,
+                'is_active' => '1',
+                'image' => UploadedFile::fake()->image('replacement.png', 800, 800),
+            ])
+            ->assertServerError();
+
+        $product->refresh();
+        $this->assertSame('products/old.webp', $product->image_path);
+        Storage::disk('public')->assertExists('products/old.webp');
+        $this->assertCount(1, Storage::disk('public')->files('products'));
     }
 
     private function telegramSendFor(int $chatId)

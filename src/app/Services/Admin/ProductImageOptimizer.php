@@ -112,7 +112,7 @@ final class ProductImageOptimizer
         return $target;
     }
 
-    private function deleteManagedImage(?string $path): void
+    public function deleteManagedImage(?string $path): void
     {
         if (! $path || ! str_starts_with($path, self::DIRECTORY.'/')) {
             return;

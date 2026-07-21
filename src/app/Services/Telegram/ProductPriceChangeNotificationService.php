@@ -8,6 +8,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -15,6 +16,8 @@ use Throwable;
 class ProductPriceChangeNotificationService
 {
     private const CLAIM_TTL_MINUTES = 15;
+
+    public const MAX_RECIPIENT_ATTEMPTS = 5;
 
     public function __construct(private readonly TelegramBotClient $bot) {}
 
@@ -58,6 +61,7 @@ class ProductPriceChangeNotificationService
         ProductPriceChangeNotificationRecipient::query()
             ->where('event_id', $event->id)
             ->whereNull('sent_at')
+            ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
             ->where(function ($query): void {
                 $query->whereNull('send_started_at')
                     ->orWhere('send_started_at', '<=', now()->subMinutes(self::CLAIM_TTL_MINUTES));
@@ -116,6 +120,10 @@ class ProductPriceChangeNotificationService
                 return null;
             }
 
+            if ($locked->attempts >= self::MAX_RECIPIENT_ATTEMPTS) {
+                return null;
+            }
+
             if ($locked->send_started_at !== null && $locked->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
                 return null;
             }
@@ -153,10 +161,17 @@ class ProductPriceChangeNotificationService
                     'send_started_at' => null,
                     'send_claim_token' => null,
                     'failed_at' => now(),
-                    'last_error' => substr($e::class.': '.$e->getMessage(), 0, 2000),
+                    'last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
                 ]);
 
-            report($e);
+            Log::warning('telegram.product_price_change_notification_failed', [
+                'event_id' => $event->id,
+                'recipient_id' => $claimed->id,
+                'customer_id' => $claimed->customer_id,
+                'attempts' => $claimed->attempts,
+                'exception' => $e::class,
+                'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
+            ]);
 
             return false;
         }

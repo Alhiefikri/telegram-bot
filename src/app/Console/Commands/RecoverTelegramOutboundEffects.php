@@ -12,6 +12,7 @@ use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
+use App\Services\Telegram\ProductPriceChangeNotificationService;
 use Illuminate\Console\Command;
 
 class RecoverTelegramOutboundEffects extends Command
@@ -87,6 +88,7 @@ class RecoverTelegramOutboundEffects extends Command
                     ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
                         $recipients
                             ->whereNull('sent_at')
+                            ->where('attempts', '<', ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS)
                             ->where(function ($recipient) use ($cutoff): void {
                                 $recipient->whereNull('send_started_at')
                                     ->orWhere('send_started_at', '<=', $cutoff);
