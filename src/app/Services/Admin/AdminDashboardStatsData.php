@@ -152,11 +152,28 @@ final class AdminDashboardStatsData
             'binance_pay_enabled' => (bool) $settings?->binance_pay_enabled,
             'qris_payment_ttl_minutes' => $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
             'binance_payment_ttl_minutes' => $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES,
+            'whatsapp_support_url' => $settings?->whatsapp_support_url,
+            'whatsapp_support_number' => $settings?->whatsappSupportNumber(),
+            'whatsapp_support_effective_url' => $settings?->whatsappSupportUrl() ?: $this->whatsappSupportFallbackUrl(),
+            'whatsapp_support_source' => $settings?->whatsappSupportUrl() ? 'dashboard_setting' : 'environment_fallback',
             'update_url' => route('admin.payment-mode.update'),
+            'support_update_url' => route('admin.support-settings.update'),
             'status_badge' => [
                 'label' => $statusBadge,
             ],
         ];
+    }
+
+    private function whatsappSupportFallbackUrl(): ?string
+    {
+        $url = trim((string) config('services.support.whatsapp_url'));
+        if ($url !== '') {
+            return $url;
+        }
+
+        $number = ManualPaymentSetting::normalizeWhatsappNumber((string) config('services.support.whatsapp_number'));
+
+        return $number !== '' ? 'https://wa.me/'.$number : null;
     }
 
     private function actionableStatusCounts(array $statusCounts): array

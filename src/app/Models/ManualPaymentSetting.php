@@ -6,7 +6,7 @@ use App\Support\PakasirCheckoutFlow;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes'])]
+#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'whatsapp_support_url', 'whatsapp_support_number', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes'])]
 class ManualPaymentSetting extends Model
 {
     public const DEFAULT_QRIS_PAYMENT_TTL_MINUTES = 10;
@@ -33,6 +33,36 @@ class ManualPaymentSetting extends Model
     public function binancePaymentTtlMinutes(): int
     {
         return max(1, (int) ($this->binance_payment_ttl_minutes ?: self::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES));
+    }
+
+    public function whatsappSupportNumber(): ?string
+    {
+        $number = self::normalizeWhatsappNumber((string) $this->whatsapp_support_number);
+
+        return $number !== '' ? $number : null;
+    }
+
+    public function whatsappSupportUrl(): ?string
+    {
+        $url = trim((string) $this->whatsapp_support_url);
+        if ($url !== '') {
+            return $url;
+        }
+
+        $number = $this->whatsappSupportNumber();
+
+        return $number ? 'https://wa.me/'.$number : null;
+    }
+
+    public static function normalizeWhatsappNumber(string $value): string
+    {
+        $number = preg_replace('/\D+/', '', $value) ?: '';
+
+        if (str_starts_with($number, '0')) {
+            return '62'.substr($number, 1);
+        }
+
+        return $number;
     }
 
     public static function current(): ?self

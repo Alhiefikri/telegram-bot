@@ -2,11 +2,16 @@
 
 namespace App\Storefront;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 
 class StorefrontSupport
 {
+    private bool $whatsappBaseUrlResolved = false;
+
+    private ?string $whatsappBaseUrl = null;
+
     /**
      * @return array{title:string, body:string, subject:array{product_id:int|string}, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
      */
@@ -160,14 +165,25 @@ class StorefrontSupport
 
     private function whatsappBaseUrl(): ?string
     {
-        $configuredUrl = trim((string) config('services.support.whatsapp_url'));
-        if ($configuredUrl !== '') {
-            return $configuredUrl;
+        if ($this->whatsappBaseUrlResolved) {
+            return $this->whatsappBaseUrl;
         }
 
-        $number = preg_replace('/\D+/', '', (string) config('services.support.whatsapp_number'));
+        $this->whatsappBaseUrlResolved = true;
 
-        return $number ? 'https://wa.me/'.$number : null;
+        $settingUrl = ManualPaymentSetting::current()?->whatsappSupportUrl();
+        if ($settingUrl) {
+            return $this->whatsappBaseUrl = $settingUrl;
+        }
+
+        $configuredUrl = trim((string) config('services.support.whatsapp_url'));
+        if ($configuredUrl !== '') {
+            return $this->whatsappBaseUrl = $configuredUrl;
+        }
+
+        $number = ManualPaymentSetting::normalizeWhatsappNumber((string) config('services.support.whatsapp_number'));
+
+        return $this->whatsappBaseUrl = ($number ? 'https://wa.me/'.$number : null);
     }
 
     private function telegramAdminBaseUrl(): ?string

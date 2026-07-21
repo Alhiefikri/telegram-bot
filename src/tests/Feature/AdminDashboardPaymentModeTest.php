@@ -172,6 +172,41 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->assertSame(25, AuditLog::query()->latest('id')->firstOrFail()->new_values['binance_payment_ttl_minutes']);
     }
 
+    public function test_owner_can_update_public_whatsapp_support_from_dashboard(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Support WhatsApp')
+            ->assertSee('Nomor publik toko disimpan di dashboard.');
+
+        $this->post(route('admin.support-settings.update'), [
+            'whatsapp_support_number' => '0812-3456-7890',
+            'whatsapp_support_url' => '',
+        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'id' => $setting->id,
+            'whatsapp_support_number' => '6281234567890',
+            'whatsapp_support_url' => null,
+        ]);
+        $auditLog = AuditLog::query()->latest('id')->firstOrFail();
+        $this->assertSame('support_settings.updated', $auditLog->action);
+        $this->assertSame('6281234567890', $auditLog->new_values['whatsapp_support_number']);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('https://wa.me/6281234567890');
+    }
+
     public function test_payment_deadlines_must_be_positive_integers(): void
     {
         $this->actingAs(User::factory()->create([
@@ -186,6 +221,21 @@ class AdminDashboardPaymentModeTest extends TestCase
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors(['qris_payment_ttl_minutes', 'binance_payment_ttl_minutes'], null, 'paymentMode');
+    }
+
+    public function test_whatsapp_support_url_must_be_valid_when_updated_from_dashboard(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Admin,
+        ]));
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.support-settings.update'), [
+                'whatsapp_support_url' => 'not-a-url',
+                'whatsapp_support_number' => 'admin<script>',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['whatsapp_support_url', 'whatsapp_support_number'], null, 'supportSettings');
     }
 
     public function test_saved_pakasir_mode_is_reported_unready_and_effectively_manual_when_config_missing(): void

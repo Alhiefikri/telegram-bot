@@ -223,6 +223,51 @@
                                 Simpan batas waktu pembayaran
                             </x-admin-dashboard.button>
                         </form>
+                        <form method="POST" action="{{ $paymentControl['support_update_url'] }}" class="mt-4 space-y-3 border-t-[2px] border-neo-ink/15 pt-4" aria-label="Support WhatsApp">
+                            @csrf
+                            <div>
+                                <h3 class="font-display text-sm font-black uppercase tracking-wider text-neo-ink">Support WhatsApp</h3>
+                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">
+                                    Nomor publik toko disimpan di dashboard. Env hanya menjadi fallback kalau setting ini kosong.
+                                </p>
+                            </div>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Nomor WhatsApp
+                                    <x-admin-dashboard.input
+                                        class="mt-1"
+                                        inputmode="tel"
+                                        name="whatsapp_support_number"
+                                        placeholder="081234567890"
+                                        type="text"
+                                        :value="old('whatsapp_support_number', $paymentControl['whatsapp_support_number'])"
+                                    />
+                                    @error('whatsapp_support_number', 'supportSettings')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    URL WhatsApp custom
+                                    <x-admin-dashboard.input
+                                        class="mt-1"
+                                        name="whatsapp_support_url"
+                                        placeholder="https://wa.me/6281234567890"
+                                        type="url"
+                                        :value="old('whatsapp_support_url', $paymentControl['whatsapp_support_url'])"
+                                    />
+                                    @error('whatsapp_support_url', 'supportSettings')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                </label>
+                            </div>
+                            <p class="text-[11px] font-semibold text-brand-muted">
+                                URL custom menang atas nomor. Aktif sekarang:
+                                <span class="break-all font-black text-neo-ink">{{ $paymentControl['whatsapp_support_effective_url'] ?: 'Belum dikonfigurasi' }}</span>
+                            </p>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                Simpan Support WhatsApp
+                            </x-admin-dashboard.button>
+                        </form>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             Hanya owner/admin yang bisa mengubah mode pembayaran.

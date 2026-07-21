@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Storefront\StorefrontSupport;
@@ -93,5 +94,22 @@ class StorefrontSupportTest extends TestCase
         $this->assertSame('Telegram Admin', $options[1]['label']);
         $this->assertTrue($options[1]['available']);
         $this->assertStringStartsWith('https://t.me/alhie02?text=', $options[1]['href']);
+    }
+
+    public function test_dashboard_whatsapp_setting_takes_priority_over_environment_fallback(): void
+    {
+        config()->set('services.support.whatsapp_url', 'https://wa.me/6280000000000');
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'whatsapp_support_number' => '0812 9999 0000',
+            'is_active' => true,
+        ]);
+
+        $context = app(StorefrontSupport::class)->general();
+        $whatsapp = $context['categories'][0]['options'][0];
+
+        $this->assertTrue($whatsapp['available']);
+        $this->assertStringStartsWith('https://wa.me/6281299990000?text=', $whatsapp['href']);
     }
 }

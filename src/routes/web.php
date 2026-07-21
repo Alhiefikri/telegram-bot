@@ -18,6 +18,7 @@ use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
+use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
@@ -84,6 +85,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
 
