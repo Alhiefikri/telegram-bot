@@ -483,7 +483,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.telegram.admin_user_id', '999');
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'store_support', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $this->fakeTelegramHttp();
 
         $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
@@ -514,6 +514,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString(route('storefront.login-guide'), $receiptText);
         $this->assertSame('Login & Security Guide', $receiptRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
         $this->assertSame(route('storefront.login-guide'), $receiptRequest['reply_markup']['inline_keyboard'][0][0]['url'] ?? null);
+        $this->assertSame('Contact Support', $receiptRequest['reply_markup']['inline_keyboard'][1][0]['text'] ?? null);
+        $this->assertSame('https://t.me/store_support', $receiptRequest['reply_markup']['inline_keyboard'][1][0]['url'] ?? null);
         $visibleReceipt = json_encode($receiptRequest->data(), JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('Pembayaran diterima', $visibleReceipt);
         $this->assertStringNotContainsString('Data akun', $visibleReceipt);
@@ -963,6 +965,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
     public function test_receipt_notifier_sends_paid_order_receipt(): void
     {
+        config()->set('services.telegram.admin_contact_url', 'https://t.me/store_support');
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 777, 'locale' => 'id']);
         $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
@@ -970,7 +973,30 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         app(TelegramReceiptNotifier::class)->send($order);
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && $r['chat_id'] === 777 && str_contains($r['text'], 'Pembayaran diterima'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['chat_id'] === 777
+            && str_contains($r['text'], 'Pembayaran diterima')
+            && data_get($r->data(), 'reply_markup.inline_keyboard.1.0.text') === 'Hubungi Support'
+            && data_get($r->data(), 'reply_markup.inline_keyboard.1.0.url') === 'https://t.me/store_support');
+    }
+
+    public function test_receipt_omits_support_button_without_admin_contact(): void
+    {
+        config()->set('services.telegram.admin_contact_url', null);
+        config()->set('services.telegram.admin_username', null);
+        config()->set('services.support.telegram_admin_url', null);
+        config()->set('services.support.telegram_admin_username', null);
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 779, 'locale' => 'id']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && (string) $r['chat_id'] === '779'
+            && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 1
+            && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.text') === 'Panduan Login & Keamanan');
     }
 
     public function test_legacy_pending_order_uses_current_product_delivery_note_as_fallback(): void

@@ -16,6 +16,7 @@ class TelegramReceiptNotifier
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
         private TelegramMessageChunker $messageChunker,
+        private TelegramSupportContact $supportContact,
     ) {}
 
     public function send(Order $order, bool $force = false): void
@@ -154,6 +155,14 @@ class TelegramReceiptNotifier
         $rows = [[
             ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
         ]];
+
+        $supportUrl = $this->supportContact->resolve()['url'];
+        if ($supportUrl !== '') {
+            $rows[] = [[
+                'text' => $this->locale->text($customer, 'Hubungi Support', 'Contact Support'),
+                'url' => $supportUrl,
+            ]];
+        }
 
         return [
             'inline_keyboard' => $rows,

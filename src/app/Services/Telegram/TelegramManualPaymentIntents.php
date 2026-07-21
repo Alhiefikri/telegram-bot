@@ -5,7 +5,6 @@ namespace App\Services\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
-use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
 use Illuminate\Support\Arr;
@@ -20,6 +19,7 @@ class TelegramManualPaymentIntents
         private AdminOrderOperations $adminOrders,
         private TelegramAdminAccess $adminAccess,
         private TelegramLocale $locale,
+        private TelegramSupportContact $supportContact,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -430,14 +430,7 @@ class TelegramManualPaymentIntents
      */
     private function buyerSupport(): array
     {
-        $settings = ManualPaymentSetting::current();
-        $username = ltrim(trim((string) ($settings?->admin_username ?: config('services.telegram.admin_username'))), '@');
-        $url = trim((string) ($settings?->admin_contact_url ?: config('services.telegram.admin_contact_url')));
-        if ($url === '' && $username !== '') {
-            $url = 'https://t.me/'.$username;
-        }
-
-        return ['username' => $username, 'url' => $url];
+        return $this->supportContact->resolve();
     }
 
     private function buyerSupportReplyMarkup(Customer $customer, string $url): array

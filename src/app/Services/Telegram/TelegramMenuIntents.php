@@ -9,7 +9,12 @@ class TelegramMenuIntents
 {
     use HasAdminWebAppButton;
 
-    public function __construct(private TelegramBotClient $bot, private TelegramAdminAccess $adminAccess, private TelegramLocale $locale) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private TelegramAdminAccess $adminAccess,
+        private TelegramLocale $locale,
+        private TelegramSupportContact $supportContact,
+    ) {}
 
     public function sendLanguagePicker(string $chatId): void
     {
@@ -131,13 +136,10 @@ class TelegramMenuIntents
 
     public function sendSupport(Customer $customer, string $chatId): void
     {
-        $adminContactUrl = config('services.telegram.admin_contact_url');
-        $adminUsername = config('services.telegram.admin_username');
+        $adminContactUrl = $this->supportContact->resolve()['url'];
         $replyMarkup = [];
         if ($adminContactUrl) {
             $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => $adminContactUrl]]]];
-        } elseif ($adminUsername) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => 'https://t.me/'.ltrim((string) $adminUsername, '@')]]]];
         }
 
         $this->bot->sendMessage($chatId, $this->locale->text($customer, "💬 Support\n━━━━━━━━━━━━━━\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", "💬 Support\n━━━━━━━━━━━━━━\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help."), $replyMarkup);

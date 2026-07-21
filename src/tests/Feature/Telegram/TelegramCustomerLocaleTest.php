@@ -40,7 +40,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
     public function test_support_copy_and_contact_button_follow_customer_locale(): void
     {
-        config()->set('services.telegram.admin_username', 'store_support');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'store_support', 'is_active' => true]);
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 41011, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41012, 'locale' => 'en']);
