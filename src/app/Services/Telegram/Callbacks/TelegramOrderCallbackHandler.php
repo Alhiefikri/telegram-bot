@@ -6,7 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Models\Customer;
-use App\Services\OrderStateMachine;
+use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -22,7 +22,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramOrderIntents $orders,
-        private OrderStateMachine $orderStates,
+        private OrderLifecycle $orderStates,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -89,7 +89,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         }
 
         try {
-            $cancelled = $this->orderStates->cancelPendingOrder($order, requireNoPaymentProof: true);
+            $cancelled = $this->orderStates->applyPendingCancellation($order, requireNoPaymentProof: true)->order;
         } catch (InvalidOrderTransition) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pesanan sudah tidak bisa dibatalkan.', 'This order can no longer be cancelled.'));
             $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.", "This order has been processed or can no longer be cancelled.\n\nCheck the latest status with /status."));

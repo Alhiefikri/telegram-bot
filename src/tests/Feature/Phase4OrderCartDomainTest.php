@@ -23,6 +23,8 @@ use App\Services\CartService;
 use App\Services\InventoryLedger;
 use App\Services\InvoiceNumberGenerator;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderLifecycle;
+use App\Services\OrderLifecycleResult;
 use App\Services\OrderStateMachine;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
@@ -107,9 +109,13 @@ class Phase4OrderCartDomainTest extends TestCase
         $order = app(OrderCheckoutService::class)->checkout($cart);
         $payment = $order->payments()->first();
 
-        app(OrderStateMachine::class)->markPaymentPaid($payment);
-        app(OrderStateMachine::class)->markPaymentPaid($payment->fresh());
+        $first = app(OrderStateMachine::class)->applyPaymentPaid($payment);
+        $replay = app(OrderStateMachine::class)->applyPaymentPaid($payment->fresh());
 
+        $this->assertTrue($first->newlyApplied);
+        $this->assertFalse($replay->newlyApplied);
+        $this->assertSame(OrderStatus::Processing, $first->orderStatus());
+        $this->assertSame(PaymentStatus::Paid, $first->paymentStatus());
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(1, Product::first()->stock);
@@ -131,15 +137,23 @@ class Phase4OrderCartDomainTest extends TestCase
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinute());
 
-        app(OrderStateMachine::class)->expirePendingOrder($order);
-        app(OrderStateMachine::class)->expirePendingOrder($order->fresh());
+        $expired = app(OrderStateMachine::class)->applyPendingExpiry($order);
+        $expiredReplay = app(OrderStateMachine::class)->applyPendingExpiry($order->fresh());
 
+        $this->assertTrue($expired->newlyApplied);
+        $this->assertFalse($expiredReplay->newlyApplied);
+        $this->assertSame(OrderStatus::Expired, $expired->orderStatus());
+        $this->assertSame(PaymentStatus::Expired, $expired->paymentStatus());
         $this->assertSame(0, Product::first()->reserved_stock);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
 
         $order2 = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2));
-        app(OrderStateMachine::class)->cancelPendingOrder($order2);
-        app(OrderStateMachine::class)->cancelPendingOrder($order2->fresh());
+        $cancelled = app(OrderStateMachine::class)->applyPendingCancellation($order2);
+        $cancelReplay = app(OrderStateMachine::class)->applyPendingCancellation($order2->fresh());
+        $this->assertTrue($cancelled->newlyApplied);
+        $this->assertFalse($cancelReplay->newlyApplied);
+        $this->assertSame(OrderStatus::Cancelled, $cancelled->orderStatus());
+        $this->assertSame(PaymentStatus::Failed, $cancelled->paymentStatus());
         $this->assertSame(2, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
 
@@ -219,9 +233,13 @@ class Phase4OrderCartDomainTest extends TestCase
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), expiresAt: now()->subMinute());
         app(OrderStateMachine::class)->expirePendingOrder($order);
 
-        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first());
-        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->first()->fresh());
+        $latePaid = app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->first());
+        $latePaidReplay = app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->first()->fresh());
 
+        $this->assertTrue($latePaid->newlyApplied);
+        $this->assertFalse($latePaidReplay->newlyApplied);
+        $this->assertSame(OrderStatus::Expired, $latePaid->orderStatus());
+        $this->assertSame(PaymentStatus::Paid, $latePaid->paymentStatus());
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
         $this->assertSame(PaymentStatus::Paid, $order->payments()->first()->fresh()->status);
@@ -237,9 +255,13 @@ class Phase4OrderCartDomainTest extends TestCase
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product));
         $payment = $order->payments()->first();
 
-        app(OrderStateMachine::class)->markPaymentRefunded($payment);
-        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
+        $refunded = app(OrderStateMachine::class)->applyPaymentRefunded($payment);
+        $refundReplay = app(OrderStateMachine::class)->applyPaymentRefunded($payment->fresh());
 
+        $this->assertTrue($refunded->newlyApplied);
+        $this->assertFalse($refundReplay->newlyApplied);
+        $this->assertSame(OrderStatus::Cancelled, $refunded->orderStatus());
+        $this->assertSame(PaymentStatus::Refunded, $refunded->paymentStatus());
         $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
@@ -402,20 +424,20 @@ class Phase4OrderCartDomainTest extends TestCase
 
         $skipped = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
-        $this->app->instance(OrderStateMachine::class, new class($skipped->id) extends OrderStateMachine
+        $this->app->instance(OrderLifecycle::class, new class($skipped->id) extends OrderStateMachine
         {
             public function __construct(private readonly string $skippedOrderId)
             {
                 parent::__construct(app(InventoryLedger::class));
             }
 
-            public function expirePendingOrder(Order $order): ?Order
+            public function applyPendingExpiry(Order $order): OrderLifecycleResult
             {
                 if ($order->id === $this->skippedOrderId) {
-                    return null;
+                    return new OrderLifecycleResult($order->fresh(['payments']), $order->payments()->first(), false);
                 }
 
-                return parent::expirePendingOrder($order);
+                return parent::applyPendingExpiry($order);
             }
         });
 
@@ -433,20 +455,20 @@ class Phase4OrderCartDomainTest extends TestCase
 
         $failed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
         $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), expiresAt: now()->subMinutes(2));
-        $this->app->instance(OrderStateMachine::class, new class($failed->id) extends OrderStateMachine
+        $this->app->instance(OrderLifecycle::class, new class($failed->id) extends OrderStateMachine
         {
             public function __construct(private readonly string $failedOrderId)
             {
                 parent::__construct(app(InventoryLedger::class));
             }
 
-            public function expirePendingOrder(Order $order): ?Order
+            public function applyPendingExpiry(Order $order): OrderLifecycleResult
             {
                 if ($order->id === $this->failedOrderId) {
                     throw new InvalidOrderTransition('Injected order failure.');
                 }
 
-                return parent::expirePendingOrder($order);
+                return parent::applyPendingExpiry($order);
             }
         });
 

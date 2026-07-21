@@ -9,20 +9,20 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
-use App\Services\OrderStateMachine;
+use App\Services\OrderLifecycle;
 use InvalidArgumentException;
 
 class AdminOrderOperations
 {
-    public function __construct(private readonly AuditLogger $audit, private readonly OrderStateMachine $orders) {}
+    public function __construct(private readonly AuditLogger $audit, private readonly OrderLifecycle $orders) {}
 
     public function canCompleteManualOrder(Order $order): bool
     {
         $order->loadMissing('payments');
         $payment = $order->payments->first();
+        $projection = $this->orders->project($order, $payment);
 
-        return $order->order_status === OrderStatus::PendingPayment
-            && $order->payment_status === PaymentStatus::Pending
+        return $projection->isPendingPayment
             && $payment?->provider === 'manual'
             && $payment->status === PaymentStatus::Pending;
     }
@@ -30,16 +30,17 @@ class AdminOrderOperations
     public function canCancelPendingOrder(Order $order): bool
     {
         $order->loadMissing('payments');
+        $payment = $order->payments->first();
+        $projection = $this->orders->project($order, $payment);
 
-        return $order->order_status === OrderStatus::PendingPayment
-            && $order->payment_status === PaymentStatus::Pending
+        return $projection->isPendingPayment
             && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Pending);
     }
 
     public function cancelPendingOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
         try {
-            $cancelledOrder = $this->orders->cancelPendingOrder($order);
+            $cancelledOrder = $this->orders->applyPendingCancellation($order)->order;
         } catch (InvalidOrderTransition $exception) {
             throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
         }
@@ -52,7 +53,7 @@ class AdminOrderOperations
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
         try {
-            $completedOrder = $this->orders->completeManualOrder($order);
+            $completedOrder = $this->orders->applyManualCompletion($order)->order;
         } catch (InvalidOrderTransition $exception) {
             throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
         }
@@ -65,7 +66,7 @@ class AdminOrderOperations
     public function rejectManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
         try {
-            $rejectedOrder = $this->orders->rejectManualOrder($order);
+            $rejectedOrder = $this->orders->applyManualRejection($order)->order;
         } catch (InvalidOrderTransition $exception) {
             throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
         }

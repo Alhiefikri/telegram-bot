@@ -2,14 +2,13 @@
 
 namespace App\Services\Pakasir;
 
-use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
-use App\Services\OrderStateMachine;
+use App\Services\OrderLifecycle;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Throwable;
@@ -17,7 +16,7 @@ use Throwable;
 class PakasirCallbackProcessor
 {
     public function __construct(
-        private readonly OrderStateMachine $orders,
+        private readonly OrderLifecycle $orders,
         private readonly PakasirProviderAdapter $client,
         private readonly PakasirPaymentEventLogger $events,
         private readonly PakasirProviderReadiness $readiness,
@@ -123,10 +122,10 @@ class PakasirCallbackProcessor
     private function applyPaid(PaymentEvent $event): void
     {
         $payment = Payment::query()->whereKey($event->payment_id)->firstOrFail();
-        $order = $this->orders->markPaymentPaid($payment);
+        $result = $this->orders->applyPaymentPaid($payment);
 
         $payment->refresh();
-        if ($payment->status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+        if ($result->shouldDispatchReceipt()) {
             SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
         }
 

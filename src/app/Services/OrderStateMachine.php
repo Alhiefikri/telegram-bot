@@ -17,7 +17,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use Illuminate\Support\Facades\DB;
 
-class OrderStateMachine
+class OrderStateMachine implements OrderLifecycle
 {
     public function __construct(
         private readonly InventoryLedger $inventory,
@@ -26,10 +26,15 @@ class OrderStateMachine
 
     public function markPaymentPaid(Payment $payment): Order
     {
+        return $this->applyPaymentPaid($payment)->order;
+    }
+
+    public function applyPaymentPaid(Payment $payment): OrderLifecycleResult
+    {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
 
-            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): Order {
+            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
                 $lockedPayment = $payments->firstWhere('id', $payment->id);
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
@@ -42,8 +47,13 @@ class OrderStateMachine
 
     public function completeManualOrder(Order $order): Order
     {
-        return DB::transaction(function () use ($order): Order {
-            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): Order {
+        return $this->applyManualCompletion($order)->order;
+    }
+
+    public function applyManualCompletion(Order $order): OrderLifecycleResult
+    {
+        return DB::transaction(function () use ($order): OrderLifecycleResult {
+            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): OrderLifecycleResult {
                 $payment = $payments
                     ->where('provider', 'manual')
                     ->where('status', PaymentStatus::Pending)
@@ -54,7 +64,7 @@ class OrderStateMachine
                 }
 
                 $paidOrder = $this->applyPaidTransition($payment, $lockedOrder);
-                if ($paidOrder->order_status !== OrderStatus::Processing || $paidOrder->payment_status !== PaymentStatus::Paid) {
+                if ($paidOrder->orderStatus() !== OrderStatus::Processing || $paidOrder->paymentStatus() !== PaymentStatus::Paid || ! $paidOrder->newlyApplied) {
                     throw new InvalidOrderTransition('Only newly paid manual orders can be completed.');
                 }
 
@@ -64,15 +74,28 @@ class OrderStateMachine
                 SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
                 DeleteBuyerBinanceCheckoutInstruction::dispatch($lockedOrder->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
 
-                return $lockedOrder->fresh(['payments']);
+                $completed = $lockedOrder->fresh(['payments']);
+
+                return new OrderLifecycleResult(
+                    order: $completed,
+                    payment: $completed->payments->firstWhere('id', $payment->id),
+                    newlyApplied: true,
+                    receiptEligible: true,
+                    salesProofEligible: $paidOrder->salesProofEligible,
+                );
             });
         }, 5);
     }
 
     public function rejectManualOrder(Order $order): Order
     {
-        return DB::transaction(function () use ($order): Order {
-            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): Order {
+        return $this->applyManualRejection($order)->order;
+    }
+
+    public function applyManualRejection(Order $order): OrderLifecycleResult
+    {
+        return DB::transaction(function () use ($order): OrderLifecycleResult {
+            return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): OrderLifecycleResult {
                 $payment = $payments
                     ->where('provider', 'manual')
                     ->where('status', PaymentStatus::Pending)
@@ -83,7 +106,7 @@ class OrderStateMachine
                 }
 
                 $rejected = $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
-                DeleteBuyerBinanceCheckoutInstruction::dispatch($rejected->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
+                DeleteBuyerBinanceCheckoutInstruction::dispatch($rejected->order->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
 
                 return $rejected;
             });
@@ -92,16 +115,26 @@ class OrderStateMachine
 
     public function markPaymentRefunded(Payment $payment): Order
     {
+        return $this->applyPaymentRefunded($payment)->order;
+    }
+
+    public function applyPaymentRefunded(Payment $payment): OrderLifecycleResult
+    {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
 
-            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): Order {
+            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
                 $lockedPayment = $payments->firstWhere('id', $payment->id);
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
 
-                $this->releaseRefundedOrderResources($order);
+                $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
+                    && $order->payment_status === PaymentStatus::Refunded;
+
+                if (! $wasAlreadyRefunded) {
+                    $this->releaseRefundedOrderResources($order);
+                }
 
                 if ($lockedPayment->status !== PaymentStatus::Refunded) {
                     $lockedPayment->update(['status' => PaymentStatus::Refunded]);
@@ -113,12 +146,23 @@ class OrderStateMachine
                 }
                 $order->update($updates);
 
-                return $order->fresh(['payments']);
+                $refunded = $order->fresh(['payments']);
+
+                return new OrderLifecycleResult(
+                    order: $refunded,
+                    payment: $refunded->payments->firstWhere('id', $payment->id),
+                    newlyApplied: ! $wasAlreadyRefunded,
+                );
             });
         }, 5);
     }
 
     public function markPaymentExpired(Payment $payment): ?Order
+    {
+        return $this->applyPaymentExpired($payment)->order;
+    }
+
+    public function applyPaymentExpired(Payment $payment): OrderLifecycleResult
     {
         $initial = Payment::findOrFail($payment->id);
 
@@ -127,18 +171,33 @@ class OrderStateMachine
 
     public function expirePendingOrder(Order $order): ?Order
     {
+        return $this->applyPendingExpiry($order)->order;
+    }
+
+    public function applyPendingExpiry(Order $order): OrderLifecycleResult
+    {
         return $this->releasePendingByOrderId($order->id, OrderStatus::Expired, PaymentStatus::Expired, true);
     }
 
     public function cancelPendingOrder(Order $order, bool $requireNoPaymentProof = false): Order
     {
+        return $this->applyPendingCancellation($order, $requireNoPaymentProof)->order;
+    }
+
+    public function applyPendingCancellation(Order $order, bool $requireNoPaymentProof = false): OrderLifecycleResult
+    {
         return $this->releasePendingByOrderId($order->id, OrderStatus::Cancelled, PaymentStatus::Failed, false, $requireNoPaymentProof);
     }
 
-    private function releasePendingByOrderId(int|string $orderId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue, bool $requireNoPaymentProof = false): ?Order
+    public function project(Order $order, ?Payment $payment = null): OrderLifecycleProjection
+    {
+        return OrderLifecycleProjection::from($order, $payment);
+    }
+
+    private function releasePendingByOrderId(int|string $orderId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue, bool $requireNoPaymentProof = false): OrderLifecycleResult
     {
         return DB::transaction(function () use ($orderId, $orderStatus, $paymentStatus, $mustBeDue, $requireNoPaymentProof) {
-            return $this->withLockedOrderPayments($orderId, function (Order $order, $payments) use ($orderStatus, $paymentStatus, $mustBeDue, $requireNoPaymentProof): ?Order {
+            return $this->withLockedOrderPayments($orderId, function (Order $order, $payments) use ($orderStatus, $paymentStatus, $mustBeDue, $requireNoPaymentProof): OrderLifecycleResult {
                 if ($requireNoPaymentProof && $order->order_status === OrderStatus::PendingPayment) {
                     if ($order->payment_status !== PaymentStatus::Pending || ! $payments->contains(fn (Payment $payment): bool => $payment->status === PaymentStatus::Pending)) {
                         throw new InvalidOrderTransition('Only pending payments can be cancelled by the customer.');
@@ -162,14 +221,22 @@ class OrderStateMachine
         return $callback($order, $payments);
     }
 
-    private function applyPaidTransition(Payment $payment, Order $order): Order
+    private function applyPaidTransition(Payment $payment, Order $order): OrderLifecycleResult
     {
         if ($order->order_status === OrderStatus::Expired || $order->order_status === OrderStatus::Cancelled) {
             return $this->markLatePaymentPaid($payment, $order);
         }
 
         if ($payment->status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) && $this->inventory->hasSaleProofForOrder($order)) {
-            return $order->fresh(['payments']);
+            $fresh = $order->fresh(['payments']);
+
+            return new OrderLifecycleResult(
+                order: $fresh,
+                payment: $fresh->payments->firstWhere('id', $payment->id),
+                newlyApplied: false,
+                receiptEligible: true,
+                salesProofEligible: true,
+            );
         }
 
         if ($payment->status !== PaymentStatus::Pending || $order->order_status !== OrderStatus::PendingPayment) {
@@ -185,14 +252,24 @@ class OrderStateMachine
         ]);
         $this->dispatchAdminPendingNotificationDelete($order);
 
-        if (StoreChannelSetting::current()->sales_proof_enabled) {
+        $salesProofEnabled = (bool) StoreChannelSetting::current()->sales_proof_enabled;
+
+        if ($salesProofEnabled) {
             SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
             PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
         }
 
         SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
 
-        return $order->fresh(['payments']);
+        $paid = $order->fresh(['payments']);
+
+        return new OrderLifecycleResult(
+            order: $paid,
+            payment: $paid->payments->firstWhere('id', $payment->id),
+            newlyApplied: true,
+            receiptEligible: in_array($paid->order_status, [OrderStatus::Processing, OrderStatus::Completed], true),
+            salesProofEligible: $salesProofEnabled,
+        );
     }
 
     private function paidOrderStatus(Payment $payment): OrderStatus
@@ -202,14 +279,20 @@ class OrderStateMachine
             : OrderStatus::Processing;
     }
 
-    private function markLatePaymentPaid(Payment $payment, Order $order): Order
+    private function markLatePaymentPaid(Payment $payment, Order $order): OrderLifecycleResult
     {
         if ($payment->status === PaymentStatus::Refunded) {
             if ($order->payment_status !== PaymentStatus::Refunded) {
                 $order->update(['payment_status' => PaymentStatus::Refunded]);
             }
 
-            return $order->fresh(['payments']);
+            $fresh = $order->fresh(['payments']);
+
+            return new OrderLifecycleResult(
+                order: $fresh,
+                payment: $fresh->payments->firstWhere('id', $payment->id),
+                newlyApplied: false,
+            );
         }
 
         if (! in_array($payment->status, [PaymentStatus::Paid, PaymentStatus::Expired, PaymentStatus::Failed], true)) {
@@ -231,21 +314,25 @@ class OrderStateMachine
             $this->dispatchAdminPendingNotificationDelete($order);
         }
 
-        return $order->fresh(['payments']);
+        $latePaid = $order->fresh(['payments']);
+
+        return new OrderLifecycleResult(
+            order: $latePaid,
+            payment: $latePaid->payments->firstWhere('id', $payment->id),
+            newlyApplied: $changed,
+        );
     }
 
-    private function applyReleaseTransition(Order $order, $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): ?Order
+    private function applyReleaseTransition(Order $order, $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): OrderLifecycleResult
     {
         if ($order->order_status === $orderStatus) {
-            if (! $this->inventory->hasSaleProofForOrder($order)) {
-                $this->inventory->releaseOrderReservations($order);
-            }
-            $this->credentials()->release($order);
-            if ($orderStatus === OrderStatus::Cancelled && $order->checkout_key !== null) {
-                $order->update(['checkout_key' => null]);
-            }
+            $fresh = $order->fresh(['payments']);
 
-            return $order->fresh(['payments']);
+            return new OrderLifecycleResult(
+                order: $fresh,
+                payment: $fresh->payments->first(),
+                newlyApplied: false,
+            );
         }
 
         if ($order->order_status !== OrderStatus::PendingPayment) {
@@ -253,7 +340,11 @@ class OrderStateMachine
         }
 
         if ($mustBeDue && $order->expires_at && $order->expires_at->isFuture()) {
-            return null;
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $payments->first(),
+                newlyApplied: false,
+            );
         }
 
         $this->inventory->releaseOrderReservations($order);
@@ -272,7 +363,13 @@ class OrderStateMachine
             $this->dispatchAdminExpiredNotification($order);
         }
 
-        return $order->fresh(['payments']);
+        $released = $order->fresh(['payments']);
+
+        return new OrderLifecycleResult(
+            order: $released,
+            payment: $released->payments->first(),
+            newlyApplied: true,
+        );
     }
 
     private function canTransitionManualOrder(Order $order, ?Payment $payment): bool

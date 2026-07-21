@@ -8,6 +8,8 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
+use App\Services\OrderLifecycle;
+use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
@@ -24,6 +26,7 @@ class StorefrontShopSignedInvoice
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
         private readonly StorefrontFunnelEvents $events,
+        private readonly OrderLifecycle $orders,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -31,9 +34,10 @@ class StorefrontShopSignedInvoice
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
 
         $payment = $this->latestPayment($order);
-        $state = $this->state($order, $payment);
+        $projection = $this->orders->project($order, $payment);
+        $state = $this->state($projection);
         $redirectUrl = $this->redirectUrl($order);
-        $qrisReadiness = $this->qrisReadiness($order, $payment);
+        $qrisReadiness = $this->qrisReadiness($projection, $payment);
         $accountGroups = $this->accountGroups($order, $state);
 
         return new StorefrontShopSignedInvoiceReadResult(
@@ -43,7 +47,7 @@ class StorefrontShopSignedInvoice
             statusUrl: $this->invoiceUrls->status($order),
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
-            canCancel: $this->canCancel($order, $payment),
+            canCancel: $this->canCancel($order, $projection),
             payableAmount: $qrisReadiness['is_payable'] ? $payment?->provider_total_payment : null,
             payableAmountFromProvider: $qrisReadiness['is_payable'],
             isQrisPayable: $qrisReadiness['is_payable'],
@@ -92,7 +96,7 @@ class StorefrontShopSignedInvoice
         }
 
         if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
-            $readiness = $this->qrisReadiness($order, $payment);
+            $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment);
             $this->events->checkoutSubmitted(null, $order, [
                 'status_endpoint_result' => 'qris_not_ready',
                 'qris_readiness_state' => $readiness['state'],
@@ -121,6 +125,7 @@ class StorefrontShopSignedInvoice
 
         $order->refresh();
         $payment->refresh();
+        $projection = $this->orders->project($order, $payment);
         $qrisReady = $this->hasPayableNativeQris($payment);
         if (! $wasQrisReady && $qrisReady && ! $qrisRecoveredDuringRetry) {
             $this->events->qrisCreated($order, $payment, [
@@ -128,28 +133,28 @@ class StorefrontShopSignedInvoice
                 'idempotent_reuse' => false,
             ]);
         }
-        if ($this->isPaid($order, $payment)) {
+        if ($projection->isPaid) {
             $this->events->paymentVerified($order, $payment, [
                 'source' => 'status_refresh',
                 'status_endpoint_result' => 'paid',
             ]);
         }
-        if ($this->isTerminalStatus($order, $payment)) {
+        if ($projection->isTerminal) {
             $this->events->checkoutSubmitted(null, $order, [
                 'status_endpoint_result' => 'terminal',
-                'recovery_cause' => $this->terminalRecoveryCause($order, $payment),
+                'recovery_cause' => $projection->terminalCause,
             ]);
         }
-        $shouldReload = ! $this->isPaid($order, $payment)
-            && ! $this->isTerminalStatus($order, $payment)
+        $shouldReload = ! $projection->isPaid
+            && ! $projection->isTerminal
             && ! $wasQrisReady
             && $qrisReady;
 
         return StorefrontShopSignedStatusRefreshResult::refreshed(
             paymentStatus: $payment->status,
             orderStatus: $order->order_status,
-            isPaid: $this->isPaid($order, $payment),
-            isTerminal: $this->state($order, $payment) === StorefrontShopSignedInvoiceState::Terminal,
+            isPaid: $projection->isPaid,
+            isTerminal: $this->state($projection) === StorefrontShopSignedInvoiceState::Terminal,
             qrisReady: $qrisReady,
             shouldReload: $shouldReload,
             redirectUrl: $this->redirectUrl($order),
@@ -165,29 +170,17 @@ class StorefrontShopSignedInvoice
             ->first();
     }
 
-    private function state(Order $order, ?Payment $payment): StorefrontShopSignedInvoiceState
+    private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState
     {
-        if ($this->isPaid($order, $payment)) {
+        if ($projection->isPaid) {
             return StorefrontShopSignedInvoiceState::Paid;
         }
 
-        if ($this->isPendingPayment($order, $payment)) {
+        if ($projection->isPendingPayment) {
             return StorefrontShopSignedInvoiceState::Pending;
         }
 
         return StorefrontShopSignedInvoiceState::Terminal;
-    }
-
-    private function isPaid(Order $order, ?Payment $payment): bool
-    {
-        return $payment?->status === PaymentStatus::Paid
-            && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
-    }
-
-    private function isPendingPayment(Order $order, ?Payment $payment): bool
-    {
-        return $payment?->status === PaymentStatus::Pending
-            && $order->order_status === OrderStatus::PendingPayment;
     }
 
     private function shouldRefreshFromProvider(Order $order, Payment $payment): bool
@@ -205,9 +198,9 @@ class StorefrontShopSignedInvoice
             && ! $this->hasPayableNativeQris($payment);
     }
 
-    private function canCancel(Order $order, ?Payment $payment): bool
+    private function canCancel(Order $order, OrderLifecycleProjection $projection): bool
     {
-        return $this->isPendingPayment($order, $payment)
+        return $projection->isPendingPayment
             && ! $order->payments()->whereNotNull('payment_proof_submitted_at')->exists();
     }
 
@@ -242,11 +235,13 @@ class StorefrontShopSignedInvoice
 
     public function statusMessage(Order $order, ?Payment $payment): string
     {
+        $projection = $this->orders->project($order, $payment);
+
         return match (true) {
-            $this->isPaid($order, $payment) => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
-            $payment?->status === PaymentStatus::Expired || $order->order_status === OrderStatus::Expired => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $order->order_status === OrderStatus::Cancelled => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
-            $payment?->status === PaymentStatus::Failed => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
+            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
+            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
+            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
+            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
             default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
         };
     }
@@ -254,9 +249,9 @@ class StorefrontShopSignedInvoice
     /**
      * @return array{is_payable: bool, state: string, title: string, message: string, retry_label: string}
      */
-    private function qrisReadiness(Order $order, ?Payment $payment): array
+    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment): array
     {
-        if (! $this->isPendingPayment($order, $payment)) {
+        if (! $projection->isPendingPayment) {
             return [
                 'is_payable' => false,
                 'state' => 'terminal',
@@ -308,23 +303,6 @@ class StorefrontShopSignedInvoice
     private function hasPayableNativeQris(?Payment $payment): bool
     {
         return $payment?->isPayableNativePakasirQris() === true;
-    }
-
-    private function isTerminalStatus(Order $order, ?Payment $payment): bool
-    {
-        return $payment?->status === PaymentStatus::Expired
-            || $payment?->status === PaymentStatus::Failed
-            || in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
-    }
-
-    private function terminalRecoveryCause(Order $order, ?Payment $payment): string
-    {
-        return match (true) {
-            $payment?->status === PaymentStatus::Expired || $order->order_status === OrderStatus::Expired => 'expired',
-            $order->order_status === OrderStatus::Cancelled => 'cancelled',
-            $payment?->status === PaymentStatus::Failed => 'provider_failed',
-            default => 'terminal',
-        };
     }
 
     /**

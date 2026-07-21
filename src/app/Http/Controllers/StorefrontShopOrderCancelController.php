@@ -6,19 +6,19 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Models\Order;
-use RuntimeException;
 use App\Services\AuditLogger;
-use App\Services\OrderStateMachine;
+use App\Services\OrderLifecycle;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirTransaction;
 use App\Storefront\StorefrontInvoiceUrl;
-use Throwable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
+use Throwable;
 
 class StorefrontShopOrderCancelController extends Controller
 {
-    public function __invoke(Request $request, Order $order, OrderStateMachine $orders, AuditLogger $audit, StorefrontInvoiceUrl $urls, PakasirProviderAdapter $pakasir): RedirectResponse
+    public function __invoke(Request $request, Order $order, OrderLifecycle $orders, AuditLogger $audit, StorefrontInvoiceUrl $urls, PakasirProviderAdapter $pakasir): RedirectResponse
     {
         $wasPending = $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending;
 
@@ -36,7 +36,7 @@ class StorefrontShopOrderCancelController extends Controller
                     }
 
                     if ($transaction->isCompleted()) {
-                        $orders->markPaymentPaid($payment);
+                        $orders->applyPaymentPaid($payment);
 
                         return redirect($urls->show($order))
                             ->withErrors(['order' => 'Pembayaran QRIS sudah diterima, jadi pesanan tidak bisa dibatalkan.']);
@@ -49,7 +49,7 @@ class StorefrontShopOrderCancelController extends Controller
         }
 
         try {
-            $cancelled = $orders->cancelPendingOrder($order, requireNoPaymentProof: true);
+            $cancelled = $orders->applyPendingCancellation($order, requireNoPaymentProof: true)->order;
         } catch (InvalidOrderTransition) {
             return redirect($urls->show($order))
                 ->withErrors(['order' => 'Pesanan sudah diproses atau bukti pembayaran sedang diverifikasi, jadi tidak bisa dibatalkan.']);

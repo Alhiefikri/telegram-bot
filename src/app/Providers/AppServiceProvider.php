@@ -14,6 +14,8 @@ use App\Services\Audit\AuditContext;
 use App\Services\Audit\HttpAuditContext;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
+use App\Services\OrderLifecycle;
+use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
@@ -43,6 +45,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(InventoryLedger::class, EloquentInventoryLedger::class);
+        $this->app->bind(OrderLifecycle::class, OrderStateMachine::class);
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
