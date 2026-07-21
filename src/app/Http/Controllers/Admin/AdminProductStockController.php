@@ -26,9 +26,7 @@ class AdminProductStockController extends Controller
 
         $adjustment = $stockAdjustment->adjustWithAvailability($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
         SendProductStockNotifications::dispatch(
-            $adjustment['product']->id,
-            $itemCount,
-            $adjustment['available_before'],
+            $adjustment['movement_id'],
         )->onQueue('notifications')->afterCommit();
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, ['queued' => true]);
 

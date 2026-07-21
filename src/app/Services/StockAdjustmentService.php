@@ -24,7 +24,7 @@ class StockAdjustmentService
 
     /**
      * @param  list<string>  $stockItems
-     * @return array{product: Product, available_before: int, available_after: int}
+     * @return array{product: Product, available_before: int, available_after: int, movement_id: int}
      */
     public function adjustWithAvailability(Product $product, int $delta, ?string $notes = null, ?User $user = null, ?string $ip = null, array $stockItems = []): array
     {
@@ -58,10 +58,11 @@ class StockAdjustmentService
                 ]);
             }
 
-            InventoryMovement::create([
+            $movement = InventoryMovement::create([
                 'product_id' => $locked->id,
                 'type' => InventoryMovementType::Adjustment,
                 'quantity' => $delta,
+                'available_before' => $availableBefore,
                 'notes' => $notes,
                 'created_at' => now(),
             ]);
@@ -74,6 +75,7 @@ class StockAdjustmentService
                 'product' => $adjusted,
                 'available_before' => $availableBefore,
                 'available_after' => $adjusted->availableStock(),
+                'movement_id' => $movement->id,
             ];
         });
     }

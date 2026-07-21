@@ -280,9 +280,8 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $this->assertLessThan(500, $durationMs, "Stock response took {$durationMs} ms while waiting for Telegram.");
         $this->assertSame(1, $product->fresh()->stock);
-        Queue::assertPushedOn('notifications', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->productId === $product->id
-            && $job->addedQuantity === 1
-            && $job->availableBefore === 0);
+        $movement = InventoryMovement::query()->where('product_id', $product->id)->latest('id')->firstOrFail();
+        Queue::assertPushedOn('notifications', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
         Http::assertNothingSent();
     }
 

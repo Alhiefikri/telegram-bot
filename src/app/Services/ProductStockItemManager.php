@@ -79,6 +79,7 @@ class ProductStockItemManager
                 'product_id' => $lockedProduct->id,
                 'type' => InventoryMovementType::Adjustment,
                 'quantity' => -1,
+                'available_before' => $lockedProduct->availableStock(),
                 'notes' => 'Hapus stok manual dashboard (1 item).',
                 'created_at' => now(),
             ]);

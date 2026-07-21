@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
 use App\Exceptions\InsufficientStock;
+use App\Jobs\SendProductStockNotifications;
 use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -130,6 +131,32 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             && ! str_contains((string) $request['text'], 'notify-secret')
             && ! str_contains((string) json_encode($request->data()), 'notify-secret'));
         $this->assertInventoryInvariants($product);
+    }
+
+    public function test_duplicate_stock_notification_job_execution_sends_only_once(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 399002]);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $adjustment = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            1,
+            'restock for notification idempotency',
+            $admin,
+            '127.0.0.1',
+            ['idempotent-secret'],
+        );
+        $job = new SendProductStockNotifications($adjustment['movement_id']);
+
+        $job->handle(app(TelegramProductNotificationService::class));
+        $job->handle(app(TelegramProductNotificationService::class));
+
+        $sendMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage'));
+
+        $this->assertCount(1, $sendMessages);
+        $this->assertNotNull(InventoryMovement::findOrFail($adjustment['movement_id'])->stock_notification_sent_at);
     }
 
     public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void
