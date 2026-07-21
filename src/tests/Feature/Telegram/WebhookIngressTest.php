@@ -203,7 +203,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         ]);
 
         $this->artisan('telegram:recover-failed-updates')
-            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=1 pruned=0 failed=0')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=1 pruned=0 failed_pruned=0 failed=0')
             ->assertSuccessful();
 
         $this->assertNotNull($update->fresh()->processed_at);
@@ -227,10 +227,41 @@ class WebhookIngressTest extends TelegramBotTestSupport
         ]);
 
         $this->artisan('telegram:recover-failed-updates')
-            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=0 pruned=1 failed=0')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=0 pruned=1 failed_pruned=0 failed=0')
             ->assertSuccessful();
 
         $this->assertSame(0, DB::table('failed_jobs')->count());
+    }
+
+    public function test_failed_telegram_update_recovery_can_prune_unrecoverable_jobs_after_retry_failure(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*' => Http::response(['ok' => false, 'description' => 'temporary Telegram failure'], 500),
+        ]);
+
+        $update = TelegramUpdate::create([
+            'update_id' => 205,
+            'payload' => $this->messageUpdate(205, '/start'),
+            'created_at' => now(),
+        ]);
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode([
+                'displayName' => ProcessTelegramUpdate::class,
+                'data' => ['command' => serialize(new ProcessTelegramUpdate($update->id))],
+            ], JSON_THROW_ON_ERROR),
+            'exception' => 'temporary Telegram failure',
+            'failed_at' => now(),
+        ]);
+
+        $this->artisan('telegram:recover-failed-updates --prune-unrecoverable')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=0 pruned=0 failed_pruned=1 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(0, DB::table('failed_jobs')->count());
+        $this->assertNull($update->fresh()->processed_at);
     }
 
 

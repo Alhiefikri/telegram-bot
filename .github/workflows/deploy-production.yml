@@ -143,7 +143,7 @@ jobs:
           done
 
           if [ "$RECOVER_FAILED_TELEGRAM_UPDATES" = "true" ]; then
-            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates
+            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable
           fi
 
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
