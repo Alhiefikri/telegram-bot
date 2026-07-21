@@ -171,7 +171,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Telegram Admin')
             ->assertSee('QRIS / pembayaran belum terdeteksi')
             ->assertSee('Pembayaran gagal, expired, atau dibatalkan')
-            ->assertSee('Kredensial atau login bermasalah')
+            ->assertSee('Data akun belum muncul')
+            ->assertSee('Kredensial tidak valid')
+            ->assertSee('MFA / Authenticator bermasalah')
+            ->assertSee('Login gagal')
             ->assertSee('data-support-channel="whatsapp"', false)
             ->assertSee('data-support-channel="telegram_admin"', false)
             ->getContent();
@@ -182,6 +185,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         foreach ($matches[1] as $href) {
             $decodedHref = rawurldecode(html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
             $this->assertStringContainsString('Invoice: '.$order->invoice_number, $decodedHref);
+            $this->assertStringContainsString('Kategori masalah:', $decodedHref);
             $this->assertStringNotContainsString($accessKey, $decodedHref);
             $this->assertStringNotContainsString($secret, $decodedHref);
             $this->assertStringNotContainsString('PasswordShouldNotLeak', $decodedHref);
@@ -403,7 +407,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('alpha-two@example.test|AlphaSecret2', false)
             ->assertSee('Beta Account')
             ->assertSee('beta@example.test|BetaSecret', false)
-            ->assertSee('Simpan data ini di password manager pribadi. Screenshot pribadi hanya cadangan aman. Jangan bagikan ke orang lain atau menyimpannya di perangkat umum.')
+            ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertSee('Panduan login & keamanan')
             ->assertDontSee('Pembayaran QRIS');
 
@@ -411,6 +415,48 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertOk()
             ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
             ->assertDontSee('pending-account@example.test|DoNotLeak', false);
+    }
+
+    public function test_paid_invoice_makes_multiple_credentials_copyable_with_accessibile_feedback_and_product_instructions(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$paidOrder] = $this->paidOrderWithAccountSecretGroups([
+            [
+                'product_name' => 'Alpha Account',
+                'unit_price' => 45000,
+                'delivery_note' => "Login dari browser pribadi.\nGanti password setelah login pertama.",
+                'secrets' => [
+                    'alpha-one@example.test|AlphaSecret1|MFA-ONE',
+                    'alpha-two@example.test|AlphaSecret2|MFA-TWO',
+                ],
+            ],
+        ]);
+
+        $response = $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false));
+
+        $response
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Data akun siap digunakan',
+                'Salin semua data',
+                'Alpha Account',
+                'Data akun 1',
+                'email : alpha-one@example.test',
+                'password : AlphaSecret1',
+                'MFA : MFA-ONE',
+                'Data akun 2',
+                'Instruksi produk',
+                'Login dari browser pribadi.',
+                'Panduan login &amp; keamanan',
+            ], false)
+            ->assertSee('data-copy-success="Semua data akun tersalin."', false)
+            ->assertSee('data-copy-success="Email tersalin."', false)
+            ->assertSee('data-copy-success="Password tersalin."', false)
+            ->assertSee('data-copy-success="MFA Secret tersalin."', false)
+            ->assertSee('aria-live="polite"', false)
+            ->assertSee('Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
+            ->assertSee('invoice='.$paidOrder->invoice_number, false)
+            ->assertSee('/panduan-login-akun?', false);
     }
 
     public function test_paid_invoice_without_allocated_stock_items_renders_admin_follow_up_copy(): void
@@ -440,8 +486,139 @@ class StorefrontShopOrderInvoiceTest extends TestCase
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false))
             ->assertOk()
-            ->assertSee('Pembayaran diterima. Produk ini tidak punya data akun otomatis; admin akan follow up memakai invoice ini.')
+            ->assertSee('Pembayaran diterima, menunggu diproses')
+            ->assertSee('Produk ini tidak punya kredensial otomatis di invoice.')
             ->assertSee('Panduan login & keamanan');
+    }
+
+    public function test_manual_fulfillment_distinguishes_processing_and_completed_states_without_promising_time(): void
+    {
+        $this->pakasirConfigIsReady();
+        $processingOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 64000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $processingOrder->id,
+            'provider' => 'pakasir',
+            'merchant_ref' => 'INV-ISSUE145-MANUAL-PROCESSING',
+            'provider_payment_method' => 'qris',
+            'amount' => 64000,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $processingOrder->id,
+            'product_name' => 'Manual Setup',
+            'quantity' => 1,
+            'unit_price' => 64000,
+            'subtotal' => 64000,
+        ]);
+        $completedOrder = $processingOrder->replicate(['invoice_number'])->forceFill([
+            'invoice_number' => 'INV-ISSUE145-MANUAL-COMPLETED',
+            'order_status' => OrderStatus::Completed,
+        ]);
+        $completedOrder->save();
+        Payment::factory()->create([
+            'order_id' => $completedOrder->id,
+            'provider' => 'manual',
+            'merchant_ref' => 'INV-ISSUE145-MANUAL-COMPLETED',
+            'provider_payment_method' => 'qris',
+            'amount' => 64000,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $completedOrder->id,
+            'product_name' => 'Manual Setup',
+            'quantity' => 1,
+            'unit_price' => 64000,
+            'subtotal' => 64000,
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $processingOrder, null, false))
+            ->assertOk()
+            ->assertSee('Pembayaran diterima, menunggu diproses')
+            ->assertSee('Pembayaran diterima')
+            ->assertSee('Menunggu diproses')
+            ->assertSee('Status akan berubah setelah admin menandai fulfillment selesai.')
+            ->assertDontSee('menit')
+            ->assertDontSee('jam');
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $completedOrder, null, false))
+            ->assertOk()
+            ->assertSee('Fulfillment selesai')
+            ->assertSee('Produk manual ditandai selesai oleh admin.')
+            ->assertSee('Selesai');
+    }
+
+    public function test_paid_invoice_distinguishes_expected_automatic_credentials_that_are_not_available_yet(): void
+    {
+        $this->pakasirConfigIsReady();
+        $product = Product::factory()->create([
+            'name' => 'Credential Expected',
+            'stock' => 1,
+            'reserved_stock' => 1,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'available-but-not-allocated@example.test|Hidden',
+        ]);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 64000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $paidOrder->id,
+            'provider' => 'pakasir',
+            'merchant_ref' => 'INV-ISSUE145-CREDENTIALS-MISSING',
+            'provider_payment_method' => 'qris',
+            'amount' => 64000,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $paidOrder->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 1,
+            'unit_price' => 64000,
+            'subtotal' => 64000,
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false))
+            ->assertOk()
+            ->assertSee('Data akun belum tersedia')
+            ->assertSee('Pembayaran sudah diterima, tetapi kredensial otomatis belum tersedia di invoice ini.')
+            ->assertSee('Data akun belum muncul')
+            ->assertDontSee('available-but-not-allocated@example.test|Hidden', false)
+            ->assertDontSee('Fulfillment manual');
+    }
+
+    public function test_login_guide_preserves_invoice_context_from_invoice_link(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$paidOrder] = $this->paidOrderWithAccountSecret(
+            OrderStatus::Processing,
+            'guide-context@example.test|GuideSecret|MFA-GUIDE',
+        );
+        $invoiceUrl = URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false);
+
+        $invoiceResponse = $this->get($invoiceUrl)->assertOk();
+        $this->assertStringContainsString('invoice='.$paidOrder->invoice_number, $invoiceResponse->getContent());
+        $this->assertStringContainsString('return=%2Fshop%2Forders%2F'.$paidOrder->getKey(), $invoiceResponse->getContent());
+
+        $this->get(route('storefront.login-guide', [
+            'invoice' => $paidOrder->invoice_number,
+            'return' => $invoiceUrl,
+        ]))
+            ->assertOk()
+            ->assertSee('Kembali ke invoice')
+            ->assertSee('Konteks invoice')
+            ->assertSee($paidOrder->invoice_number)
+            ->assertSee($invoiceUrl);
     }
 
     public function test_signed_status_endpoint_rejects_orders_without_pakasir_payment(): void

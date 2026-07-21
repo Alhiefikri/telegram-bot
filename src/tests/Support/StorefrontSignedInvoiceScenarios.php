@@ -134,6 +134,8 @@ trait StorefrontSignedInvoiceScenarios
                 'order_id' => $order->id,
                 'product_id' => $product->id,
                 'product_name' => $product->name,
+                'delivery_note' => $group['delivery_note'] ?? null,
+                'delivery_note_snapshotted' => array_key_exists('delivery_note', $group),
                 'quantity' => count($secrets),
                 'unit_price' => $unitPrice,
                 'subtotal' => $unitPrice * count($secrets),

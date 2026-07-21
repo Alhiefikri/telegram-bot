@@ -77,9 +77,19 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             [
                 'product_name' => 'Module Secret Product',
                 'delivery_note' => null,
-                'secrets' => ['paid-account@example.test|Visible'],
+                'secrets' => [
+                    [
+                        'text' => 'paid-account@example.test|Visible',
+                        'parts' => null,
+                        'label' => 'Data akun 1',
+                    ],
+                ],
+                'copy_text' => "1.\npaid-account@example.test|Visible",
             ],
         ], $paidInvoice->accountGroups);
+        $this->assertSame("Module Secret Product\n1.\npaid-account@example.test|Visible", $paidInvoice->accountCopyText);
+        $this->assertSame('automatic_available', $paidInvoice->paidDeliveryType);
+        $this->assertSame('processing', $paidInvoice->manualFulfillmentStatus);
     }
 
     public function test_read_result_blocks_qris_when_provider_total_is_missing(): void

@@ -60,7 +60,7 @@ class StorefrontOrderAccessTest extends TestCase
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
             ->assertSee($secret, false)
-            ->assertSee('Simpan data ini di password manager pribadi. Screenshot pribadi hanya cadangan aman.')
+            ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }

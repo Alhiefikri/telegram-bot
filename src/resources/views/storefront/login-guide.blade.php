@@ -16,7 +16,7 @@
                     <a href="#alur" class="rounded-md bg-[var(--sf-surface)] px-4 py-2 shadow-[3px_3px_0_var(--sf-shadow)]">Alur</a>
                     <a href="#langkah" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
                     <a href="#bantuan" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>
-                    <a href="{{ route('storefront.order-access.create') }}" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
+                    <a href="{{ $invoiceReturnUrl ?: route('storefront.order-access.create') }}" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">{{ $invoiceReturnUrl ? 'Kembali ke Invoice' : 'Akses Pesanan' }}</a>
                 </nav>
             </div>
         </header>
@@ -39,10 +39,15 @@
                         <x-storefront.button href="#langkah" variant="secondary">
                             Lihat langkah
                         </x-storefront.button>
-                        <x-storefront.button :href="route('storefront.order-access.create')" variant="yellow">
-                            Akses pesanan
+                        <x-storefront.button :href="$invoiceReturnUrl ?: route('storefront.order-access.create')" variant="yellow">
+                            {{ $invoiceReturnUrl ? 'Kembali ke invoice' : 'Akses pesanan' }}
                         </x-storefront.button>
                     </div>
+                    @if ($invoiceReturnUrl)
+                        <p class="mt-4 text-sm font-black leading-6 text-[var(--sf-muted)]">
+                            Konteks invoice <span class="break-all font-mono text-[var(--sf-ink)]">{{ $invoiceNumber }}</span> tetap tersimpan di halaman ini.
+                        </p>
+                    @endif
                 </div>
 
                 <figure class="neo-panel relative overflow-hidden bg-[#0b1220] p-3 text-white">
@@ -161,7 +166,7 @@
                             </li>
                         @endforeach
                     </ul>
-                    <x-storefront.button :href="route('storefront.order-access.create')" variant="yellow" class="mt-7">Buka akses pesanan</x-storefront.button>
+                    <x-storefront.button :href="$invoiceReturnUrl ?: route('storefront.order-access.create')" variant="yellow" class="mt-7">{{ $invoiceReturnUrl ? 'Kembali ke invoice' : 'Buka akses pesanan' }}</x-storefront.button>
                 </div>
                 <figure class="rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[6px_6px_0_var(--sf-shadow)]">
                     <img src="{{ $guide['images']['security'] }}" alt="Menu Security and login untuk mengganti password dan mengatur ulang MFA" class="w-full rounded-lg border-[3px] border-[var(--sf-border)] bg-white object-contain" loading="lazy">

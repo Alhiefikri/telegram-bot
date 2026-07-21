@@ -67,9 +67,24 @@ class StorefrontSupport
                     'message' => $this->orderMessage($order, 'Pembayaran gagal, expired, atau dibatalkan'),
                 ],
                 [
-                    'key' => 'credentials_login',
-                    'label' => 'Kredensial atau login bermasalah',
-                    'message' => $this->orderMessage($order, 'Kredensial atau login bermasalah'),
+                    'key' => 'credentials_missing',
+                    'label' => 'Data akun belum muncul',
+                    'message' => $this->orderMessage($order, 'Data akun belum muncul'),
+                ],
+                [
+                    'key' => 'credentials_invalid',
+                    'label' => 'Kredensial tidak valid',
+                    'message' => $this->orderMessage($order, 'Kredensial tidak valid'),
+                ],
+                [
+                    'key' => 'mfa_problem',
+                    'label' => 'MFA / Authenticator bermasalah',
+                    'message' => $this->orderMessage($order, 'MFA / Authenticator bermasalah'),
+                ],
+                [
+                    'key' => 'login_failed',
+                    'label' => 'Login gagal',
+                    'message' => $this->orderMessage($order, 'Login gagal'),
                 ],
             ],
         );

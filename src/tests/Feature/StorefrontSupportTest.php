@@ -55,7 +55,10 @@ class StorefrontSupportTest extends TestCase
         $this->assertSame([
             'QRIS / pembayaran belum terdeteksi',
             'Pembayaran gagal, expired, atau dibatalkan',
-            'Kredensial atau login bermasalah',
+            'Data akun belum muncul',
+            'Kredensial tidak valid',
+            'MFA / Authenticator bermasalah',
+            'Login gagal',
         ], array_column($context['categories'], 'label'));
 
         foreach ($context['categories'] as $category) {
@@ -67,7 +70,7 @@ class StorefrontSupportTest extends TestCase
                 $this->assertStringNotContainsString('LHIE-SECRET-RECOVERY-KEY', $message);
                 $this->assertStringNotContainsString('Recovery Key', $message);
                 $this->assertStringNotContainsString('password', strtolower($message));
-                $this->assertStringNotContainsString('mfa', strtolower($message));
+                $this->assertStringNotContainsString('mfa secret', strtolower($message));
             }
         }
     }

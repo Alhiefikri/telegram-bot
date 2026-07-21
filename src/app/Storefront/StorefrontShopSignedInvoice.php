@@ -33,6 +33,7 @@ class StorefrontShopSignedInvoice
         $state = $this->state($order, $payment);
         $redirectUrl = $this->redirectUrl($order);
         $qrisReadiness = $this->qrisReadiness($order, $payment);
+        $accountGroups = $this->accountGroups($order, $state);
 
         return new StorefrontShopSignedInvoiceReadResult(
             order: $order,
@@ -51,7 +52,10 @@ class StorefrontShopSignedInvoice
             qrisRetryLabel: $qrisReadiness['retry_label'],
             qrisImageDataUri: $this->qrisImageDataUri($payment),
             hostedPaymentUrl: $this->hostedPaymentUrl($payment),
-            accountGroups: $this->accountGroups($order, $state),
+            accountGroups: $accountGroups,
+            accountCopyText: $this->accountCopyText($accountGroups),
+            paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
+            manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
             statusMessage: $this->statusMessage($order, $payment),
         );
     }
@@ -278,7 +282,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @return list<array{product_name: string, secrets: list<string>, delivery_note: ?string}>
+     * @return list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>
      */
     private function accountGroups(Order $order, StorefrontShopSignedInvoiceState $state): array
     {
@@ -287,18 +291,75 @@ class StorefrontShopSignedInvoice
         }
 
         return $order->orderItems
-            ->map(fn (OrderItem $item): array => [
-                'product_name' => (string) $item->product_name,
-                'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
-                'secrets' => $item->stockItems
-                    ->map(fn ($stockItem): string => $this->credentialFormatter->format((string) $stockItem->secret))
-                    ->filter(fn (string $secret): bool => trim($secret) !== '')
+            ->map(function (OrderItem $item): array {
+                $secrets = $item->stockItems
+                    ->map(function ($stockItem): array {
+                        $rawSecret = (string) $stockItem->secret;
+
+                        return [
+                            'text' => $this->credentialFormatter->format($rawSecret),
+                            'parts' => $this->credentialFormatter->parts($rawSecret),
+                        ];
+                    })
+                    ->filter(fn (array $secret): bool => trim($secret['text']) !== '')
                     ->values()
-                    ->all(),
-            ])
+                    ->map(fn (array $secret, int $index): array => array_merge($secret, [
+                        'label' => 'Data akun '.($index + 1),
+                    ]))
+                    ->all();
+
+                return [
+                    'product_name' => (string) $item->product_name,
+                    'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
+                    'secrets' => $secrets,
+                    'copy_text' => collect($secrets)
+                        ->map(fn (array $secret, int $index): string => ($index + 1).".\n".$secret['text'])
+                        ->implode("\n\n"),
+                ];
+            })
             ->filter(fn (array $group): bool => $group['secrets'] !== [])
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>  $accountGroups
+     */
+    private function accountCopyText(array $accountGroups): string
+    {
+        return collect($accountGroups)
+            ->map(fn (array $group): string => $group['product_name']."\n".$group['copy_text'])
+            ->implode("\n\n");
+    }
+
+    /**
+     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>  $accountGroups
+     */
+    private function paidDeliveryType(Order $order, StorefrontShopSignedInvoiceState $state, array $accountGroups): string
+    {
+        if ($state !== StorefrontShopSignedInvoiceState::Paid) {
+            return 'none';
+        }
+
+        if ($accountGroups !== []) {
+            return 'automatic_available';
+        }
+
+        return $this->expectsAutomaticCredentials($order) ? 'credentials_unavailable' : 'manual';
+    }
+
+    private function manualFulfillmentStatus(Order $order, ?Payment $payment): string
+    {
+        if ($order->order_status === OrderStatus::Completed && strtolower((string) $payment?->provider) !== 'pakasir') {
+            return 'completed';
+        }
+
+        return 'processing';
+    }
+
+    private function expectsAutomaticCredentials(Order $order): bool
+    {
+        return $order->orderItems->contains(fn (OrderItem $item): bool => $item->product?->isCredentialManaged() === true);
     }
 
     private function redirectUrl(Order $order): string

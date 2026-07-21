@@ -118,6 +118,24 @@ return [
         'body' => 'Produk digital disiapkan setelah status pembayaran valid dan stok tervalidasi. Jika ada antrean verifikasi manual, support akan membantu memberi status order melalui kanal yang tersedia.',
     ],
 
+    'fulfillment' => [
+        'automatic_default_instruction' => 'Login dari perangkat pribadi, ganti password setelah berhasil masuk, lalu pindahkan MFA/Authenticator ke perangkat Anda sendiri jika produk mendukungnya.',
+        'manual' => [
+            'processing_title' => 'Pembayaran diterima, menunggu diproses',
+            'completed_title' => 'Fulfillment selesai',
+            'received_body' => 'Invoice sudah lunas dan aman diproses.',
+            'processing_body' => 'Admin akan menyelesaikan produk manual memakai invoice ini.',
+            'processing_done_body' => 'Tahap proses manual sudah dilewati.',
+            'completed_waiting_body' => 'Status akan berubah setelah admin menandai fulfillment selesai.',
+            'completed_body' => 'Produk manual ditandai selesai oleh admin.',
+            'next_step' => 'Produk ini tidak punya kredensial otomatis di invoice. Gunakan tombol bantuan di bawah jika data akun belum muncul, kredensial tidak valid, MFA bermasalah, atau login gagal.',
+        ],
+        'credentials_unavailable' => [
+            'title' => 'Data akun belum tersedia',
+            'body' => 'Pembayaran sudah diterima, tetapi kredensial otomatis belum tersedia di invoice ini. Gunakan bantuan kategori Data akun belum muncul agar admin mengecek invoice tanpa meminta secret.',
+        ],
+    ],
+
     'qris' => [
         'eyebrow' => 'QRIS Website',
         'title' => 'QRIS web dibuat per order',
