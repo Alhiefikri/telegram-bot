@@ -7,6 +7,8 @@ use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Http\Requests\StorefrontShopCheckoutRequest;
 use App\Models\Order;
+use App\Models\Product;
+use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
@@ -15,8 +17,13 @@ use Illuminate\Support\Str;
 
 class StorefrontShopCheckoutController extends Controller
 {
-    public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout, StorefrontOrderAccess $orderAccess): RedirectResponse
+    public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout, StorefrontOrderAccess $orderAccess, StorefrontFunnelEvents $events): RedirectResponse
     {
+        $product = Product::query()->find((int) $request->input('product_id'));
+        if ($product !== null) {
+            $events->checkoutOpened($product, ['source' => 'checkout_submit']);
+        }
+
         try {
             $session = $request->session();
             $checkoutClientKey = $session->get('storefront.checkout_client_key');
@@ -30,6 +37,11 @@ class StorefrontShopCheckoutController extends Controller
                 $checkoutClientKey,
             );
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
+            $events->checkoutSubmitted($product, null, [
+                'status_endpoint_result' => 'rejected',
+                'failure_kind' => $exception::class,
+            ]);
+
             return redirect()
                 ->to($request->checkoutRecoveryUrl())
                 ->withInput()
@@ -43,6 +55,10 @@ class StorefrontShopCheckoutController extends Controller
                 $orderAccess->rememberIssuedKey($request, $order, $result->recoveryKey);
             }
         }
+
+        $events->checkoutSubmitted($product, $result->orderId === null ? null : Order::find($result->orderId), [
+            'status_endpoint_result' => 'accepted',
+        ]);
 
         return redirect()->to($result->redirectUrl);
     }

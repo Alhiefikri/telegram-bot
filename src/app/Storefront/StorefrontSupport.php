@@ -8,13 +8,14 @@ use App\Models\Product;
 class StorefrontSupport
 {
     /**
-     * @return array{title:string, body:string, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
+     * @return array{title:string, body:string, subject:array{product_id:int|string}, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
      */
     public function prePurchase(Product $product): array
     {
         return $this->context(
             title: 'Butuh bantuan?',
             body: 'Tanya ketersediaan, kecocokan produk, atau detail checkout sebelum membeli.',
+            subject: ['product_id' => $product->getKey()],
             categories: [
                 [
                     'key' => 'pre_purchase',
@@ -30,13 +31,14 @@ class StorefrontSupport
     }
 
     /**
-     * @return array{title:string, body:string, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
+     * @return array{title:string, body:string, subject:array{}, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
      */
     public function general(): array
     {
         return $this->context(
             title: 'Butuh bantuan?',
             body: 'Pilih kanal support sebelum membeli, saat checkout, atau saat butuh arahan pesanan.',
+            subject: [],
             categories: [
                 [
                     'key' => 'general',
@@ -48,13 +50,14 @@ class StorefrontSupport
     }
 
     /**
-     * @return array{title:string, body:string, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
+     * @return array{title:string, body:string, subject:array{order_id:int|string}, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
      */
     public function order(Order $order): array
     {
         return $this->context(
             title: 'Butuh bantuan?',
             body: 'Pilih kategori masalah. Pesan hanya membawa nomor invoice dan konteks masalah, tanpa Recovery Key atau data kredensial. Support tidak dapat membuka kredensial dari invoice saja.',
+            subject: ['order_id' => $order->getKey()],
             categories: [
                 [
                     'key' => 'payment_pending',
@@ -135,13 +138,15 @@ class StorefrontSupport
 
     /**
      * @param  list<array{key:string, label:string, message:string}>  $categories
-     * @return array{title:string, body:string, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
+     * @param  array<string, int|string>  $subject
+     * @return array{title:string, body:string, subject:array<string, int|string>, categories:list<array{key:string, label:string, options:list<array{key:string, label:string, description:string, message:string, href:?string, available:bool}>}>}
      */
-    private function context(string $title, string $body, array $categories): array
+    private function context(string $title, string $body, array $subject, array $categories): array
     {
         return [
             'title' => $title,
             'body' => $body,
+            'subject' => $subject,
             'categories' => array_map(fn (array $category): array => [
                 'key' => $category['key'],
                 'label' => $category['label'],

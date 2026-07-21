@@ -1,6 +1,35 @@
 const ACTIVE_CATEGORY_CLASSES = ['neo-filter-active'];
 const INACTIVE_CATEGORY_CLASSES = ['neo-filter-inactive'];
 const MODAL_FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const STOREFRONT_EVENT_URL = '/storefront/events';
+
+function trackStorefrontEvent(action, payload = {}) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const data = new FormData();
+
+    data.append('action', action);
+    Object.entries(payload).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+            data.append(key, value);
+        }
+    });
+
+    if (csrfToken) {
+        data.append('_token', csrfToken);
+    }
+
+    if (navigator.sendBeacon && navigator.sendBeacon(STOREFRONT_EVENT_URL, data)) {
+        return;
+    }
+
+    window.fetch(STOREFRONT_EVENT_URL, {
+        method: 'POST',
+        body: data,
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {},
+    }).catch(() => {});
+}
 
 function toggleMobileMenu(menu, iconTop, iconMiddle, iconBottom, menuButton, backdrop, forceClosed = null) {
     const isClosed = menu.classList.contains('hidden') || menu.getAttribute('aria-hidden') !== 'false';
@@ -328,6 +357,20 @@ function initPaymentActions() {
     });
 }
 
+function initSupportFunnelEvents() {
+    document.querySelectorAll('a[data-support-channel][data-support-category]').forEach((link) => {
+        link.addEventListener('click', () => {
+            trackStorefrontEvent('storefront.support_selected', {
+                order_id: link.getAttribute('data-support-order-id'),
+                product_id: link.getAttribute('data-support-product-id'),
+                support_channel: link.getAttribute('data-support-channel'),
+                support_category: link.getAttribute('data-support-category'),
+                source: 'support_link',
+            });
+        });
+    });
+}
+
 function initShopPaymentStatus() {
     const containers = document.querySelectorAll('[data-shop-payment-status]');
 
@@ -509,6 +552,10 @@ export function storefrontModal() {
             this.supportContactValue = options.supportContactValue || '';
             this.paymentMethod = options.paymentMethod || (this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris');
             this.productModalOpen = true;
+            trackStorefrontEvent('storefront.checkout_opened', {
+                product_id: product?.checkout?.websiteQris?.productId || product?.id,
+                source: options.focusInvalid ? 'checkout_error_restore' : 'checkout_modal',
+            });
             document.body.style.overflow = 'hidden';
             this.$nextTick(() => this.focusModal(options.focusInvalid));
         },
@@ -683,6 +730,7 @@ export default function initStorefront() {
         initCounters();
         initFaqAccordion();
         initPaymentActions();
+        initSupportFunnelEvents();
         initShopPaymentStatus();
     };
 

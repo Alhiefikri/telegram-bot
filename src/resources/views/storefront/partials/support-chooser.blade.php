@@ -30,7 +30,9 @@
                                    class="inline-flex min-h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-center text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[5px_5px_0_var(--sf-shadow)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-blue)] focus:ring-offset-2"
                                    data-support-channel="{{ $option['key'] }}"
                                    data-support-category="{{ $category['key'] }}"
-                                   data-support-message="{{ $option['message'] }}">
+                                   data-support-message="{{ $option['message'] }}"
+                                   @if (! empty($supportContext['subject']['order_id'])) data-support-order-id="{{ $supportContext['subject']['order_id'] }}" @endif
+                                   @if (! empty($supportContext['subject']['product_id'])) data-support-product-id="{{ $supportContext['subject']['product_id'] }}" @endif>
                                     {{ $option['label'] }}
                                 </a>
                             @else

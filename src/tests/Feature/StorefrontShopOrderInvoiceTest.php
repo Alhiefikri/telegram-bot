@@ -411,6 +411,12 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Panduan login & keamanan')
             ->assertDontSee('Pembayaran QRIS');
 
+        $credentialEvent = AuditLog::where('action', 'storefront.credentials_opened')->where('subject_id', (string) $paidOrder->id)->firstOrFail();
+        $this->assertSame($paidOrder->invoice_number, $credentialEvent->new_values['invoice_number']);
+        $this->assertSame('automatic_available', $credentialEvent->new_values['delivery_type']);
+        $this->assertStringNotContainsString('AlphaSecret1', json_encode($credentialEvent->new_values, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('MFA', json_encode($credentialEvent->new_values, JSON_THROW_ON_ERROR));
+
         $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder, null, false))
             ->assertOk()
             ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
@@ -665,6 +671,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->status);
         $this->assertSame(PaymentStatus::Pending, $order->payment_status);
         $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+
+        $event = AuditLog::where('action', 'storefront.checkout_submitted')->where('subject_id', (string) $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('provider_failure', $event->new_values['status_endpoint_result']);
+        $this->assertNotSame('', $event->new_values['failure_kind']);
     }
 
     public function test_signed_status_endpoint_recovers_incomplete_qris_without_creating_duplicate_payment(): void
@@ -700,6 +710,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame('created', $payment->provider_create_state);
         $this->assertSame(1, Payment::where('order_id', $order->id)->count());
         $this->assertSame(1, Order::count());
+        $this->assertSame(1, AuditLog::where('action', 'storefront.qris_created')->where('subject_id', (string) $payment->id)->count());
     }
 
     public function test_signed_status_endpoint_returns_terminal_payment_messages_without_provider_call(): void
@@ -757,6 +768,9 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         [$order, $payment] = $this->pendingNativeQrisOrder(46000, 300, 46300, '00020101021226610016ID.CO.QRIS.RENDEREXPIRED99');
         $order->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
         $payment->update(['status' => PaymentStatus::Expired]);
+        Http::fake();
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))->assertOk();
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
@@ -775,6 +789,33 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertDontSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.')
             ->assertDontSee('Pembayaran QRIS')
             ->assertDontSee('Total bayar QRIS');
+
+        $event = AuditLog::where('action', 'storefront.checkout_submitted')->where('subject_id', (string) $order->id)->latest('id')->firstOrFail();
+        $this->assertSame('terminal', $event->new_values['status_endpoint_result']);
+        $this->assertSame('expired', $event->new_values['recovery_cause']);
+    }
+
+    public function test_support_selection_beacon_records_safe_operational_context(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order] = $this->pendingNativeQrisOrder(48000, 300, 48300, '00020101021226610016ID.CO.QRIS.SUPPORTBEACON99');
+
+        $this->postJson(route('storefront.events.store'), [
+            'action' => 'storefront.support_selected',
+            'order_id' => $order->id,
+            'support_channel' => 'whatsapp',
+            'support_category' => 'payment_pending',
+            'message' => 'Recovery Key: SHOULD-NOT-LOG password=secret MFA=SECRET',
+        ])->assertOk()->assertJsonPath('ok', true);
+
+        $event = AuditLog::where('action', 'storefront.support_selected')->where('subject_id', (string) $order->id)->firstOrFail();
+        $this->assertSame($order->invoice_number, $event->new_values['invoice_number']);
+        $this->assertSame('whatsapp', $event->new_values['support_channel']);
+        $this->assertSame('payment_pending', $event->new_values['support_category']);
+        $payload = json_encode($event->new_values, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('SHOULD-NOT-LOG', $payload);
+        $this->assertStringNotContainsString('secret', $payload);
+        $this->assertStringNotContainsString('MFA', $payload);
     }
 
     public function test_cancelled_invoice_replaces_payment_instructions_with_new_order_action(): void

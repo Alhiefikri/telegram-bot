@@ -23,6 +23,7 @@ class StorefrontShopSignedInvoice
         private readonly PakasirCallbackProcessor $processor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
+        private readonly StorefrontFunnelEvents $events,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -70,6 +71,7 @@ class StorefrontShopSignedInvoice
 
         $wasQrisReady = $this->hasPayableNativeQris($payment);
         $qrisRecoveryFailed = false;
+        $qrisRecoveredDuringRetry = false;
 
         if ($this->shouldRecoverQris($order, $payment)) {
             try {
@@ -80,10 +82,22 @@ class StorefrontShopSignedInvoice
             }
 
             $payment->refresh();
+            if (! $wasQrisReady && $this->hasPayableNativeQris($payment)) {
+                $qrisRecoveredDuringRetry = true;
+                $this->events->qrisCreated($order, $payment, [
+                    'source' => 'status_retry',
+                    'idempotent_reuse' => false,
+                ]);
+            }
         }
 
         if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
             $readiness = $this->qrisReadiness($order, $payment);
+            $this->events->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'qris_not_ready',
+                'qris_readiness_state' => $readiness['state'],
+                'failure_kind' => 'qris_recovery_failed',
+            ]);
 
             return StorefrontShopSignedStatusRefreshResult::qrisNotReady(
                 title: $readiness['title'],
@@ -96,6 +110,10 @@ class StorefrontShopSignedInvoice
                 $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
             } catch (Throwable $exception) {
                 report($exception);
+                $this->events->checkoutSubmitted(null, $order, [
+                    'status_endpoint_result' => 'provider_failure',
+                    'failure_kind' => $exception::class,
+                ]);
 
                 return StorefrontShopSignedStatusRefreshResult::retryableProviderFailure();
             }
@@ -104,6 +122,24 @@ class StorefrontShopSignedInvoice
         $order->refresh();
         $payment->refresh();
         $qrisReady = $this->hasPayableNativeQris($payment);
+        if (! $wasQrisReady && $qrisReady && ! $qrisRecoveredDuringRetry) {
+            $this->events->qrisCreated($order, $payment, [
+                'source' => 'status_refresh',
+                'idempotent_reuse' => false,
+            ]);
+        }
+        if ($this->isPaid($order, $payment)) {
+            $this->events->paymentVerified($order, $payment, [
+                'source' => 'status_refresh',
+                'status_endpoint_result' => 'paid',
+            ]);
+        }
+        if ($this->isTerminalStatus($order, $payment)) {
+            $this->events->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'terminal',
+                'recovery_cause' => $this->terminalRecoveryCause($order, $payment),
+            ]);
+        }
         $shouldReload = ! $this->isPaid($order, $payment)
             && ! $this->isTerminalStatus($order, $payment)
             && ! $wasQrisReady
@@ -279,6 +315,16 @@ class StorefrontShopSignedInvoice
         return $payment?->status === PaymentStatus::Expired
             || $payment?->status === PaymentStatus::Failed
             || in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+    }
+
+    private function terminalRecoveryCause(Order $order, ?Payment $payment): string
+    {
+        return match (true) {
+            $payment?->status === PaymentStatus::Expired || $order->order_status === OrderStatus::Expired => 'expired',
+            $order->order_status === OrderStatus::Cancelled => 'cancelled',
+            $payment?->status === PaymentStatus::Failed => 'provider_failed',
+            default => 'terminal',
+        };
     }
 
     /**

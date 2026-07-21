@@ -9,6 +9,7 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
+use App\Models\AuditLog;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -412,6 +413,31 @@ class StorefrontShopCheckoutTest extends TestCase
             && $request['order_id'] === $payment->merchant_ref
             && $request['amount'] === 30000
             && $request['api_key'] === 'secret-key');
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'storefront.checkout_opened',
+            'subject_type' => Product::class,
+            'subject_id' => (string) $product->id,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'storefront.checkout_submitted',
+            'subject_type' => Order::class,
+            'subject_id' => (string) $order->id,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'storefront.qris_created',
+            'subject_type' => Payment::class,
+            'subject_id' => (string) $payment->id,
+        ]);
+
+        $metadata = AuditLog::where('action', 'storefront.qris_created')->where('subject_id', (string) $payment->id)->firstOrFail()->new_values;
+        $this->assertSame($order->invoice_number, $metadata['invoice_number']);
+        $this->assertSame('pakasir', $metadata['provider']);
+        $this->assertSame('checkout_submit', $metadata['source']);
+        $this->assertArrayNotHasKey('buyer_name', $metadata);
+        $this->assertArrayNotHasKey('support_contact_value', $metadata);
+        $this->assertArrayNotHasKey('provider_payment_number', $metadata);
+        $this->assertStringNotContainsString($paymentNumber, json_encode($metadata, JSON_THROW_ON_ERROR));
     }
 
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void

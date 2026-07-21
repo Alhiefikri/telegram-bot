@@ -29,6 +29,7 @@ class StorefrontShopCheckout
         private readonly PakasirProviderReadiness $readiness,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
+        private readonly StorefrontFunnelEvents $events,
     ) {}
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
@@ -58,7 +59,15 @@ class StorefrontShopCheckout
             $payment = $existing->payments()->latest('created_at')->first();
             if ($payment?->provider === 'pakasir') {
                 try {
+                    $wasQrisReady = $payment->isPayableNativePakasirQris();
                     $this->nativeQris->ensureCreated($payment);
+                    $payment->refresh();
+                    if ($payment->isPayableNativePakasirQris()) {
+                        $this->events->qrisCreated($existing, $payment, [
+                            'source' => 'checkout_reuse',
+                            'idempotent_reuse' => $wasQrisReady,
+                        ]);
+                    }
                 } catch (Throwable $exception) {
                     report($exception);
                 }
@@ -121,6 +130,9 @@ class StorefrontShopCheckout
 
         $payment->refresh();
         $order->refresh();
+        if ($payment->isPayableNativePakasirQris()) {
+            $this->events->qrisCreated($order, $payment, ['source' => 'checkout_submit']);
+        }
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
         return new StorefrontShopCheckoutResult(

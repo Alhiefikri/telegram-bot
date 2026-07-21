@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\PaymentStatus;
 use App\Http\Requests\StorefrontOrderAccessRequest;
 use App\Models\Order;
+use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontShopOrderPresenter;
@@ -42,15 +43,24 @@ class StorefrontOrderAccessController extends Controller
         return redirect()->route('storefront.order-access.show', $order);
     }
 
-    public function show(Request $request, Order $order, StorefrontOrderAccess $access, StorefrontShopOrderPresenter $presenter): Response
+    public function show(Request $request, Order $order, StorefrontOrderAccess $access, StorefrontShopOrderPresenter $presenter, StorefrontFunnelEvents $events): Response
     {
         if ($order->payment_status !== PaymentStatus::Paid || ! $access->canAccess($request, $order)) {
             return response()->view('errors.403', [], 403)
                 ->header('Cache-Control', 'no-store, private');
         }
 
+        $viewData = $presenter->viewData($order, canRevealCredentials: true, accessKey: null);
+        if (! empty($viewData['accountGroups'])) {
+            $events->credentialsOpened($viewData['order'], $viewData['payment'], [
+                'source' => 'recovery_key_access',
+                'delivery_type' => $viewData['paidDeliveryType'] ?? null,
+                'manual_fulfillment_status' => $viewData['manualFulfillmentStatus'] ?? null,
+            ]);
+        }
+
         return response()
-            ->view('storefront.shop-order', $presenter->viewData($order, canRevealCredentials: true, accessKey: null))
+            ->view('storefront.shop-order', $viewData)
             ->header('Cache-Control', 'no-store, private')
             ->header('Referrer-Policy', 'no-referrer');
     }
