@@ -13,6 +13,7 @@ class AdminTelegramDogfoodTiming
             'sent' => (int) ($broadcastResult['sent'] ?? 0),
             'failed' => (int) ($broadcastResult['failed'] ?? 0),
             'skipped' => (bool) ($broadcastResult['skipped'] ?? false),
+            'queued' => (bool) ($broadcastResult['queued'] ?? false),
             'telegram_total_duration_ms' => (float) ($broadcastResult['telegram_total_duration_ms'] ?? 0.0),
             'per_recipient_telegram' => $broadcastResult['per_recipient_telegram'] ?? [],
         ]);

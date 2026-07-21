@@ -91,15 +91,18 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
         );
 
         $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.product_stock_add'
-            && $context['recipient_count'] === 1
-            && $context['sent'] === 1
+            && $context['recipient_count'] === 0
+            && $context['sent'] === 0
             && $context['failed'] === 0
             && $context['skipped'] === false
+            && $context['queued'] === true
             && array_key_exists('request_duration_ms', $context)
             && array_key_exists('telegram_total_duration_ms', $context)
-            && count($context['per_recipient_telegram']) === 1
-            && $context['per_recipient_telegram'][0]['status'] === 'ok'
+            && $context['per_recipient_telegram'] === []
         );
+        $this->assertDogfoodLog($logs, 'dogfood.telegram.broadcast_finished', fn (array $context): bool => $context['recipient_count'] === 1
+            && $context['sent'] === 1
+            && $context['failed'] === 0);
 
         $this->assertDogfoodLogsDoNotContain($logs, [
             '333333333',

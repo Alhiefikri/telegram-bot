@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Jobs\SendProductStockNotifications;
 use App\Models\AuditLog;
 use App\Models\Category;
 use App\Models\Customer;
@@ -18,6 +19,7 @@ use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AdminDashboardStockFlowsTest extends TestCase
@@ -245,6 +247,43 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSeeInOrder(['Canva Pro', 'Stok', '5'])
             ->assertSeeInOrder(['Canva Pro', 'Tersedia', '4'])
             ->assertSeeInOrder(['Canva Pro', 'Dipesan', '1']);
+    }
+
+    public function test_add_stock_response_does_not_wait_for_slow_telegram_delivery(): void
+    {
+        Queue::fake([SendProductStockNotifications::class]);
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+        Http::fake(function () {
+            usleep(800_000);
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 77]]);
+        });
+
+        Customer::factory()->create(['telegram_id' => 333]);
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $startedAt = hrtime(true);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_items' => 'slow-telegram@example.test|pass',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+
+        $durationMs = (hrtime(true) - $startedAt) / 1_000_000;
+
+        $this->assertLessThan(500, $durationMs, "Stock response took {$durationMs} ms while waiting for Telegram.");
+        $this->assertSame(1, $product->fresh()->stock);
+        Queue::assertPushedOn('notifications', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->productId === $product->id
+            && $job->addedQuantity === 1
+            && $job->availableBefore === 0);
+        Http::assertNothingSent();
     }
 
     public function test_stock_ready_broadcast_only_when_add_stock_transitions_from_zero_to_available(): void
