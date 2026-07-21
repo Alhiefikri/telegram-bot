@@ -13,11 +13,14 @@ use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
+use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Support\DogfoodTiming;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
 
 class TelegramCallbackRouter
 {
@@ -221,28 +224,37 @@ class TelegramCallbackRouter
         }
 
         if (preg_match('/^qty:(qris|binance):([1-9][0-9]*):([1-9][0-9]*)$/', $data, $matches)) {
-            $paymentMethod = $matches[1];
-            $productId = (int) $matches[2];
-            $quantity = (int) $matches[3];
-            $product = Product::publicVisible()->whereKey($productId)->first();
-            if (! $product || $product->availableStock() < $quantity) {
+            $checkoutKey = $this->checkoutIntentKey($customer, $chatId, $messageId, $this->checkoutIntentPayload($data));
+            $this->withCheckoutIntentLock($customer, $id, $checkoutKey, function () use ($customer, $chatId, $id, $matches, $checkoutKey): void {
+                if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+                    $this->bot->answerCallbackQuery($id);
+
+                    return;
+                }
+
+                $paymentMethod = $matches[1];
+                $productId = (int) $matches[2];
+                $quantity = (int) $matches[3];
+                $product = Product::publicVisible()->whereKey($productId)->first();
+                if (! $product || $product->availableStock() < $quantity) {
+                    $this->session->forget($customer);
+                    $this->bot->answerCallbackQuery($id, $this->text($customer, 'Produk atau jumlah ini sudah tidak tersedia.', 'This product or quantity is no longer available.'));
+
+                    return;
+                }
+                if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
+                    $this->session->forget($customer);
+                    $this->bot->answerCallbackQuery($id, $this->text($customer, 'Binance Pay sedang tidak tersedia untuk produk ini.', 'Binance Pay is not available for this product.'));
+
+                    return;
+                }
+
+                $this->bot->answerCallbackQuery($id);
                 $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, $this->text($customer, 'Produk atau jumlah ini sudah tidak tersedia.', 'This product or quantity is no longer available.'));
-
-                return;
-            }
-            if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
-                $this->session->forget($customer);
-                $this->bot->answerCallbackQuery($id, $this->text($customer, 'Binance Pay sedang tidak tersedia untuk produk ini.', 'Binance Pay is not available for this product.'));
-
-                return;
-            }
-
-            $this->bot->answerCallbackQuery($id);
-            $this->session->forget($customer);
-            if ($this->cart->addProductToCart($customer, $chatId, $productId, $quantity, true, false)) {
-                $this->checkout($customer, $chatId, $id, $paymentMethod === 'binance', false);
-            }
+                if ($this->cart->addProductToCart($customer, $chatId, $productId, $quantity, true, false)) {
+                    $this->checkout($customer, $chatId, $id, $paymentMethod === 'binance', false, $checkoutKey);
+                }
+            });
 
             return;
         }
@@ -258,13 +270,15 @@ class TelegramCallbackRouter
         }
 
         if ($data === 'checkout') {
-            $this->choosePaymentMethod($customer, $chatId, $id);
+            $checkoutKey = $this->checkoutIntentKey($customer, $chatId, $messageId, $this->checkoutIntentPayload($data));
+            $this->withCheckoutIntentLock($customer, $id, $checkoutKey, fn () => $this->choosePaymentMethod($customer, $chatId, $id, $checkoutKey));
 
             return;
         }
 
         if (in_array($data, ['checkout:current', 'checkout:binance'], true)) {
-            $this->checkout($customer, $chatId, $id, $data === 'checkout:binance');
+            $checkoutKey = $this->checkoutIntentKey($customer, $chatId, $messageId, $this->checkoutIntentPayload($data));
+            $this->withCheckoutIntentLock($customer, $id, $checkoutKey, fn () => $this->checkout($customer, $chatId, $id, $data === 'checkout:binance', checkoutKey: $checkoutKey));
 
             return;
         }
@@ -329,17 +343,17 @@ class TelegramCallbackRouter
         $this->bot->sendMessage($chatId, $this->text($customer, "❌ Pesanan dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.", "❌ Order cancelled\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} was cancelled and the stock was released.\n\nOpen /products if you would like to order again."));
     }
 
-    private function choosePaymentMethod(Customer $customer, string $chatId, string $id): void
+    private function choosePaymentMethod(Customer $customer, string $chatId, string $id, ?string $checkoutKey = null): void
     {
         $cart = $this->carts->currentActiveCartFor($customer);
         if (! $cart) {
-            $this->checkout($customer, $chatId, $id);
+            $this->checkout($customer, $chatId, $id, checkoutKey: $checkoutKey);
 
             return;
         }
         $cart->load('cartItems.product');
         if (! $this->checkoutIntents->binancePayEnabled() || ! $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
-            $this->checkout($customer, $chatId, $id);
+            $this->checkout($customer, $chatId, $id, checkoutKey: $checkoutKey);
 
             return;
         }
@@ -353,8 +367,16 @@ class TelegramCallbackRouter
         $this->bot->sendMessage($chatId, $this->text($customer, 'Pilih metode pembayaran. QRIS hanya untuk aplikasi bank dan e-wallet Indonesia:', 'Choose a payment method. QRIS is for Indonesian bank and e-wallet apps only:'), ['inline_keyboard' => $buttons]);
     }
 
-    private function checkout(Customer $customer, string $chatId, string $id, bool $binance = false, bool $answerCallback = true): void
+    private function checkout(Customer $customer, string $chatId, string $id, bool $binance = false, bool $answerCallback = true, ?string $checkoutKey = null): void
     {
+        if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            if ($answerCallback) {
+                $this->bot->answerCallbackQuery($id);
+            }
+
+            return;
+        }
+
         if ($answerCallback) {
             $this->bot->answerCallbackQuery($id);
         }
@@ -383,10 +405,10 @@ class TelegramCallbackRouter
                 'customer_correlation_id' => DogfoodTiming::correlation($customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
             ], fn () => $binance
-                ? $this->checkout->checkout($cart, 'BINANCE_PAY_ID', 'manual')
+                ? $this->checkout->checkout($cart, 'BINANCE_PAY_ID', 'manual', checkoutKey: $checkoutKey)
                 : ($paymentMode === 'pakasir'
-                    ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir')
-                    : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual')));
+                    ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir', checkoutKey: $checkoutKey)
+                    : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual', checkoutKey: $checkoutKey)));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($chatId, $this->text($customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
 
@@ -407,6 +429,59 @@ class TelegramCallbackRouter
         } else {
             SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+        }
+    }
+
+    private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string
+    {
+        if ($messageId === null) {
+            return null;
+        }
+
+        $payload = implode('|', [
+            'telegram-direct-checkout',
+            $customer->getKey(),
+            $customer->telegram_id,
+            $chatId,
+            $messageId,
+            $data,
+        ]);
+
+        return hash_hmac('sha256', $payload, (string) config('app.key'));
+    }
+
+    private function checkoutIntentPayload(string $data): string
+    {
+        if (preg_match('/^qty:(qris|binance):([1-9][0-9]*):[1-9][0-9]*$/', $data, $matches)) {
+            return 'qty:'.$matches[1].':'.$matches[2];
+        }
+
+        if (in_array($data, ['checkout:current', 'checkout:binance'], true)) {
+            return 'checkout:choice';
+        }
+
+        return $data;
+    }
+
+    private function checkoutIntentAlreadyHandled(?string $checkoutKey): bool
+    {
+        return $checkoutKey !== null
+            && Order::query()->where('checkout_key', $checkoutKey)->exists();
+    }
+
+    private function withCheckoutIntentLock(Customer $customer, string $id, ?string $checkoutKey, callable $callback): void
+    {
+        if ($checkoutKey === null) {
+            $callback();
+
+            return;
+        }
+
+        try {
+            Cache::lock('telegram:checkout:'.$checkoutKey, 45)
+                ->block(5, fn () => $callback());
+        } catch (LockTimeoutException) {
+            $this->bot->answerCallbackQuery($id, $this->text($customer, 'Checkout sedang diproses. Tunggu sebentar ya.', 'Checkout is being processed. Please wait a moment.'));
         }
     }
 }

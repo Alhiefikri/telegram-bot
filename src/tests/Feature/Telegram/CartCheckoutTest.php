@@ -13,6 +13,7 @@ use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
@@ -154,6 +155,120 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (str_contains((string) ($request['text'] ?? ''), 'Masuk keranjang')
                 || str_contains((string) ($request['text'] ?? ''), 'Pilih metode pembayaran')));
+    }
+
+    public function test_duplicate_direct_qris_quantity_callbacks_share_one_checkout_intent(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
+        $this->bindInspectableQrRenderer();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.DIRECT92';
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
+                'payment' => [
+                    'project' => 'sedulur-digital',
+                    'order_id' => $request['order_id'],
+                    'amount' => $request['amount'],
+                    'fee' => 103,
+                    'total_payment' => $request['amount'] + 103,
+                    'payment_method' => 'qris',
+                    'payment_number' => $paymentNumber,
+                    'expired_at' => '2026-07-04T16:30:00Z',
+                ],
+            ], 200),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'pakasir_checkout_flow' => 'api_qris', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $product = Product::factory()->create(['name' => 'Direct QRIS', 'price_amount' => 15000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(6201, 'qris-qty-first', 'qty:qris:'.$product->id.':1', messageId: 88001))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(6202, 'qris-qty-second', 'qty:qris:'.$product->id.':2', messageId: 88001))->assertOk();
+
+        $this->assertSame(1, Cart::count());
+        $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
+        $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/api/transactioncreate/qris')));
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')));
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), 'Checkout belum bayar')));
+
+        $this->postTelegramWebhook($this->callbackUpdate(6203, 'qris-new-intent', 'qty:qris:'.$product->id.':1', messageId: 88002))->assertOk();
+
+        $this->assertSame(2, Cart::count());
+        $this->assertSame(2, Order::count());
+        $this->assertSame(2, Payment::count());
+        $this->assertSame(2, $product->fresh()->reserved_stock);
+    }
+
+    public function test_duplicate_checkout_choice_callbacks_share_one_checkout_intent(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Choice Checkout', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(6251, 'choice-current-first', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99011))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(6252, 'choice-binance-second', 'checkout:binance', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99011))->assertOk();
+
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')));
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), 'Checkout belum bayar')));
+
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $this->postTelegramWebhook($this->callbackUpdate(6253, 'choice-current-new', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99012))->assertOk();
+
+        $this->assertSame(2, Cart::count());
+        $this->assertSame(2, Order::count());
+        $this->assertSame(2, Payment::count());
+        $this->assertSame(2, $product->fresh()->reserved_stock);
+    }
+
+    public function test_duplicate_direct_binance_quantity_callbacks_share_one_checkout_intent(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'Direct Binance',
+            'price_amount' => 25000,
+            'usdt_price_amount' => 2_500_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(6301, 'binance-qty-first', 'qty:binance:'.$product->id.':2', messageId: 99001))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(6302, 'binance-qty-second', 'qty:binance:'.$product->id.':3', messageId: 99001))->assertOk();
+
+        $this->assertSame(1, Cart::count());
+        $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
+        $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(2, $product->fresh()->reserved_stock);
+        $this->assertDatabaseHas('payments', [
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+        ]);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')));
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), 'Checkout belum bayar')));
     }
 
     public function test_product_detail_hides_binance_when_disabled_or_product_has_no_usdt_price(): void
