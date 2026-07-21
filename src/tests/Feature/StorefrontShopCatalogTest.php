@@ -84,10 +84,10 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('name="quantity"', false)
             ->assertSee('x-bind:value="quantity"', false)
             ->assertSee('Nama pembeli')
-            ->assertSee('name="buyer_handle"', false)
-            ->assertSee('x-model.trim="buyerHandle"', false)
+            ->assertSee('name="buyer_name"', false)
+            ->assertSee('x-model.trim="buyerName"', false)
             ->assertSee('required', false)
-            ->assertSee('placeholder="@username atau Nama Pembeli"', false)
+            ->assertSee('placeholder="Nama pembeli"', false)
             ->assertSee('Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.')
             ->assertSee('type="submit"', false)
             ->assertSee('Bayar QRIS di Website')
@@ -97,7 +97,6 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Stok kosong')
             ->assertDontSee('&amp;quot;', false);
     }
-
 
     public function test_unavailable_landing_products_render_disabled_card_without_modal_trigger(): void
     {

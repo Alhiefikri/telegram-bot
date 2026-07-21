@@ -63,8 +63,10 @@ return [
         'body' => 'Pilih produk, bayar QRIS di website, lalu simpan invoice dan Recovery Key khusus pesanan website untuk akses ulang.',
         'empty_title' => 'Belum ada produk siap dibeli.',
         'empty_body' => 'Produk aktif akan muncul otomatis setelah admin mempublikasikan stok.',
-        'buyer_handle_label' => 'Nama pembeli',
-        'buyer_handle_help' => 'Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.',
+        'buyer_name_label' => 'Nama pembeli',
+        'buyer_name_help' => 'Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.',
+        'support_contact_label' => 'Kontak bantuan opsional',
+        'support_contact_help' => 'Diisi hanya jika Anda ingin support punya kanal follow-up. Kontak ini bukan bukti kepemilikan pesanan; akses tetap memakai invoice dan Recovery Key.',
         'checkout_cta' => 'Bayar QRIS di Website',
     ],
 

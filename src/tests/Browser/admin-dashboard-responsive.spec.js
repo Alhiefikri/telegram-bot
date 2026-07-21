@@ -68,17 +68,17 @@ test('keeps customer checkout modal keyboard accessible and restores failed stat
     await page.keyboard.press('Enter');
     dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
     await dialog.getByLabel('Tambah jumlah').click();
     await expect(dialog.locator('[aria-live="polite"]')).toHaveText('Jumlah 2. Total produk Rp90.000.');
-    await dialog.locator('#storefront-buyer-handle').fill('@browser_buyer');
+    await dialog.locator('#storefront-buyer-name').fill('Browser Buyer');
     await dialog.getByRole('button', { name: /Bayar/i }).click();
     await page.waitForLoadState('domcontentloaded');
 
     dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator('#storefront-buyer-handle')).toHaveValue('@browser_buyer');
-    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await expect(dialog.locator('#storefront-buyer-name')).toHaveValue('Browser Buyer');
+    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
     await expect(dialog.locator('#storefront-checkout-error')).toBeVisible();
     await expectNoDocumentOverflow(page);
 });
@@ -94,7 +94,7 @@ test('opens the selected product checkout from the landing catalog', async ({ pa
     const dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
-    await expect(dialog.locator('#storefront-buyer-handle')).toBeFocused();
+    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
     await expectNoDocumentOverflow(page);
 });
 

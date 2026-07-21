@@ -2,9 +2,13 @@
     $modalCheckoutError = session('storefront_checkout_error')
         ?: $errors->first('product_id')
         ?: $errors->first('payment_method')
+        ?: $errors->first('support_contact_channel')
+        ?: $errors->first('support_contact_value')
         ?: $errors->first('quantity');
-    $buyerHandleHasError = $errors->has('buyer_handle');
-    $buyerHandleDescribedBy = 'storefront-buyer-handle-help'.($buyerHandleHasError ? ' storefront-buyer-handle-error' : '');
+    $buyerNameHasError = $errors->has('buyer_name');
+    $buyerNameDescribedBy = 'storefront-buyer-name-help'.($buyerNameHasError ? ' storefront-buyer-name-error' : '');
+    $supportContactHasError = $errors->has('support_contact_channel') || $errors->has('support_contact_value');
+    $supportContactDescribedBy = 'storefront-support-contact-help'.($supportContactHasError ? ' storefront-support-contact-error' : '');
 @endphp
 
 <div class="relative z-50" x-show="productModalOpen" x-cloak>
@@ -99,22 +103,52 @@
                                     @endif
 
                                     <div class="grid gap-2">
-                                        <label for="storefront-buyer-handle" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['buyer_handle_label'] }}</label>
-                                        <input id="storefront-buyer-handle"
-                                               name="buyer_handle"
+                                        <label for="storefront-buyer-name" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['buyer_name_label'] }}</label>
+                                        <input id="storefront-buyer-name"
+                                               name="buyer_name"
                                                type="text"
                                                required
-                                               x-model.trim="buyerHandle"
-                                               placeholder="@username atau Nama Pembeli"
-                                               aria-describedby="{{ $buyerHandleDescribedBy }}"
-                                               @if ($buyerHandleHasError) aria-invalid="true" @endif
+                                               x-model.trim="buyerName"
+                                               placeholder="Nama pembeli"
+                                               aria-describedby="{{ $buyerNameDescribedBy }}"
+                                               @if ($buyerNameHasError) aria-invalid="true" @endif
                                                class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] placeholder:text-[var(--sf-muted)]">
-                                        <p id="storefront-buyer-handle-help" class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">
-                                            {{ $copy['shop']['buyer_handle_help'] }}
+                                        <p id="storefront-buyer-name-help" class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">
+                                            {{ $copy['shop']['buyer_name_help'] }}
                                         </p>
-                                        @error('buyer_handle')
-                                            <p id="storefront-buyer-handle-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                        @error('buyer_name')
+                                            <p id="storefront-buyer-name-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
+                                    </div>
+
+                                    <div class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3">
+                                        <label for="storefront-support-contact-channel" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }}</label>
+                                        <div class="grid gap-2 sm:grid-cols-[150px_1fr]">
+                                            <select id="storefront-support-contact-channel"
+                                                    name="support_contact_channel"
+                                                    x-model="supportContactChannel"
+                                                    aria-describedby="{{ $supportContactDescribedBy }}"
+                                                    @if ($supportContactHasError) aria-invalid="true" @endif
+                                                    class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)]">
+                                                <option value="">Tidak perlu</option>
+                                                <option value="telegram">Telegram</option>
+                                                <option value="whatsapp">WhatsApp</option>
+                                            </select>
+                                            <input id="storefront-support-contact-value"
+                                                   name="support_contact_value"
+                                                   type="text"
+                                                   x-model.trim="supportContactValue"
+                                                   placeholder="@username atau nomor WhatsApp"
+                                                   aria-describedby="{{ $supportContactDescribedBy }}"
+                                                   @if ($supportContactHasError) aria-invalid="true" @endif
+                                                   class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] placeholder:text-[var(--sf-muted)]">
+                                        </div>
+                                        <p id="storefront-support-contact-help" class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">
+                                            {{ $copy['shop']['support_contact_help'] }}
+                                        </p>
+                                        @if ($supportContactHasError)
+                                            <p id="storefront-support-contact-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $errors->first('support_contact_channel') ?: $errors->first('support_contact_value') }}</p>
+                                        @endif
                                     </div>
 
                                     <fieldset class="grid gap-2" x-show="selectedProduct?.checkout?.websiteBinancePay || selectedProduct?.checkout?.websiteQris" @if ($errors->has('payment_method')) aria-describedby="storefront-payment-method-error" @endif>

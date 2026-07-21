@@ -8,7 +8,9 @@
         $checkoutRestore = [
             'productId' => old('product_id'),
             'quantity' => old('quantity', 1),
-            'buyerHandle' => old('buyer_handle', ''),
+            'buyerName' => old('buyer_name', ''),
+            'supportContactChannel' => old('support_contact_channel', ''),
+            'supportContactValue' => old('support_contact_value', ''),
             'paymentMethod' => old('payment_method'),
         ];
     @endphp

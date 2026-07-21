@@ -8,7 +8,9 @@
         $checkoutRestore = [
             'productId' => old('product_id'),
             'quantity' => old('quantity', 1),
-            'buyerHandle' => old('buyer_handle', ''),
+            'buyerName' => old('buyer_name', ''),
+            'supportContactChannel' => old('support_contact_channel', ''),
+            'supportContactValue' => old('support_contact_value', ''),
             'paymentMethod' => old('payment_method'),
         ];
         $checkoutPayload = $isAvailable ? $presentation->modalPayload() : null;
@@ -108,10 +110,20 @@
                                             <input name="quantity" type="number" min="1" max="{{ min($stock, 20) }}" value="{{ old('quantity', 1) }}" class="neo-input h-12 bg-white px-3 text-base font-bold">
                                         </label>
                                         <label class="grid gap-2 text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
-                                            {{ $copy['shop']['buyer_handle_label'] }}
-                                            <input name="buyer_handle" type="text" required value="{{ old('buyer_handle') }}" placeholder="@username atau Nama Pembeli" class="neo-input h-12 bg-white px-3 text-base font-bold">
+                                            {{ $copy['shop']['buyer_name_label'] }}
+                                            <input name="buyer_name" type="text" required value="{{ old('buyer_name') }}" placeholder="Nama pembeli" class="neo-input h-12 bg-white px-3 text-base font-bold">
                                         </label>
-                                        <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['buyer_handle_help'] }}</p>
+                                        <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['buyer_name_help'] }}</p>
+                                        <fieldset class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3">
+                                            <legend class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }}</legend>
+                                            <select name="support_contact_channel" class="neo-input h-12 bg-white px-3 text-base font-bold">
+                                                <option value="">Tidak perlu</option>
+                                                <option value="telegram" @selected(old('support_contact_channel') === 'telegram')>Telegram</option>
+                                                <option value="whatsapp" @selected(old('support_contact_channel') === 'whatsapp')>WhatsApp</option>
+                                            </select>
+                                            <input name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" class="neo-input h-12 bg-white px-3 text-base font-bold">
+                                            <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['support_contact_help'] }}</p>
+                                        </fieldset>
                                         <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Bayar QRIS di Website</button>
                                     </form>
                                 </noscript>

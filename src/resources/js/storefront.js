@@ -463,7 +463,9 @@ export function storefrontModal() {
         selectedProduct: null,
         quantity: 1,
         notes: '',
-        buyerHandle: '',
+        buyerName: '',
+        supportContactChannel: '',
+        supportContactValue: '',
         paymentMethod: 'qris',
         quantityAnnouncement: '',
         modalOpener: null,
@@ -502,7 +504,9 @@ export function storefrontModal() {
             this.quantity = Number.parseInt(options.quantity, 10) || 1;
             this.quantityAnnouncement = '';
             this.notes = '';
-            this.buyerHandle = options.buyerHandle || '';
+            this.buyerName = options.buyerName || '';
+            this.supportContactChannel = options.supportContactChannel || '';
+            this.supportContactValue = options.supportContactValue || '';
             this.paymentMethod = options.paymentMethod || (this.isEnglishBrowser() && product?.checkout?.websiteBinancePay ? 'binance_pay' : 'qris');
             this.productModalOpen = true;
             document.body.style.overflow = 'hidden';
@@ -574,8 +578,8 @@ export function storefrontModal() {
             const panel = this.$refs.dialogPanel;
             const focusTarget = () => {
                 const target = focusInvalid
-                    ? panel?.querySelector('[aria-invalid="true"], #storefront-buyer-handle')
-                    : panel?.querySelector('#storefront-buyer-handle');
+                    ? panel?.querySelector('[aria-invalid="true"], #storefront-buyer-name')
+                    : panel?.querySelector('#storefront-buyer-name');
 
                 (target || panel)?.focus?.();
             };
@@ -632,7 +636,9 @@ export function storefrontModal() {
                 this.openProductModal(typeof payload === 'string' ? JSON.parse(payload) : payload, {
                     opener: card || document.getElementById('product-checkout-cta') || document.activeElement,
                     quantity: this.restoreCheckout.quantity,
-                    buyerHandle: this.restoreCheckout.buyerHandle,
+                    buyerName: this.restoreCheckout.buyerName,
+                    supportContactChannel: this.restoreCheckout.supportContactChannel,
+                    supportContactValue: this.restoreCheckout.supportContactValue,
                     paymentMethod: this.restoreCheckout.paymentMethod,
                     focusInvalid: true,
                 });

@@ -53,6 +53,7 @@ class StorefrontShopCheckout
             ->where('order_status', OrderStatus::PendingPayment)
             ->where('payment_status', PaymentStatus::Pending)
             ->first()) !== null) {
+            $this->storeSupportContact($existing, $input);
             $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
             $payment = $existing->payments()->latest('created_at')->first();
             if ($payment?->provider === 'pakasir') {
@@ -74,12 +75,10 @@ class StorefrontShopCheckout
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
         }
 
-        $buyer = $this->buyerIdentity($input->buyerHandle);
-
         $customer = Customer::create([
             'telegram_id' => null,
-            'first_name' => $buyer['display_name'],
-            'username' => $buyer['telegram_username'],
+            'first_name' => $this->buyerName($input->buyerName),
+            'username' => null,
         ]);
 
         $cart = $this->carts->activeCartFor($customer);
@@ -92,6 +91,7 @@ class StorefrontShopCheckout
             null,
             $checkoutKey,
         );
+        $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
         if ($input->paymentMethod === 'binance_pay') {
@@ -146,26 +146,9 @@ class StorefrontShopCheckout
         return $this->orderAccess->hasKey($order) ? null : $this->orderAccess->issue($order);
     }
 
-    /**
-     * @return array{display_name: string, telegram_username: ?string}
-     */
-    private function buyerIdentity(string $buyerHandle): array
+    private function buyerName(string $buyerName): string
     {
-        $value = trim($buyerHandle);
-
-        if (preg_match('/^@?[A-Za-z0-9_]{5,32}$/', $value) === 1) {
-            $username = ltrim($value, '@');
-
-            return [
-                'display_name' => $username,
-                'telegram_username' => $username,
-            ];
-        }
-
-        return [
-            'display_name' => $value,
-            'telegram_username' => null,
-        ];
+        return trim($buyerName);
     }
 
     private function assertPaymentMethodReady(string $paymentMethod, Product $product): void
@@ -198,10 +181,44 @@ class StorefrontShopCheckout
             $sessionId,
             $input->productId,
             $input->quantity,
-            mb_strtolower(trim($input->buyerHandle)),
+            mb_strtolower(trim($input->buyerName)),
             $input->paymentMethod,
         ]);
 
         return hash_hmac('sha256', $payload, (string) config('app.key'));
+    }
+
+    private function storeSupportContact(Order $order, StorefrontShopCheckoutInput $input): void
+    {
+        $channel = $input->supportContactChannel;
+        $value = $this->supportContactValue($channel, $input->supportContactValue);
+
+        if ($channel === null || $value === null) {
+            $order->forceFill([
+                'support_contact_channel' => null,
+                'support_contact_value' => null,
+            ])->save();
+
+            return;
+        }
+
+        $order->forceFill([
+            'support_contact_channel' => $channel,
+            'support_contact_value' => $value,
+        ])->save();
+    }
+
+    private function supportContactValue(?string $channel, ?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+
+        return match ($channel) {
+            'telegram' => '@'.ltrim($value, '@'),
+            'whatsapp' => preg_replace('/[^\d+]/', '', $value) ?: null,
+            default => null,
+        };
     }
 }

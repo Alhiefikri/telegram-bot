@@ -15,9 +15,11 @@ trait StorefrontCheckoutScenarios
     protected function successfulNativeQrisCheckout(
         Product $product,
         int $quantity,
-        string $buyerHandle,
+        string $buyerName,
         string $paymentNumber,
         int $fee = 103,
+        ?string $supportContactChannel = null,
+        ?string $supportContactValue = null,
     ): array {
         $this->pakasirNativeQrisIsReady();
         $this->qrisRendererReturnsDeterministicPng();
@@ -27,7 +29,7 @@ trait StorefrontCheckoutScenarios
             fee: $fee,
         );
 
-        $response = $this->postStorefrontShopCheckout($product, $quantity, $buyerHandle);
+        $response = $this->postStorefrontShopCheckout($product, $quantity, $buyerName, $supportContactChannel, $supportContactValue);
 
         $order = Order::with(['customer', 'cart', 'payments', 'orderItems.stockItems'])->firstOrFail();
         $payment = $order->payments->first();
@@ -36,14 +38,26 @@ trait StorefrontCheckoutScenarios
         return [$response, $order, $payment];
     }
 
-    protected function postStorefrontShopCheckout(Product $product, int $quantity, string $buyerHandle): TestResponse
-    {
+    protected function postStorefrontShopCheckout(
+        Product $product,
+        int $quantity,
+        string $buyerName,
+        ?string $supportContactChannel = null,
+        ?string $supportContactValue = null,
+    ): TestResponse {
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => $quantity,
+            'buyer_name' => $buyerName,
+        ];
+
+        if ($supportContactChannel !== null || $supportContactValue !== null) {
+            $payload['support_contact_channel'] = $supportContactChannel;
+            $payload['support_contact_value'] = $supportContactValue;
+        }
+
         return $this
             ->from(route('storefront.shop.index'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
-                'quantity' => $quantity,
-                'buyer_handle' => $buyerHandle,
-            ]);
+            ->post(route('storefront.shop.checkout'), $payload);
     }
 }

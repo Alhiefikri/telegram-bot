@@ -24,7 +24,7 @@ class StorefrontErrorPageTest extends TestCase
         $payload = [
             'product_id' => 999_999,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
         ];
 
         $this->post(route('storefront.shop.checkout'), $payload)->assertRedirect();

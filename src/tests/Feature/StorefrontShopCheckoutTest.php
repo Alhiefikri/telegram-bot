@@ -76,28 +76,20 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertRedirect(route('storefront.shop.index'));
     }
 
-    public function test_checkout_module_normalizes_buyer_identity_from_input_handle(): void
+    public function test_checkout_module_stores_buyer_name_without_treating_it_as_contact_identity(): void
     {
         $cases = [
-            'telegram username with at sign' => [
-                'input' => ' @LhieStore_99 ',
-                'expected_first_name' => 'LhieStore_99',
-                'expected_username' => 'LhieStore_99',
-            ],
-            'telegram username without at sign' => [
+            'username shaped name is still only a buyer name' => [
                 'input' => 'LhieStore_99',
                 'expected_first_name' => 'LhieStore_99',
-                'expected_username' => 'LhieStore_99',
             ],
-            'display name with spaces is not telegram' => [
+            'display name with spaces' => [
                 'input' => ' Lia Store ',
                 'expected_first_name' => 'Lia Store',
-                'expected_username' => null,
             ],
-            'display name with dash is not telegram' => [
+            'display name with dash' => [
                 'input' => 'lia-store',
                 'expected_first_name' => 'lia-store',
-                'expected_username' => null,
             ],
         ];
 
@@ -116,7 +108,7 @@ class StorefrontShopCheckoutTest extends TestCase
             $result = app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
                 productId: $product->id,
                 quantity: 1,
-                buyerHandle: $data['input'],
+                buyerName: $data['input'],
             ));
             $order = Order::latest('id')->firstOrFail();
 
@@ -124,7 +116,7 @@ class StorefrontShopCheckoutTest extends TestCase
             $this->assertDatabaseHas('customers', [
                 'id' => $order->customer_id,
                 'telegram_id' => null,
-                'username' => $data['expected_username'],
+                'username' => null,
                 'first_name' => $data['expected_first_name'],
             ]);
         }
@@ -149,7 +141,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
                     productId: $product->id,
                     quantity: 1,
-                    buyerHandle: 'Web Buyer',
+                    buyerName: 'Web Buyer',
                 ));
                 $this->fail('Expected checkout to reject '.$case.'.');
             } catch (InsufficientStock $exception) {
@@ -171,7 +163,7 @@ class StorefrontShopCheckoutTest extends TestCase
             app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
                 productId: $product->id,
                 quantity: 1,
-                buyerHandle: 'Web Buyer',
+                buyerName: 'Web Buyer',
             ));
             $this->fail('Expected checkout to reject disabled native QRIS before validating availability.');
         } catch (InvalidCheckout $exception) {
@@ -192,7 +184,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => 999_999,
                 'quantity' => 1,
-                'buyer_handle' => '@buyer_test',
+                'buyer_name' => 'buyer_test',
             ]);
 
         $response
@@ -216,7 +208,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => $product->id,
                 'quantity' => 1,
-                'buyer_handle' => '@buyer_test',
+                'buyer_name' => 'buyer_test',
             ]);
 
         $response
@@ -332,15 +324,15 @@ class StorefrontShopCheckoutTest extends TestCase
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => $product->id,
                 'quantity' => 2,
-                'buyer_handle' => 'x',
+                'buyer_name' => 'x',
                 'payment_method' => 'qris',
             ])
             ->assertOk()
             ->assertSee('data-checkout-restore=', false)
             ->assertSee('Retry Checkout Product')
-            ->assertSee('id="storefront-buyer-handle-error"', false)
+            ->assertSee('id="storefront-buyer-name-error"', false)
             ->assertSee('aria-invalid="true"', false)
-            ->assertSee('aria-describedby="storefront-buyer-handle-help storefront-buyer-handle-error"', false);
+            ->assertSee('aria-describedby="storefront-buyer-name-help storefront-buyer-name-error"', false);
     }
 
     public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
@@ -362,7 +354,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 2,
-            buyerHandle: '@buyer_test',
+            buyerName: 'buyer_test',
             paymentNumber: $paymentNumber,
         );
 
@@ -376,7 +368,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertDatabaseHas('customers', [
             'id' => $order->customer_id,
             'telegram_id' => null,
-            'username' => 'buyer_test',
+            'username' => null,
             'first_name' => 'buyer_test',
         ]);
         $this->assertSame(30000, $order->total_amount);
@@ -442,7 +434,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $response = $this->post(route('storefront.shop.checkout'), [
             'product_id' => $product->id,
             'quantity' => 2,
-            'buyer_handle' => '@international_buyer',
+            'buyer_name' => 'international_buyer',
             'payment_method' => 'binance_pay',
         ]);
 
@@ -475,7 +467,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->post(route('storefront.shop.checkout'), [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
             'payment_method' => 'manual;DROP TABLE payments',
         ])->assertSessionHasErrors('payment_method');
 
@@ -498,7 +490,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->post(route('storefront.shop.checkout'), [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
             'payment_method' => 'binance_pay',
         ])->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
@@ -519,7 +511,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $payload = [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
             'payment_method' => 'binance_pay',
         ];
 
@@ -542,7 +534,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $product = $this->availableProduct(['name' => 'Retryable Cancelled Checkout', 'price_amount' => 15000, 'stock' => 3]);
         $this->pakasirNativeQrisIsReady();
         $this->providerQrisCreateSucceedsWithProviderTotal(15000, '00020101021226610016ID.CO.QRIS.RETRY99');
-        $payload = ['product_id' => $product->id, 'quantity' => 1, 'buyer_handle' => '@buyer_test'];
+        $payload = ['product_id' => $product->id, 'quantity' => 1, 'buyer_name' => 'buyer_test'];
         $session = ['storefront.checkout_client_key' => 'cancel-retry-session'];
 
         $first = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
@@ -584,7 +576,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $payload = [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
         ];
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
             ->from(route('storefront.home'))
@@ -596,6 +588,49 @@ class StorefrontShopCheckoutTest extends TestCase
         $first->assertRedirect();
         $second->assertRedirect($first->headers->get('Location'));
         $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+    }
+
+    public function test_repeated_checkout_updates_optional_support_contact_without_creating_a_new_order(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        $product = $this->availableProduct([
+            'name' => 'Support Contact Idempotent Checkout',
+            'price_amount' => 15000,
+            'stock' => 2,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        $this->providerQrisCreateSucceedsWithProviderTotal(
+            amount: 15000,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.CONTACTIDEMPOTENT99',
+        );
+
+        $session = ['storefront.checkout_client_key' => 'same-browser-support-contact-session'];
+        $basePayload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'buyer_test',
+        ];
+        $first = $this->withSession($session)
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $basePayload + [
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@buyer_test',
+            ]);
+        $second = $this->withSession($session)
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $basePayload + [
+                'support_contact_channel' => 'whatsapp',
+                'support_contact_value' => '+62 812-0000-0000',
+            ]);
+
+        $first->assertRedirect();
+        $second->assertRedirect($first->headers->get('Location'));
+        $order = Order::sole();
+        $this->assertSame('whatsapp', $order->support_contact_channel);
+        $this->assertSame('+6281200000000', $order->support_contact_value);
         $this->assertSame(1, Payment::count());
         $this->assertSame(1, $product->fresh()->reserved_stock);
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
@@ -613,7 +648,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $payload = [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
         ];
 
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
@@ -645,7 +680,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $payload = [
             'product_id' => $product->id,
             'quantity' => 1,
-            'buyer_handle' => '@buyer_test',
+            'buyer_name' => 'buyer_test',
         ];
 
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
@@ -691,7 +726,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [$response, $order] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
-            buyerHandle: 'Budi Store',
+            buyerName: 'Budi Store',
             paymentNumber: '00020101021226610016ID.CO.QRIS.BUDISTORE99',
         );
 
@@ -706,6 +741,78 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, Payment::count());
     }
 
+    public function test_guest_checkout_does_not_require_support_contact(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Guest Checkout No Contact',
+            'price_amount' => 20000,
+            'stock' => 2,
+        ]);
+
+        [$response, $order] = $this->successfulNativeQrisCheckout(
+            product: $product,
+            quantity: 1,
+            buyerName: 'Guest Buyer',
+            paymentNumber: '00020101021226610016ID.CO.QRIS.GUESTNOCONTACT99',
+        );
+
+        $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
+        $this->assertDatabaseHas('customers', [
+            'id' => $order->customer_id,
+            'telegram_id' => null,
+            'first_name' => 'Guest Buyer',
+            'username' => null,
+            'email' => null,
+        ]);
+        $this->assertNull($order->support_contact_channel);
+        $this->assertNull($order->support_contact_value);
+    }
+
+    public function test_guest_checkout_stores_optional_support_contact_without_making_it_order_ownership(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Guest Checkout With Contact',
+            'price_amount' => 20000,
+            'stock' => 2,
+        ]);
+
+        [$response, $order] = $this->successfulNativeQrisCheckout(
+            product: $product,
+            quantity: 1,
+            buyerName: 'Guest Buyer',
+            paymentNumber: '00020101021226610016ID.CO.QRIS.GUESTCONTACT99',
+            supportContactChannel: 'telegram',
+            supportContactValue: ' @support_buyer ',
+        );
+
+        $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
+        $order->refresh();
+        $this->assertSame('telegram', $order->support_contact_channel);
+        $this->assertSame('@support_buyer', $order->support_contact_value);
+        $this->assertDatabaseHas('customers', [
+            'id' => $order->customer_id,
+            'telegram_id' => null,
+            'first_name' => 'Guest Buyer',
+            'username' => null,
+            'email' => null,
+        ]);
+    }
+
+    public function test_checkout_rejects_unapproved_support_contact_channel_before_creating_rows(): void
+    {
+        $product = $this->availableProduct(['stock' => 1]);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'Guest Buyer',
+            'support_contact_channel' => 'instagram',
+            'support_contact_value' => '@buyer',
+        ])->assertSessionHasErrors('support_contact_channel');
+
+        $this->assertNoLocalCheckoutRowsCreated('invalid support contact channel');
+    }
+
     public function test_shop_checkout_signed_invoice_survives_proxy_scheme_or_host_mismatch(): void
     {
         $product = $this->availableProduct([
@@ -717,7 +824,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [$response] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
-            buyerHandle: '@proxy_buyer',
+            buyerName: 'proxy_buyer',
             paymentNumber: '00020101021226610016ID.CO.QRIS.PROXYMISMATCH99',
         );
 
@@ -745,7 +852,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [, $order] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
-            buyerHandle: '@legacy_buyer',
+            buyerName: 'legacy_buyer',
             paymentNumber: '00020101021226610016ID.CO.QRIS.LEGACYABSOLUTE99',
         );
 
@@ -769,7 +876,7 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         Http::fake();
 
-        $response = $this->postStorefrontShopCheckout($product, 1, '@buyer_test');
+        $response = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
 
         $response
             ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
@@ -827,7 +934,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $stockItem = ProductStockItem::where('product_id', $product->id)->firstOrFail();
         $this->providerQrisCreateFails();
 
-        $response = $this->postStorefrontShopCheckout($product, 1, '@RetryBuyer');
+        $response = $this->postStorefrontShopCheckout($product, 1, 'RetryBuyer');
 
         $response->assertRedirect();
 
@@ -884,7 +991,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
-            buyerHandle: '@paid_buyer',
+            buyerName: 'paid_buyer',
             paymentNumber: '00020101021226610016ID.CO.QRIS.PAIDREVEAL99',
         );
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
@@ -898,6 +1005,8 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Data akun')
             ->assertSee('Allocated Account Product')
             ->assertSee('account@example.test|pass', false)
+            ->assertSee('Simpan pesanan ke akun')
+            ->assertSee('invoice plus Recovery Key tetap bisa dipakai')
             ->assertSee('Ganti password dan MFA setelah login pertama.')
             ->assertDontSee('Catatan baru yang tidak boleh diterima pembeli lama.')
             ->assertSee('Panduan login & keamanan');
@@ -918,7 +1027,7 @@ class StorefrontShopCheckoutTest extends TestCase
         [, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
             quantity: 1,
-            buyerHandle: 'Status Buyer',
+            buyerName: 'Status Buyer',
             paymentNumber: '00020101021226610016ID.CO.QRIS.STATUSPAID99',
             fee: 500,
         );

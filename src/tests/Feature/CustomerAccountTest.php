@@ -115,6 +115,53 @@ class CustomerAccountTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'order.customer_claimed', 'subject_id' => $order->id]);
     }
 
+    public function test_paid_guest_order_with_support_contact_can_be_claimed_only_with_invoice_and_recovery_key(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
+        $order = Order::factory()->create([
+            'customer_id' => Customer::factory()->create(['telegram_id' => null, 'email' => null])->id,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'support_contact_channel' => 'telegram',
+            'support_contact_value' => '@support_buyer',
+        ]);
+        $key = app(StorefrontOrderAccess::class)->issue($order);
+
+        $claimed = app(CustomerOrderClaimService::class)->claim($customer, $order->invoice_number, $key);
+
+        $this->assertNotNull($claimed);
+        $this->assertSame($customer->id, $order->fresh()->customer_id);
+    }
+
+    public function test_invalid_order_claim_does_not_attach_order(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
+        $order = Order::factory()->create([
+            'customer_id' => Customer::factory()->create(['telegram_id' => null, 'email' => null])->id,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        app(StorefrontOrderAccess::class)->issue($order);
+
+        $this->assertNull(app(CustomerOrderClaimService::class)->claim($customer, $order->invoice_number, 'LHIE-WRONG-KEY-123'));
+        $this->assertNotSame($customer->id, $order->fresh()->customer_id);
+    }
+
+    public function test_order_owned_by_another_customer_account_cannot_be_claimed(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
+        $other = Customer::factory()->create(['email' => 'other@example.test', 'email_verified_at' => now(), 'telegram_id' => null]);
+        $order = Order::factory()->create([
+            'customer_id' => $other->id,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $key = app(StorefrontOrderAccess::class)->issue($order);
+
+        $this->assertNull(app(CustomerOrderClaimService::class)->claim($customer, $order->invoice_number, $key));
+        $this->assertSame($other->id, $order->fresh()->customer_id);
+    }
+
     public function test_failed_order_claim_does_not_flash_recovery_key_to_old_input(): void
     {
         $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
