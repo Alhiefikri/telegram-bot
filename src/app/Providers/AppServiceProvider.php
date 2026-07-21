@@ -16,8 +16,19 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramBroadcastCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCartCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCheckoutCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCommunityGateVerifyCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramLocaleCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -36,6 +47,18 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
+        $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([
+            $app->make(TelegramLocaleCallbackHandler::class),
+            $app->make(TelegramCommunityGateVerifyCallbackHandler::class),
+            $app->make(TelegramAdminPaymentCallbackHandler::class),
+            $app->make(TelegramBroadcastCallbackHandler::class),
+            $app->make(TelegramAdminStatsCallbackHandler::class),
+            $app->make(TelegramCatalogCallbackHandler::class),
+            $app->make(TelegramOrderCallbackHandler::class),
+            $app->make(TelegramCartCallbackHandler::class),
+            $app->make(TelegramCheckoutCallbackHandler::class),
+            $app->make(TelegramPaymentProofCallbackHandler::class),
+        ]));
     }
 
     /**
