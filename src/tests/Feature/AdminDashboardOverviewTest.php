@@ -247,6 +247,47 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
     }
 
+    public function test_dashboard_balance_and_earnings_do_not_mix_usdt_micro_units_into_idr(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+
+        $idrOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 75000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $idrOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 75000,
+            'provider_fee' => 5000,
+            'currency' => 'IDR',
+            'paid_at' => now(),
+        ]);
+
+        $usdtOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 50000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $usdtOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 5_000_000,
+            'provider_fee' => 250_000,
+            'currency' => 'USDT',
+            'paid_at' => now(),
+        ]);
+
+        $data = app(AdminDashboardData::class)->forAdmin($admin);
+
+        $this->assertSame(70000, $data['metrics']['read_only_balance_amount']);
+        $this->assertSame(70000, $data['statsTab']['balance']['amount']);
+        $this->assertSame('IDR 70.000', $data['statsTab']['balance']['amount_formatted']);
+        $this->assertSame(70000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
+        $this->assertStringNotContainsString('IDR 5.000.000', json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
     public function test_stats_tab_renders_store_link_actions_cards_statuses_and_css_earnings(): void
     {
         $this->actingAs(User::factory()->create([

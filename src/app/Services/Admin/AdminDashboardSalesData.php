@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\PaymentReceiptReport;
 use App\Support\Money;
 use Illuminate\Pagination\LengthAwarePaginator;
 
@@ -15,6 +16,8 @@ final class AdminDashboardSalesData
     private const ORDERS_PER_PAGE = 10;
 
     private ?StoreChannelSetting $storeChannelSetting = null;
+
+    public function __construct(private readonly PaymentReceiptReport $receiptReport) {}
 
     /**
      * @param  array<string, mixed>  $statusCounts
@@ -43,7 +46,7 @@ final class AdminDashboardSalesData
                 'orderItems:id,order_id,product_name,quantity,subtotal',
                 'payments' => fn ($query) => $query
                     ->where('status', PaymentStatus::Paid)
-                    ->select(['id', 'order_id', 'amount', 'status']),
+                    ->select(['id', 'order_id', 'amount', 'currency', 'provider_fee', 'status', 'paid_at']),
                 'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
@@ -55,7 +58,7 @@ final class AdminDashboardSalesData
 
         $orders = $paginator->getCollection()
             ->map(function (Order $order) use ($canRetrySalesProof): array {
-                $paidAmount = (int) $order->payments->sum('amount');
+                $earning = $this->paidReceiptLabel($order);
                 $orderStatusTone = $this->orderStatusTone($order->order_status);
                 $paymentStatusTone = $this->paymentStatusTone($order->payment_status);
 
@@ -74,8 +77,8 @@ final class AdminDashboardSalesData
                     'payment_status_tone' => $paymentStatusTone,
                     'payment_attention' => $this->paymentAttention($order),
                     'price' => Money::idr($order->total_amount),
-                    'earning' => Money::idr($paidAmount),
-                    'earning_amount' => $paidAmount,
+                    'earning' => $earning['label'],
+                    'earning_amount' => $earning['amount'],
                     'item_count' => $order->order_items_count,
                     'sales_proof' => $this->salesProofState($order, $canRetrySalesProof),
                     'created_at' => $order->created_at?->toDateTimeString(),
@@ -85,6 +88,41 @@ final class AdminDashboardSalesData
             ->all();
 
         return [$orders, $this->pagination($paginator)];
+    }
+
+    /**
+     * @return array{label: string, amount: int}
+     */
+    private function paidReceiptLabel(Order $order): array
+    {
+        $canonical = $order->payments
+            ->sortBy([['paid_at', 'asc'], ['id', 'asc']])
+            ->take(1);
+
+        $payments = $canonical
+            ->groupBy(fn ($payment): string => $this->receiptReport->currency($payment))
+            ->map(fn ($payments): int => (int) $payments->sum(fn ($payment): int => $this->receiptReport->netAmount($payment)));
+
+        if ($payments->count() === 1 && $payments->has('USDT')) {
+            $amount = (int) $payments->get('USDT');
+
+            return ['label' => Money::usdt($amount), 'amount' => $amount];
+        }
+
+        $idr = (int) ($payments->get('IDR') ?? 0);
+        if ($payments->count() <= 1) {
+            return ['label' => Money::idr($idr), 'amount' => $idr];
+        }
+
+        $parts = [];
+        if ($idr > 0) {
+            $parts[] = Money::idr($idr);
+        }
+        if (($payments->get('USDT') ?? 0) > 0) {
+            $parts[] = Money::usdt((int) $payments->get('USDT'));
+        }
+
+        return ['label' => implode(' + ', $parts), 'amount' => $idr];
     }
 
     public function paymentAttention(Order $order): ?array

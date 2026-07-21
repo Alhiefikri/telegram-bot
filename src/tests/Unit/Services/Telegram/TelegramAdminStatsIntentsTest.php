@@ -19,6 +19,118 @@ class TelegramAdminStatsIntentsTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_usdt_payment_micro_units_are_not_reported_as_rupiah_millions(): void
+    {
+        Carbon::setTestNow('2026-07-08 15:00:00');
+
+        config()->set('services.telegram.token', 'bot-token');
+
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+        ]);
+
+        $customer = Customer::factory()->create();
+        $order = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 75000,
+            'created_at' => now()->subHour(),
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'provider_fee' => 250_000,
+            'paid_at' => now()->subHour(),
+        ]);
+
+        app(TelegramAdminStatsIntents::class)->showDailyStats($customer, 'admin-chat-123');
+
+        $sends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $sends);
+
+        $text = (string) $sends->first()[0]['text'];
+
+        $this->assertStringContainsString('Nilai Penjualan: Rp75.000', $text);
+        $this->assertStringContainsString('USDT: 4.75 USDT', $text);
+        $this->assertStringNotContainsString('Rp5.000.000', $text);
+    }
+
+    public function test_mixed_idr_and_usdt_stats_group_receipts_and_count_order_once(): void
+    {
+        Carbon::setTestNow('2026-07-08 15:00:00');
+
+        $customer = Customer::factory()->create();
+        $product = Product::factory()->create();
+        $idrOrder = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 50000,
+            'created_at' => now()->subHours(2),
+        ]);
+        OrderItem::factory()->for($idrOrder)->for($product)->create(['quantity' => 2]);
+        Payment::factory()->for($idrOrder)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 50000,
+            'provider_fee' => 2500,
+            'currency' => 'IDR',
+            'paid_at' => now()->subHours(2),
+        ]);
+
+        $usdtOrder = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 25000,
+            'created_at' => now()->subHour(),
+        ]);
+        OrderItem::factory()->for($usdtOrder)->for($product)->create(['quantity' => 1]);
+        Payment::factory()->for($usdtOrder)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 2_500_000,
+            'currency' => 'USDT',
+            'paid_at' => now()->subHour(),
+        ]);
+
+        $stats = app(TelegramAdminStatsIntents::class)->calculateTodayStats();
+
+        $this->assertSame(2, $stats['paid_orders']);
+        $this->assertSame(3, $stats['sold_products']);
+        $this->assertSame(75000, $stats['sales_value']);
+        $this->assertSame(47500, $stats['receipts']['IDR']);
+        $this->assertSame(2_500_000, $stats['receipts']['USDT']);
+    }
+
+    public function test_duplicate_paid_payment_rows_use_first_paid_payment_as_canonical(): void
+    {
+        Carbon::setTestNow('2026-07-08 15:00:00');
+
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 50000,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 50000,
+            'provider_fee' => 1000,
+            'currency' => 'IDR',
+            'paid_at' => now()->subMinutes(10),
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'paid_at' => now()->subMinute(),
+        ]);
+
+        $stats = app(TelegramAdminStatsIntents::class)->calculateTodayStats();
+
+        $this->assertSame(1, $stats['paid_orders']);
+        $this->assertSame(50000, $stats['sales_value']);
+        $this->assertSame(49000, $stats['receipts']['IDR']);
+        $this->assertArrayNotHasKey('USDT', $stats['receipts']);
+    }
+
     public function test_calculate_today_stats_counts_only_orders_and_payments_from_today(): void
     {
         Carbon::setTestNow('2026-07-08 15:00:00');
@@ -177,7 +289,9 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertStringContainsString('Order Baru: 1', $text);
         $this->assertStringContainsString('Order Dibayar: 1', $text);
         $this->assertStringContainsString('Produk Terjual: 2', $text);
-        $this->assertStringContainsString('Earning: Rp95.000', $text);
+        $this->assertStringContainsString('Nilai Penjualan: Rp10.000', $text);
+        $this->assertStringContainsString('Pembayaran Diterima:', $text);
+        $this->assertStringContainsString('• Rupiah: Rp95.000', $text);
 
         // Check for mini app dashboard button
         $replyMarkup = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);

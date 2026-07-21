@@ -8,8 +8,10 @@ use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
+use App\Models\ProductPriceChangeEvent;
 use Illuminate\Console\Command;
 
 class RecoverTelegramOutboundEffects extends Command
@@ -74,6 +76,27 @@ class RecoverTelegramOutboundEffects extends Command
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
                     DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
+                        ->onQueue((string) $this->option('queue'));
+                    $dispatched++;
+                }
+            });
+
+        ProductPriceChangeEvent::query()
+            ->where(function ($query) use ($cutoff): void {
+                $query->whereNull('recipients_materialized_at')
+                    ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
+                        $recipients
+                            ->whereNull('sent_at')
+                            ->where(function ($recipient) use ($cutoff): void {
+                                $recipient->whereNull('send_started_at')
+                                    ->orWhere('send_started_at', '<=', $cutoff);
+                            });
+                    });
+            })
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($events) use (&$dispatched): void {
+                foreach ($events as $event) {
+                    SendProductPriceChangeNotifications::dispatch($event->id, now()->toISOString())
                         ->onQueue((string) $this->option('queue'));
                     $dispatched++;
                 }

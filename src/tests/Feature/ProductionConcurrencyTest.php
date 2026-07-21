@@ -18,6 +18,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
@@ -26,6 +27,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
+use App\Services\Telegram\ProductPriceChangeNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -423,6 +425,37 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertManagedInventoryInvariants($product);
     }
 
+    public function test_concurrent_product_price_updates_create_sequential_price_change_events(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $product = Product::factory()->create([
+            'name' => 'Sequential Price Product',
+            'price_amount' => 10000,
+            'usdt_price_amount' => 1_000_000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $results = $this->runConcurrently([
+            fn () => $this->lockedPriceUpdate($product->id, 20000, 2_000_000),
+            fn () => $this->lockedPriceUpdate($product->id, 30000, 3_000_000),
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+
+        $events = ProductPriceChangeEvent::query()->orderBy('id')->get();
+        $this->assertCount(2, $events);
+        $this->assertSame(10000, $events[0]->old_price_amount);
+        $this->assertContains($events[0]->new_price_amount, [20000, 30000]);
+        $this->assertSame($events[0]->new_price_amount, $events[1]->old_price_amount);
+        $this->assertContains($events[1]->new_price_amount, [20000, 30000]);
+        $this->assertNotSame($events[0]->new_price_amount, $events[1]->new_price_amount);
+        $this->assertSame($events[1]->new_price_amount, $product->fresh()->price_amount);
+    }
+
     private function requireConcurrencyLane(): void
     {
         if (! $this->shouldRunConcurrencyLane()) {
@@ -514,6 +547,23 @@ class ProductionConcurrencyTest extends TestCase
         DB::reconnect();
 
         return $results;
+    }
+
+    private function lockedPriceUpdate(int $productId, int $idrPrice, int $usdtPrice): int
+    {
+        return DB::transaction(function () use ($productId, $idrPrice, $usdtPrice): int {
+            $product = Product::query()->whereKey($productId)->lockForUpdate()->firstOrFail();
+            $oldValues = $product->only(['price_amount', 'usdt_price_amount']);
+            $product->update([
+                'price_amount' => $idrPrice,
+                'usdt_price_amount' => $usdtPrice,
+            ]);
+            $newValues = $product->only(['price_amount', 'usdt_price_amount']);
+
+            return app(ProductPriceChangeNotificationService::class)
+                ->createEventForCommittedUpdate($product, $oldValues, $newValues)
+                ?->id ?? 0;
+        }, 5);
     }
 
     private function runChildProcess(callable $callback, string $releaseFile, string $resultFile): never

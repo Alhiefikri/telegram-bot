@@ -2,12 +2,12 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Payment;
+use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
+use App\Support\Money;
 use Illuminate\Support\Carbon;
 
 class TelegramAdminStatsIntents
@@ -16,6 +16,7 @@ class TelegramAdminStatsIntents
 
     public function __construct(
         private readonly TelegramBotClient $bot,
+        private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
     public function showDailyStats(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
@@ -32,7 +33,7 @@ class TelegramAdminStatsIntents
     }
 
     /**
-     * @param  array{new_orders: int, paid_orders: int, sold_products: int, earning: int}  $stats
+     * @param  array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>}  $stats
      */
     private function sendStats(string $chatId, array $stats, string $title): void
     {
@@ -50,7 +51,7 @@ class TelegramAdminStatsIntents
     }
 
     /**
-     * @return array{new_orders: int, paid_orders: int, sold_products: int, earning: int}
+     * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
      */
     public function calculateTodayStats(): array
     {
@@ -61,7 +62,7 @@ class TelegramAdminStatsIntents
     }
 
     /**
-     * @return array{new_orders: int, paid_orders: int, sold_products: int, earning: int}
+     * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
      */
     private function calculateYesterdayStats(): array
     {
@@ -72,7 +73,7 @@ class TelegramAdminStatsIntents
     }
 
     /**
-     * @return array{new_orders: int, paid_orders: int, sold_products: int, earning: int}
+     * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
      */
     private function calculateStats(Carbon $reportStartAt, Carbon $reportEndAt, bool $includeEnd = false): array
     {
@@ -84,14 +85,8 @@ class TelegramAdminStatsIntents
             ->count();
 
         // Reporting periods use the configured application timezone and exclude the end boundary.
-        $paidPayments = Payment::query()
-            ->where('status', PaymentStatus::Paid)
-            ->whereNotNull('paid_at')
-            ->where('paid_at', '>=', $reportStartAt)
-            ->where('paid_at', $endOperator, $reportEndAt)
-            ->get(['order_id', 'amount', 'provider_fee']);
-
-        $paidOrderIds = $paidPayments->pluck('order_id')->unique()->all();
+        $canonicalPaidPayments = $this->receiptReport->canonicalPaidPayments($reportStartAt, $reportEndAt, $includeEnd);
+        $paidOrderIds = $canonicalPaidPayments->pluck('order_id')->all();
         $paidOrders = count($paidOrderIds);
 
         // Get total sold products for paid orders in the reporting window.
@@ -102,19 +97,24 @@ class TelegramAdminStatsIntents
                 ->sum('quantity');
         }
 
-        // Calculate earnings from payments in the reporting window.
-        $earning = $paidPayments->sum(fn (Payment $payment): int => $payment->amount - $payment->provider_fee);
+        $salesValue = $paidOrders > 0
+            ? (int) Order::query()->whereIn('id', $paidOrderIds)->sum('total_amount')
+            : 0;
+
+        $receipts = $this->receiptReport->netReceiptsByCurrency($canonicalPaidPayments);
 
         return [
             'new_orders' => $newOrders,
             'paid_orders' => $paidOrders,
             'sold_products' => (int) $soldProducts,
-            'earning' => $earning,
+            'sales_value' => $salesValue,
+            'receipts' => $receipts,
+            'earning' => $receipts['IDR'] ?? 0,
         ];
     }
 
     /**
-     * @param  array{new_orders: int, paid_orders: int, sold_products: int, earning: int}  $stats
+     * @param  array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>}  $stats
      */
     private function formatMessage(array $stats, string $title): string
     {
@@ -124,9 +124,36 @@ class TelegramAdminStatsIntents
             'Order Baru: '.$stats['new_orders'],
             'Order Dibayar: '.$stats['paid_orders'],
             'Produk Terjual: '.$stats['sold_products'],
-            'Earning: Rp'.number_format($stats['earning'], 0, ',', '.'),
+            'Nilai Penjualan: '.Money::rupiah($stats['sales_value']),
+            '',
+            'Pembayaran Diterima:',
+            ...$this->receiptLines($stats['receipts']),
         ];
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array<string, int>  $receipts
+     * @return list<string>
+     */
+    private function receiptLines(array $receipts): array
+    {
+        $lines = [];
+        if (($receipts['IDR'] ?? 0) > 0) {
+            $lines[] = '• Rupiah: '.Money::rupiah($receipts['IDR']);
+        }
+        if (($receipts['USDT'] ?? 0) > 0) {
+            $lines[] = '• USDT: '.Money::usdt($receipts['USDT']);
+        }
+
+        foreach ($receipts as $currency => $amount) {
+            if (in_array($currency, ['IDR', 'USDT'], true) || $amount <= 0) {
+                continue;
+            }
+            $lines[] = '• '.$currency.': '.$amount.' '.$currency;
+        }
+
+        return $lines === [] ? ['• Belum ada'] : $lines;
     }
 }

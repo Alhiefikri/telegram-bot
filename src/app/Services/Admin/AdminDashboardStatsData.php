@@ -3,11 +3,11 @@
 namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Support\Money;
 use App\Support\PakasirCheckoutFlow;
@@ -15,7 +15,11 @@ use Illuminate\Support\Carbon;
 
 final class AdminDashboardStatsData
 {
-    public function __construct(private readonly PakasirProviderReadiness $pakasirReadiness, private readonly SalesProofPostNumbering $salesProofNumbers) {}
+    public function __construct(
+        private readonly PakasirProviderReadiness $pakasirReadiness,
+        private readonly SalesProofPostNumbering $salesProofNumbers,
+        private readonly PaymentReceiptReport $receiptReport,
+    ) {}
 
     /**
      * @param  array<string, int>  $metrics
@@ -191,15 +195,12 @@ final class AdminDashboardStatsData
     private function earnings(): array
     {
         $start = now()->startOfDay()->subDays(6);
-        $payments = Payment::query()
-            ->where('status', PaymentStatus::Paid)
-            ->whereNotNull('paid_at')
-            ->where('paid_at', '>=', $start)
-            ->get(['amount', 'paid_at']);
+        $payments = $this->receiptReport->canonicalPaidPayments($start);
 
         $amountsByDate = $payments
+            ->filter(fn (Payment $payment): bool => $this->receiptReport->currency($payment) === 'IDR')
             ->groupBy(fn (Payment $payment): string => $payment->paid_at->toDateString())
-            ->map(fn ($payments): int => (int) $payments->sum('amount'));
+            ->map(fn ($payments): int => (int) $payments->sum(fn (Payment $payment): int => $this->receiptReport->netAmount($payment)));
         $maxAmount = max(1, (int) $amountsByDate->max());
 
         return collect(range(0, 6))

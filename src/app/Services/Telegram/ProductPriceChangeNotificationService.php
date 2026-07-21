@@ -1,0 +1,276 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use App\Models\Customer;
+use App\Models\Product;
+use App\Models\ProductPriceChangeEvent;
+use App\Models\ProductPriceChangeNotificationRecipient;
+use App\Support\Money;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use RuntimeException;
+use Throwable;
+
+class ProductPriceChangeNotificationService
+{
+    private const CLAIM_TTL_MINUTES = 15;
+
+    public function __construct(private readonly TelegramBotClient $bot) {}
+
+    public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
+    {
+        $oldIdr = (int) $oldValues['price_amount'];
+        $newIdr = (int) $newValues['price_amount'];
+        $oldUsdt = $oldValues['usdt_price_amount'] === null ? null : (int) $oldValues['usdt_price_amount'];
+        $newUsdt = $newValues['usdt_price_amount'] === null ? null : (int) $newValues['usdt_price_amount'];
+
+        if ($oldIdr === $newIdr && $oldUsdt === $newUsdt) {
+            return null;
+        }
+
+        if (! $product->is_active || $product->availableStock() < 1) {
+            return null;
+        }
+
+        return ProductPriceChangeEvent::create([
+            'event_key' => (string) Str::uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => $oldIdr,
+            'new_price_amount' => $newIdr,
+            'old_usdt_price_amount' => $oldUsdt,
+            'new_usdt_price_amount' => $newUsdt,
+        ]);
+    }
+
+    public function processEvent(int $eventId): void
+    {
+        if (blank(config('services.telegram.token'))) {
+            return;
+        }
+
+        $event = ProductPriceChangeEvent::query()->findOrFail($eventId);
+        $this->ensureRecipients($event);
+        $event->forceFill(['recipients_materialized_at' => now()])->save();
+        $failedRecipients = 0;
+
+        ProductPriceChangeNotificationRecipient::query()
+            ->where('event_id', $event->id)
+            ->whereNull('sent_at')
+            ->where(function ($query): void {
+                $query->whereNull('send_started_at')
+                    ->orWhere('send_started_at', '<=', now()->subMinutes(self::CLAIM_TTL_MINUTES));
+            })
+            ->orderBy('id')
+            ->chunkById(50, function ($recipients) use ($event, &$failedRecipients): void {
+                foreach ($recipients as $recipient) {
+                    if (! $this->sendRecipient($event, $recipient)) {
+                        $failedRecipients++;
+                    }
+                }
+            });
+
+        if ($failedRecipients > 0) {
+            throw new RuntimeException("Product price change notification failed for {$failedRecipients} recipient(s).");
+        }
+    }
+
+    private function ensureRecipients(ProductPriceChangeEvent $event): void
+    {
+        Customer::query()
+            ->whereNotNull('telegram_id')
+            ->select(['id', 'telegram_id', 'locale'])
+            ->orderBy('id')
+            ->chunkById(200, function ($customers) use ($event): void {
+                $now = now();
+                $rows = $customers
+                    ->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== '')
+                    ->map(fn (Customer $customer): array => [
+                        'event_id' => $event->id,
+                        'customer_id' => $customer->id,
+                        'telegram_id' => (string) $customer->telegram_id,
+                        'locale' => $customer->locale === 'en' ? 'en' : 'id',
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ])
+                    ->values()
+                    ->all();
+
+                if ($rows !== []) {
+                    ProductPriceChangeNotificationRecipient::query()->insertOrIgnore($rows);
+                }
+            });
+    }
+
+    private function sendRecipient(ProductPriceChangeEvent $event, ProductPriceChangeNotificationRecipient $recipient): bool
+    {
+        $token = (string) Str::uuid();
+        $claimed = DB::transaction(function () use ($recipient, $token): ?ProductPriceChangeNotificationRecipient {
+            $locked = ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($recipient->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $locked || $locked->sent_at !== null) {
+                return null;
+            }
+
+            if ($locked->send_started_at !== null && $locked->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
+                return null;
+            }
+
+            $locked->forceFill([
+                'send_started_at' => now(),
+                'send_claim_token' => $token,
+                'failed_at' => null,
+                'last_error' => null,
+                'attempts' => $locked->attempts + 1,
+            ])->save();
+
+            return $locked->fresh();
+        }, 5);
+
+        if (! $claimed) {
+            return true;
+        }
+
+        try {
+            // Telegram has no transactional exactly-once send. The durable recipient row prevents normal
+            // retries from resending once sent_at is stored, but a process crash after this sendMessage call
+            // and before the sent_at update below can still produce one duplicate message on recovery.
+            $this->bot->sendMessage(
+                $claimed->telegram_id,
+                $this->message($event, $claimed->locale === 'en'),
+                $this->replyMarkup($event, $claimed->locale === 'en'),
+            );
+        } catch (Throwable $e) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($claimed->id)
+                ->where('send_claim_token', $token)
+                ->whereNull('sent_at')
+                ->update([
+                    'send_started_at' => null,
+                    'send_claim_token' => null,
+                    'failed_at' => now(),
+                    'last_error' => substr($e::class.': '.$e->getMessage(), 0, 2000),
+                ]);
+
+            report($e);
+
+            return false;
+        }
+
+        ProductPriceChangeNotificationRecipient::query()
+            ->whereKey($claimed->id)
+            ->where('send_claim_token', $token)
+            ->whereNull('sent_at')
+            ->update([
+                'sent_at' => now(),
+                'send_started_at' => null,
+                'send_claim_token' => null,
+                'failed_at' => null,
+                'last_error' => null,
+            ]);
+
+        return true;
+    }
+
+    private function message(ProductPriceChangeEvent $event, bool $english): string
+    {
+        $decrease = $this->isPureDecrease($event);
+        $title = $english
+            ? ($decrease ? '🎉 Price Drop!' : '📢 Price Update')
+            : ($decrease ? '🎉 Harganya Turun!' : '📢 Update Harga');
+
+        $lines = [
+            $title,
+            '━━━━━━━━━━━━━━',
+            $english
+                ? ($decrease ? 'Good news for you 👀' : 'A product price has been updated.')
+                : ($decrease ? 'Kabar bagus buat kamu 👀' : 'Ada update harga produk.'),
+            '📦 '.$event->product_name,
+            '',
+            '💵 QRIS',
+            $this->formatIdr($event->old_price_amount, $english).' → '.$this->formatIdr($event->new_price_amount, $english),
+        ];
+
+        $usdtLine = $this->usdtLine($event, $english);
+        if ($usdtLine !== null) {
+            $lines[] = '';
+            $lines[] = '💎 Binance Pay';
+            $lines[] = $usdtLine;
+        }
+
+        $lines[] = '';
+        if ($decrease && $event->new_price_amount < $event->old_price_amount) {
+            $lines[] = $english
+                ? 'You save '.$this->formatIdr($event->old_price_amount - $event->new_price_amount, true).' ✨'
+                : 'Lebih hemat '.$this->formatIdr($event->old_price_amount - $event->new_price_amount, false).' ✨';
+            $lines[] = $english
+                ? 'The new price is ready for your next checkout.'
+                : 'Harga baru sudah siap untuk checkout berikutnya.';
+        } else {
+            $lines[] = $english
+                ? 'The new price applies to future checkouts.'
+                : 'Harga baru berlaku untuk checkout berikutnya.';
+            $lines[] = $english
+                ? 'Existing orders keep their previous price.'
+                : 'Order yang sudah dibuat tetap memakai harga sebelumnya.';
+        }
+
+        $lines[] = '';
+        $lines[] = $english ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.';
+
+        return implode("\n", $lines);
+    }
+
+    private function isPureDecrease(ProductPriceChangeEvent $event): bool
+    {
+        $directions = [];
+        if ($event->old_price_amount !== $event->new_price_amount) {
+            $directions[] = $event->new_price_amount < $event->old_price_amount ? 'down' : 'up';
+        }
+        if ($event->old_usdt_price_amount !== null && $event->new_usdt_price_amount !== null && $event->old_usdt_price_amount !== $event->new_usdt_price_amount) {
+            $directions[] = $event->new_usdt_price_amount < $event->old_usdt_price_amount ? 'down' : 'up';
+        }
+        if ($event->old_usdt_price_amount === null xor $event->new_usdt_price_amount === null) {
+            $directions[] = 'changed';
+        }
+
+        return $directions !== [] && collect($directions)->every(fn (string $direction): bool => $direction === 'down');
+    }
+
+    private function usdtLine(ProductPriceChangeEvent $event, bool $english): ?string
+    {
+        if ($event->old_usdt_price_amount === $event->new_usdt_price_amount) {
+            return null;
+        }
+
+        if ($event->old_usdt_price_amount === null && $event->new_usdt_price_amount !== null) {
+            return $english
+                ? 'Now available at '.Money::usdt($event->new_usdt_price_amount)
+                : 'Sekarang tersedia di '.Money::usdt($event->new_usdt_price_amount);
+        }
+
+        if ($event->old_usdt_price_amount !== null && $event->new_usdt_price_amount === null) {
+            return $english ? 'No longer available for Binance Pay.' : 'Tidak tersedia lagi untuk Binance Pay.';
+        }
+
+        return Money::usdt($event->old_usdt_price_amount).' → '.Money::usdt($event->new_usdt_price_amount);
+    }
+
+    private function replyMarkup(ProductPriceChangeEvent $event, bool $english): array
+    {
+        return [
+            'inline_keyboard' => [[
+                ['text' => $english ? '🛒 View Product' : '🛒 Lihat Produk', 'callback_data' => 'product:'.$event->product_id],
+            ]],
+        ];
+    }
+
+    private function formatIdr(int $amount, bool $english): string
+    {
+        return Money::rupiah($amount, $english ? ',' : '.');
+    }
+}

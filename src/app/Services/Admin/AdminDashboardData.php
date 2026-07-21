@@ -3,12 +3,11 @@
 namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Models\Order;
-use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\User;
+use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\FakeSalesProofPostPublisher;
 use App\Services\Telegram\TelegramBotApiRedactor;
 
@@ -19,6 +18,7 @@ final class AdminDashboardData
         private readonly AdminDashboardProductsData $productsData,
         private readonly AdminDashboardSalesData $salesData,
         private readonly FakeSalesProofPostPublisher $fakeSalesProof,
+        private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
     /**
@@ -69,9 +69,7 @@ final class AdminDashboardData
         $gmvAmount = (int) Order::query()
             ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
             ->sum('total_amount');
-        $readOnlyBalanceAmount = (int) Payment::query()
-            ->where('status', PaymentStatus::Paid)
-            ->sum('amount');
+        $readOnlyBalanceAmount = $this->receiptReport->idrNetTotal($this->receiptReport->canonicalPaidPayments());
 
         return [
             'read_only_balance_amount' => $readOnlyBalanceAmount,
