@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ProcessTelegramUpdate;
+use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -17,12 +18,24 @@ class RecoverFailedTelegramUpdates extends Command
     public function handle(TelegramUpdateProcessor $processor): int
     {
         $recovered = 0;
+        $pruned = 0;
         $failed = 0;
         $dryRun = (bool) $this->option('dry-run');
 
         foreach (DB::table('failed_jobs')->orderBy('failed_at')->get(['uuid', 'payload']) as $failedJob) {
             $job = $this->processTelegramUpdateJob((string) $failedJob->payload);
             if ($job === null) {
+                continue;
+            }
+
+            $update = TelegramUpdate::query()->find($job->telegramUpdateId);
+            if ($update === null) {
+                if (! $dryRun) {
+                    DB::table('failed_jobs')->where('uuid', $failedJob->uuid)->delete();
+                }
+
+                $pruned++;
+
                 continue;
             }
 
@@ -42,7 +55,7 @@ class RecoverFailedTelegramUpdates extends Command
             }
         }
 
-        $this->info("telegram:recover-failed-updates completed: recovered={$recovered} failed={$failed}");
+        $this->info("telegram:recover-failed-updates completed: recovered={$recovered} pruned={$pruned} failed={$failed}");
 
         return $failed === 0 ? self::SUCCESS : self::FAILURE;
     }

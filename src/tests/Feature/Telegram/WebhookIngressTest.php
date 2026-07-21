@@ -203,10 +203,33 @@ class WebhookIngressTest extends TelegramBotTestSupport
         ]);
 
         $this->artisan('telegram:recover-failed-updates')
-            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=1 failed=0')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=1 pruned=0 failed=0')
             ->assertSuccessful();
 
         $this->assertNotNull($update->fresh()->processed_at);
+        $this->assertSame(0, DB::table('failed_jobs')->count());
+    }
+
+    public function test_failed_telegram_update_recovery_prunes_stale_jobs_without_replaying_deleted_updates(): void
+    {
+        $this->fakeTelegramHttp();
+
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode([
+                'displayName' => ProcessTelegramUpdate::class,
+                'data' => ['command' => serialize(new ProcessTelegramUpdate(999999))],
+            ], JSON_THROW_ON_ERROR),
+            'exception' => 'stale Telegram failure',
+            'failed_at' => now(),
+        ]);
+
+        $this->artisan('telegram:recover-failed-updates')
+            ->expectsOutputToContain('telegram:recover-failed-updates completed: recovered=0 pruned=1 failed=0')
+            ->assertSuccessful();
+
         $this->assertSame(0, DB::table('failed_jobs')->count());
     }
 
