@@ -373,6 +373,8 @@ class PakasirGatewayTest extends TestCase
                 'project' => 'warung-ai',
                 'order_id' => $request['order_id'],
                 'amount' => $request['amount'],
+                'fee' => 103,
+                'total_payment' => $request['amount'] + 103,
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
                 'expired_at' => $providerExpiry->utc()->toAtomString(),

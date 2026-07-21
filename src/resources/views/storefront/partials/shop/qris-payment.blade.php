@@ -1,5 +1,5 @@
 @php
-    $hasNativeQris = $isPendingPayment && filled($qrisImageDataUri);
+    $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageDataUri);
     $paymentDeadline = $payment?->provider_expires_at ?? $payment?->expired_at ?? $order->expires_at;
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
 @endphp
@@ -10,12 +10,16 @@
             <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Pembayaran QRIS</p>
             <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">QRIS invoice</h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                Bayar sesuai total QRIS final. Jangan memakai total produk sebagai total final jika biaya QRIS belum muncul.
+                @if ($isQrisPayable)
+                    Bayar sesuai total QRIS final. Jangan memakai total produk sebagai total final jika biaya QRIS belum muncul.
+                @else
+                    QRIS belum siap dibayar. Jangan memakai total produk sebagai total final.
+                @endif
             </p>
         </div>
 
         <span class="inline-flex w-fit rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">
-            {{ $isPaid ? 'Terverifikasi' : ($isPendingPayment ? 'Menunggu bayar' : ($payment?->status?->value ?? 'Belum tersedia')) }}
+            {{ $isPaid ? 'Terverifikasi' : ($isQrisPayable ? 'Menunggu bayar' : $qrisReadinessTitle) }}
         </span>
     </div>
 
@@ -30,7 +34,7 @@
         </div>
         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">
             <dt class="font-black text-[var(--sf-ink)]">Total bayar QRIS</dt>
-            <dd class="text-right font-display text-2xl font-black text-[var(--sf-accent)]">{{ $payableAmount !== null ? $storefront->idr($payableAmount) : '-' }}</dd>
+            <dd class="text-right font-display text-2xl font-black text-[var(--sf-accent)]">{{ $isQrisPayable && $payableAmount !== null ? $storefront->idr($payableAmount) : 'Menunggu provider' }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4">
             <dt class="text-[var(--sf-muted)]">Batas bayar</dt>
@@ -38,9 +42,9 @@
         </div>
     </dl>
 
-    @if (! $payableAmountFromProvider)
+    @if (! $isQrisPayable)
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-            Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.
+            {{ $qrisReadinessTitle }}. {{ $qrisReadinessMessage }}
         </p>
     @endif
 
@@ -56,7 +60,7 @@
         </div>
     @elseif ($isPendingPayment)
         <p class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
-            QRIS belum tersedia di invoice ini. Simpan link invoice dan hubungi admin jika status tidak berubah.
+            {{ $qrisReadinessMessage }}
         </p>
     @endif
 
@@ -65,13 +69,13 @@
              data-shop-payment-status
              data-status-url="{{ $statusUrl }}"
              data-redirect-url="{{ $redirectUrl }}">
-            <p class="font-black text-[var(--sf-ink)]" data-payment-status-title>Cek status pembayaran</p>
-            <p data-payment-status-message>Setelah membayar, tekan tombol ini untuk mengecek status QRIS.</p>
+            <p class="font-black text-[var(--sf-ink)]" data-payment-status-title>{{ $isQrisPayable ? 'Cek status pembayaran' : $qrisReadinessTitle }}</p>
+            <p data-payment-status-message>{{ $isQrisPayable ? 'Setelah membayar, tekan tombol ini untuk mengecek status QRIS.' : $qrisReadinessMessage }}</p>
             <p class="sr-only" aria-live="polite" data-payment-status-announcement></p>
             <button type="button" class="mt-4 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" data-payment-status-check>
-                Cek status pembayaran
+                {{ $qrisRetryLabel }}
             </button>
-            <div class="mt-4 hidden flex-wrap gap-3" data-payment-status-followup>
+            <div class="mt-4 {{ $isQrisPayable ? 'hidden' : 'flex' }} flex-wrap gap-3" data-payment-status-followup>
                 <a href="{{ $homeUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">Belanja lagi</a>
                 <a href="#invoice-support" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Butuh bantuan?</a>
             </div>

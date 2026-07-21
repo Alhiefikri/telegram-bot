@@ -82,7 +82,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         ], $paidInvoice->accountGroups);
     }
 
-    public function test_read_result_preserves_provider_total_fallback_warning_state(): void
+    public function test_read_result_blocks_qris_when_provider_total_is_missing(): void
     {
         $this->pakasirConfigIsReady();
         $this->qrisRendererReturnsDeterministicPng();
@@ -95,8 +95,12 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
 
         $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
 
-        $this->assertSame(88000, $invoice->payableAmount);
+        $this->assertNull($invoice->payableAmount);
         $this->assertFalse($invoice->payableAmountFromProvider);
+        $this->assertFalse($invoice->isQrisPayable);
+        $this->assertSame('provider_total_pending', $invoice->qrisReadinessState);
+        $this->assertSame('Provider belum memberi nominal', $invoice->qrisReadinessTitle);
+        $this->assertNull($invoice->qrisImageDataUri);
     }
 
     public function test_refresh_status_reconciles_pending_pakasir_payment_and_returns_redirect_payload(): void
@@ -120,6 +124,8 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             'order_status' => OrderStatus::Completed->value,
             'is_paid' => true,
             'is_terminal' => false,
+            'qris_ready' => false,
+            'should_reload' => false,
             'redirect_url' => $result->redirectUrl,
             'message' => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
         ], $result->payload());
@@ -143,6 +149,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
             'ok' => false,
+            'title' => 'Status belum bisa dicek',
             'message' => 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.',
         ], $result->payload());
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
@@ -196,6 +203,8 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             'order_status' => OrderStatus::Expired->value,
             'is_paid' => false,
             'is_terminal' => true,
+            'qris_ready' => false,
+            'should_reload' => false,
             'redirect_url' => $result->redirectUrl,
             'message' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
         ], $result->payload());

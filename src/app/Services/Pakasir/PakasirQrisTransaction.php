@@ -13,7 +13,7 @@ readonly class PakasirQrisTransaction
 
     public function __construct(private array $payload)
     {
-        $payment = Arr::get($payload, 'payment');
+        $payment = Arr::get($payload, 'payment', Arr::get($payload, 'transaction'));
 
         if (! is_array($payment)) {
             throw new UnexpectedValueException('Pakasir QRIS create response is missing payment data.');
@@ -55,6 +55,13 @@ readonly class PakasirQrisTransaction
     public function totalPayment(): ?int
     {
         return $this->nullableIntField('total_payment');
+    }
+
+    public function hasValidFinalAmount(): bool
+    {
+        $totalPayment = $this->totalPayment();
+
+        return $totalPayment !== null && $totalPayment >= $this->amount();
     }
 
     public function paymentMethod(): string

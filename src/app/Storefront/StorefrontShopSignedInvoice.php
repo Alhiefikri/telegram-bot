@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use Throwable;
@@ -18,6 +19,7 @@ class StorefrontShopSignedInvoice
     public function __construct(
         private readonly TelegramQrCodeRenderer $qrCodes,
         private readonly PakasirProviderAdapter $pakasir,
+        private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirCallbackProcessor $processor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
@@ -30,6 +32,7 @@ class StorefrontShopSignedInvoice
         $payment = $this->latestPayment($order);
         $state = $this->state($order, $payment);
         $redirectUrl = $this->redirectUrl($order);
+        $qrisReadiness = $this->qrisReadiness($order, $payment);
 
         return new StorefrontShopSignedInvoiceReadResult(
             order: $order,
@@ -39,8 +42,13 @@ class StorefrontShopSignedInvoice
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
             canCancel: $this->canCancel($order, $payment),
-            payableAmount: $payment?->provider_total_payment ?? $payment?->amount,
-            payableAmountFromProvider: $payment?->provider_total_payment !== null,
+            payableAmount: $qrisReadiness['is_payable'] ? $payment?->provider_total_payment : null,
+            payableAmountFromProvider: $qrisReadiness['is_payable'],
+            isQrisPayable: $qrisReadiness['is_payable'],
+            qrisReadinessState: $qrisReadiness['state'],
+            qrisReadinessTitle: $qrisReadiness['title'],
+            qrisReadinessMessage: $qrisReadiness['message'],
+            qrisRetryLabel: $qrisReadiness['retry_label'],
             qrisImageDataUri: $this->qrisImageDataUri($payment),
             hostedPaymentUrl: $this->hostedPaymentUrl($payment),
             accountGroups: $this->accountGroups($order, $state),
@@ -56,6 +64,29 @@ class StorefrontShopSignedInvoice
             return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
         }
 
+        $wasQrisReady = $this->hasPayableNativeQris($payment);
+        $qrisRecoveryFailed = false;
+
+        if ($this->shouldRecoverQris($order, $payment)) {
+            try {
+                $this->nativeQris->ensureCreated($payment);
+            } catch (Throwable $exception) {
+                report($exception);
+                $qrisRecoveryFailed = true;
+            }
+
+            $payment->refresh();
+        }
+
+        if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
+            $readiness = $this->qrisReadiness($order, $payment);
+
+            return StorefrontShopSignedStatusRefreshResult::qrisNotReady(
+                title: $readiness['title'],
+                message: $readiness['message'],
+            );
+        }
+
         if ($this->shouldRefreshFromProvider($order, $payment)) {
             try {
                 $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
@@ -68,14 +99,21 @@ class StorefrontShopSignedInvoice
 
         $order->refresh();
         $payment->refresh();
+        $qrisReady = $this->hasPayableNativeQris($payment);
+        $shouldReload = ! $this->isPaid($order, $payment)
+            && ! $this->isTerminalStatus($order, $payment)
+            && ! $wasQrisReady
+            && $qrisReady;
 
         return StorefrontShopSignedStatusRefreshResult::refreshed(
             paymentStatus: $payment->status,
             orderStatus: $order->order_status,
             isPaid: $this->isPaid($order, $payment),
             isTerminal: $this->state($order, $payment) === StorefrontShopSignedInvoiceState::Terminal,
+            qrisReady: $qrisReady,
+            shouldReload: $shouldReload,
             redirectUrl: $this->redirectUrl($order),
-            message: $this->statusMessage($order, $payment),
+            message: $shouldReload ? 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.' : $this->statusMessage($order, $payment),
         );
     }
 
@@ -114,8 +152,17 @@ class StorefrontShopSignedInvoice
 
     private function shouldRefreshFromProvider(Order $order, Payment $payment): bool
     {
-        return $payment->status === PaymentStatus::Pending
+        return $this->hasPayableNativeQris($payment)
+            && $payment->status === PaymentStatus::Pending
             && $order->order_status === OrderStatus::PendingPayment;
+    }
+
+    private function shouldRecoverQris(Order $order, Payment $payment): bool
+    {
+        return $this->isPakasirPayment($payment)
+            && $payment->status === PaymentStatus::Pending
+            && $order->order_status === OrderStatus::PendingPayment
+            && ! $this->hasPayableNativeQris($payment);
     }
 
     private function canCancel(Order $order, ?Payment $payment): bool
@@ -131,7 +178,7 @@ class StorefrontShopSignedInvoice
 
     private function qrisImageDataUri(?Payment $payment): ?string
     {
-        if ($payment?->status !== PaymentStatus::Pending || ! filled($payment->provider_payment_number)) {
+        if ($payment?->status !== PaymentStatus::Pending || ! $this->hasPayableNativeQris($payment)) {
             return null;
         }
 
@@ -162,6 +209,72 @@ class StorefrontShopSignedInvoice
             $payment?->status === PaymentStatus::Failed => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
             default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
         };
+    }
+
+    /**
+     * @return array{is_payable: bool, state: string, title: string, message: string, retry_label: string}
+     */
+    private function qrisReadiness(Order $order, ?Payment $payment): array
+    {
+        if (! $this->isPendingPayment($order, $payment)) {
+            return [
+                'is_payable' => false,
+                'state' => 'terminal',
+                'title' => 'QRIS tidak aktif',
+                'message' => 'Invoice ini tidak sedang menunggu pembayaran QRIS.',
+                'retry_label' => 'Cek status pembayaran',
+            ];
+        }
+
+        if ($this->hasPayableNativeQris($payment)) {
+            return [
+                'is_payable' => true,
+                'state' => 'ready',
+                'title' => 'QRIS siap dibayar',
+                'message' => 'Bayar hanya memakai QRIS dan total bayar final di invoice ini.',
+                'retry_label' => 'Cek status pembayaran',
+            ];
+        }
+
+        if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {
+            return [
+                'is_payable' => false,
+                'state' => 'provider_total_pending',
+                'title' => 'Provider belum memberi nominal',
+                'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.',
+                'retry_label' => 'Coba ambil total QRIS',
+            ];
+        }
+
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+            return [
+                'is_payable' => false,
+                'state' => 'failed',
+                'title' => 'Gagal membuat QRIS',
+                'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
+                'retry_label' => 'Coba buat QRIS lagi',
+            ];
+        }
+
+        return [
+            'is_payable' => false,
+            'state' => 'creating',
+            'title' => 'Sedang membuat QRIS',
+            'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.',
+            'retry_label' => 'Coba cek QRIS',
+        ];
+    }
+
+    private function hasPayableNativeQris(?Payment $payment): bool
+    {
+        return $payment?->isPayableNativePakasirQris() === true;
+    }
+
+    private function isTerminalStatus(Order $order, ?Payment $payment): bool
+    {
+        return $payment?->status === PaymentStatus::Expired
+            || $payment?->status === PaymentStatus::Failed
+            || in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
     }
 
     /**

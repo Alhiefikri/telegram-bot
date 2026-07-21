@@ -102,6 +102,51 @@ trait PakasirNativeQrisScenarios
         ]);
     }
 
+    protected function providerQrisCreateSucceedsWithoutProviderTotal(int $amount, string $paymentNumber): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://app.pakasir.test/api/transactioncreate/qris' => function (HttpRequest $request) use ($amount, $paymentNumber) {
+                $this->assertSame('lhie-test', $request['project']);
+                $this->assertSame($amount, $request['amount']);
+                $this->assertSame('secret-key', $request['api_key']);
+
+                return Http::response([
+                    'payment' => [
+                        'project' => 'lhie-test',
+                        'order_id' => $request['order_id'],
+                        'amount' => $amount,
+                        'payment_method' => 'qris',
+                        'payment_number' => $paymentNumber,
+                        'expired_at' => now()->addMinutes(15)->utc()->toAtomString(),
+                    ],
+                ], 200);
+            },
+        ]);
+    }
+
+    protected function providerTransactionDetailReturnsQrisTotal(Payment $payment, string $paymentNumber, int $fee = 103, ?int $amount = null): void
+    {
+        $amount ??= $payment->amount;
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response([
+                'transaction' => [
+                    'project' => 'lhie-test',
+                    'order_id' => $payment->merchant_ref,
+                    'amount' => $amount,
+                    'fee' => $fee,
+                    'total_payment' => $amount + $fee,
+                    'payment_method' => 'qris',
+                    'payment_number' => $paymentNumber,
+                    'status' => 'pending',
+                    'expired_at' => now()->addMinutes(15)->utc()->toAtomString(),
+                ],
+            ], 200),
+        ]);
+    }
+
     protected function providerQrisCreateFails(array $payload = ['message' => 'upstream unavailable'], int $status = 500): void
     {
         Http::preventStrayRequests();

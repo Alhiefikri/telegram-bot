@@ -427,6 +427,12 @@ function initShopPaymentStatus() {
                     return;
                 }
 
+                if (data.should_reload === true) {
+                    setStatus('QRIS siap dibayar', data.message || 'Invoice akan dimuat ulang untuk menampilkan QRIS dan total final.');
+                    window.location.href = data.redirect_url || redirectUrl || window.location.href;
+                    return;
+                }
+
                 if (isTerminalStatus(data)) {
                     setStatus('Status pembayaran final', data.message || 'QRIS ini tidak bisa dibayar lagi. Buat order baru dari katalog.');
                     container.setAttribute('data-terminal', 'true');
@@ -436,7 +442,7 @@ function initShopPaymentStatus() {
                 }
 
                 if (data.ok === false) {
-                    setStatus('Status belum bisa dicek', data.message || 'Coba lagi beberapa saat lagi.');
+                    setStatus(data.title || 'Status belum bisa dicek', data.message || 'Coba lagi beberapa saat lagi.');
                     button.disabled = false;
                     return;
                 }

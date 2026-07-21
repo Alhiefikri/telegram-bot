@@ -14,10 +14,10 @@
                 </a>
 
                 @php
-                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBinancePay ? 'Order Binance Pay dibuat' : 'Order QRIS dibuat');
+                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBinancePay ? 'Order Binance Pay dibuat' : ($isQrisPayable ? 'Order QRIS dibuat' : $qrisReadinessTitle));
                     $summary = $isPaid
                         ? 'sudah lunas. Data akun tersedia di bawah.'
-                        : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.');
+                        : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : ($isQrisPayable ? 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' : 'sudah mencadangkan stok, tetapi QRIS belum siap dibayar. Gunakan tombol retry di bawah atau hubungi bantuan jika tetap gagal.'));
 
                     if ($isTerminal && ! $isPaid) {
                         $headline = match ($order->order_status?->value) {

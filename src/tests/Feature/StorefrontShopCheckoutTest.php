@@ -632,6 +632,54 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, Payment::count());
     }
 
+    public function test_checkout_with_incomplete_provider_total_blocks_payment_and_reuses_original_order(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Incomplete QRIS Total Checkout',
+            'price_amount' => 15000,
+            'stock' => 2,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.INCOMPLETECREATE99';
+        $this->providerQrisCreateSucceedsWithoutProviderTotal(15000, $paymentNumber);
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_handle' => '@buyer_test',
+        ];
+
+        $first = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $payload);
+        $order = Order::with('payments')->sole();
+        $payment = $order->payments->sole();
+
+        $first->assertRedirect();
+        $this->assertSame('provider_total_pending', $payment->provider_create_state);
+        $this->assertNull($payment->provider_total_payment);
+        $this->assertSame($paymentNumber, $payment->provider_payment_number);
+
+        $this->providerTransactionDetailFails();
+        $second = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $payload);
+
+        $second->assertRedirect($first->headers->get('Location'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+
+        $this->get($first->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Total produk')
+            ->assertSee('Rp15.000')
+            ->assertSee('Total bayar QRIS')
+            ->assertSee('Menunggu provider')
+            ->assertSee('Provider belum memberi nominal')
+            ->assertSee('Coba ambil total QRIS')
+            ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false);
+    }
+
     public function test_shop_checkout_accepts_non_telegram_buyer_name(): void
     {
         $product = $this->availableProduct([

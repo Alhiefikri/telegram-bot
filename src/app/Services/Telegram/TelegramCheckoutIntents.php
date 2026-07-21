@@ -52,7 +52,7 @@ class TelegramCheckoutIntents
                 $transaction = $this->nativeQris->ensureCreated($payment);
             } catch (Throwable $e) {
                 report($e);
-                $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale, fallback: true);
+                $this->sendNativeQrisPendingMessage($chatId, $order, $locale);
 
                 return;
             }
@@ -136,6 +136,27 @@ class TelegramCheckoutIntents
                 $locale,
             ),
         );
+    }
+
+    private function sendNativeQrisPendingMessage(string $chatId, Order $order, string $locale): void
+    {
+        $supportUsername = ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@');
+        $text = $locale === 'en'
+            ? "⚠️ QRIS is not ready yet\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe provider has not returned a valid QRIS and final payment amount yet. Do not pay the product total as the final QRIS amount.\n\nPlease tap Check Payment in a moment, or contact admin @{$supportUsername} with this invoice if QRIS still fails."
+            : "⚠️ QRIS belum siap\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nProvider belum mengirim QRIS dan total bayar final yang valid. Jangan bayar total produk sebagai total final QRIS.\n\nCoba tekan Cek Pembayaran beberapa saat lagi, atau hubungi admin @{$supportUsername} dengan invoice ini jika QRIS tetap gagal.";
+
+        $this->bot->sendMessage($chatId, $text, [
+            'inline_keyboard' => [
+                [[
+                    'text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran',
+                    'callback_data' => 'order:'.$order->invoice_number,
+                ]],
+                [[
+                    'text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order',
+                    'callback_data' => 'buyer:cancel-pending:'.$order->id,
+                ]],
+            ],
+        ]);
     }
 
     private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $locale): void

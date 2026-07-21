@@ -164,6 +164,55 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
     await expectNoDocumentOverflow(page);
 });
 
+test('keeps QRIS retry states clear for incomplete provider payloads', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.route(`**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                ok: false,
+                title: 'Gagal membuat QRIS',
+                message: 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
+            }),
+        });
+    });
+
+    await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
+    const statusCard = page.locator('[data-shop-payment-status]');
+    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Provider belum memberi nominal');
+
+    await statusCard.getByRole('button', { name: 'Coba ambil total QRIS' }).click();
+    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Gagal membuat QRIS');
+    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.');
+    await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
+});
+
+test('reloads invoice when QRIS retry obtains final provider total', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.route(`**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                ok: true,
+                payment_status: 'pending',
+                order_status: 'pending_payment',
+                is_paid: false,
+                is_terminal: false,
+                qris_ready: true,
+                should_reload: true,
+                redirect_url: `${baseUrl}/shop/orders/reloaded-qris`,
+                message: 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.',
+            }),
+        });
+    });
+
+    await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
+    await page.locator('[data-shop-payment-status]').getByRole('button', { name: 'Coba ambil total QRIS' }).click();
+    await expect(page).toHaveURL(`${baseUrl}/shop/orders/reloaded-qris`);
+});
+
 test('prioritizes invoice content by state without mobile overflow', async ({ page }) => {
     for (const width of [320, 390, 768, 1280]) {
         await page.setViewportSize({ width, height: 1000 });
@@ -175,6 +224,17 @@ test('prioritizes invoice content by state without mobile overflow', async ({ pa
         await expect(page.getByAltText(/QRIS invoice/)).toBeVisible();
         await expect(page.getByRole('button', { name: 'Cek status pembayaran' })).toBeVisible();
         await expectBefore(page.getByRole('heading', { name: 'QRIS invoice' }), page.locator('section[aria-label="Ringkasan invoice"]'));
+        await expectNoDocumentOverflow(page);
+
+        await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: 'Provider belum memberi nominal' })).toBeVisible();
+        await expect(page.getByText('Total produk', { exact: true })).toBeVisible();
+        await expect(page.getByText('Rp45.000')).toBeVisible();
+        await expect(page.getByText('Menunggu provider')).toBeVisible();
+        await expect(page.locator('[data-shop-payment-status]').getByText('Jangan bayar total produk')).toBeVisible();
+        await expect(page.getByAltText(/QRIS invoice/)).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Coba ambil total QRIS' })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Butuh bantuan?' }).first()).toBeVisible();
         await expectNoDocumentOverflow(page);
 
         await page.goto(`${baseUrl}${invoiceFixtures.paid.showUrl}`, { waitUntil: 'domcontentloaded' });
@@ -817,6 +877,30 @@ Payment::factory()->create([
     'expired_at' => now()->addMinutes(15),
 ]);
 
+$missingProviderTotalOrder = Order::factory()->create([
+    'customer_id' => $customer->id,
+    'invoice_number' => 'INV-BROWSER-QRIS-NO-FINAL',
+    'order_status' => OrderStatus::PendingPayment,
+    'payment_status' => PaymentStatus::Pending,
+    'total_amount' => 45000,
+    'expires_at' => now()->addMinutes(15),
+]);
+
+Payment::factory()->create([
+    'order_id' => $missingProviderTotalOrder->id,
+    'provider' => 'pakasir',
+    'method' => 'api_qris',
+    'provider_payment_method' => 'qris',
+    'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERNOFINAL99',
+    'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.BROWSERNOFINAL99'),
+    'provider_fee' => null,
+    'provider_total_payment' => null,
+    'provider_create_state' => 'provider_total_pending',
+    'amount' => 45000,
+    'status' => PaymentStatus::Pending,
+    'expired_at' => now()->addMinutes(15),
+]);
+
 $statusPendingOrder = Order::factory()->create([
     'customer_id' => $customer->id,
     'invoice_number' => 'INV-BROWSER-STATUS-PENDING',
@@ -829,6 +913,10 @@ Payment::factory()->create([
     'provider' => 'pakasir',
     'method' => 'qris',
     'provider_payment_method' => 'qris',
+    'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERSTATUSPENDING99',
+    'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.BROWSERSTATUSPENDING99'),
+    'provider_fee' => 350,
+    'provider_total_payment' => 45350,
     'amount' => 45000,
     'status' => PaymentStatus::Pending,
 ]);
@@ -927,6 +1015,11 @@ echo json_encode([
     'pendingStatusRefresh' => [
         'orderId' => $statusPendingOrder->id,
         'showUrl' => URL::signedRoute('storefront.shop.orders.show', $statusPendingOrder, null, false),
+    ],
+    'pendingMissingProviderTotal' => [
+        'orderId' => $missingProviderTotalOrder->id,
+        'showUrl' => URL::signedRoute('storefront.shop.orders.show', $missingProviderTotalOrder, null, false),
+        'statusPath' => parse_url(URL::signedRoute('storefront.shop.orders.status', $missingProviderTotalOrder, null, false), PHP_URL_PATH),
     ],
     'paid' => [
         'orderId' => $paidInvoiceOrder->id,

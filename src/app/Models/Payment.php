@@ -81,6 +81,16 @@ class Payment extends Model
             || filled($this->provider_payment_number);
     }
 
+    public function isPayableNativePakasirQris(): bool
+    {
+        return $this->status === PaymentStatus::Pending
+            && $this->providerName() === 'pakasir'
+            && $this->providerPaymentMethodName() === 'qris'
+            && filled($this->provider_payment_number)
+            && $this->provider_total_payment !== null
+            && $this->provider_total_payment >= $this->amount;
+    }
+
     private function providerName(): string
     {
         return strtolower(trim((string) $this->provider));

@@ -85,22 +85,28 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
     }
 
-    public function test_pending_invoice_with_missing_provider_total_uses_amount_as_fallback_and_warns_not_to_pay(): void
+    public function test_pending_invoice_with_missing_provider_total_blocks_qris_and_warns_not_to_pay(): void
     {
         $this->pakasirConfigIsReady();
         $this->qrisRendererReturnsDeterministicPng();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.ISSUE121NOFINAL99';
         [$order] = $this->pendingNativeQrisOrder(
             totalAmount: 88000,
             providerFee: null,
             providerTotalPayment: null,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE121NOFINAL99',
+            paymentNumber: $paymentNumber,
         );
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
-            ->assertSee('Total bayar QRIS')
+            ->assertSee('Total produk')
             ->assertSee('Rp88.000')
-            ->assertSee('Total final QRIS belum tersedia. Jangan bayar sebelum QRIS berhasil dibuat ulang.')
+            ->assertSee('Total bayar QRIS')
+            ->assertSee('Menunggu provider')
+            ->assertSee('Provider belum memberi nominal')
+            ->assertSee('QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.')
+            ->assertSee('Coba ambil total QRIS')
+            ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false)
             ->assertDontSee('Pakasir');
     }
 
@@ -482,6 +488,41 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->status);
         $this->assertSame(PaymentStatus::Pending, $order->payment_status);
         $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+    }
+
+    public function test_signed_status_endpoint_recovers_incomplete_qris_without_creating_duplicate_payment(): void
+    {
+        $this->pakasirConfigIsReady();
+        $paymentNumber = '00020101021226610016ID.CO.QRIS.RECOVERFINAL99';
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 52000,
+            providerFee: null,
+            providerTotalPayment: null,
+            paymentNumber: $paymentNumber,
+        );
+        $payment->update([
+            'provider_create_state' => 'provider_total_pending',
+            'provider_create_last_error' => 'missing_provider_total_payment',
+        ]);
+        $this->providerTransactionDetailReturnsQrisTotal($payment, $paymentNumber, 450);
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('payment_status', PaymentStatus::Pending->value)
+            ->assertJsonPath('order_status', OrderStatus::PendingPayment->value)
+            ->assertJsonPath('is_paid', false)
+            ->assertJsonPath('is_terminal', false)
+            ->assertJsonPath('qris_ready', true)
+            ->assertJsonPath('should_reload', true)
+            ->assertJsonPath('message', 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.');
+
+        $payment->refresh();
+        $this->assertSame(450, $payment->provider_fee);
+        $this->assertSame(52450, $payment->provider_total_payment);
+        $this->assertSame('created', $payment->provider_create_state);
+        $this->assertSame(1, Payment::where('order_id', $order->id)->count());
+        $this->assertSame(1, Order::count());
     }
 
     public function test_signed_status_endpoint_returns_terminal_payment_messages_without_provider_call(): void

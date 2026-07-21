@@ -21,25 +21,25 @@ class PakasirNativeQrisService
         $this->readiness->verification(PakasirCheckoutFlow::API_QRIS)->assertReady('Pakasir native QRIS cannot be created.');
 
         $payment->refresh();
-        if ($this->hasPersistedQris($payment)) {
+        if ($this->hasPayablePersistedQris($payment)) {
             return $this->transactionFromPayment($payment);
         }
 
         return Cache::lock('pakasir:native-qris:create:'.$payment->getKey(), 30)
             ->block(10, function () use ($payment): PakasirQrisTransaction {
                 $payment->refresh();
-                if ($this->hasPersistedQris($payment)) {
+                if ($this->hasPayablePersistedQris($payment)) {
                     return $this->transactionFromPayment($payment);
                 }
 
-                if ($payment->provider_create_state !== null) {
+                if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
                     $this->recoverCreationOutcome($payment);
                     $payment->refresh();
-                    if ($this->hasPersistedQris($payment)) {
+                    if ($this->hasPayablePersistedQris($payment)) {
                         return $this->transactionFromPayment($payment);
                     }
 
-                    throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.');
+                    throw new \RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
                 }
 
                 $this->markCreationAttempted($payment);
@@ -53,7 +53,13 @@ class PakasirNativeQrisService
                     throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.', 0, $exception);
                 }
 
-                return $this->persistCreatedTransaction($payment, $transaction);
+                $transaction = $this->persistCreatedTransaction($payment, $transaction);
+
+                if (! $transaction->hasValidFinalAmount()) {
+                    throw new \RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
+                }
+
+                return $transaction;
             });
     }
 
@@ -63,24 +69,25 @@ class PakasirNativeQrisService
             $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->first();
             $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
 
-            if ($this->hasPersistedQris($lockedPayment)) {
+            if ($this->hasPayablePersistedQris($lockedPayment)) {
                 $payment->refresh();
 
                 return $this->transactionFromPayment($payment);
             }
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
+            $providerTotalPayment = $transaction->totalPayment();
             $paymentUpdates = [
                 'provider_payload' => $transaction->sanitizedPayload(),
-                'provider_fee' => $transaction->fee(),
-                'provider_total_payment' => $transaction->totalPayment(),
+                'provider_fee' => $transaction->fee() ?? ($providerTotalPayment !== null ? max(0, $providerTotalPayment - $lockedPayment->amount) : null),
+                'provider_total_payment' => $providerTotalPayment,
                 'provider_payment_method' => $transaction->paymentMethod(),
                 'provider_created_at' => now(),
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_payment_number' => $transaction->paymentNumber(),
                 'provider_payment_number_hash' => hash('sha256', $transaction->paymentNumber()),
-                'provider_create_state' => 'created',
-                'provider_create_last_error' => null,
+                'provider_create_state' => $transaction->hasValidFinalAmount() ? 'created' : 'provider_total_pending',
+                'provider_create_last_error' => $transaction->hasValidFinalAmount() ? null : 'missing_provider_total_payment',
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -100,16 +107,21 @@ class PakasirNativeQrisService
         });
     }
 
-    private function hasPersistedQris(Payment $payment): bool
+    private function hasPersistedQrisPayload(Payment $payment): bool
     {
         return $payment->provider_payment_method === 'qris' && filled($payment->provider_payment_number);
+    }
+
+    private function hasPayablePersistedQris(Payment $payment): bool
+    {
+        return $payment->isPayableNativePakasirQris();
     }
 
     private function markCreationAttempted(Payment $payment): void
     {
         DB::transaction(function () use ($payment): void {
             $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPersistedQris($locked) || $locked->provider_create_state !== null) {
+            if ($this->hasPayablePersistedQris($locked) || $locked->provider_create_state !== null) {
                 return;
             }
 

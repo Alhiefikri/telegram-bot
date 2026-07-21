@@ -18,7 +18,10 @@ class StorefrontShopSignedStatusRefreshResult
         public readonly ?OrderStatus $orderStatus = null,
         public readonly bool $isPaid = false,
         public readonly bool $isTerminal = false,
+        public readonly bool $qrisReady = false,
+        public readonly bool $shouldReload = false,
         public readonly ?string $redirectUrl = null,
+        public readonly ?string $title = null,
         public readonly ?string $message = null,
     ) {}
 
@@ -36,7 +39,18 @@ class StorefrontShopSignedStatusRefreshResult
         return new self(
             ok: false,
             statusCode: 200,
+            title: 'Status belum bisa dicek',
             message: self::RETRYABLE_PROVIDER_FAILURE,
+        );
+    }
+
+    public static function qrisNotReady(string $title, string $message): self
+    {
+        return new self(
+            ok: false,
+            statusCode: 200,
+            title: $title,
+            message: $message,
         );
     }
 
@@ -45,6 +59,8 @@ class StorefrontShopSignedStatusRefreshResult
         ?OrderStatus $orderStatus,
         bool $isPaid,
         bool $isTerminal,
+        bool $qrisReady,
+        bool $shouldReload,
         string $redirectUrl,
         ?string $message = null,
     ): self {
@@ -55,6 +71,8 @@ class StorefrontShopSignedStatusRefreshResult
             orderStatus: $orderStatus,
             isPaid: $isPaid,
             isTerminal: $isTerminal,
+            qrisReady: $qrisReady,
+            shouldReload: $shouldReload,
             redirectUrl: $redirectUrl,
             message: $message,
         );
@@ -71,10 +89,11 @@ class StorefrontShopSignedStatusRefreshResult
     public function payload(): array
     {
         if (! $this->ok) {
-            return [
+            return array_filter([
                 'ok' => false,
+                'title' => $this->title,
                 'message' => $this->message,
-            ];
+            ], fn ($value): bool => $value !== null);
         }
 
         return [
@@ -83,6 +102,8 @@ class StorefrontShopSignedStatusRefreshResult
             'order_status' => $this->orderStatus?->value,
             'is_paid' => $this->isPaid,
             'is_terminal' => $this->isTerminal,
+            'qris_ready' => $this->qrisReady,
+            'should_reload' => $this->shouldReload,
             'redirect_url' => $this->redirectUrl,
             'message' => $this->message,
         ];
