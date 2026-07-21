@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Bootstrap\ApplicationRateLimiterRegistrar;
+use App\Bootstrap\ProductionConfigurationValidator;
 use App\Models\Category;
 use App\Models\Product;
 use App\Observers\ProductAuditObserver;
@@ -17,15 +19,10 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Support\DogfoodTiming;
-use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
-use RuntimeException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -46,7 +43,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->validateProductionConfiguration();
+        $this->app->make(ProductionConfigurationValidator::class)->validate();
         $this->configureUrlGeneration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 
@@ -56,95 +53,7 @@ class AppServiceProvider extends ServiceProvider
 
         DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
 
-        RateLimiter::for('telegram', function (Request $request) {
-            $limit = (int) config('services.telegram.webhook_rate_limit_per_minute', 120);
-
-            if (! $this->hasTrustedTelegramWebhookSecret($request)) {
-                $source = $request->ip() ?: 'unknown';
-
-                return Limit::perMinute($limit)->by('telegram:webhook:bad-secret:source:'.$source);
-            }
-
-            $payload = $request->all();
-            $identity = Arr::get($payload, 'message.from.id')
-                ?? Arr::get($payload, 'callback_query.from.id')
-                ?? Arr::get($payload, 'message.chat.id')
-                ?? $request->ip()
-                ?? 'unknown';
-
-            if (! is_scalar($identity)) {
-                $identity = $request->ip() ?: 'unknown';
-            }
-
-            return Limit::perMinute($limit)->by('telegram:webhook:identity:'.(string) $identity);
-        });
-
-        RateLimiter::for('pakasir-webhook', function (Request $request) {
-            $limit = (int) config('services.pakasir.webhook_rate_limit_per_minute', 30);
-            $source = $request->ip() ?: 'unknown';
-
-            return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
-        });
-
-        RateLimiter::for('pakasir-status-refresh', function (Request $request) {
-            $limit = max(1, (int) config('services.pakasir.status_refresh_rate_limit_per_minute', 3));
-            $routeOrder = $request->route('order');
-            $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
-                ? (string) $routeOrder->getKey()
-                : ($request->ip() ?: 'unknown');
-            $rateLimitedResponse = function (Request $request, array $headers) {
-                $retryAfter = max(1, (int) ($headers['Retry-After'] ?? 60));
-
-                return response()->json([
-                    'ok' => false,
-                    'retry_after' => $retryAfter,
-                    'message' => 'Terlalu sering cek status. Coba lagi dalam '.$retryAfter.' detik.',
-                ], 429, $headers);
-            };
-
-            return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity)->response($rateLimitedResponse);
-        });
-
-        RateLimiter::for('storefront-checkout', function (Request $request) {
-            $limit = max(1, (int) config('services.storefront.checkout_rate_limit_per_minute', 5));
-            $source = $request->ip() ?: 'unknown';
-            $session = $request->hasSession() ? $request->session()->getId() : 'no-session';
-
-            $rateLimitedResponse = function (Request $request, array $headers) {
-                $retryAfter = max(1, (int) ($headers['Retry-After'] ?? 60));
-
-                return response()->view('errors.429', [
-                    'retryAfter' => $retryAfter,
-                ], 429, $headers);
-            };
-
-            return [
-                Limit::perMinute($limit)->by('storefront:checkout:source:'.$source)->response($rateLimitedResponse),
-                Limit::perMinute($limit)->by('storefront:checkout:session:'.$session)->response($rateLimitedResponse),
-            ];
-        });
-
-        RateLimiter::for('storefront-order-access', function (Request $request) {
-            $limit = max(1, (int) config('services.storefront.credential_access_rate_limit_per_minute', 5));
-            $source = $request->ip() ?: 'unknown';
-            $invoice = strtoupper(trim((string) $request->input('invoice_number', 'unknown')));
-
-            return [
-                Limit::perMinute($limit)->by('storefront:order-access:source:'.$source),
-                Limit::perMinute($limit)->by('storefront:order-access:invoice:'.$invoice),
-            ];
-        });
-
-        RateLimiter::for('customer-login-link', function (Request $request) {
-            $email = strtolower(trim((string) $request->input('email', 'unknown')));
-            $ip = $request->ip() ?: 'unknown';
-
-            return [Limit::perMinutes(15, 3)->by('customer:login:email:'.$email.':'.$ip), Limit::perHour(10)->by('customer:login:ip:'.$ip)];
-        });
-
-        RateLimiter::for('customer-login-consume', fn (Request $request) => Limit::perMinutes(15, 10)->by('customer:login:consume:'.($request->ip() ?: 'unknown')));
-        RateLimiter::for('customer-order-claim', fn (Request $request) => Limit::perMinutes(15, 5)->by('customer:claim:'.($request->user('customer')?->getAuthIdentifier() ?? 'unknown').':'.($request->ip() ?: 'unknown')));
-
+        $this->app->make(ApplicationRateLimiterRegistrar::class)->register();
     }
 
     private function configureUrlGeneration(): void
@@ -161,48 +70,6 @@ class AppServiceProvider extends ServiceProvider
 
         if ((bool) config('app.force_https')) {
             URL::forceScheme('https');
-        }
-    }
-
-    private function hasTrustedTelegramWebhookSecret(Request $request): bool
-    {
-        $secret = (string) config('services.telegram.webhook_secret');
-
-        return $secret === ''
-            || hash_equals($secret, (string) $request->header('X-Telegram-Bot-Api-Secret-Token'));
-    }
-
-    private function validateProductionConfiguration(): void
-    {
-        if (in_array(config('app.env'), ['local', 'testing'], true)) {
-            return;
-        }
-
-        $required = [
-            'APP_KEY' => config('app.key'),
-            'TELEGRAM_BOT_TOKEN' => config('services.telegram.token'),
-            'TELEGRAM_WEBHOOK_SECRET' => config('services.telegram.webhook_secret'),
-        ];
-
-        if ((bool) config('app.debug')) {
-            throw new RuntimeException('APP_DEBUG must be false in production.');
-        }
-
-        $pakasirBaseUrl = (string) config('services.pakasir.base_url', '');
-        if (! blank($pakasirBaseUrl) && ! str_starts_with($pakasirBaseUrl, 'https://')) {
-            throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
-        }
-
-        if (! str_starts_with((string) config('app.url'), 'https://')) {
-            throw new RuntimeException('APP_URL must use HTTPS in production.');
-        }
-
-        if (in_array(rtrim((string) config('app.url'), '/'), ['https://example.com'], true)) {
-            throw new RuntimeException('APP_URL must not use the example domain in production.');
-        }
-
-        if (((bool) config('services.dogfood_timing.enabled') || (bool) config('services.dogfood_timing.fake_telegram_outbound')) && ! (bool) config('services.dogfood_timing.allow_runtime')) {
-            throw new RuntimeException('Dogfood runtime flags are not allowed in production.');
         }
     }
 
