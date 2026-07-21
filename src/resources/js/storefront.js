@@ -365,6 +365,7 @@ function initSupportFunnelEvents() {
                 product_id: link.getAttribute('data-support-product-id'),
                 support_channel: link.getAttribute('data-support-channel'),
                 support_category: link.getAttribute('data-support-category'),
+                signed_url: link.getAttribute('data-support-signed-url'),
                 source: 'support_link',
             });
         });

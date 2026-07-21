@@ -32,6 +32,7 @@
                                    data-support-category="{{ $category['key'] }}"
                                    data-support-message="{{ $option['message'] }}"
                                    @if (! empty($supportContext['subject']['order_id'])) data-support-order-id="{{ $supportContext['subject']['order_id'] }}" @endif
+                                   @if (! empty($supportContext['subject']['order_id']) && ! empty($redirectUrl)) data-support-signed-url="{{ $redirectUrl }}" @endif
                                    @if (! empty($supportContext['subject']['product_id'])) data-support-product-id="{{ $supportContext['subject']['product_id'] }}" @endif>
                                     {{ $option['label'] }}
                                 </a>

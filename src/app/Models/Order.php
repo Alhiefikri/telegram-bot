@@ -18,7 +18,30 @@ class Order extends Model
 
     protected function casts(): array
     {
-        return ['order_status' => OrderStatus::class, 'payment_status' => PaymentStatus::class, 'total_amount' => 'integer', 'expires_at' => 'datetime', 'telegram_receipt_sent_at' => 'datetime', 'telegram_receipt_send_started_at' => 'datetime', 'manual_checkout_customer_notified_at' => 'datetime', 'manual_checkout_customer_notification_started_at' => 'datetime', 'manual_checkout_customer_notification_message_id' => 'integer', 'manual_checkout_customer_notification_deleted_at' => 'datetime', 'manual_checkout_customer_notification_deletion_started_at' => 'datetime', 'manual_checkout_admin_notified_at' => 'datetime', 'manual_checkout_admin_notification_started_at' => 'datetime', 'admin_pending_order_notification_started_at' => 'datetime', 'admin_pending_order_notified_at' => 'datetime', 'admin_pending_order_notification_message_id' => 'integer', 'admin_pending_order_notification_deleted_at' => 'datetime', 'admin_paid_order_notification_started_at' => 'datetime', 'admin_paid_order_notified_at' => 'datetime', 'admin_expired_order_notification_started_at' => 'datetime', 'admin_expired_order_notified_at' => 'datetime'];
+        return [
+            'order_status' => OrderStatus::class,
+            'payment_status' => PaymentStatus::class,
+            'support_contact_value' => 'encrypted',
+            'total_amount' => 'integer',
+            'expires_at' => 'datetime',
+            'telegram_receipt_sent_at' => 'datetime',
+            'telegram_receipt_send_started_at' => 'datetime',
+            'manual_checkout_customer_notified_at' => 'datetime',
+            'manual_checkout_customer_notification_started_at' => 'datetime',
+            'manual_checkout_customer_notification_message_id' => 'integer',
+            'manual_checkout_customer_notification_deleted_at' => 'datetime',
+            'manual_checkout_customer_notification_deletion_started_at' => 'datetime',
+            'manual_checkout_admin_notified_at' => 'datetime',
+            'manual_checkout_admin_notification_started_at' => 'datetime',
+            'admin_pending_order_notification_started_at' => 'datetime',
+            'admin_pending_order_notified_at' => 'datetime',
+            'admin_pending_order_notification_message_id' => 'integer',
+            'admin_pending_order_notification_deleted_at' => 'datetime',
+            'admin_paid_order_notification_started_at' => 'datetime',
+            'admin_paid_order_notified_at' => 'datetime',
+            'admin_expired_order_notification_started_at' => 'datetime',
+            'admin_expired_order_notified_at' => 'datetime',
+        ];
     }
 
     public function customer()

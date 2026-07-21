@@ -24,6 +24,7 @@ use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
@@ -815,6 +816,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $order->refresh();
         $this->assertSame('telegram', $order->support_contact_channel);
         $this->assertSame('@support_buyer', $order->support_contact_value);
+        $rawContact = DB::table('orders')->where('id', $order->id)->value('support_contact_value');
+        $this->assertIsString($rawContact);
+        $this->assertNotSame('@support_buyer', $rawContact);
+        $this->assertStringNotContainsString('@support_buyer', $rawContact);
         $this->assertDatabaseHas('customers', [
             'id' => $order->customer_id,
             'telegram_id' => null,

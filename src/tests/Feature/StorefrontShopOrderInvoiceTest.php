@@ -805,6 +805,14 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             'order_id' => $order->id,
             'support_channel' => 'whatsapp',
             'support_category' => 'payment_pending',
+        ])->assertForbidden();
+
+        $this->postJson(route('storefront.events.store'), [
+            'action' => 'storefront.support_selected',
+            'order_id' => $order->id,
+            'support_channel' => 'whatsapp',
+            'support_category' => 'payment_pending',
+            'signed_url' => URL::signedRoute('storefront.shop.orders.show', $order, null, false),
             'message' => 'Recovery Key: SHOULD-NOT-LOG password=secret MFA=SECRET',
         ])->assertOk()->assertJsonPath('ok', true);
 
