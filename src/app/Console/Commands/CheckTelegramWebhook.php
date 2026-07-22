@@ -9,21 +9,26 @@ use Throwable;
 
 class CheckTelegramWebhook extends Command
 {
-    protected $signature = 'ops:check-telegram-webhook {--max-pending=0 : Maximum acceptable Telegram pending_update_count}';
+    protected $signature = 'ops:check-telegram-webhook
+        {--max-pending=0 : Maximum acceptable Telegram pending_update_count per sample}
+        {--observation-seconds=0 : Bounded period to observe pending updates; zero takes one sample}
+        {--sample-interval=5 : Seconds between pending-update samples}';
 
     protected $description = 'Verify Telegram webhook registration without printing secrets or private URLs.';
 
     public function handle(TelegramBotApiRequestFactory $requests): int
     {
         $maxPending = (int) $this->option('max-pending');
+        $observationSeconds = (int) $this->option('observation-seconds');
+        $sampleInterval = (int) $this->option('sample-interval');
         $token = trim((string) config('services.telegram.token'));
         $secret = trim((string) config('services.telegram.webhook_secret'));
         $appUrl = rtrim(trim((string) config('app.url')), '/');
         $target = $appUrl.'/api/webhook/telegram';
         $healthy = true;
 
-        if ($maxPending < 0) {
-            $this->error('Telegram webhook: max pending updates must be zero or greater');
+        if ($maxPending < 0 || $observationSeconds < 0 || $sampleInterval <= 0) {
+            $this->error('Telegram webhook: pending-update thresholds must be zero or greater and sample interval must be positive');
 
             return self::FAILURE;
         }
@@ -46,20 +51,34 @@ class CheckTelegramWebhook extends Command
             return self::FAILURE;
         }
 
-        try {
-            $response = $requests->request()->get($requests->url('getWebhookInfo'));
-        } catch (Throwable) {
-            $this->error('Telegram webhook: request failed');
+        $deadline = time() + $observationSeconds;
+        $samples = [];
+        $firstResponse = null;
+        do {
+            try {
+                $response = $requests->request()->get($requests->url('getWebhookInfo'));
+            } catch (Throwable) {
+                $this->error('Telegram webhook: request failed');
 
-            return self::FAILURE;
-        }
+                return self::FAILURE;
+            }
 
-        $body = $response->json();
-        $telegramOk = $response->ok() && data_get($body, 'ok') === true;
+            $body = $response->json();
+            $samples[] = $body;
+            $firstResponse ??= $response;
+
+            if (time() >= $deadline) {
+                break;
+            }
+
+            sleep(min($sampleInterval, max(1, $deadline - time())));
+        } while (true);
+
+        $body = $samples[0];
+        $telegramOk = $firstResponse->ok() && data_get($body, 'ok') === true;
         $registeredUrl = (string) data_get($body, 'result.url', '');
         $webhookConfigured = $registeredUrl !== '';
         $webhookMatchesAppUrl = $webhookConfigured && hash_equals($target, $registeredUrl);
-        $pendingUpdates = data_get($body, 'result.pending_update_count');
         $lastErrorDate = data_get($body, 'result.last_error_date');
         $lastErrorMessage = data_get($body, 'result.last_error_message');
         $lastErrorPresent = $lastErrorMessage !== null;
@@ -88,9 +107,11 @@ class CheckTelegramWebhook extends Command
             $this->line('Telegram webhook '.$name.'='.($value ? 'true' : 'false'));
         }
 
-        $this->line('Telegram webhook pending_update_count='.(is_numeric($pendingUpdates) ? (string) $pendingUpdates : 'unknown'));
+        $pendingValues = array_map(static fn (array $sample): mixed => data_get($sample, 'result.pending_update_count'), $samples);
+        $pendingHealthy = collect($pendingValues)->contains(static fn (mixed $pending): bool => is_numeric($pending) && (int) $pending <= $maxPending);
+        $this->line('Telegram webhook pending_update_count_samples='.implode(',', array_map(static fn (mixed $pending): string => is_numeric($pending) ? (string) $pending : 'unknown', $pendingValues)));
 
-        if (! $telegramOk || ! $webhookConfigured || ! $webhookMatchesAppUrl || $lastErrorActive || ! is_numeric($pendingUpdates) || (int) $pendingUpdates > $maxPending) {
+        if (! $telegramOk || ! $webhookConfigured || ! $webhookMatchesAppUrl || $lastErrorActive || ! $pendingHealthy) {
             $healthy = false;
         }
 

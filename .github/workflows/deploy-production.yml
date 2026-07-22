@@ -72,7 +72,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: release-gate
     environment: production
+    env:
+      RELEASE_ARTIFACT_DIR: .release-gate-artifacts/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure SSH
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
@@ -95,15 +99,29 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" 'bash -s' <<'REMOTE'
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
+          RELEASE_ARTIFACT_DIR="$PRODUCTION_PATH/$RELEASE_ARTIFACT_DIR"
+          mkdir -p "$RELEASE_ARTIFACT_DIR"
+
+          collect_release_diagnostics() {
+            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps --format json > "$RELEASE_ARTIFACT_DIR/compose-ps.json" 2>/dev/null || true
+            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:release-health-summary --since="$RELEASE_STARTED_AT" > "$RELEASE_ARTIFACT_DIR/health-summary.json" 2>/dev/null || true
+            docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env logs --tail=120 app web scheduler 2>&1 \
+              | sed -E -e 's/(token|secret|password|app_key)=?[^[:space:]]*/\1=[REDACTED]/Ig' -e 's/bot[0-9]{6,}:[[:alnum:]_-]+/bot[REDACTED]/g' \
+              > "$RELEASE_ARTIFACT_DIR/compose.log" || true
+          }
+
+          RELEASE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          trap 'status=$?; collect_release_diagnostics; exit "$status"' EXIT
           exec 9>"$PRODUCTION_PATH/.production-mutation.lock"
           if ! flock -n 9; then
             echo "Another production deployment or recovery is already running; refusing to overlap." >&2
@@ -152,9 +170,9 @@ jobs:
             docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable
           fi
 
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null
 
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps
 
@@ -173,3 +191,34 @@ jobs:
 
           echo "No duplicate Telegram Bot Compose projects running."
           REMOTE
+
+      - name: Run external public smoke checks
+        env:
+          BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
+          SMOKE_TIMEOUT: '15'
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Set the non-secret production environment variable PRODUCTION_SMOKE_BASE_URL}"
+          ./scripts/smoke-production.sh
+
+      - name: Download release-gate diagnostics
+        if: always()
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-gate-artifacts
+          scp -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/production_key -P "$PRODUCTION_SSH_PORT" -r \
+            "$PRODUCTION_USER@$PRODUCTION_HOST:$PRODUCTION_PATH/$RELEASE_ARTIFACT_DIR/." release-gate-artifacts/ \
+            || printf 'Release-gate diagnostics were unavailable for download.\n' >&2
+
+      - name: Upload release-gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-diagnostics-${{ github.run_id }}
+          path: release-gate-artifacts
+          if-no-files-found: warn

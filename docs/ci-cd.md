@@ -24,9 +24,10 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
   - Builds the production image on the VPS after checking out the pinned SHA, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This preserves the VPS build as the release artifact because production secrets and the deploy host stay local to the VPS.
-  - Verifies app health, scheduler heartbeat, failed jobs, queue depth, Telegram webhook external registration, and absence of duplicate running Telegram Bot Compose projects after deploy.
+  - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
   - Uses SSH batch mode, a connection timeout, and server keepalives to make long VPS operations resilient to idle disconnects.
+  - Captures a bounded, redacted Compose log, Compose status, and secret-free JSON health summary as workflow artifacts, including when a release gate fails.
 
 - `.github/workflows/recover-failed-jobs.yml`
   - Runs manually in the `production` environment only after the operator types `RECOVER_TELEGRAM_UPDATES`.
@@ -72,12 +73,22 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 
 - `php artisan ops:health --db --queue-schema --supervisor`
 - `php artisan ops:health --scheduler-heartbeat=180` in the scheduler container
-- `php artisan ops:check-failed-jobs --max=0`
-- `php artisan ops:check-queue-depth --max=0`
-- `php artisan ops:check-telegram-webhook --max-pending=0`
+- `php artisan ops:check-failed-jobs --max=0 --since=<release-start>`
+- `php artisan ops:check-queue-depth --max=50 --max-oldest-age=120`
+- `php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5`
+- An external GitHub runner runs `scripts/smoke-production.sh` against `PRODUCTION_SMOKE_BASE_URL`, which checks `/up` and the representative `/admin` route without SSHing into the VPS.
 - Running Docker containers with Compose label `com.docker.compose.project` must not include another `telegram-bot*` project besides `telegram-bot-prod`.
 
-The Telegram webhook check verifies only booleans/counts: Telegram API success, HTTPS target, webhook secret configured, webhook URL configured, webhook URL matching `APP_URL/api/webhook/telegram`, `pending_update_count`, and whether Telegram reports a last error. It must not print the bot token, webhook secret, or full private webhook URL.
+`PRODUCTION_SMOKE_BASE_URL` is a required non-secret GitHub Environment variable, for example `https://store.example.com`. It must be the public HTTPS base URL, not a private hostname or a webhook URL.
+
+### Traffic-tolerant release thresholds
+
+- **Failed jobs:** zero failures whose `failed_at` is at or after the release start time. Retained historical records and failures already quarantined before deployment do not block the candidate. A new failure blocks the release: inspect the `health-summary.json` artifact and the redacted logs, then use the targeted recovery procedure only when applicable.
+- **Queue:** at most 50 queued jobs and the oldest queued job must be no more than 120 seconds old. This permits normal bursts while detecting workers that have stopped draining. If it blocks, inspect worker/scheduler health and the artifact; do not flush the queue to force a release through.
+- **Telegram:** each registration property must be healthy, and the 30-second observation must see at least one sample at or below 25 pending updates. This avoids failing on a transient update while persistent backlog remains visible. If it blocks, inspect Telegram's status and deployment artifacts before changing the webhook.
+- **External smoke:** `/up` and `/admin` must be reachable from GitHub Actions after container health succeeds. If it blocks, treat this as public routing, TLS, DNS, proxy, or web-container incident even if in-VPS checks passed.
+
+The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, and a redacted 120-line Compose log. Do not add resolved Compose configuration or `.env` files to workflow artifacts.
 
 ## Safe failed-job recovery
 

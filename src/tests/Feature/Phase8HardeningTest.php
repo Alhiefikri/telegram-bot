@@ -183,8 +183,30 @@ class Phase8HardeningTest extends TestCase
             'created_at' => now()->timestamp,
         ]);
 
-        $this->artisan('ops:check-queue-depth --max=0 --queue=telegram-outbound')
-            ->expectsOutputToContain('ALERT queue depth 1 exceeds max 0 for queues telegram-outbound')
+        $this->artisan('ops:check-queue-depth --max=0 --max-oldest-age=0 --queue=telegram-outbound')
+            ->expectsOutputToContain('ALERT queue depth 1 (oldest age')
+            ->assertFailed();
+    }
+
+    public function test_queue_depth_monitor_allows_fresh_live_traffic_but_rejects_stuck_work(): void
+    {
+        DB::table('jobs')->insert([
+            'queue' => 'default',
+            'payload' => '{}',
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => now()->timestamp,
+            'created_at' => now()->timestamp,
+        ]);
+
+        $this->artisan('ops:check-queue-depth --max=50 --max-oldest-age=120')
+            ->expectsOutputToContain('OK queue depth 1')
+            ->assertSuccessful();
+
+        DB::table('jobs')->update(['created_at' => now()->subMinutes(3)->timestamp]);
+
+        $this->artisan('ops:check-queue-depth --max=50 --max-oldest-age=120')
+            ->expectsOutputToContain('exceeds thresholds max 50, max oldest age 120s')
             ->assertFailed();
     }
 
@@ -209,11 +231,34 @@ class Phase8HardeningTest extends TestCase
         $this->artisan('ops:check-telegram-webhook --max-pending=0')
             ->expectsOutputToContain('Telegram webhook telegram_ok=true')
             ->expectsOutputToContain('Telegram webhook webhook_matches_app_url=true')
-            ->expectsOutputToContain('Telegram webhook pending_update_count=1')
+            ->expectsOutputToContain('Telegram webhook pending_update_count_samples=1')
             ->doesntExpectOutputToContain('bot-token')
             ->doesntExpectOutputToContain('webhook-secret')
             ->doesntExpectOutputToContain('https://store.example.com/api/webhook/telegram')
             ->assertFailed();
+    }
+
+    public function test_telegram_webhook_observation_accepts_a_transient_pending_update_that_drains(): void
+    {
+        config()->set('app.url', 'https://store.example.com');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.webhook_secret', 'webhook-secret');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        Http::fakeSequence('https://api.telegram.org/botbot-token/getWebhookInfo')
+            ->push(['ok' => true, 'result' => ['url' => 'https://store.example.com/api/webhook/telegram', 'pending_update_count' => 1]])
+            ->push(['ok' => true, 'result' => ['url' => 'https://store.example.com/api/webhook/telegram', 'pending_update_count' => 0]]);
+
+        $this->artisan('ops:check-telegram-webhook --max-pending=0 --observation-seconds=1 --sample-interval=1')
+            ->expectsOutputToContain('Telegram webhook pending_update_count_samples=1,0')
+            ->assertSuccessful();
+    }
+
+    public function test_release_health_summary_is_machine_readable_and_secret_free(): void
+    {
+        $this->artisan('ops:release-health-summary')
+            ->expectsOutputToContain('"candidate_release": null')
+            ->assertSuccessful();
     }
 
     public function test_telegram_webhook_check_redacts_transport_failure_messages(): void
@@ -487,9 +532,13 @@ SH);
         $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull', $contents);
         $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans', $contents);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
-        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
-        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
-        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=0', $contents);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT"', $contents);
+        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $contents);
+        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $contents);
+        $this->assertStringContainsString('actions/upload-artifact@v4', $contents);
+        $this->assertStringContainsString('ops:release-health-summary --since="$RELEASE_STARTED_AT"', $contents);
+        $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
+        $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
         $this->assertStringContainsString('group: production-mutation', $contents);
         $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $contents);
         $this->assertStringContainsString('flock -n 9', $contents);
@@ -497,9 +546,9 @@ SH);
         foreach ([
             'app health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
             'scheduler health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
-            'failed jobs check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null',
-            'queue depth check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null',
-            'Telegram webhook check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=0 </dev/null',
+            'failed jobs check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null',
+            'queue depth check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
+            'Telegram webhook check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
             $this->assertStringContainsString($command, $contents, $contract);
         }
