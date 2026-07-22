@@ -3,34 +3,37 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class ReleaseHealthSummary extends Command
 {
-    protected $signature = 'ops:release-health-summary {--since= : ISO-8601 candidate release start time}';
+    protected $signature = 'ops:release-health-summary
+        {--baseline-stdin : Attribute candidate failures against a JSON maximum-ID baseline read from standard input}';
 
     protected $description = 'Print a secret-free machine-readable release health summary.';
 
     public function handle(): int
     {
-        $since = $this->releaseStart();
-        if ($this->hasReleaseStartOption() && $since === null) {
-            $this->error('Release health summary: since must be a valid ISO-8601 timestamp.');
-
-            return self::FAILURE;
-        }
-
         try {
             $jobs = DB::table('jobs');
             $oldestCreatedAt = $jobs->min('created_at');
             $failedJobs = DB::table('failed_jobs');
-            $candidateFailedJobs = $since === null ? null : (clone $failedJobs)->where('failed_at', '>=', $since->toDateTimeString())->count();
+            $baseline = $this->baselineMaxId();
+            if ($baseline === null) {
+                return self::FAILURE;
+            }
+            $candidateFailedJobs = null;
+            if ((bool) $this->option('baseline-stdin')) {
+                $candidateQuery = clone $failedJobs;
+                if ($baseline >= 0) {
+                    $candidateQuery->where('id', '>', $baseline);
+                }
+                $candidateFailedJobs = $candidateQuery->count();
+            }
 
             $this->line(json_encode([
                 'generated_at' => now()->utc()->toIso8601String(),
-                'release_started_at' => $since?->toIso8601String(),
                 'queue' => [
                     'depth' => $jobs->count(),
                     'oldest_job_age_seconds' => $oldestCreatedAt === null ? null : max(0, now()->timestamp - (int) $oldestCreatedAt),
@@ -49,24 +52,27 @@ class ReleaseHealthSummary extends Command
         return self::SUCCESS;
     }
 
-    private function releaseStart(): ?Carbon
+    private function baselineMaxId(): ?int
     {
-        $value = $this->option('since');
-        if ($value === null || is_array($value) || trim((string) $value) === '') {
-            return null;
+        if (! (bool) $this->option('baseline-stdin')) {
+            return -1;
         }
 
         try {
-            return Carbon::parse((string) $value)->utc();
+            $decoded = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+            if (! is_array($decoded) || ! array_key_exists('max_id', $decoded)) {
+                throw new \UnexpectedValueException('baseline must contain max_id');
+            }
+            $maxId = filter_var($decoded['max_id'], FILTER_VALIDATE_INT);
+            if ($maxId === false || $maxId < 0) {
+                throw new \UnexpectedValueException('max_id must be a non-negative integer');
+            }
+
+            return $maxId;
         } catch (Throwable) {
+            $this->error('Release health summary: baseline must contain a non-negative integer max_id.');
+
             return null;
         }
-    }
-
-    private function hasReleaseStartOption(): bool
-    {
-        $value = $this->option('since');
-
-        return $value !== null && (! is_string($value) || trim($value) !== '');
     }
 }

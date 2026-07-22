@@ -145,13 +145,44 @@ jobs:
             'bash -s' < scripts/deploy-production-release.sh
 
       - name: Run external public smoke checks
+        id: external-smoke
+        continue-on-error: true
         env:
           BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
           SMOKE_TIMEOUT: '15'
+          SMOKE_PUBLIC_ONLY: 'true'
         run: |
           set -euo pipefail
           : "${BASE_URL:?Set the non-secret production environment variable PRODUCTION_SMOKE_BASE_URL}"
           ./scripts/smoke-production.sh
+
+      - name: Roll back after external smoke failure
+        id: external-smoke-rollback
+        if: steps.external-smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
+            'bash -s' < scripts/deploy-production-release.sh
+
+      - name: Fail release after external smoke rollback
+        if: always() && steps.external-smoke.outcome == 'failure'
+        env:
+          ROLLBACK_OUTCOME: ${{ steps.external-smoke-rollback.outcome }}
+        run: |
+          if [ "$ROLLBACK_OUTCOME" = "success" ]; then
+            echo "External public smoke failed; automatic rollback restored a healthy previous release." >&2
+            exit 20
+          fi
+          echo "External public smoke failed and automatic rollback also failed. Emergency manual recovery is required." >&2
+          exit 21
 
       - name: Download release-gate diagnostics
         if: always()
@@ -176,10 +207,10 @@ jobs:
             echo
             echo "- Result: \`$result\`"
             case "$result" in
-              deploy-failed-rollback-succeeded)
+              deploy-failed-rollback-succeeded|external-smoke-failed-rollback-succeeded)
                 echo "- Deployment failed, but automatic rollback restored a healthy previous release."
                 ;;
-              deploy-failed-rollback-failed)
+              deploy-failed-rollback-failed|external-smoke-failed-rollback-failed)
                 echo "- Deployment and automatic rollback both failed. Emergency manual recovery is required."
                 ;;
             esac

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class Phase8HardeningTest extends TestCase
@@ -261,6 +262,46 @@ class Phase8HardeningTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_failed_job_release_gate_uses_id_watermark_instead_of_failure_timestamp(): void
+    {
+        $historicalUuid = (string) Str::uuid();
+        $historicalId = DB::table('failed_jobs')->insertGetId([
+            'uuid' => $historicalUuid,
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\HistoricalJob'], JSON_THROW_ON_ERROR),
+            'exception' => 'historical',
+            'failed_at' => now(),
+        ]);
+
+        $this->artisan('ops:check-failed-jobs --snapshot')
+            ->expectsOutput(json_encode(['max_id' => $historicalId], JSON_THROW_ON_ERROR))
+            ->assertSuccessful();
+
+        $baseline = json_encode(['max_id' => $historicalId], JSON_THROW_ON_ERROR);
+        $this->artisan('ops:check-failed-jobs', ['--max' => 0, '--baseline' => $baseline])
+            ->expectsOutputToContain('OK failed_jobs count 0')
+            ->assertSuccessful();
+
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\CandidateJob'], JSON_THROW_ON_ERROR),
+            'exception' => 'candidate',
+            'failed_at' => now(),
+        ]);
+
+        $this->artisan('ops:check-failed-jobs', ['--max' => 0, '--baseline' => $baseline])
+            ->expectsOutputToContain('ALERT failed_jobs count 1 exceeds max 0 for failures created after the pre-release baseline')
+            ->assertFailed();
+
+        $releaseScript = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
+        $this->assertStringContainsString('ops:check-failed-jobs --snapshot', $releaseScript);
+        $this->assertStringContainsString('ops:check-failed-jobs --max=0 --baseline-stdin', $releaseScript);
+        $this->assertStringNotContainsString('ops:check-failed-jobs --max=0 --since=', $releaseScript);
+    }
+
     public function test_telegram_webhook_check_redacts_transport_failure_messages(): void
     {
         config()->set('app.url', 'https://store.example.com');
@@ -310,6 +351,21 @@ class Phase8HardeningTest extends TestCase
         $this->assertStringContainsString('--location', $contents);
         $this->assertStringContainsString('scheduler php artisan ops:health --scheduler-heartbeat', $contents);
         $this->assertStringContainsString('SCHEDULER_HEALTH_TIMEOUT', $contents);
+        $this->assertStringContainsString('SMOKE_PUBLIC_ONLY', $contents);
+    }
+
+    public function test_external_smoke_failure_triggers_locked_rollback_and_explicit_failure(): void
+    {
+        $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
+
+        $this->assertStringContainsString('id: external-smoke', $workflow);
+        $this->assertStringContainsString("SMOKE_PUBLIC_ONLY: 'true'", $workflow);
+        $this->assertStringContainsString('Roll back after external smoke failure', $workflow);
+        $this->assertStringContainsString("if: steps.external-smoke.outcome == 'failure'", $workflow);
+        $this->assertStringContainsString('RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed', $workflow);
+        $this->assertStringContainsString('Fail release after external smoke rollback', $workflow);
+        $this->assertStringContainsString('exit 20', $workflow);
+        $this->assertStringContainsString('exit 21', $workflow);
     }
 
     public function test_restore_drill_script_dry_run_accepts_sql_gz_without_mutation(): void
@@ -397,6 +453,35 @@ SH);
             $this->assertStringContainsString('Smoke check passed: https://store.example/up', $result['stdout']);
             $this->assertStringNotContainsString('Mini app dashboard smoke check passed', $result['stdout']);
             $this->assertStringContainsString("https://store.example/up\nhttps://store.example/telegram-mini-app", file_get_contents($curlLog));
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public function test_public_only_smoke_skips_runner_local_compose_checks(): void
+    {
+        $workspace = $this->makeShellWorkspace('smoke-public-only');
+
+        try {
+            $this->writeExecutable($workspace.'/curl', <<<'SH'
+#!/usr/bin/env bash
+exit 0
+SH);
+            $this->writeExecutable($workspace.'/docker', <<<'SH'
+#!/usr/bin/env bash
+echo 'docker must not run during public-only smoke' >&2
+exit 99
+SH);
+
+            $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
+                'BASE_URL' => 'https://store.example',
+                'COMPOSE_PROJECT_NAME' => 'telegram-bot-prod',
+                'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
+                'SMOKE_PUBLIC_ONLY' => 'true',
+            ]);
+
+            $this->assertSame(0, $result['exitCode'], $result['stderr']);
+            $this->assertStringNotContainsString('docker must not run', $result['stderr']);
         } finally {
             File::deleteDirectory($workspace);
         }
@@ -539,11 +624,12 @@ SH);
         $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
         $this->assertStringContainsString('running_image="$(docker inspect "$container_id" --format \'{{.Image}}\')"', $release);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
-        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT"', $release);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --snapshot', $release);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $release);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
         $this->assertStringContainsString('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4', $contents);
-        $this->assertStringContainsString('ops:release-health-summary --since="$RELEASE_STARTED_AT"', $release);
+        $this->assertStringContainsString('ops:release-health-summary --baseline-stdin', $release);
         $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
         $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
         $this->assertStringContainsString('group: production-mutation', $contents);
@@ -553,7 +639,7 @@ SH);
         foreach ([
             'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
             'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
-            'failed jobs check is non-interactive' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null',
+            'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
             'queue depth check is non-interactive' => 'compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
             'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
@@ -563,8 +649,8 @@ SH);
         $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
         $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
         $this->assertStringContainsString('compose run --rm --no-deps -e APP_AUTO_MIGRATE=false', $release);
-        $this->assertStringContainsString('deploy-failed-rollback-succeeded', $release);
-        $this->assertStringContainsString('deploy-failed-rollback-failed', $release);
+        $this->assertStringContainsString('${failure_reason}-rollback-succeeded', $release);
+        $this->assertStringContainsString('${failure_reason}-rollback-failed', $release);
         $this->assertStringContainsString('duplicate_projects="$(', $release);
     }
 

@@ -109,7 +109,9 @@ jobs:
 
       - name: Exercise production release and rollback paths
         working-directory: ..
-        run: ./scripts/test-deploy-production-release.sh
+        run: |
+          ./scripts/test-deploy-production-release.sh
+          ./scripts/test-redact-release-diagnostics.sh
 
   postgres-release-gate:
     name: PostgreSQL migration and concurrency release gate

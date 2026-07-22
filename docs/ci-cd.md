@@ -32,13 +32,13 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
   - Reads the image digest recorded on the deployment commit by the successful CI run and pulls that exact GHCR digest on the VPS. Production never rebuilds the application image.
   - Records the previous Git commit and immutable running image before changing the checkout, then runs `php artisan migrate --force` in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
-  - Aborts before cutover when migration fails, leaving the current containers available. If a post-cutover release gate fails, restores the previous commit and immutable image automatically and verifies app and scheduler health.
-  - Writes `release-result.txt` with `deploy-succeeded`, `migration-failed-no-cutover`, `deploy-failed-rollback-succeeded`, or `deploy-failed-rollback-failed`, so operators can distinguish a contained deploy failure from a failed recovery.
+  - Aborts before cutover when migration fails, leaving the current containers available. If an internal gate or the public GitHub-runner smoke fails, restores the previous commit and immutable image automatically and verifies app and scheduler health.
+  - Writes `release-result.txt` with `deploy-succeeded`, `migration-failed-no-cutover`, or a reason-specific `*-rollback-succeeded` / `*-rollback-failed` result, so operators can distinguish a contained deploy failure from a failed recovery.
   - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
   - Uses SSH batch mode, a connection timeout, and server keepalives to make long VPS operations resilient to idle disconnects.
-  - Captures a bounded, redacted Compose log, Compose status, and secret-free JSON health summary as workflow artifacts, including when a release gate fails.
+  - Captures a bounded, redacted Compose log, Compose status, and secret-free JSON health summary as workflow artifacts, including when a release gate fails. Payload/body lines are dropped, while credentials in key/value, JSON, bearer-token, Telegram-token, and URL-query forms are redacted.
 
 - `.github/workflows/recover-failed-jobs.yml`
   - Runs manually in the `production` environment only after the operator types `RECOVER_TELEGRAM_UPDATES`.
@@ -164,7 +164,7 @@ Every production migration must follow expand-and-contract compatibility because
 
 Do not include destructive renames, column/table drops, incompatible type changes, irreversible data rewrites, or long blocking DDL in the automatic release migration. Those changes require a verified database backup and explicit human approval before dispatching the workflow. If a change cannot preserve compatibility with the retained image, treat it as a planned maintenance release with a documented restore procedure rather than relying on automatic application rollback.
 
-The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, and rollback health failure. CI runs this harness on every change.
+The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, rollback health failure, and external-smoke rollback. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. CI runs these contracts through the PHP hardening suite and release harness.
 
 ## Image identity and retention
 
@@ -187,7 +187,7 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 
 - `php artisan ops:health --db --queue-schema --supervisor`
 - `php artisan ops:health --scheduler-heartbeat=180` in the scheduler container
-- `php artisan ops:check-failed-jobs --max=0 --since=<release-start>`
+- `php artisan ops:check-failed-jobs --snapshot` before release mutation, followed by `php artisan ops:check-failed-jobs --max=0 --baseline-stdin` after cutover
 - `php artisan ops:check-queue-depth --max=50 --max-oldest-age=120`
 - `php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5`
 - An external GitHub runner runs `scripts/smoke-production.sh` against `PRODUCTION_SMOKE_BASE_URL`, which checks `/up` and the representative `/admin` route without SSHing into the VPS.
@@ -197,10 +197,10 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 
 ### Traffic-tolerant release thresholds
 
-- **Failed jobs:** zero failures whose `failed_at` is at or after the release start time. Retained historical records and failures already quarantined before deployment do not block the candidate. A new failure blocks the release: inspect the `health-summary.json` artifact and the redacted logs, then use the targeted recovery procedure only when applicable.
+- **Failed jobs:** zero records above the secret-free pre-release `failed_jobs.id` watermark. Retained historical records remain excluded even when their timestamps overlap the release, while every newly inserted failed record blocks the candidate. The scalar watermark keeps the query and artifact bounded. Inspect `health-summary.json` and the redacted logs, then use targeted recovery only when applicable.
 - **Queue:** at most 50 queued jobs and the oldest queued job must be no more than 120 seconds old. This permits normal bursts while detecting workers that have stopped draining. If it blocks, inspect worker/scheduler health and the artifact; do not flush the queue to force a release through.
 - **Telegram:** each registration property must be healthy, and the 30-second observation must see at least one sample at or below 25 pending updates. This avoids failing on a transient update while persistent backlog remains visible. If it blocks, inspect Telegram's status and deployment artifacts before changing the webhook.
-- **External smoke:** `/up` and `/admin` must be reachable from GitHub Actions after container health succeeds. If it blocks, treat this as public routing, TLS, DNS, proxy, or web-container incident even if in-VPS checks passed.
+- **External smoke:** `/up` and `/admin` must be reachable from GitHub Actions after container health succeeds. Failure immediately invokes the same locked rollback operation, verifies the restored app and scheduler health, records an `external-smoke-failed-rollback-*` result, and still fails the workflow so the candidate cannot be reported as deployed.
 
 The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, and a redacted 120-line Compose log. Do not add resolved Compose configuration or `.env` files to workflow artifacts.
 

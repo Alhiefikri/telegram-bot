@@ -35,6 +35,8 @@ run_scenario() {
 exit 0
 SCRIPT
   chmod +x "$workspace/scripts/safe-compose-config.sh"
+  cp "$ROOT_DIR/scripts/redact-release-diagnostics.sh" "$workspace/scripts/redact-release-diagnostics.sh"
+  chmod +x "$workspace/scripts/redact-release-diagnostics.sh"
 
   cat > "$bin/git" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -89,7 +91,7 @@ case "$command" in
     if [ "${1:-}" = "-q" ]; then printf '%s-container\n' "${2:-app}"; fi
     ;;
   run)
-    if [ "$scenario" = "migration-failure" ]; then exit 1; fi
+    if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     ;;
   up)
     printf '%s\n' "${APP_IMAGE:?}" > "$MOCK_WORKSPACE/current-image"
@@ -114,11 +116,23 @@ SCRIPT
   status=$?
   set -e
 
+  if [ "$scenario" = "external-smoke-rollback" ] && [ "$status" -eq 0 ]; then
+    set +e
+    PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" \
+      COMPOSE_PROJECT_NAME=telegram-bot-prod RELEASE_ARTIFACT_DIR="$artifacts" \
+      RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
+      bash "$RELEASE_SCRIPT" >> "$workspace/stdout" 2>> "$workspace/stderr"
+    status=$?
+    set -e
+  fi
+
   assert_eq "$status" "$expected_exit"
   assert_eq "$(cat "$artifacts/release-result.txt")" "$expected_result"
   assert_eq "$(cat "$workspace/current-image")" "$expected_image"
   assert_eq "$(cat "$artifacts/previous-commit.txt")" "$PREVIOUS_COMMIT"
   assert_eq "$(cat "$artifacts/previous-image.txt")" "$PREVIOUS_IMAGE"
+  [ -x "$artifacts/redact-release-diagnostics.sh" ] || fail "artifact-local redactor is missing or not executable"
+  [ -f "$artifacts/compose.log" ] || fail "release diagnostics did not produce a redacted compose log"
 
   case "$scenario" in
     success)
@@ -134,6 +148,10 @@ SCRIPT
     rollback-failure)
       grep -q 'rollback failed' "$workspace/stderr" || fail "failed rollback outcome was not explicit"
       ;;
+    external-smoke-rollback)
+      grep -q "APP_IMAGE=$PREVIOUS_IMAGE" "$workspace/commands.log" || fail "external smoke rollback did not restore previous image"
+      grep -q 'external-smoke-failed' "$workspace/stderr" || fail "external smoke rollback reason was not explicit"
+      ;;
   esac
 
   rm -rf "$workspace"
@@ -144,3 +162,4 @@ run_scenario success 0 deploy-succeeded "$CANDIDATE_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
+run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"

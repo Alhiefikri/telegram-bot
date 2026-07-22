@@ -2,10 +2,13 @@
 set -euo pipefail
 
 : "${PRODUCTION_PATH:?PRODUCTION_PATH is required}"
-: "${DEPLOY_BRANCH:?DEPLOY_BRANCH is required}"
-: "${DEPLOY_SHA:?DEPLOY_SHA is required}"
 : "${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}"
-: "${APP_IMAGE:?APP_IMAGE is required}"
+RELEASE_OPERATION="${RELEASE_OPERATION:-deploy}"
+if [ "$RELEASE_OPERATION" = "deploy" ]; then
+  : "${DEPLOY_BRANCH:?DEPLOY_BRANCH is required}"
+  : "${DEPLOY_SHA:?DEPLOY_SHA is required}"
+  : "${APP_IMAGE:?APP_IMAGE is required}"
+fi
 
 cd "$PRODUCTION_PATH"
 RELEASE_ARTIFACT_DIR="${RELEASE_ARTIFACT_DIR:-.release-gate-artifacts/manual}"
@@ -14,6 +17,9 @@ case "$RELEASE_ARTIFACT_DIR" in
   *) RELEASE_ARTIFACT_DIR="$PRODUCTION_PATH/$RELEASE_ARTIFACT_DIR" ;;
 esac
 mkdir -p "$RELEASE_ARTIFACT_DIR"
+REDACTOR_PATH="$RELEASE_ARTIFACT_DIR/redact-release-diagnostics.sh"
+cp ./scripts/redact-release-diagnostics.sh "$REDACTOR_PATH"
+chmod 0700 "$REDACTOR_PATH"
 
 compose() {
   docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"
@@ -24,10 +30,20 @@ record_result() {
 }
 
 collect_release_diagnostics() {
+  local health_summary_temp="$RELEASE_ARTIFACT_DIR/health-summary.json.tmp"
   compose ps --format json > "$RELEASE_ARTIFACT_DIR/compose-ps.json" 2>/dev/null || true
-  compose exec -T app php artisan ops:release-health-summary --since="$RELEASE_STARTED_AT" > "$RELEASE_ARTIFACT_DIR/health-summary.json" 2>/dev/null || true
+  if [ -s "$FAILED_JOBS_BASELINE_FILE" ]; then
+    if compose exec -T app php artisan ops:release-health-summary --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE" > "$health_summary_temp" 2>/dev/null; then
+      mv "$health_summary_temp" "$RELEASE_ARTIFACT_DIR/health-summary.json"
+    fi
+  else
+    if compose exec -T app php artisan ops:release-health-summary > "$health_summary_temp" 2>/dev/null; then
+      mv "$health_summary_temp" "$RELEASE_ARTIFACT_DIR/health-summary.json"
+    fi
+  fi
+  rm -f "$health_summary_temp"
   compose logs --tail=120 app web scheduler 2>&1 \
-    | sed -E -e 's/(token|secret|password|app_key)=?[^[:space:]]*/\1=[REDACTED]/Ig' -e 's/bot[0-9]{6,}:[[:alnum:]_-]+/bot[REDACTED]/g' \
+    | "$REDACTOR_PATH" \
     > "$RELEASE_ARTIFACT_DIR/compose.log" || true
 }
 
@@ -71,33 +87,52 @@ verify_release_gates() {
     compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable
   fi
 
-  compose exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null
+  compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"
   compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null
   compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null
 }
 
 restore_previous_release() {
-  echo "Post-cutover verification failed. Restoring previous immutable release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
+  local failure_reason="${FAILURE_REASON:-deploy-failed}"
+  echo "Release verification failed ($failure_reason). Restoring previous immutable release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans
 
   if verify_service_images "$PREVIOUS_IMAGE" && wait_for_health; then
-    record_result "deploy-failed-rollback-succeeded"
+    record_result "${failure_reason}-rollback-succeeded"
     echo "DEPLOY FAILED: rollback succeeded and previous release is healthy." >&2
     return 0
   fi
 
-  record_result "deploy-failed-rollback-failed"
+  record_result "${failure_reason}-rollback-failed"
   echo "DEPLOY FAILED: rollback failed or the restored release is unhealthy. Manual recovery is required." >&2
   return 1
 }
 
-RELEASE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+FAILED_JOBS_BASELINE_FILE="$RELEASE_ARTIFACT_DIR/failed-jobs-baseline.json"
 trap 'status=$?; collect_release_diagnostics; exit "$status"' EXIT
 exec 9>"$PRODUCTION_PATH/.production-mutation.lock"
 if ! flock -n 9; then
   echo "Another production deployment or recovery is already running; refusing to overlap." >&2
+  exit 1
+fi
+
+if [ "$RELEASE_OPERATION" = "rollback" ]; then
+  PREVIOUS_COMMIT="$(cat "$RELEASE_ARTIFACT_DIR/previous-commit.txt")"
+  PREVIOUS_IMAGE="$(cat "$RELEASE_ARTIFACT_DIR/previous-image.txt")"
+  case "$PREVIOUS_COMMIT" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *) echo "Recorded rollback commit is invalid." >&2; exit 1 ;;
+  esac
+  case "$PREVIOUS_IMAGE" in
+    *@sha256:????????????????????????????????????????????????????????????????) ;;
+    *) echo "Recorded rollback image is invalid." >&2; exit 1 ;;
+  esac
+  FAILURE_REASON="${FAILURE_REASON:-external-smoke-failed}"
+  if restore_previous_release; then
+    exit 0
+  fi
   exit 1
 fi
 
@@ -122,6 +157,9 @@ git reset --hard "$DEPLOY_SHA"
 
 echo "Pulling CI-approved production image: $APP_IMAGE"
 docker pull "$APP_IMAGE"
+
+echo "Recording the pre-release failed-job ID watermark with the candidate image."
+APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot > "$FAILED_JOBS_BASELINE_FILE"
 
 echo "Running candidate database migration before application cutover."
 if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan migrate --force; then

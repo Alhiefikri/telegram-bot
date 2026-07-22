@@ -4,39 +4,47 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Carbon;
 use Throwable;
 
 class CheckFailedJobs extends Command
 {
     protected $signature = 'ops:check-failed-jobs
         {--max=0 : Maximum acceptable failed job count}
-        {--since= : Only count failures at or after this ISO-8601 release start time}';
+        {--snapshot : Print a secret-free JSON baseline with the maximum retained failed-job ID}
+        {--baseline= : JSON failed-job ID baseline for bounded tests or manual checks}
+        {--baseline-stdin : Count only IDs above a JSON baseline read from standard input}';
 
     protected $description = 'Alert when failed_jobs exceeds the configured threshold.';
 
     public function handle(): int
     {
         $max = (int) $this->option('max');
-        $since = $this->releaseStart();
-
         if ($max < 0) {
             $this->error('ALERT failed_jobs max must be zero or greater.');
 
             return self::FAILURE;
         }
 
-        if ($this->hasReleaseStartOption() && $since === null) {
-            $this->error('ALERT failed_jobs since must be a valid ISO-8601 timestamp.');
-
-            return self::FAILURE;
-        }
-
         try {
             $query = DB::table('failed_jobs');
-            if ($since !== null) {
-                $query->where('failed_at', '>=', $since->toDateTimeString());
+
+            if ((bool) $this->option('snapshot')) {
+                $this->line(json_encode(
+                    ['max_id' => (int) ($query->max('id') ?? 0)],
+                    JSON_THROW_ON_ERROR,
+                ));
+
+                return self::SUCCESS;
             }
+
+            $baseline = $this->baselineMaxId();
+            if ($baseline === null) {
+                return self::FAILURE;
+            }
+            if ($baseline >= 0) {
+                $query->where('id', '>', $baseline);
+            }
+
             $count = $query->count();
         } catch (Throwable $e) {
             $this->error('ALERT failed_jobs check could not query database: '.$e->getMessage());
@@ -45,45 +53,55 @@ class CheckFailedJobs extends Command
         }
 
         if ($count > $max) {
-            $scope = $since === null ? 'all retained failures' : 'candidate-release failures since '.$since->toIso8601String();
-            $this->error("ALERT failed_jobs count {$count} exceeds max {$max} for {$scope}. Recent job types: ".$this->recentFailedJobTypes($since));
+            $scope = ($this->option('baseline-stdin') || $this->option('baseline')) ? 'failures created after the pre-release baseline' : 'all retained failures';
+            $this->error("ALERT failed_jobs count {$count} exceeds max {$max} for {$scope}. Recent job types: ".$this->recentFailedJobTypes($baseline));
 
             return self::FAILURE;
         }
 
-        $scope = $since === null ? 'all retained failures' : 'candidate-release failures since '.$since->toIso8601String();
+        $scope = ($this->option('baseline-stdin') || $this->option('baseline')) ? 'failures created after the pre-release baseline' : 'all retained failures';
         $this->info("OK failed_jobs count {$count} is within max {$max} for {$scope}.");
 
         return self::SUCCESS;
     }
-    private function releaseStart(): ?Carbon
+
+    private function baselineMaxId(): ?int
     {
-        $value = $this->option('since');
-        if ($value === null || is_array($value) || trim((string) $value) === '') {
-            return null;
+        $encoded = $this->option('baseline');
+        if (! (bool) $this->option('baseline-stdin') && ($encoded === null || trim((string) $encoded) === '')) {
+            return -1;
         }
 
         try {
-            return Carbon::parse((string) $value)->utc();
+            $decoded = json_decode(
+                (bool) $this->option('baseline-stdin') ? stream_get_contents(STDIN) : (string) $encoded,
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            if (! is_array($decoded) || ! array_key_exists('max_id', $decoded)) {
+                throw new \UnexpectedValueException('baseline must contain max_id');
+            }
+            $maxId = filter_var($decoded['max_id'], FILTER_VALIDATE_INT);
+            if ($maxId === false || $maxId < 0) {
+                throw new \UnexpectedValueException('max_id must be a non-negative integer');
+            }
+
+            return $maxId;
         } catch (Throwable) {
+            $this->error('ALERT failed_jobs baseline must contain a non-negative integer max_id.');
+
             return null;
         }
     }
 
-    private function hasReleaseStartOption(): bool
-    {
-        $value = $this->option('since');
-
-        return $value !== null && (! is_string($value) || trim($value) !== '');
-    }
-
-    private function recentFailedJobTypes(?Carbon $since = null): string
+    private function recentFailedJobTypes(?int $baseline): string
     {
         $types = [];
 
         $query = DB::table('failed_jobs')->orderByDesc('failed_at');
-        if ($since !== null) {
-            $query->where('failed_at', '>=', $since->toDateTimeString());
+        if ($baseline >= 0) {
+            $query->where('id', '>', $baseline);
         }
 
         foreach ($query->limit(20)->pluck('payload') as $payload) {
