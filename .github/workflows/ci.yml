@@ -109,7 +109,7 @@ jobs:
           retention-days: 14
 
       - name: Exercise production release and rollback paths
-        working-directory: ..
+        working-directory: .
         run: |
           ./scripts/test-deploy-production-release.sh
           ./scripts/test-redact-release-diagnostics.sh
