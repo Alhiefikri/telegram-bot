@@ -177,7 +177,7 @@ jobs:
       - name: Verify production container image
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint sh "$LOCAL_IMAGE_TAG" -ceu '
+          docker run --rm --entrypoint sh -e APP_ENV=testing "$LOCAL_IMAGE_TAG" -ceu '
             php --version
             php artisan --version
             test -f vendor/autoload.php
