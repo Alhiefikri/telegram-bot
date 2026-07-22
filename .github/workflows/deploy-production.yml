@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-production
+  group: production-mutation
   cancel-in-progress: false
 
 jobs:
@@ -100,10 +100,16 @@ jobs:
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
-          ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
+          exec 9>"$PRODUCTION_PATH/.production-mutation.lock"
+          if ! flock -n 9; then
+            echo "Another production deployment or recovery is already running; refusing to overlap." >&2
+            exit 1
+          fi
+          echo "Acquired production mutation lock."
 
           git fetch --prune origin "$DEPLOY_BRANCH"
           git cat-file -e "${DEPLOY_SHA}^{commit}"

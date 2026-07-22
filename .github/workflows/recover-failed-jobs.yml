@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type RETRY_FAILED_JOBS to retry every failed queue job.
+        description: Type RECOVER_TELEGRAM_UPDATES to recover supported failed Telegram update jobs only.
         required: true
         type: string
 
@@ -12,13 +12,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: recover-failed-jobs
+  group: production-mutation
   cancel-in-progress: false
 
 jobs:
   recover:
-    name: Retry and verify failed jobs
-    if: inputs.confirm == 'RETRY_FAILED_JOBS'
+    name: Recover and verify supported failed Telegram update jobs
+    if: inputs.confirm == 'RECOVER_TELEGRAM_UPDATES'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -39,7 +39,7 @@ jobs:
           chmod 600 ~/.ssh/production_key
           ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts
 
-      - name: Retry failed jobs
+      - name: Recover failed Telegram update jobs
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
@@ -50,24 +50,32 @@ jobs:
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
-          ssh -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
+          exec 9>"$PRODUCTION_PATH/.production-mutation.lock"
+          if ! flock -n 9; then
+            echo "Another production deployment or recovery is already running; refusing to overlap." >&2
+            exit 1
+          fi
+          echo "Acquired production mutation lock."
 
           ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:failed </dev/null
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:retry all </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --dry-run
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null
 
           for attempt in $(seq 1 12); do
             if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null; then
-              echo "All failed jobs recovered."
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
+              echo "Supported failed Telegram update jobs recovered; no failed jobs remain."
               exit 0
             fi
 
             sleep 5
           done
 
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan queue:failed </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
           exit 1
           REMOTE

@@ -490,6 +490,10 @@ SH);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=0', $contents);
+        $this->assertStringContainsString('group: production-mutation', $contents);
+        $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $contents);
+        $this->assertStringContainsString('flock -n 9', $contents);
+        $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
         foreach ([
             'app health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
             'scheduler health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
@@ -507,7 +511,7 @@ SH);
         $this->assertStringContainsString('Unexpected Telegram Bot Compose project(s) running:', $contents);
     }
 
-    public function test_failed_job_recovery_workflow_requires_manual_confirmation_and_verifies_the_queue(): void
+    public function test_failed_job_recovery_workflow_is_targeted_locked_and_verifies_the_queue(): void
     {
         $workflow = base_path('../.github/workflows/recover-failed-jobs.yml');
 
@@ -515,12 +519,25 @@ SH);
 
         $contents = file_get_contents($workflow);
         $this->assertStringContainsString('workflow_dispatch:', $contents);
-        $this->assertStringContainsString('RETRY_FAILED_JOBS', $contents);
+        $this->assertStringContainsString('RECOVER_TELEGRAM_UPDATES', $contents);
         $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
-        $this->assertStringContainsString('php artisan queue:retry all', $contents);
+        $this->assertStringContainsString('group: production-mutation', $contents);
+        $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $contents);
+        $this->assertStringContainsString('flock -n 9', $contents);
+        $this->assertStringContainsString('php artisan telegram:recover-failed-updates --dry-run', $contents);
+        $this->assertStringContainsString('php artisan telegram:recover-failed-updates --prune-unrecoverable', $contents);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
-        $this->assertStringContainsString('php artisan queue:failed', $contents);
+        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
+        $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
+        $this->assertStringNotContainsString('queue:retry all', $contents);
+        $this->assertStringNotContainsString('queue:failed', $contents);
         $this->assertStringNotContainsString('queue:flush', $contents);
+
+        $deployWorkflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
+        preg_match('/^concurrency:\s+group: ([^\s]+)/m', $deployWorkflow, $deployConcurrency);
+        preg_match('/^concurrency:\s+group: ([^\s]+)/m', $contents, $recoveryConcurrency);
+        $this->assertSame('production-mutation', $deployConcurrency[1] ?? null);
+        $this->assertSame($deployConcurrency[1] ?? null, $recoveryConcurrency[1] ?? null);
     }
 
     public function test_docker_compose_has_vps_resource_caps_and_log_rotation(): void

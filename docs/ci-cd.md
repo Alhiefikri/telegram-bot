@@ -25,6 +25,14 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
   - Builds the production image on the VPS after checking out the pinned SHA, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This preserves the VPS build as the release artifact because production secrets and the deploy host stay local to the VPS.
   - Verifies app health, scheduler heartbeat, failed jobs, queue depth, Telegram webhook external registration, and absence of duplicate running Telegram Bot Compose projects after deploy.
+  - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
+  - Uses SSH batch mode, a connection timeout, and server keepalives to make long VPS operations resilient to idle disconnects.
+
+- `.github/workflows/recover-failed-jobs.yml`
+  - Runs manually in the `production` environment only after the operator types `RECOVER_TELEGRAM_UPDATES`.
+  - Prints a count-only dry-run summary first, then directly handles only stored `ProcessTelegramUpdate` failures. It classifies retryable updates, stale deleted updates, and already terminal updates. Unsupported failed job types are never replayed or deleted.
+  - A direct retry that still fails is marked terminal only with `--prune-unrecoverable`; stale and already terminal Telegram records are removed from `failed_jobs` without replaying them.
+  - The workflow then requires both failed-job count and queue depth to return to zero. If an unsupported failed job remains, recovery fails visibly for manual, domain-specific handling rather than replaying it.
 
 ## Required GitHub secrets
 
@@ -70,3 +78,14 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 - Running Docker containers with Compose label `com.docker.compose.project` must not include another `telegram-bot*` project besides `telegram-bot-prod`.
 
 The Telegram webhook check verifies only booleans/counts: Telegram API success, HTTPS target, webhook secret configured, webhook URL configured, webhook URL matching `APP_URL/api/webhook/telegram`, `pending_update_count`, and whether Telegram reports a last error. It must not print the bot token, webhook secret, or full private webhook URL.
+
+## Safe failed-job recovery
+
+Use recovery only for failed Telegram update processing after checking the production incident. It does not recover arbitrary queue jobs.
+
+```bash
+gh workflow run recover-failed-jobs.yml --ref main -f confirm=RECOVER_TELEGRAM_UPDATES
+gh run watch
+```
+
+The workflow prints only aggregate classification counts before mutation, so it does not expose job payloads or production secrets. It refuses to run alongside a production deploy at both GitHub Actions and VPS levels. If verification does not reach zero failed jobs and zero queue depth, treat the remaining jobs as unsupported or otherwise unsafe to replay, inspect them through the appropriate domain procedure, and do not use `queue:retry all`.

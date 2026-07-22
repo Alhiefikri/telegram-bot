@@ -13,24 +13,32 @@ class RecoverFailedTelegramUpdates extends Command
 {
     protected $signature = 'telegram:recover-failed-updates
         {--dry-run : Report recoverable failed Telegram update jobs without processing them}
-        {--prune-unrecoverable : Delete Telegram update failed_jobs that still fail after one direct retry}';
+        {--prune-unrecoverable : Mark retry failures terminal and remove only their Telegram update failed_jobs}';
 
-    protected $description = 'Retry failed Telegram update jobs directly and remove only records that recover successfully.';
+    protected $description = 'Classify and directly recover only failed Telegram update jobs.';
 
     public function handle(TelegramUpdateProcessor $processor): int
     {
+        $supported = 0;
+        $retryable = 0;
         $recovered = 0;
-        $pruned = 0;
+        $stale = 0;
+        $terminal = 0;
         $failed = 0;
         $failedPruned = 0;
+        $unsupported = 0;
         $dryRun = (bool) $this->option('dry-run');
         $pruneUnrecoverable = (bool) $this->option('prune-unrecoverable');
 
         foreach (DB::table('failed_jobs')->orderBy('failed_at')->get(['uuid', 'payload']) as $failedJob) {
             $job = $this->processTelegramUpdateJob((string) $failedJob->payload);
             if ($job === null) {
+                $unsupported++;
+
                 continue;
             }
+
+            $supported++;
 
             $update = TelegramUpdate::query()->find($job->telegramUpdateId);
             if ($update === null) {
@@ -38,16 +46,28 @@ class RecoverFailedTelegramUpdates extends Command
                     DB::table('failed_jobs')->where('uuid', $failedJob->uuid)->delete();
                 }
 
-                $pruned++;
+                $stale++;
+
+                continue;
+            }
+
+            if ($update->terminal_failed_at !== null) {
+                if (! $dryRun) {
+                    DB::table('failed_jobs')->where('uuid', $failedJob->uuid)->delete();
+                }
+
+                $terminal++;
 
                 continue;
             }
 
             if ($dryRun) {
-                $recovered++;
+                $retryable++;
 
                 continue;
             }
+
+            $retryable++;
 
             try {
                 $job->handle($processor);
@@ -74,7 +94,8 @@ class RecoverFailedTelegramUpdates extends Command
             }
         }
 
-        $this->info("telegram:recover-failed-updates completed: recovered={$recovered} pruned={$pruned} failed_pruned={$failedPruned} failed={$failed}");
+        $mode = $dryRun ? 'dry-run' : 'completed';
+        $this->info("telegram:recover-failed-updates {$mode}: supported={$supported} retryable={$retryable} recovered={$recovered} stale={$stale} terminal={$terminal} failed_pruned={$failedPruned} unsupported={$unsupported} failed={$failed}");
 
         return $failed === 0 ? self::SUCCESS : self::FAILURE;
     }
