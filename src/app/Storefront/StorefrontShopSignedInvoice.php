@@ -55,8 +55,8 @@ class StorefrontShopSignedInvoice
             qrisReadinessTitle: $qrisReadiness['title'],
             qrisReadinessMessage: $qrisReadiness['message'],
             qrisRetryLabel: $qrisReadiness['retry_label'],
-            qrisImageDataUri: $this->qrisImageDataUri($payment),
-            hostedPaymentUrl: $this->hostedPaymentUrl($payment),
+            qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
+            hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
             accountGroups: $accountGroups,
             accountCopyText: $this->accountCopyText($accountGroups),
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
@@ -77,7 +77,8 @@ class StorefrontShopSignedInvoice
         $qrisRecoveryFailed = false;
         $qrisRecoveredDuringRetry = false;
 
-        if ($this->shouldRecoverQris($order, $payment)) {
+        $projection = $this->orders->project($order, $payment);
+        if ($this->shouldRecoverQris($projection, $payment)) {
             try {
                 $this->nativeQris->ensureCreated($payment);
             } catch (Throwable $exception) {
@@ -109,7 +110,7 @@ class StorefrontShopSignedInvoice
             );
         }
 
-        if ($this->shouldRefreshFromProvider($order, $payment)) {
+        if ($this->shouldRefreshFromProvider($projection, $payment)) {
             try {
                 $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
             } catch (Throwable $exception) {
@@ -183,18 +184,16 @@ class StorefrontShopSignedInvoice
         return StorefrontShopSignedInvoiceState::Terminal;
     }
 
-    private function shouldRefreshFromProvider(Order $order, Payment $payment): bool
+    private function shouldRefreshFromProvider(OrderLifecycleProjection $projection, Payment $payment): bool
     {
         return $this->hasPayableNativeQris($payment)
-            && $payment->status === PaymentStatus::Pending
-            && $order->order_status === OrderStatus::PendingPayment;
+            && $projection->isPendingPayment;
     }
 
-    private function shouldRecoverQris(Order $order, Payment $payment): bool
+    private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
     {
         return $this->isPakasirPayment($payment)
-            && $payment->status === PaymentStatus::Pending
-            && $order->order_status === OrderStatus::PendingPayment
+            && $projection->isPendingPayment
             && ! $this->hasPayableNativeQris($payment);
     }
 
@@ -209,18 +208,18 @@ class StorefrontShopSignedInvoice
         return strtolower((string) $payment?->provider) === 'pakasir';
     }
 
-    private function qrisImageDataUri(?Payment $payment): ?string
+    private function qrisImageDataUri(OrderLifecycleProjection $projection, ?Payment $payment): ?string
     {
-        if ($payment?->status !== PaymentStatus::Pending || ! $this->hasPayableNativeQris($payment)) {
+        if (! $projection->isPendingPayment || ! $this->hasPayableNativeQris($payment)) {
             return null;
         }
 
         return 'data:image/png;base64,'.base64_encode($this->qrCodes->png($payment->provider_payment_number));
     }
 
-    private function hostedPaymentUrl(?Payment $payment): ?string
+    private function hostedPaymentUrl(OrderLifecycleProjection $projection, ?Payment $payment): ?string
     {
-        if ($payment?->status !== PaymentStatus::Pending || ! $this->isPakasirPayment($payment)) {
+        if (! $projection->isPendingPayment || ! $this->isPakasirPayment($payment)) {
             return null;
         }
 

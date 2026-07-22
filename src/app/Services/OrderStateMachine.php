@@ -54,6 +54,20 @@ class OrderStateMachine implements OrderLifecycle
     {
         return DB::transaction(function () use ($order): OrderLifecycleResult {
             return $this->withLockedOrderPayments($order->id, function (Order $lockedOrder, $payments): OrderLifecycleResult {
+                $manualPayment = $payments->where('provider', 'manual')->first();
+
+                if ($lockedOrder->order_status === OrderStatus::Completed
+                    && $lockedOrder->payment_status === PaymentStatus::Paid
+                    && $manualPayment?->status === PaymentStatus::Paid) {
+                    $completed = $lockedOrder->fresh(['payments']);
+
+                    return new OrderLifecycleResult(
+                        order: $completed,
+                        payment: $completed->payments->firstWhere('id', $manualPayment->id),
+                        newlyApplied: false,
+                    );
+                }
+
                 $payment = $payments
                     ->where('provider', 'manual')
                     ->where('status', PaymentStatus::Pending)
