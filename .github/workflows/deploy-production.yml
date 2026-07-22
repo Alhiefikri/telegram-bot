@@ -34,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TARGET_SHA: ${{ inputs.commit || github.sha }}
+    outputs:
+      image_reference: ${{ steps.production-image.outputs.reference }}
     steps:
       - name: Require manual deploy from main
         run: |
@@ -49,6 +51,7 @@ jobs:
           esac
 
       - name: Require successful CI for deployment commit
+        id: successful-ci
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -59,13 +62,45 @@ jobs:
             *) echo "Deployment commit $TARGET_SHA is not contained in ${DEPLOY_BRANCH}."; exit 1 ;;
           esac
 
-          ci_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&status=completed&per_page=100" --jq '.workflow_runs | map(select(.conclusion == "success")) | .[0].id // empty')"
+          ci_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&status=completed&event=push&per_page=100" --jq '.workflow_runs | map(select(.conclusion == "success" and .head_branch == "main")) | .[0].id // empty')"
           if [ -z "$ci_run_id" ]; then
             echo "CI has not succeeded for deployment commit $TARGET_SHA. Push the commit to ${DEPLOY_BRANCH} and wait for CI."
             exit 1
           fi
 
           echo "Using successful CI run $ci_run_id for $TARGET_SHA."
+          echo "run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the CI-approved immutable image
+        id: production-image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ steps.successful-ci.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/production-image-metadata"
+          gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" --name production-image-metadata --dir "$artifact_dir"
+
+          image_commit="$(cat "$artifact_dir/production-image-commit.txt")"
+          image_reference="$(cat "$artifact_dir/production-image-reference.txt")"
+          if [ "$image_commit" != "$TARGET_SHA" ]; then
+            echo "CI image commit $image_commit does not match deployment commit $TARGET_SHA." >&2
+            exit 1
+          fi
+
+          image_repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          printf '%s' "$image_reference" | grep -Eq "^${image_repository}@sha256:[0-9a-f]{64}$" \
+            || { echo "CI artifact contains an invalid production image reference: $image_reference" >&2; exit 1; }
+
+          echo "reference=$image_reference" >> "$GITHUB_OUTPUT"
+          echo "Deploying CI-approved image: $image_reference"
+          {
+            echo "### Approved production image"
+            echo
+            echo "- Commit: \`${TARGET_SHA}\`"
+            echo "- CI run: \`${CI_RUN_ID}\`"
+            echo "- Immutable reference: \`${image_reference}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Deploy to production VPS
@@ -74,6 +109,7 @@ jobs:
     environment: production
     env:
       RELEASE_ARTIFACT_DIR: .release-gate-artifacts/${{ github.run_id }}-${{ github.run_attempt }}
+      APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,13 +136,14 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+          APP_IMAGE: ${{ env.APP_IMAGE }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" 'bash -s' <<'REMOTE'
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$PRODUCTION_PATH"
           RELEASE_ARTIFACT_DIR="$PRODUCTION_PATH/$RELEASE_ARTIFACT_DIR"
@@ -135,8 +172,20 @@ jobs:
           git reset --hard "$DEPLOY_SHA"
 
           ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build --pull
+          echo "Pulling CI-approved production image: $APP_IMAGE"
+          docker pull "$APP_IMAGE"
           docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans
+
+          for service in app scheduler; do
+            container_id="$(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env ps -q "$service")"
+            running_image="$(docker inspect "$container_id" --format '{{.Image}}')"
+            approved_image="$(docker image inspect "$APP_IMAGE" --format '{{.Id}}')"
+            if [ "$running_image" != "$approved_image" ]; then
+              echo "$service is running $running_image instead of approved image $approved_image." >&2
+              exit 1
+            fi
+          done
+          echo "Production app and scheduler are running approved image: $APP_IMAGE"
 
           for attempt in $(seq 1 36); do
             if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null; then

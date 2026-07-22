@@ -75,6 +75,7 @@ x-app-environment: &app-environment
 
 services:
   app:
+    image: ${APP_IMAGE:-telegram-bot:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -133,6 +134,7 @@ services:
       - bot_network
 
   scheduler:
+    image: ${APP_IMAGE:-telegram-bot:local}
     build:
       context: .
       dockerfile: Dockerfile

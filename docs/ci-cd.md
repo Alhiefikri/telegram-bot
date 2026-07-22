@@ -15,15 +15,18 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Laravel test suite via `composer test`.
   - Node 24 + `npm ci`.
   - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
-  - Production Docker image build check.
+  - Builds the production image once with BuildKit, reusing the GitHub Actions cache without changing the resulting content-addressed image.
+  - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
+  - Records the immutable `sha256` reference in the `production-image-metadata` artifact and the CI job summary.
 
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.
   - Pins the deployment to the dispatched revision (or an explicitly supplied full commit SHA), requires that SHA to be contained in `main`, and requires a successful `CI` workflow run for that exact SHA.
-  - Does not rerun Composer, NPM, PHPUnit, asset smoke, or the CI-parity Docker build; those are the required `CI` evidence for the pinned SHA.
+  - Does not rerun Composer, NPM, PHPUnit, asset smoke, or a Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
-  - Builds the production image on the VPS after checking out the pinned SHA, then starts that already-built image with `docker compose ... up -d --no-build --remove-orphans`. This preserves the VPS build as the release artifact because production secrets and the deploy host stay local to the VPS.
+  - Downloads the image identity recorded by the successful CI run, pulls that exact GHCR digest on the VPS, and starts it with `docker compose ... up -d --no-build --remove-orphans`. Production never rebuilds the application image.
+  - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
   - Uses SSH batch mode, a connection timeout, and server keepalives to make long VPS operations resilient to idle disconnects.
@@ -47,6 +50,14 @@ Configure these in GitHub repository Settings → Secrets and variables → Acti
 
 Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and payment credentials must stay in the VPS `.env`, not in the workflow file. The deploy workflow validates Compose with `./scripts/safe-compose-config.sh`, which uses `docker compose config --quiet`; do not run or paste plain `docker compose ... config` output for production-like environments because resolved Compose output includes secret values.
 
+CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the image job receives `packages: write`, while all other workflow jobs remain read-only. If the GHCR package is private, authenticate Docker on the VPS once using a dedicated machine user or fine-grained token with read-only package access. Do not use a personal token with repository write access:
+
+```bash
+printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+```
+
+The credential remains in the VPS Docker credential store and is not passed through deployment logs or workflow artifacts.
+
 ## Recommended GitHub environment protection
 
 Create a GitHub Environment named `production` and add a required reviewer if you want manual approval before SSH deploy. The workflow already targets `environment: production`.
@@ -68,6 +79,23 @@ gh run watch
 ```
 
 The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be able to `git fetch origin main` and run `docker compose` from the repo root.
+
+## Image identity and retention
+
+Each successful push to `main` publishes one commit-addressed GHCR tag. Treat tags as lookup aids only; the deployment consumes the immutable `ghcr.io/<owner>/<repository>@sha256:<digest>` reference recorded by CI. The metadata artifact is retained for 30 days, so production deployments must select a CI run whose metadata is still available.
+
+Keep every GHCR digest that is currently deployed or is a supported rollback target. A safe baseline is to retain at least the latest 30 successful `main` images and never delete a digest reported by production. Configure package cleanup accordingly in GitHub Packages; deleting a commit tag is safe only after confirming its digest is neither running nor retained for rollback.
+
+Identify the release selected by the latest deployment in its `Approved production image` job summary. On the VPS, identify the exact running image without printing environment variables or credentials:
+
+```bash
+docker compose -p telegram-bot-prod --env-file .env ps -q app \
+  | xargs docker inspect --format '{{.Config.Image}} {{.Image}}'
+docker compose -p telegram-bot-prod --env-file .env ps -q scheduler \
+  | xargs docker inspect --format '{{.Config.Image}} {{.Image}}'
+```
+
+The first value is the configured immutable GHCR reference and the second is the local content-addressed image ID. They should correspond to the digest printed in the deployment summary.
 
 The post-deploy release interface is intentionally cheap but deeper than liveness:
 
