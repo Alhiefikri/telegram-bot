@@ -542,7 +542,7 @@ SH);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT"', $release);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $release);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
-        $this->assertStringContainsString('actions/upload-artifact@v4', $contents);
+        $this->assertStringContainsString('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4', $contents);
         $this->assertStringContainsString('ops:release-health-summary --since="$RELEASE_STARTED_AT"', $release);
         $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
         $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
@@ -566,6 +566,48 @@ SH);
         $this->assertStringContainsString('deploy-failed-rollback-succeeded', $release);
         $this->assertStringContainsString('deploy-failed-rollback-failed', $release);
         $this->assertStringContainsString('duplicate_projects="$(', $release);
+    }
+
+    public function test_github_workflows_pin_actions_bound_jobs_and_enforce_dependency_audits(): void
+    {
+        $workflowDirectory = base_path('../.github/workflows');
+        $workflowPaths = glob($workflowDirectory.'/*.yml');
+
+        $this->assertNotEmpty($workflowPaths);
+
+        foreach ($workflowPaths as $workflowPath) {
+            $contents = file_get_contents($workflowPath);
+            preg_match_all('/^\s*(?:-\s*)?uses:\s*([^\s#]+)/m', $contents, $uses);
+
+            foreach ($uses[1] as $action) {
+                if (str_starts_with($action, './') || str_starts_with($action, 'docker://')) {
+                    continue;
+                }
+
+                $this->assertMatchesRegularExpression(
+                    '/@[0-9a-f]{40}$/',
+                    $action,
+                    basename($workflowPath).' contains an action that is not pinned to a full commit SHA: '.$action,
+                );
+            }
+
+            $jobCount = preg_match_all('/^    runs-on:\s*.+$/m', $contents);
+            $timeoutCount = preg_match_all('/^    timeout-minutes:\s*\d+\s*$/m', $contents);
+            $this->assertSame($jobCount, $timeoutCount, basename($workflowPath).' must bound every job with a timeout.');
+        }
+
+        $ci = file_get_contents($workflowDirectory.'/ci.yml');
+        $this->assertStringContainsString('actionlint', $ci);
+        $this->assertStringContainsString('composer audit --locked --no-dev --abandoned=fail', $ci);
+        $this->assertStringContainsString('npm audit --audit-level=high', $ci);
+        $this->assertStringContainsString('phpunit-failure-', $ci);
+        $this->assertStringContainsString('playwright-failure-', $ci);
+        $this->assertStringContainsString('docker-failure-', $ci);
+
+        $dependabot = file_get_contents(base_path('../.github/dependabot.yml'));
+        foreach (['github-actions', 'composer', 'npm'] as $ecosystem) {
+            $this->assertStringContainsString('package-ecosystem: '.$ecosystem, $dependabot);
+        }
     }
 
     public function test_failed_job_recovery_workflow_is_targeted_locked_and_verifies_the_queue(): void

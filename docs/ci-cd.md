@@ -11,6 +11,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 ## Workflows
 
 - `.github/workflows/ci.yml`
+  - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
   - PHP 8.4 + Composer validate/install.
   - Laravel test suite via `composer test`.
   - Node 24 + `npm ci`.
@@ -18,6 +19,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Builds the production image once with BuildKit, reusing the GitHub Actions cache without changing the resulting content-addressed image.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
   - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
+  - Every job has a bounded timeout. Failed PHPUnit, Playwright, and Docker jobs upload diagnostic artifacts retained for 14 days.
 
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.
@@ -61,9 +63,73 @@ printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME
 
 The credential remains in the VPS Docker credential store and is not passed through deployment logs or workflow artifacts.
 
-## Recommended GitHub environment protection
+## Dependency vulnerability policy
 
-Create a GitHub Environment named `production` and add a required reviewer if you want manual approval before SSH deploy. The workflow already targets `environment: production`.
+CI blocks a release when either dependency audit fails:
+
+- Composer production dependencies use `composer audit --locked --no-dev --abandoned=fail`. Any published advisory or abandoned production package is blocking, regardless of severity.
+- npm uses `npm audit --audit-level=high`. High and critical findings are blocking. Moderate and low findings must be reviewed during the next dependency update, but do not by themselves block a release.
+
+Do not suppress an advisory only to make CI green. A temporary exception must be documented in a GitHub issue with the affected package, advisory identifier, exposure analysis, compensating control, owner, and expiry date.
+
+Dependabot checks GitHub Actions, Composer, and npm weekly through `.github/dependabot.yml`. Workflow actions must remain pinned to a reviewed full commit SHA. The trailing version comment is informational and is the version Dependabot updates.
+
+## Required GitHub governance settings
+
+Some controls live in GitHub and cannot be enforced by committed files. Repository administrators must configure and periodically verify the following.
+
+### Actions
+
+- Default workflow token permission: read-only.
+- Pull request approval permission for workflows: disabled.
+- Allowed Actions: GitHub-owned actions, verified creators, plus the reviewed `shivammathur/setup-php` and `docker/*` patterns.
+- Require actions to be pinned to a full-length commit SHA.
+
+Verify through the API:
+
+```bash
+gh api repos/{owner}/{repo}/actions/permissions
+gh api repos/{owner}/{repo}/actions/permissions/workflow
+gh api repos/{owner}/{repo}/actions/permissions/selected-actions
+```
+
+Expected values include `allowed_actions: selected`, `sha_pinning_required: true`, `default_workflow_permissions: read`, and `can_approve_pull_request_reviews: false`.
+
+### `main` branch
+
+Protect `main` with these settings:
+
+- Require a pull request before merging, with at least one approval.
+- Require the current successful CI check names, including `Workflow validation and dependency audit`, `PHP tests`, `Frontend build and asset smoke`, `Customer browser smoke`, and `Build, verify, and publish production image`.
+- Require branches to be up to date before merging.
+- Require all review conversations to be resolved.
+- Do not allow force pushes or branch deletion.
+- Include administrators so the release path cannot be bypassed accidentally.
+
+Verify through the API:
+
+```bash
+gh api repos/{owner}/{repo}/branches/main/protection
+```
+
+GitHub Free does not provide branch protection for private repositories. If the API returns HTTP 403 with `Upgrade to GitHub Pro or make this repository public`, upgrade the repository plan or make the repository public before treating this control as satisfied.
+
+### `production` environment
+
+The `production` environment must require at least one explicit reviewer before the SSH deploy job starts. Restrict deployment branches to `main`, disable administrator bypass where the plan supports it, and keep both production mutation workflows targeted at `environment: production`.
+
+Verify through the API:
+
+```bash
+gh api repos/{owner}/{repo}/environments/production
+gh api repos/{owner}/{repo}/environments/production/deployment-branch-policies
+```
+
+Expected output contains a `required_reviewers` protection rule and a `main` deployment branch policy. Required-reviewer availability for private repositories depends on the GitHub plan and currently may require GitHub Enterprise. If configuration returns HTTP 422 mentioning the billing plan, move the repository to a plan that supports the rule or make it public before treating production approval as protected. Verify support through the API rather than assuming a GitHub Pro or Team upgrade is sufficient.
+
+## Production environment protection
+
+The workflows already target a GitHub Environment named `production`. Its required reviewer and `main`-only deployment branch policy are mandatory governance controls, subject to the GitHub plan limitation documented above.
 
 ## Release command
 

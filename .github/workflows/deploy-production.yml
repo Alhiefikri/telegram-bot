@@ -32,6 +32,7 @@ jobs:
   release-gate:
     name: Release gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       TARGET_SHA: ${{ inputs.commit || github.sha }}
     outputs:
@@ -101,13 +102,14 @@ jobs:
   deploy:
     name: Deploy to production VPS
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: release-gate
     environment: production
     env:
       RELEASE_ARTIFACT_DIR: .release-gate-artifacts/${{ github.run_id }}-${{ github.run_attempt }}
       APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure SSH
         env:
@@ -185,7 +187,7 @@ jobs:
 
       - name: Upload release-gate diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-gate-diagnostics-${{ github.run_id }}
           path: release-gate-artifacts
