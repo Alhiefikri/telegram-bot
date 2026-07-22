@@ -147,6 +147,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      statuses: write
     env:
       LOCAL_IMAGE_TAG: telegram-bot:${{ github.sha }}
     steps:
@@ -196,6 +197,8 @@ jobs:
 
       - name: Publish verified image and record immutable digest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           docker tag "$LOCAL_IMAGE_TAG" "$IMAGE_TAG"
@@ -209,8 +212,11 @@ jobs:
 
           immutable_ref="${IMAGE_REPOSITORY}@${digest}"
           printf '%s\n' "$digest" > production-image-digest.txt
-          printf '%s\n' "$immutable_ref" > production-image-reference.txt
-          printf '%s\n' "${GITHUB_SHA}" > production-image-commit.txt
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=success \
+            -f context=production-image \
+            -f description="$digest" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           {
             echo "### Production image"
             echo
@@ -219,15 +225,3 @@ jobs:
             echo "- Immutable reference: \`${immutable_ref}\`"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Published verified production image: $immutable_ref"
-
-      - name: Upload production image identity
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-image-metadata
-          path: |
-            production-image-digest.txt
-            production-image-reference.txt
-            production-image-commit.txt
-          if-no-files-found: error
-          retention-days: 30

@@ -78,19 +78,15 @@ jobs:
           CI_RUN_ID: ${{ steps.successful-ci.outputs.run_id }}
         run: |
           set -euo pipefail
-          artifact_dir="${RUNNER_TEMP}/production-image-metadata"
-          gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" --name production-image-metadata --dir "$artifact_dir"
-
-          image_commit="$(cat "$artifact_dir/production-image-commit.txt")"
-          image_reference="$(cat "$artifact_dir/production-image-reference.txt")"
-          if [ "$image_commit" != "$TARGET_SHA" ]; then
-            echo "CI image commit $image_commit does not match deployment commit $TARGET_SHA." >&2
+          digest="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/statuses" \
+            --jq '[.[] | select(.context == "production-image" and .state == "success")][0].description // empty')"
+          if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "CI did not record a valid approved production image digest for $TARGET_SHA." >&2
             exit 1
           fi
 
           image_repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          printf '%s' "$image_reference" | grep -Eq "^${image_repository}@sha256:[0-9a-f]{64}$" \
-            || { echo "CI artifact contains an invalid production image reference: $image_reference" >&2; exit 1; }
+          image_reference="${image_repository}@${digest}"
 
           echo "reference=$image_reference" >> "$GITHUB_OUTPUT"
           echo "Deploying CI-approved image: $image_reference"

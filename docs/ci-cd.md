@@ -17,7 +17,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
   - Builds the production image once with BuildKit, reusing the GitHub Actions cache without changing the resulting content-addressed image.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
-  - Records the immutable `sha256` reference in the `production-image-metadata` artifact and the CI job summary.
+  - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
 
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.
@@ -25,7 +25,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Does not rerun Composer, NPM, PHPUnit, asset smoke, or a Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
-  - Downloads the image identity recorded by the successful CI run, pulls that exact GHCR digest on the VPS, and starts it with `docker compose ... up -d --no-build --remove-orphans`. Production never rebuilds the application image.
+  - Reads the image digest recorded on the deployment commit by the successful CI run, pulls that exact GHCR digest on the VPS, and starts it with `docker compose ... up -d --no-build --remove-orphans`. Production never rebuilds the application image.
   - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
@@ -50,7 +50,7 @@ Configure these in GitHub repository Settings → Secrets and variables → Acti
 
 Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and payment credentials must stay in the VPS `.env`, not in the workflow file. The deploy workflow validates Compose with `./scripts/safe-compose-config.sh`, which uses `docker compose config --quiet`; do not run or paste plain `docker compose ... config` output for production-like environments because resolved Compose output includes secret values.
 
-CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the image job receives `packages: write`, while all other workflow jobs remain read-only. If the GHCR package is private, authenticate Docker on the VPS once using a dedicated machine user or fine-grained token with read-only package access. Do not use a personal token with repository write access:
+CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the image job receives `packages: write` and `statuses: write`, while all other workflow jobs remain read-only. If the GHCR package is private, authenticate Docker on the VPS once using a dedicated machine user or fine-grained token with read-only package access. Do not use a personal token with repository write access:
 
 ```bash
 printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
@@ -82,7 +82,7 @@ The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be abl
 
 ## Image identity and retention
 
-Each successful push to `main` publishes one commit-addressed GHCR tag. Treat tags as lookup aids only; the deployment consumes the immutable `ghcr.io/<owner>/<repository>@sha256:<digest>` reference recorded by CI. The metadata artifact is retained for 30 days, so production deployments must select a CI run whose metadata is still available.
+Each successful push to `main` publishes one commit-addressed GHCR tag. Treat tags as lookup aids only; the deployment consumes the immutable `ghcr.io/<owner>/<repository>@sha256:<digest>` reference recorded by CI in the commit's `production-image` status. Commit statuses remain attached to repository history and do not consume GitHub Actions artifact storage.
 
 Keep every GHCR digest that is currently deployed or is a supported rollback target. A safe baseline is to retain at least the latest 30 successful `main` images and never delete a digest reported by production. Configure package cleanup accordingly in GitHub Packages; deleting a commit tag is safe only after confirming its digest is neither running nor retained for rollback.
 
