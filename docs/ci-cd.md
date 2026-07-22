@@ -25,7 +25,10 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Does not rerun Composer, NPM, PHPUnit, asset smoke, or a Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
-  - Reads the image digest recorded on the deployment commit by the successful CI run, pulls that exact GHCR digest on the VPS, and starts it with `docker compose ... up -d --no-build --remove-orphans`. Production never rebuilds the application image.
+  - Reads the image digest recorded on the deployment commit by the successful CI run and pulls that exact GHCR digest on the VPS. Production never rebuilds the application image.
+  - Records the previous Git commit and immutable running image before changing the checkout, then runs `php artisan migrate --force` in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
+  - Aborts before cutover when migration fails, leaving the current containers available. If a post-cutover release gate fails, restores the previous commit and immutable image automatically and verifies app and scheduler health.
+  - Writes `release-result.txt` with `deploy-succeeded`, `migration-failed-no-cutover`, `deploy-failed-rollback-succeeded`, or `deploy-failed-rollback-failed`, so operators can distinguish a contained deploy failure from a failed recovery.
   - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
@@ -80,6 +83,18 @@ gh run watch
 
 The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be able to `git fetch origin main` and run `docker compose` from the repo root.
 
+## Migration compatibility and approval policy
+
+Every production migration must follow expand-and-contract compatibility because the old application remains live while the candidate migration runs and may be restored after cutover:
+
+1. **Expand** with additive, backward-compatible schema changes such as nullable columns, new tables, or new indexes created without blocking production traffic.
+2. Deploy code that can operate with both the old and expanded schema. Backfill data in a separate bounded operation when necessary.
+3. **Contract** only in a later release after the old code is no longer a rollback target.
+
+Do not include destructive renames, column/table drops, incompatible type changes, irreversible data rewrites, or long blocking DDL in the automatic release migration. Those changes require a verified database backup and explicit human approval before dispatching the workflow. If a change cannot preserve compatibility with the retained image, treat it as a planned maintenance release with a documented restore procedure rather than relying on automatic application rollback.
+
+The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, and rollback health failure. CI runs this harness on every change.
+
 ## Image identity and retention
 
 Each successful push to `main` publishes one commit-addressed GHCR tag. Treat tags as lookup aids only; the deployment consumes the immutable `ghcr.io/<owner>/<repository>@sha256:<digest>` reference recorded by CI in the commit's `production-image` status. Commit statuses remain attached to repository history and do not consume GitHub Actions artifact storage.
@@ -117,6 +132,26 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 - **External smoke:** `/up` and `/admin` must be reachable from GitHub Actions after container health succeeds. If it blocks, treat this as public routing, TLS, DNS, proxy, or web-container incident even if in-VPS checks passed.
 
 The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, and a redacted 120-line Compose log. Do not add resolved Compose configuration or `.env` files to workflow artifacts.
+
+## Emergency manual recovery
+
+Use this only when automatic rollback reports `deploy-failed-rollback-failed`. Read `previous-commit.txt` and `previous-image.txt` from the deployment artifact, then run on the VPS from `PRODUCTION_PATH`:
+
+```bash
+PREVIOUS_COMMIT='<40-character commit from previous-commit.txt>'
+PREVIOUS_IMAGE='<immutable ghcr.io/...@sha256:... from previous-image.txt>'
+
+git fetch --prune origin main
+git checkout --detach "$PREVIOUS_COMMIT"
+git reset --hard "$PREVIOUS_COMMIT"
+docker pull "$PREVIOUS_IMAGE"
+APP_IMAGE="$PREVIOUS_IMAGE" docker compose -p telegram-bot-prod --env-file .env up -d --no-build --remove-orphans
+docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor
+docker compose -p telegram-bot-prod --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180
+docker compose -p telegram-bot-prod --env-file .env ps
+```
+
+Do not run a down migration during application rollback. If the candidate migration was not expand-and-contract compatible, stop and follow the pre-approved database restore procedure instead of guessing at schema reversal.
 
 ## Safe failed-job recovery
 

@@ -73,6 +73,10 @@ jobs:
       - name: Run PHPUnit suite
         run: composer test
 
+      - name: Exercise production release and rollback paths
+        working-directory: ..
+        run: ./scripts/test-deploy-production-release.sh
+
   frontend-build:
     name: Frontend build and asset smoke
     runs-on: ubuntu-latest

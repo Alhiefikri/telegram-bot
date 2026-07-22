@@ -66,9 +66,11 @@ class FoundationInfrastructureTest extends TestCase
     public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
+        $release = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
 
         $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $workflow);
-        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans', $workflow);
+        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"', $release);
+        $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
         $this->assertStringNotContainsString('docker compose --env-file .env up -d --build --remove-orphans', $workflow);
         $this->assertStringNotContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans', $workflow);
     }

@@ -523,46 +523,49 @@ SH);
         $this->assertFileExists($workflow);
 
         $contents = file_get_contents($workflow);
+        $release = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
         $this->assertStringContainsString('DEPLOY_BRANCH: main', $contents);
         $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
         $this->assertStringContainsString('DEPLOY_SHA: ${{ inputs.commit || github.sha }}', $contents);
         $this->assertStringContainsString('actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}', $contents);
-        $this->assertStringContainsString('git checkout --detach "$DEPLOY_SHA"', $contents);
-        $this->assertStringContainsString('./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env', $contents);
+        $this->assertStringContainsString('scripts/deploy-production-release.sh', $contents);
+        $this->assertStringContainsString('git checkout --detach "$DEPLOY_SHA"', $release);
+        $this->assertStringContainsString('./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env', $release);
         $this->assertStringContainsString('commits/${TARGET_SHA}/statuses', $contents);
         $this->assertStringContainsString('.context == "production-image"', $contents);
         $this->assertStringContainsString('APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}', $contents);
-        $this->assertStringContainsString('docker pull "$APP_IMAGE"', $contents);
+        $this->assertStringContainsString('docker pull "$APP_IMAGE"', $release);
         $this->assertStringNotContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build', $contents);
-        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --no-build --remove-orphans', $contents);
-        $this->assertStringContainsString('running_image="$(docker inspect "$container_id" --format \'{{.Image}}\')"', $contents);
+        $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
+        $this->assertStringContainsString('running_image="$(docker inspect "$container_id" --format \'{{.Image}}\')"', $release);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
-        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT"', $contents);
-        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $contents);
-        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $contents);
+        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT"', $release);
+        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $release);
+        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
         $this->assertStringContainsString('actions/upload-artifact@v4', $contents);
-        $this->assertStringContainsString('ops:release-health-summary --since="$RELEASE_STARTED_AT"', $contents);
+        $this->assertStringContainsString('ops:release-health-summary --since="$RELEASE_STARTED_AT"', $release);
         $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
         $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
         $this->assertStringContainsString('group: production-mutation', $contents);
-        $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $contents);
-        $this->assertStringContainsString('flock -n 9', $contents);
+        $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $release);
+        $this->assertStringContainsString('flock -n 9', $release);
         $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
         foreach ([
-            'app health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
-            'scheduler health check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
-            'failed jobs check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null',
-            'queue depth check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
-            'Telegram webhook check keeps the remote heredoc stdin available' => 'docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
+            'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
+            'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
+            'failed jobs check is non-interactive' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --since="$RELEASE_STARTED_AT" </dev/null',
+            'queue depth check is non-interactive' => 'compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
+            'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
-            $this->assertStringContainsString($command, $contents, $contract);
+            $this->assertStringContainsString($command, $release, $contract);
         }
 
-        $this->assertStringContainsString('duplicate_projects="$(', $contents);
-        $this->assertStringContainsString('docker ps --filter label=com.docker.compose.project --format', $contents);
-        $this->assertStringContainsString('awk -v expected="$COMPOSE_PROJECT_NAME"', $contents);
-        $this->assertStringContainsString('$0 ~ /^telegram-bot/ && $0 != expected', $contents);
-        $this->assertStringContainsString('Unexpected Telegram Bot Compose project(s) running:', $contents);
+        $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
+        $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
+        $this->assertStringContainsString('compose run --rm --no-deps -e APP_AUTO_MIGRATE=false', $release);
+        $this->assertStringContainsString('deploy-failed-rollback-succeeded', $release);
+        $this->assertStringContainsString('deploy-failed-rollback-failed', $release);
+        $this->assertStringContainsString('duplicate_projects="$(', $release);
     }
 
     public function test_failed_job_recovery_workflow_is_targeted_locked_and_verifies_the_queue(): void
@@ -617,7 +620,7 @@ SH);
         $this->assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);
     }
 
-    public function test_docker_startup_runs_migrations_before_supervisor_by_default(): void
+    public function test_docker_startup_does_not_own_production_migrations(): void
     {
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
@@ -637,10 +640,10 @@ SH);
             strpos($entrypoint, 'exec "$@"'),
             strpos($entrypoint, 'artisan optimize')
         );
-        $this->assertStringContainsString('APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('APP_OPTIMIZE: ${APP_OPTIMIZE:-true}', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE=true', $envExample);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE=false', $envExample);
         $this->assertStringContainsString('APP_OPTIMIZE=true', $envExample);
     }
 

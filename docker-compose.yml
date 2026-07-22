@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *app-environment
-      APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}
+      APP_AUTO_MIGRATE: "false"
     volumes:
       - laravel_storage:/var/www/html/storage
       - laravel_public:/var/www/html/public

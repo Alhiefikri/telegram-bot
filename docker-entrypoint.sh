@@ -112,7 +112,7 @@ fi
 
 
 
-if [ "${APP_AUTO_MIGRATE:-true}" = "true" ]; then
+if [ "${APP_AUTO_MIGRATE:-false}" = "true" ]; then
     artisan migrate --force
 fi
 
