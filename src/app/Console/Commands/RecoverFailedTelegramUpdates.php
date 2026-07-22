@@ -56,6 +56,14 @@ class RecoverFailedTelegramUpdates extends Command
             } catch (Throwable $exception) {
                 report($exception);
                 if ($pruneUnrecoverable) {
+                    $update->refresh();
+                    $update->update([
+                        'processing_started_at' => null,
+                        'next_retry_at' => null,
+                        'terminal_failed_at' => now(),
+                        'last_error_class' => class_basename($exception),
+                        'last_failed_at' => now(),
+                    ]);
                     DB::table('failed_jobs')->where('uuid', $failedJob->uuid)->delete();
                     $failedPruned++;
 

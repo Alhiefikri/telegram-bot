@@ -12,7 +12,17 @@ class ProcessTelegramUpdate implements ShouldQueue
 {
     use Queueable;
 
+    public int $tries = 3;
+
     public function __construct(public int $telegramUpdateId, public ?string $jobEnqueuedAt = null) {}
+
+    /** @return list<int> */
+    public function backoff(): array
+    {
+        $baseDelay = max(1, (int) config('services.telegram.processing_retry_delay_seconds', 60));
+
+        return [$baseDelay, $baseDelay * 5];
+    }
 
     public function handle(TelegramUpdateProcessor $processor): void
     {

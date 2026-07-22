@@ -7,7 +7,19 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['update_id', 'customer_id', 'payload', 'processed_at', 'processing_started_at', 'created_at'])]
+#[Fillable([
+    'update_id',
+    'customer_id',
+    'payload',
+    'processed_at',
+    'processing_started_at',
+    'processing_attempts',
+    'next_retry_at',
+    'terminal_failed_at',
+    'last_error_class',
+    'last_failed_at',
+    'created_at',
+])]
 class TelegramUpdate extends Model
 {
     /** @use HasFactory<TelegramUpdateFactory> */
@@ -17,7 +29,17 @@ class TelegramUpdate extends Model
 
     protected function casts(): array
     {
-        return ['update_id' => 'integer', 'payload' => 'array', 'processed_at' => 'datetime', 'processing_started_at' => 'datetime', 'created_at' => 'datetime'];
+        return [
+            'update_id' => 'integer',
+            'payload' => 'array',
+            'processed_at' => 'datetime',
+            'processing_started_at' => 'datetime',
+            'processing_attempts' => 'integer',
+            'next_retry_at' => 'datetime',
+            'terminal_failed_at' => 'datetime',
+            'last_failed_at' => 'datetime',
+            'created_at' => 'datetime',
+        ];
     }
 
     public function customer()
@@ -29,6 +51,11 @@ class TelegramUpdate extends Model
     {
         return $this->processing_started_at !== null
             && $this->processing_started_at->gt(now()->subSeconds($this->claimLeaseSeconds()));
+    }
+
+    public function isTerminallyFailed(): bool
+    {
+        return $this->terminal_failed_at !== null;
     }
 
     private function claimLeaseSeconds(): int

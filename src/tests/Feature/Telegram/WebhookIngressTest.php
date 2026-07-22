@@ -8,11 +8,13 @@ use App\Models\Order;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Mockery;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -173,6 +175,77 @@ class WebhookIngressTest extends TelegramBotTestSupport
             ->assertSuccessful();
 
         Bus::assertDispatched(ProcessTelegramUpdate::class, fn (ProcessTelegramUpdate $job): bool => $job->telegramUpdateId === $unprocessed->id && $job->queue === 'default');
+        $this->assertNotNull($unprocessed->fresh()->next_retry_at);
+    }
+
+    public function test_recovery_command_skips_terminal_and_not_yet_due_updates(): void
+    {
+        Bus::fake();
+        $due = TelegramUpdate::create([
+            'update_id' => 211,
+            'payload' => $this->messageUpdate(211, '/start'),
+            'next_retry_at' => now()->subSecond(),
+            'created_at' => now(),
+        ]);
+        $notDue = TelegramUpdate::create([
+            'update_id' => 212,
+            'payload' => $this->messageUpdate(212, '/start'),
+            'next_retry_at' => now()->addHour(),
+            'created_at' => now(),
+        ]);
+        $terminal = TelegramUpdate::create([
+            'update_id' => 213,
+            'payload' => $this->messageUpdate(213, '/start'),
+            'terminal_failed_at' => now(),
+            'created_at' => now(),
+        ]);
+
+        $this->artisan('telegram:recover-updates', ['--queue' => 'default'])
+            ->expectsOutputToContain('telegram:recover-updates completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        Bus::assertDispatched(ProcessTelegramUpdate::class, fn (ProcessTelegramUpdate $job): bool => $job->telegramUpdateId === $due->id);
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class, fn (ProcessTelegramUpdate $job): bool => in_array($job->telegramUpdateId, [$notDue->id, $terminal->id], true));
+    }
+
+    public function test_repeated_processing_failure_becomes_terminal_and_is_not_recovered_again(): void
+    {
+        config()->set('services.telegram.processing_max_attempts', 3);
+        config()->set('services.telegram.processing_retry_delay_seconds', 60);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*' => Http::response(['ok' => false, 'description' => 'blocked'], 403),
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $update = TelegramUpdate::create([
+            'update_id' => 214,
+            'payload' => $this->messageUpdate(214, '/start'),
+            'created_at' => now(),
+        ]);
+
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+                if ($attempt < 3) {
+                    $this->fail("Attempt {$attempt} should fail.");
+                }
+            } catch (RequestException) {
+                $this->assertLessThan(3, $attempt, 'The terminal attempt must be quarantined instead of entering failed_jobs.');
+                // The replay guard records the failure before rethrowing it.
+            }
+
+            $update->refresh();
+            $this->assertSame($attempt, $update->processing_attempts);
+        }
+
+        $this->assertNotNull($update->terminal_failed_at);
+        $this->assertNull($update->next_retry_at);
+        $this->assertSame('RequestException', $update->last_error_class);
+
+        Bus::fake();
+        $this->artisan('telegram:recover-updates')
+            ->expectsOutputToContain('telegram:recover-updates completed cleanly: dispatched=0')
+            ->assertSuccessful();
+        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
     }
 
     public function test_recovery_command_is_scheduled(): void
@@ -181,6 +254,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
             ->expectsOutputToContain('telegram:recover-updates --queue=default')
             ->assertSuccessful();
     }
+
     public function test_failed_telegram_update_recovery_reprocesses_only_the_stored_update_and_removes_its_failed_record(): void
     {
         $this->fakeTelegramHttp();
@@ -191,7 +265,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
             'created_at' => now(),
         ]);
         DB::table('failed_jobs')->insert([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'database',
             'queue' => 'default',
             'payload' => json_encode([
@@ -215,7 +289,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
 
         DB::table('failed_jobs')->insert([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'database',
             'queue' => 'default',
             'payload' => json_encode([
@@ -245,7 +319,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
             'created_at' => now(),
         ]);
         DB::table('failed_jobs')->insert([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'database',
             'queue' => 'default',
             'payload' => json_encode([
@@ -262,8 +336,8 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertSame(0, DB::table('failed_jobs')->count());
         $this->assertNull($update->fresh()->processed_at);
+        $this->assertNotNull($update->fresh()->terminal_failed_at);
     }
-
 
     public function test_telegram_webhook_is_rate_limited_by_user(): void
     {

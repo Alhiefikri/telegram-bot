@@ -89,6 +89,8 @@ return [
         'welcome_banner_url' => env('TELEGRAM_WELCOME_BANNER_URL'),
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
         'claim_lease_seconds' => (int) env('TELEGRAM_CLAIM_LEASE_SECONDS', 600),
+        'processing_max_attempts' => (int) env('TELEGRAM_PROCESSING_MAX_ATTEMPTS', 3),
+        'processing_retry_delay_seconds' => (int) env('TELEGRAM_PROCESSING_RETRY_DELAY_SECONDS', 60),
     ],
 
     'dogfood_timing' => [

@@ -16,7 +16,7 @@ class TelegramUpdateReplayGuard
      */
     public function processOnce(TelegramUpdate $update, callable $handler): void
     {
-        if ($update->processed_at || $update->hasActiveClaim()) {
+        if ($update->processed_at || $update->isTerminallyFailed() || $update->hasActiveClaim()) {
             return;
         }
 
@@ -27,7 +27,7 @@ class TelegramUpdateReplayGuard
 
         try {
             $update->refresh();
-            if ($update->processed_at || $update->hasActiveClaim()) {
+            if ($update->processed_at || $update->isTerminallyFailed() || $update->hasActiveClaim()) {
                 return;
             }
 
@@ -36,12 +36,35 @@ class TelegramUpdateReplayGuard
             try {
                 $handler($update);
             } catch (\Throwable $exception) {
-                $update->update(['processing_started_at' => null]);
+                $attempts = $update->processing_attempts + 1;
+                $terminal = $attempts >= max(1, (int) config('services.telegram.processing_max_attempts', 3));
+                $retryDelay = max(1, (int) config('services.telegram.processing_retry_delay_seconds', 60));
+
+                $update->update([
+                    'processing_started_at' => null,
+                    'processing_attempts' => $attempts,
+                    'next_retry_at' => $terminal ? null : now()->addSeconds($retryDelay * (2 ** ($attempts - 1))),
+                    'terminal_failed_at' => $terminal ? now() : null,
+                    'last_error_class' => class_basename($exception),
+                    'last_failed_at' => now(),
+                ]);
+
+                if ($terminal) {
+                    report($exception);
+
+                    return;
+                }
 
                 throw $exception;
             }
 
-            $update->update(['processed_at' => now(), 'processing_started_at' => null]);
+            $update->update([
+                'processed_at' => now(),
+                'processing_started_at' => null,
+                'next_retry_at' => null,
+                'terminal_failed_at' => null,
+                'last_error_class' => null,
+            ]);
         } finally {
             $lock->release();
         }
