@@ -114,6 +114,7 @@ SCRIPT
   PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" DEPLOY_BRANCH=main \
     DEPLOY_SHA="$CANDIDATE_COMMIT" COMPOSE_PROJECT_NAME=telegram-bot-prod APP_IMAGE="$CANDIDATE_IMAGE" \
     RELEASE_ARTIFACT_DIR="$artifacts" RELEASE_HEALTH_ATTEMPTS=1 RELEASE_HEALTH_INTERVAL=0 \
+    GHCR_USERNAME=ci-bot GHCR_TOKEN=ci-token \
     bash "$RELEASE_SCRIPT" > "$workspace/stdout" 2> "$workspace/stderr"
   status=$?
   set -e

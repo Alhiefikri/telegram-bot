@@ -23,6 +23,7 @@ env:
 permissions:
   actions: read
   contents: read
+  packages: read
   statuses: read
 
 concurrency:
@@ -136,13 +137,15 @@ jobs:
           RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" GHCR_USERNAME="$GHCR_USERNAME" GHCR_TOKEN="$GHCR_TOKEN" \
             'bash -s' < scripts/deploy-production-release.sh
 
       - name: Run external public smoke checks
