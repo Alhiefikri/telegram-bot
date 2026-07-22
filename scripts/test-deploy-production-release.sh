@@ -6,6 +6,7 @@ RELEASE_SCRIPT="$ROOT_DIR/scripts/deploy-production-release.sh"
 PREVIOUS_COMMIT=1111111111111111111111111111111111111111
 CANDIDATE_COMMIT=2222222222222222222222222222222222222222
 PREVIOUS_IMAGE=ghcr.io/example/telegram-bot@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+LEGACY_PREVIOUS_IMAGE=telegram-bot-prod-app
 CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 fail() {
@@ -19,13 +20,14 @@ assert_eq() {
 
 run_scenario() {
   local scenario=$1 expected_exit=$2 expected_result=$3 expected_image=$4
+  local previous_image=${5:-$PREVIOUS_IMAGE}
   local workspace bin artifacts status
   workspace=$(mktemp -d)
   bin="$workspace/bin"
   artifacts="$workspace/artifacts"
   mkdir -p "$bin" "$artifacts" "$workspace/scripts"
   printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
-  printf '%s\n' "$PREVIOUS_IMAGE" > "$workspace/current-image"
+  printf '%s\n' "$previous_image" > "$workspace/current-image"
   printf '%s\n' "$scenario" > "$workspace/scenario"
   : > "$workspace/commands.log"
   : > "$workspace/.env"
@@ -130,7 +132,7 @@ SCRIPT
   assert_eq "$(cat "$artifacts/release-result.txt")" "$expected_result"
   assert_eq "$(cat "$workspace/current-image")" "$expected_image"
   assert_eq "$(cat "$artifacts/previous-commit.txt")" "$PREVIOUS_COMMIT"
-  assert_eq "$(cat "$artifacts/previous-image.txt")" "$PREVIOUS_IMAGE"
+  assert_eq "$(cat "$artifacts/previous-image.txt")" "$previous_image"
   [ -x "$artifacts/redact-release-diagnostics.sh" ] || fail "artifact-local redactor is missing or not executable"
   [ -f "$artifacts/compose.log" ] || fail "release diagnostics did not produce a redacted compose log"
 
@@ -142,14 +144,14 @@ SCRIPT
       ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
       ;;
     application-health-failure)
-      grep -q "APP_IMAGE=$PREVIOUS_IMAGE" "$workspace/commands.log" || fail "health failure did not restore previous image"
+      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "successful rollback outcome was not explicit"
       ;;
     rollback-failure)
       grep -q 'rollback failed' "$workspace/stderr" || fail "failed rollback outcome was not explicit"
       ;;
     external-smoke-rollback)
-      grep -q "APP_IMAGE=$PREVIOUS_IMAGE" "$workspace/commands.log" || fail "external smoke rollback did not restore previous image"
+      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "external smoke rollback did not restore previous image"
       grep -q 'external-smoke-failed' "$workspace/stderr" || fail "external smoke rollback reason was not explicit"
       ;;
   esac
@@ -159,6 +161,7 @@ SCRIPT
 }
 
 run_scenario success 0 deploy-succeeded "$CANDIDATE_IMAGE"
+run_scenario legacy-image-success 0 deploy-succeeded "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"

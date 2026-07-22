@@ -114,7 +114,7 @@ verify_release_gates() {
 
 restore_previous_release() {
   local failure_reason="${FAILURE_REASON:-deploy-failed}"
-  echo "Release verification failed ($failure_reason). Restoring previous immutable release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
+  echo "Release verification failed ($failure_reason). Restoring previous release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans
@@ -146,8 +146,8 @@ if [ "$RELEASE_OPERATION" = "rollback" ]; then
     *) echo "Recorded rollback commit is invalid." >&2; exit 1 ;;
   esac
   case "$PREVIOUS_IMAGE" in
-    *@sha256:????????????????????????????????????????????????????????????????) ;;
-    *) echo "Recorded rollback image is invalid." >&2; exit 1 ;;
+    ""|*[[:space:]]*) echo "Recorded rollback image is invalid." >&2; exit 1 ;;
+    *) ;;
   esac
   FAILURE_REASON="${FAILURE_REASON:-external-smoke-failed}"
   if restore_previous_release; then
@@ -164,8 +164,17 @@ previous_app_container="$(compose ps -q app)"
 [ -n "$previous_app_container" ] || { echo "Cannot identify the currently running app container." >&2; exit 1; }
 PREVIOUS_IMAGE="$(docker inspect "$previous_app_container" --format '{{.Config.Image}}')"
 case "$PREVIOUS_IMAGE" in
-  *@sha256:????????????????????????????????????????????????????????????????) ;;
-  *) echo "Current app image is not an immutable digest reference: $PREVIOUS_IMAGE" >&2; exit 1 ;;
+  *@sha256:????????????????????????????????????????????????????????????????)
+    echo "Current app image is an immutable digest reference: $PREVIOUS_IMAGE"
+    ;;
+  ""|*[[:space:]]*)
+    echo "Current app image reference is invalid and cannot be used for rollback: $PREVIOUS_IMAGE" >&2
+    exit 1
+    ;;
+  *)
+    echo "Current app image is a legacy mutable/local reference: $PREVIOUS_IMAGE" >&2
+    echo "Proceeding with first immutable-image cutover; rollback will reuse this existing local image with --no-build." >&2
+    ;;
 esac
 printf '%s\n' "$PREVIOUS_COMMIT" > "$RELEASE_ARTIFACT_DIR/previous-commit.txt"
 printf '%s\n' "$PREVIOUS_IMAGE" > "$RELEASE_ARTIFACT_DIR/previous-image.txt"
