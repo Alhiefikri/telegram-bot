@@ -757,9 +757,12 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $response = $this->postJson($url)
             ->assertTooManyRequests()
             ->assertHeader('Retry-After')
-            ->assertJsonPath('ok', false)
-            ->assertJsonPath('message', 'Terlalu sering cek status. Coba lagi dalam 60 detik.');
+            ->assertJsonPath('ok', false);
         $this->assertContains($response->json('retry_after'), [59, 60]);
+        $this->assertMatchesRegularExpression(
+            '/^Terlalu sering cek status\. Coba lagi dalam (59|60) detik\.$/',
+            (string) $response->json('message'),
+        );
     }
 
     public function test_terminal_invoice_replaces_pending_status_card_with_human_instruction(): void
