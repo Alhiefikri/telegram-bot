@@ -34,11 +34,13 @@ use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
 class Phase4OrderCartDomainTest extends TestCase
 {
     use RefreshDatabase;
+    use PakasirNativeQrisScenarios;
 
     public function test_duplicate_checkout_returns_existing_order(): void
     {
@@ -384,6 +386,7 @@ class Phase4OrderCartDomainTest extends TestCase
 
     public function test_completed_refund_keeps_order_completed_and_releases_credential(): void
     {
+        $this->pakasirConfigIsReady();
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
         $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'completed@example.test|pass']);
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), CheckoutPaymentIntents::pakasir());
