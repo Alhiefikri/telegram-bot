@@ -3,58 +3,85 @@
 namespace Tests\Unit\Bootstrap;
 
 use App\Bootstrap\ProductionConfigurationValidator;
+use Illuminate\Config\Repository;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Tests\TestCase;
 
 class ProductionConfigurationValidatorTest extends TestCase
 {
-    public function test_it_skips_validation_outside_production(): void
+    public function test_it_skips_validation_outside_production_without_booting_laravel(): void
     {
-        config([
-            'app.env' => 'local',
-            'app.debug' => true,
-            'app.url' => 'http://example.test',
-            'app.key' => null,
-            'services.telegram.token' => null,
-            'services.telegram.webhook_secret' => null,
-        ]);
+        $validator = new ProductionConfigurationValidator(new Repository([
+            'app' => ['env' => 'local'],
+        ]));
 
-        (new ProductionConfigurationValidator)->validate();
+        $validator->validate();
 
-        $this->assertTrue(true);
+        $this->addToAssertionCount(1);
     }
 
-    public function test_it_fails_closed_when_a_required_production_value_is_missing(): void
+    public function test_it_accepts_a_complete_secure_production_configuration(): void
     {
-        config([
-            'app.env' => 'production',
-            'app.debug' => false,
-            'app.url' => 'https://store.example.test',
-            'app.key' => 'base64:test-key',
-            'services.telegram.token' => '',
-            'services.telegram.webhook_secret' => 'telegram-secret',
-        ]);
+        $validator = new ProductionConfigurationValidator(new Repository($this->validConfiguration()));
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TELEGRAM_BOT_TOKEN must be configured in production.');
+        $validator->validate();
 
-        (new ProductionConfigurationValidator)->validate();
+        $this->addToAssertionCount(1);
     }
 
-    public function test_it_rejects_insecure_production_configuration(): void
-    {
-        config([
-            'app.env' => 'production',
-            'app.debug' => true,
-            'app.url' => 'https://store.example.test',
-            'app.key' => 'base64:test-key',
-            'services.telegram.token' => 'telegram-token',
-            'services.telegram.webhook_secret' => 'telegram-secret',
-        ]);
+    #[DataProvider('invalidProductionConfigurationProvider')]
+    public function test_every_production_invariant_fails_closed_with_an_actionable_message(
+        string $path,
+        mixed $value,
+        string $message,
+    ): void {
+        $configuration = $this->validConfiguration();
+        data_set($configuration, $path, $value);
+        $validator = new ProductionConfigurationValidator(new Repository($configuration));
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('APP_DEBUG must be false in production.');
+        $this->expectExceptionMessage($message);
 
-        (new ProductionConfigurationValidator)->validate();
+        $validator->validate();
+    }
+
+    public static function invalidProductionConfigurationProvider(): array
+    {
+        return [
+            'missing app key' => ['app.key', '', 'APP_KEY must be configured in production.'],
+            'missing Telegram token' => ['services.telegram.token', '', 'TELEGRAM_BOT_TOKEN must be configured in production.'],
+            'missing Telegram webhook secret' => ['services.telegram.webhook_secret', '', 'TELEGRAM_WEBHOOK_SECRET must be configured in production.'],
+            'debug enabled' => ['app.debug', true, 'APP_DEBUG must be false in production.'],
+            'insecure Pakasir URL' => ['services.pakasir.base_url', 'http://pakasir.example.test', 'PAKASIR_BASE_URL must use HTTPS in production.'],
+            'insecure application URL' => ['app.url', 'http://store.example.test', 'APP_URL must use HTTPS in production.'],
+            'example application URL' => ['app.url', 'https://example.com/', 'APP_URL must not use the example domain in production.'],
+            'dogfood timing enabled' => ['services.dogfood_timing.enabled', true, 'Dogfood runtime flags are not allowed in production.'],
+            'fake Telegram outbound enabled' => ['services.dogfood_timing.fake_telegram_outbound', true, 'Dogfood runtime flags are not allowed in production.'],
+        ];
+    }
+
+    private function validConfiguration(): array
+    {
+        return [
+            'app' => [
+                'env' => 'production',
+                'debug' => false,
+                'url' => 'https://store.example.test',
+                'key' => 'base64:test-key',
+            ],
+            'services' => [
+                'telegram' => [
+                    'token' => 'telegram-token',
+                    'webhook_secret' => 'telegram-secret',
+                ],
+                'pakasir' => ['base_url' => 'https://pakasir.example.test'],
+                'dogfood_timing' => [
+                    'enabled' => false,
+                    'fake_telegram_outbound' => false,
+                    'allow_runtime' => false,
+                ],
+            ],
+        ];
     }
 }

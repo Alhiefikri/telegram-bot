@@ -2,17 +2,23 @@
 
 namespace App\Bootstrap;
 
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Config\Repository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\RateLimiter;
 
 class ApplicationRateLimiterRegistrar
 {
+    public function __construct(
+        private readonly RateLimiter $rateLimiter,
+        private readonly Repository $config,
+    ) {}
+
     public function register(): void
     {
-        RateLimiter::for('telegram', function (Request $request) {
-            $limit = (int) config('services.telegram.webhook_rate_limit_per_minute', 120);
+        $this->rateLimiter->for('telegram', function (Request $request) {
+            $limit = (int) $this->config->get('services.telegram.webhook_rate_limit_per_minute', 120);
 
             if (! $this->hasTrustedTelegramWebhookSecret($request)) {
                 $source = $request->ip() ?: 'unknown';
@@ -34,15 +40,15 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('telegram:webhook:identity:'.(string) $identity);
         });
 
-        RateLimiter::for('pakasir-webhook', function (Request $request) {
-            $limit = (int) config('services.pakasir.webhook_rate_limit_per_minute', 30);
+        $this->rateLimiter->for('pakasir-webhook', function (Request $request) {
+            $limit = (int) $this->config->get('services.pakasir.webhook_rate_limit_per_minute', 30);
             $source = $request->ip() ?: 'unknown';
 
             return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
         });
 
-        RateLimiter::for('pakasir-status-refresh', function (Request $request) {
-            $limit = max(1, (int) config('services.pakasir.status_refresh_rate_limit_per_minute', 3));
+        $this->rateLimiter->for('pakasir-status-refresh', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.pakasir.status_refresh_rate_limit_per_minute', 3));
             $routeOrder = $request->route('order');
             $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
                 ? (string) $routeOrder->getKey()
@@ -60,8 +66,8 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity)->response($rateLimitedResponse);
         });
 
-        RateLimiter::for('storefront-checkout', function (Request $request) {
-            $limit = max(1, (int) config('services.storefront.checkout_rate_limit_per_minute', 5));
+        $this->rateLimiter->for('storefront-checkout', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.storefront.checkout_rate_limit_per_minute', 5));
             $source = $request->ip() ?: 'unknown';
             $session = $request->hasSession() ? $request->session()->getId() : 'no-session';
 
@@ -79,8 +85,8 @@ class ApplicationRateLimiterRegistrar
             ];
         });
 
-        RateLimiter::for('storefront-order-access', function (Request $request) {
-            $limit = max(1, (int) config('services.storefront.credential_access_rate_limit_per_minute', 5));
+        $this->rateLimiter->for('storefront-order-access', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.storefront.credential_access_rate_limit_per_minute', 5));
             $source = $request->ip() ?: 'unknown';
             $invoice = strtoupper(trim((string) $request->input('invoice_number', 'unknown')));
 
@@ -90,20 +96,20 @@ class ApplicationRateLimiterRegistrar
             ];
         });
 
-        RateLimiter::for('customer-login-link', function (Request $request) {
+        $this->rateLimiter->for('customer-login-link', function (Request $request) {
             $email = strtolower(trim((string) $request->input('email', 'unknown')));
             $ip = $request->ip() ?: 'unknown';
 
             return [Limit::perMinutes(15, 3)->by('customer:login:email:'.$email.':'.$ip), Limit::perHour(10)->by('customer:login:ip:'.$ip)];
         });
 
-        RateLimiter::for('customer-login-consume', fn (Request $request) => Limit::perMinutes(15, 10)->by('customer:login:consume:'.($request->ip() ?: 'unknown')));
-        RateLimiter::for('customer-order-claim', fn (Request $request) => Limit::perMinutes(15, 5)->by('customer:claim:'.($request->user('customer')?->getAuthIdentifier() ?? 'unknown').':'.($request->ip() ?: 'unknown')));
+        $this->rateLimiter->for('customer-login-consume', fn (Request $request) => Limit::perMinutes(15, 10)->by('customer:login:consume:'.($request->ip() ?: 'unknown')));
+        $this->rateLimiter->for('customer-order-claim', fn (Request $request) => Limit::perMinutes(15, 5)->by('customer:claim:'.($request->user('customer')?->getAuthIdentifier() ?? 'unknown').':'.($request->ip() ?: 'unknown')));
     }
 
     private function hasTrustedTelegramWebhookSecret(Request $request): bool
     {
-        $secret = (string) config('services.telegram.webhook_secret');
+        $secret = (string) $this->config->get('services.telegram.webhook_secret');
 
         return $secret === ''
             || hash_equals($secret, (string) $request->header('X-Telegram-Bot-Api-Secret-Token'));

@@ -69,7 +69,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->app->make(ProductionConfigurationValidator::class)->validate();
+        $this->app->make(ProductionConfigurationValidator::class)->assertValid();
         $this->configureUrlGeneration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
 
