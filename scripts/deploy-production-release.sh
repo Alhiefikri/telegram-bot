@@ -18,7 +18,27 @@ case "$RELEASE_ARTIFACT_DIR" in
 esac
 mkdir -p "$RELEASE_ARTIFACT_DIR"
 REDACTOR_PATH="$RELEASE_ARTIFACT_DIR/redact-release-diagnostics.sh"
-cp ./scripts/redact-release-diagnostics.sh "$REDACTOR_PATH"
+if [ -f ./scripts/redact-release-diagnostics.sh ]; then
+  cp ./scripts/redact-release-diagnostics.sh "$REDACTOR_PATH"
+else
+  # The workflow streams this script over SSH before the production checkout is
+  # updated. Older checkouts may not have the redactor file yet, so keep a
+  # self-contained fallback to avoid losing rollback diagnostics.
+  cat > "$REDACTOR_PATH" <<'RELEASE_DIAGNOSTIC_REDACTOR'
+#!/usr/bin/env bash
+set -euo pipefail
+
+sed -E \
+  -e '/(payload|request[_ -]?body|response[_ -]?body)/Id' \
+  -e 's/(Authorization[[:space:]]*:[[:space:]]*)(Bearer[[:space:]]+)?[^[:space:],;]+/\1[REDACTED]/Ig' \
+  -e 's/("?(token|secret|password|app[_-]?key|api[_-]?key|cookie|set-cookie)"?[[:space:]]*[=:][[:space:]]*)"[^"]*"/\1"[REDACTED]"/Ig' \
+  -e 's/("?(token|secret|password|app[_-]?key|api[_-]?key|cookie|set-cookie)"?[[:space:]]*[=:][[:space:]]*)[^"[:space:],;]+/\1[REDACTED]/Ig' \
+  -e 's/(Bearer[[:space:]]+)[[:alnum:]_.~+\/-]+/\1[REDACTED]/Ig' \
+  -e 's/bot[0-9]{6,}:[[:alnum:]_-]+/bot[REDACTED]/g' \
+  -e 's#([[:alpha:]][[:alnum:]+.-]*://)[^/@[:space:]]*:[^/@[:space:]]+@#\1[REDACTED]@#Ig' \
+  -e 's/([?&](token|secret|password|key|api_key)=)[^&#[:space:]]+/\1[REDACTED]/Ig'
+RELEASE_DIAGNOSTIC_REDACTOR
+fi
 chmod 0700 "$REDACTOR_PATH"
 
 compose() {
