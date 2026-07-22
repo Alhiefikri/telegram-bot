@@ -6,7 +6,6 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
-use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Models\Customer;
@@ -29,9 +28,9 @@ use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
-use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
 class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
@@ -196,6 +195,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
     }
 
+    #[Group('postgres-release')]
     public function test_binance_payment_photo_with_payment_caption_reaches_admin_through_the_database_queue(): void
     {
         config()->set('queue.default', 'database');
@@ -218,12 +218,20 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $storedUpdate = TelegramUpdate::firstOrFail();
         $this->assertNull($storedUpdate->processed_at);
-        (new ProcessTelegramUpdate($storedUpdate->id))->handle(app(TelegramUpdateProcessor::class));
+        $this->assertDatabaseHas('jobs', ['queue' => 'default']);
+
+        $this->artisan('queue:work', [
+            'connection' => 'database',
+            '--queue' => 'default',
+            '--once' => true,
+            '--tries' => 1,
+        ])->assertSuccessful();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'large-photo');
         $this->assertNotNull($storedUpdate->fresh()->processed_at);
+        $this->assertDatabaseCount('jobs', 0);
     }
 
     public function test_binance_payment_proof_replied_to_with_payment_command_reaches_admin(): void

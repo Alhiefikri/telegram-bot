@@ -111,6 +111,119 @@ jobs:
         working-directory: ..
         run: ./scripts/test-deploy-production-release.sh
 
+  postgres-release-gate:
+    name: PostgreSQL migration and concurrency release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: telegram_bot_ci
+          POSTGRES_USER: telegram_bot_ci
+          POSTGRES_PASSWORD: ci-only-not-production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      APP_ENV: testing
+      APP_FORCE_HTTPS: false
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: telegram_bot_ci
+      DB_USERNAME: telegram_bot_ci
+      DB_PASSWORD: ci-only-not-production
+      DB_URL: ''
+      POSTGRES_DB: telegram_bot_ci
+      POSTGRES_USER: telegram_bot_ci
+      POSTGRES_PASSWORD: ci-only-not-production
+      CONCURRENCY_DB_HOST: 127.0.0.1
+      CONCURRENCY_DB_PORT: 5432
+      CONCURRENCY_DB_ADMIN_DATABASE: telegram_bot_ci
+      CONCURRENCY_DB_ADMIN_USERNAME: telegram_bot_ci
+      CONCURRENCY_DB_ADMIN_PASSWORD: ci-only-not-production
+      CONCURRENCY_DB_APP_USERNAME: telegram_bot_ci
+      CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up PHP with PostgreSQL and process extensions
+        uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45 # v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pgsql, posix, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare Laravel PostgreSQL test environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          php artisan key:generate --ansi
+          mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
+          php artisan config:clear --ansi
+
+      - name: Migrate empty PostgreSQL database
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifacts/postgres-release
+          php artisan migrate:fresh --force --ansi 2>&1 | tee ../artifacts/postgres-release/migrations.log
+          php artisan migrate:status --ansi 2>&1 | tee ../artifacts/postgres-release/migration-status.log
+
+      - name: Run production-critical PostgreSQL integration tests
+        run: |
+          set -euo pipefail
+          artifact_dir=../artifacts/postgres-release
+          set +e
+          ./vendor/bin/phpunit \
+            --configuration=phpunit.postgres.xml \
+            --testsuite="PostgreSQL release integration" \
+            --group=postgres-release \
+            --fail-on-skipped \
+            --log-junit="$artifact_dir/junit.xml" \
+            --no-coverage \
+            2>&1 | tee "$artifact_dir/phpunit.log"
+          phpunit_status="${PIPESTATUS[0]}"
+          set -e
+          php ../scripts/junit-gate-report.php \
+            "PostgreSQL Production-Critical Integration Result" \
+            "$artifact_dir/junit.xml" \
+            "$phpunit_status" \
+            "$artifact_dir/phpunit.log" \
+            "$DB_DATABASE" > "$artifact_dir/report.md"
+          cat "$artifact_dir/report.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$phpunit_status"
+
+      - name: Run PostgreSQL concurrency deploy gate without skips
+        working-directory: .
+        env:
+          RUN_CONCURRENCY_TESTS: '1'
+          CONCURRENCY_GATE_ARTIFACT_DIR: artifacts/postgres-concurrency
+        run: ./scripts/concurrency-deploy-gate.sh
+
+      - name: Upload PostgreSQL release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: postgres-release-gate-${{ github.run_attempt }}
+          path: |
+            artifacts/postgres-release/
+            artifacts/postgres-concurrency/
+          if-no-files-found: warn
+          retention-days: 14
+
   frontend-build:
     name: Frontend build and asset smoke
     runs-on: ubuntu-latest

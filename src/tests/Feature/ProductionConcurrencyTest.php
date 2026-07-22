@@ -13,6 +13,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -104,6 +105,8 @@ class ProductionConcurrencyTest extends TestCase
     public function test_concurrent_binance_checkout_for_same_stock_allows_only_one_reservation(): void
     {
         $this->requireConcurrencyLane();
+        config()->set('services.binance.pay_id', '123456789');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
 
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'only-binance-secret']);
@@ -128,7 +131,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertManagedInventoryInvariants($product);
     }
 
-    public function test_concurrent_cart_quantity_holds_last_stock_once(): void
+    public function test_concurrent_cart_quantity_allows_each_cart_to_hold_last_stock_until_checkout(): void
     {
         $this->requireConcurrencyLane();
 
@@ -142,13 +145,13 @@ class ProductionConcurrencyTest extends TestCase
             fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($second->id)), Product::findOrFail($product->id), 1)?->id,
         ]);
 
-        $this->assertSame(1, $this->successfulResultCount($results));
-        $this->assertSame([InsufficientStock::class], $this->failedResultClasses($results));
-        $this->assertSame(1, $this->activeCartQuantityFor($product));
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $this->assertSame(2, $this->activeCartQuantityFor($product));
         $this->assertManagedInventoryInvariants($product);
     }
 
-    public function test_concurrent_cart_quantity_two_plus_one_never_exceeds_stock_two(): void
+    public function test_concurrent_cart_quantity_tracks_each_cart_without_mutating_inventory(): void
     {
         $this->requireConcurrencyLane();
 
@@ -163,9 +166,9 @@ class ProductionConcurrencyTest extends TestCase
             fn () => app(CartService::class)->setItemQuantity(app(CartService::class)->activeCartFor(Customer::findOrFail($second->id)), Product::findOrFail($product->id), 1)?->id,
         ]);
 
-        $this->assertSame(1, $this->successfulResultCount($results));
-        $this->assertSame([InsufficientStock::class], $this->failedResultClasses($results));
-        $this->assertLessThanOrEqual(2, $this->activeCartQuantityFor($product));
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $this->assertSame(3, $this->activeCartQuantityFor($product));
         $this->assertManagedInventoryInvariants($product);
     }
 

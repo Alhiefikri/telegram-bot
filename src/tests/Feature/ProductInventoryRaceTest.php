@@ -24,10 +24,12 @@ use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
 class ProductInventoryRaceTest extends TelegramBotTestSupport
 {
+    #[Group('postgres-release')]
     public function test_two_buyers_competing_for_last_stock_can_cart_but_only_one_checkout_reserves_stock(): void
     {
         $this->fakeTelegramHttp();

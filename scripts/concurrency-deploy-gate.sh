@@ -6,6 +6,9 @@ APP_DIR="$ROOT_DIR/src"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 TEST_DATABASE="${CONCURRENCY_DB_DATABASE:-telegram_bot_concurrency_test_${RUN_ID//[^a-zA-Z0-9_]/_}}"
 ARTIFACT_DIR="${CONCURRENCY_GATE_ARTIFACT_DIR:-$ROOT_DIR/artifacts/concurrency-gate/$RUN_ID}"
+if [[ "$ARTIFACT_DIR" != /* ]]; then
+    ARTIFACT_DIR="$ROOT_DIR/$ARTIFACT_DIR"
+fi
 LOG_PATH="$ARTIFACT_DIR/phpunit.log"
 JUNIT_PATH="$ARTIFACT_DIR/junit.xml"
 REPORT_PATH="$ARTIFACT_DIR/report.md"
@@ -43,7 +46,12 @@ set +e
 phpunit_status="${PIPESTATUS[0]}"
 set -e
 
-php "$ROOT_DIR/scripts/concurrency-gate-report.php" "$JUNIT_PATH" "$phpunit_status" "$LOG_PATH" "$TEST_DATABASE" > "$REPORT_PATH"
+php "$ROOT_DIR/scripts/junit-gate-report.php" \
+    "PostgreSQL Concurrency Deploy Gate Result" \
+    "$JUNIT_PATH" \
+    "$phpunit_status" \
+    "$LOG_PATH" \
+    "$TEST_DATABASE" > "$REPORT_PATH"
 cat "$REPORT_PATH"
 
 exit "$phpunit_status"

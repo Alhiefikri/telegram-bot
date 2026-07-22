@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-if ($argc !== 5) {
-    fwrite(STDERR, "Usage: php scripts/concurrency-gate-report.php <junit.xml> <exit-code> <log-path> <database-name>\n");
+if ($argc !== 6) {
+    fwrite(STDERR, "Usage: php scripts/junit-gate-report.php <title> <junit.xml> <exit-code> <log-path> <database-name>\n");
     exit(2);
 }
 
-[$script, $junitPath, $exitCode, $logPath, $database] = $argv;
+[$script, $title, $junitPath, $exitCode, $logPath, $database] = $argv;
 
 if (! is_file($junitPath)) {
     fwrite(STDERR, "JUnit file not found: {$junitPath}\n");
@@ -44,11 +44,14 @@ foreach (($xml->xpath('//testcase[failure or error]') ?: []) as $testCase) {
     $problemCases[] = $class === '' ? $name : "{$class}::{$name}";
 }
 
-$passed = (int) $exitCode === 0 && $totals['skipped'] === 0 && $totals['failures'] === 0 && $totals['errors'] === 0;
+$passed = (int) $exitCode === 0
+    && $totals['skipped'] === 0
+    && $totals['failures'] === 0
+    && $totals['errors'] === 0;
 $status = $passed ? 'passed' : 'failed';
 $generatedAt = gmdate('Y-m-d\TH:i:s\Z');
 
-echo "# PostgreSQL Concurrency Deploy Gate Result\n\n";
+printf("# %s\n\n", $title);
 echo "- Generated: {$generatedAt}\n";
 echo "- Result: {$status}\n";
 echo "- Exit code: {$exitCode}\n";

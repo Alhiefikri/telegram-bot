@@ -14,6 +14,9 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
   - PHP 8.4 + Composer validate/install.
   - Laravel test suite via `composer test`.
+  - Keeps the fast SQLite suite parallel, then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 17 service with health checking and CI-only credentials.
+  - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.
+  - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
   - Node 24 + `npm ci`.
   - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
   - Builds the production image once with BuildKit, reusing the GitHub Actions cache without changing the resulting content-addressed image.
@@ -100,7 +103,7 @@ Expected values include `allowed_actions: selected`, `sha_pinning_required: true
 Protect `main` with these settings:
 
 - Require a pull request before merging, with at least one approval.
-- Require the current successful CI check names, including `Workflow validation and dependency audit`, `PHP tests`, `Frontend build and asset smoke`, `Customer browser smoke`, and `Build, verify, and publish production image`.
+- Require the current successful CI check names, including `Workflow validation and dependency audit`, `PHP tests`, `PostgreSQL migration and concurrency release gate`, `Frontend build and asset smoke`, `Customer browser smoke`, and `Build, verify, and publish production image`.
 - Require branches to be up to date before merging.
 - Require all review conversations to be resolved.
 - Do not allow force pushes or branch deletion.
@@ -150,6 +153,8 @@ gh run watch
 The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be able to `git fetch origin main` and run `docker compose` from the repo root.
 
 ## Migration compatibility and approval policy
+
+The SQLite `PHP tests` job is the fast general regression lane. The `PostgreSQL migration and concurrency release gate` job is authoritative for production database compatibility because it uses the same database family as production, starts from an empty database, and exercises locking and process-level concurrency behavior. A deployment commit is not eligible for release unless the complete `CI` workflow, including this PostgreSQL job, succeeds for that exact SHA.
 
 Every production migration must follow expand-and-contract compatibility because the old application remains live while the candidate migration runs and may be restored after cutover:
 

@@ -26,6 +26,7 @@ use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -653,6 +654,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->admin_pending_order_notified_at);
     }
 
+    #[Group('postgres-release')]
     public function test_manual_checkout_enqueues_outbound_notifications_without_inline_photo_or_admin_send(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');

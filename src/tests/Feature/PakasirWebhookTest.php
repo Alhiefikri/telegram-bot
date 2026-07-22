@@ -32,6 +32,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
 class PakasirWebhookTest extends TestCase
@@ -51,6 +52,7 @@ class PakasirWebhookTest extends TestCase
         ]);
     }
 
+    #[Group('postgres-release')]
     public function test_identical_completed_callback_replays_coalesce_to_one_processed_event_and_once_only_fulfillment(): void
     {
         Queue::fake();
@@ -77,7 +79,7 @@ class PakasirWebhookTest extends TestCase
             $this->assertSame($payment->id, $firstEvent->payment_id);
             $this->assertSame($payment->merchant_ref, $firstEvent->merchant_ref);
             $this->assertSame('completed', $firstEvent->provider_status);
-            $this->assertSame($payload, $firstEvent->raw_payload);
+            $this->assertEquals($payload, $firstEvent->raw_payload);
             $this->assertNotNull($firstEvent->processed_at);
             $this->assertSame(1, $firstEvent->received_count);
 

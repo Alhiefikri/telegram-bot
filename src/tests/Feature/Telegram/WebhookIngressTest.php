@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
 class WebhookIngressTest extends TelegramBotTestSupport
@@ -149,6 +150,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         Http::assertSentCount(3);
     }
 
+    #[Group('postgres-release')]
     public function test_duplicate_direct_job_does_not_send_twice(): void
     {
         $this->fakeTelegramHttp();

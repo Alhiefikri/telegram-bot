@@ -26,6 +26,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
 class Phase7AdminOperationsTest extends TestCase
@@ -294,6 +295,7 @@ class Phase7AdminOperationsTest extends TestCase
         $this->assertSame(1, ManualPaymentSetting::query()->count());
     }
 
+    #[Group('postgres-release')]
     public function test_ops_health_passes_when_database_and_queue_schema_exist(): void
     {
         $this->artisan('ops:health', ['--db' => true, '--queue-schema' => true])

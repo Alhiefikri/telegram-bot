@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
@@ -337,6 +338,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('aria-describedby="storefront-buyer-name-help storefront-buyer-name-error"', false);
     }
 
+    #[Group('postgres-release')]
     public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
