@@ -617,7 +617,7 @@ SH);
         $concurrencyGate = file_get_contents(base_path('../scripts/concurrency-deploy-gate.sh'));
 
         $this->assertStringContainsString('name: PostgreSQL migration and concurrency release gate', $workflow);
-        $this->assertStringContainsString('image: postgres:17-alpine', $workflow);
+        $this->assertStringContainsString('image: postgres:16-alpine', $workflow);
         $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"', $workflow);
         $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
         $this->assertStringContainsString('POSTGRES_PASSWORD: ci-only-not-production', $workflow);

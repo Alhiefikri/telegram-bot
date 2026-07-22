@@ -117,7 +117,7 @@ jobs:
     timeout-minutes: 40
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:16-alpine
         env:
           POSTGRES_DB: telegram_bot_ci
           POSTGRES_USER: telegram_bot_ci

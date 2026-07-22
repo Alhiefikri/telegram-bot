@@ -14,7 +14,7 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
   - PHP 8.4 + Composer validate/install.
   - Laravel test suite via `composer test`.
-  - Keeps the fast SQLite suite parallel, then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 17 service with health checking and CI-only credentials.
+  - Keeps the fast SQLite suite parallel, then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
   - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.
   - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
   - Node 24 + `npm ci`.
