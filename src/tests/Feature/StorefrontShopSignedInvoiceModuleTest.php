@@ -6,11 +6,13 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Storefront\StorefrontShopPaymentStatusRefresh;
 use App\Storefront\StorefrontShopSignedInvoice;
 use App\Storefront\StorefrontShopSignedInvoiceState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use ReflectionClass;
 use Tests\Support\StorefrontSignedInvoiceScenarios;
 use Tests\TestCase;
 
@@ -18,6 +20,20 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
 {
     use RefreshDatabase;
     use StorefrontSignedInvoiceScenarios;
+
+    public function test_projection_constructor_has_no_payment_provider_or_reconciliation_dependencies(): void
+    {
+        $dependencies = collect((new ReflectionClass(StorefrontShopSignedInvoice::class))
+            ->getConstructor()?->getParameters() ?? [])
+            ->map(fn ($parameter): string => (string) $parameter->getType())
+            ->all();
+
+        $this->assertNotContains('App\\Services\\Pakasir\\PakasirProviderAdapter', $dependencies);
+        $this->assertNotContains('App\\Services\\Pakasir\\PakasirNativeQrisService', $dependencies);
+        $this->assertNotContains('App\\Services\\Pakasir\\PakasirCallbackProcessor', $dependencies);
+        $this->assertNotContains('App\\Storefront\\StorefrontFunnelEvents', $dependencies);
+        $this->assertFalse((new ReflectionClass(StorefrontShopSignedInvoice::class))->hasMethod('refreshStatus'));
+    }
 
     public function test_read_result_selects_latest_payment_and_builds_pending_invoice_state(): void
     {
@@ -125,7 +141,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         );
         $this->providerTransactionDetailCompletesPayment($payment);
 
-        $result = app(StorefrontShopSignedInvoice::class)->refreshStatus($order);
+        $result = app(StorefrontShopPaymentStatusRefresh::class)->execute($order);
 
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
@@ -143,6 +159,49 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
+    public function test_refresh_status_keeps_pending_provider_result_pending_without_lifecycle_mutation(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 61000,
+            providerFee: 400,
+            providerTotalPayment: 61400,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.MODULEPENDINGREFRESH99',
+        );
+        $this->providerTransactionDetailIsPending($payment);
+
+        $result = app(StorefrontShopPaymentStatusRefresh::class)->execute($order);
+
+        $this->assertTrue($result->payload()['ok']);
+        $this->assertFalse($result->payload()['is_paid']);
+        $this->assertFalse($result->payload()['is_terminal']);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+    }
+
+    public function test_refresh_status_replay_reuses_canonical_paid_state_without_second_provider_call(): void
+    {
+        $this->pakasirConfigIsReady();
+        Queue::fake();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 74000,
+            providerFee: 500,
+            providerTotalPayment: 74500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.MODULEREPLAY99',
+        );
+        $this->providerTransactionDetailCompletesPayment($payment);
+        $command = app(StorefrontShopPaymentStatusRefresh::class);
+
+        $first = $command->execute($order);
+        $second = $command->execute($order->fresh());
+
+        $this->assertTrue($first->payload()['is_paid']);
+        $this->assertTrue($second->payload()['is_paid']);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        Http::assertSentCount(1);
+    }
+
     public function test_refresh_status_returns_retryable_failure_when_provider_reconciliation_fails(): void
     {
         $this->pakasirConfigIsReady();
@@ -154,7 +213,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         );
         $this->providerTransactionDetailFails();
 
-        $result = app(StorefrontShopSignedInvoice::class)->refreshStatus($order);
+        $result = app(StorefrontShopPaymentStatusRefresh::class)->execute($order);
 
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
@@ -179,7 +238,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         ]);
 
         foreach ([$noPaymentOrder, $manualPaymentOrder] as $order) {
-            $result = app(StorefrontShopSignedInvoice::class)->refreshStatus($order);
+            $result = app(StorefrontShopPaymentStatusRefresh::class)->execute($order);
 
             $this->assertSame(422, $result->statusCode());
             $this->assertSame([
@@ -204,7 +263,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $payment->update(['status' => PaymentStatus::Expired]);
         Http::fake();
 
-        $result = app(StorefrontShopSignedInvoice::class)->refreshStatus($order);
+        $result = app(StorefrontShopPaymentStatusRefresh::class)->execute($order);
 
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([

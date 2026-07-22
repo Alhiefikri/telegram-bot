@@ -10,23 +10,16 @@ use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
-use App\Services\Pakasir\PakasirCallbackProcessor;
-use App\Services\Pakasir\PakasirNativeQrisService;
-use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramQrCodeRenderer;
-use Throwable;
 
 class StorefrontShopSignedInvoice
 {
     public function __construct(
         private readonly TelegramQrCodeRenderer $qrCodes,
-        private readonly PakasirProviderAdapter $pakasir,
-        private readonly PakasirNativeQrisService $nativeQris,
-        private readonly PakasirCallbackProcessor $processor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
-        private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
+        private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -62,104 +55,6 @@ class StorefrontShopSignedInvoice
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
             manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
             statusMessage: $this->statusMessage($order, $payment),
-        );
-    }
-
-    public function refreshStatus(Order $order): StorefrontShopSignedStatusRefreshResult
-    {
-        $payment = $this->latestPayment($order);
-
-        if (! $this->isPakasirPayment($payment)) {
-            return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
-        }
-
-        $wasQrisReady = $this->hasPayableNativeQris($payment);
-        $qrisRecoveryFailed = false;
-        $qrisRecoveredDuringRetry = false;
-
-        $projection = $this->orders->project($order, $payment);
-        if ($this->shouldRecoverQris($projection, $payment)) {
-            try {
-                $this->nativeQris->ensureCreated($payment);
-            } catch (Throwable $exception) {
-                report($exception);
-                $qrisRecoveryFailed = true;
-            }
-
-            $payment->refresh();
-            if (! $wasQrisReady && $this->hasPayableNativeQris($payment)) {
-                $qrisRecoveredDuringRetry = true;
-                $this->events->qrisCreated($order, $payment, [
-                    'source' => 'status_retry',
-                    'idempotent_reuse' => false,
-                ]);
-            }
-        }
-
-        if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
-            $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment);
-            $this->events->checkoutSubmitted(null, $order, [
-                'status_endpoint_result' => 'qris_not_ready',
-                'qris_readiness_state' => $readiness['state'],
-                'failure_kind' => 'qris_recovery_failed',
-            ]);
-
-            return StorefrontShopSignedStatusRefreshResult::qrisNotReady(
-                title: $readiness['title'],
-                message: $readiness['message'],
-            );
-        }
-
-        if ($this->shouldRefreshFromProvider($projection, $payment)) {
-            try {
-                $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
-            } catch (Throwable $exception) {
-                report($exception);
-                $this->events->checkoutSubmitted(null, $order, [
-                    'status_endpoint_result' => 'provider_failure',
-                    'failure_kind' => $exception::class,
-                ]);
-
-                return StorefrontShopSignedStatusRefreshResult::retryableProviderFailure();
-            }
-        }
-
-        $order->refresh();
-        $payment->refresh();
-        $projection = $this->orders->project($order, $payment);
-        $qrisReady = $this->hasPayableNativeQris($payment);
-        if (! $wasQrisReady && $qrisReady && ! $qrisRecoveredDuringRetry) {
-            $this->events->qrisCreated($order, $payment, [
-                'source' => 'status_refresh',
-                'idempotent_reuse' => false,
-            ]);
-        }
-        if ($projection->isPaid) {
-            $this->events->paymentVerified($order, $payment, [
-                'source' => 'status_refresh',
-                'status_endpoint_result' => 'paid',
-            ]);
-        }
-        if ($projection->isTerminal) {
-            $this->events->checkoutSubmitted(null, $order, [
-                'status_endpoint_result' => 'terminal',
-                'recovery_cause' => $projection->terminalCause,
-            ]);
-        }
-        $shouldReload = ! $projection->isPaid
-            && ! $projection->isTerminal
-            && ! $wasQrisReady
-            && $qrisReady;
-
-        return StorefrontShopSignedStatusRefreshResult::refreshed(
-            paymentStatus: $payment->status,
-            orderStatus: $order->order_status,
-            isPaid: $projection->isPaid,
-            isTerminal: $this->state($projection) === StorefrontShopSignedInvoiceState::Terminal,
-            qrisReady: $qrisReady,
-            shouldReload: $shouldReload,
-            redirectUrl: $this->redirectUrl($order),
-            message: $shouldReload ? 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.' : $this->statusMessage($order, $payment),
         );
     }
 
@@ -223,13 +118,7 @@ class StorefrontShopSignedInvoice
             return null;
         }
 
-        try {
-            return $this->pakasir->hostedPaymentUrl($payment);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return null;
-        }
+        return $this->hostedPaymentUrls->for($payment);
     }
 
     public function statusMessage(Order $order, ?Payment $payment): string

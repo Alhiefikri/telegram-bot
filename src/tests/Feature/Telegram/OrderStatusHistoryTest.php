@@ -12,6 +12,7 @@ use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
@@ -197,7 +198,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $payment->update(['provider_payment_method' => 'qris']);
         $this->fakeTelegramHttp([
@@ -226,7 +227,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => [

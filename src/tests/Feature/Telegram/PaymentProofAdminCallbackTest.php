@@ -21,6 +21,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramUpdate;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\StockAdjustmentService;
@@ -306,7 +307,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), CheckoutPaymentIntents::binancePay());
 
         (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
         $this->postTelegramWebhook($this->paymentPhotoUpdate(207, $order->invoice_number, ['username' => 'buyer']))->assertOk();
@@ -326,7 +327,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), CheckoutPaymentIntents::binancePay());
         $completedDuringInstructionSend = false;
 
         Http::preventStrayRequests();
@@ -363,7 +364,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 1_500_000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), 'BINANCE_PAY_ID', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->firstOrFail(), CheckoutPaymentIntents::binancePay());
 
         (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
         $this->postTelegramWebhook($this->paymentPhotoUpdate(209, $order->invoice_number, ['username' => 'buyer']))->assertOk();
@@ -1054,7 +1055,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 888, 'locale' => 'id']);
         $product = Product::factory()->create(['stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), 'hosted', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->first();
         $payload = ['project' => 'sedulur-digital', 'order_id' => $payment->merchant_ref, 'amount' => $payment->amount, 'status' => 'completed'];
         $this->fakeTelegramHttp([

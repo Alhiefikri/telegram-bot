@@ -1,0 +1,195 @@
+<?php
+
+namespace App\Storefront;
+
+use App\Models\Order;
+use App\Models\Payment;
+use App\Services\OrderLifecycle;
+use App\Services\OrderLifecycleProjection;
+use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use Throwable;
+
+class StorefrontShopPaymentStatusRefresh
+{
+    public function __construct(
+        private readonly PakasirProviderAdapter $pakasir,
+        private readonly PakasirNativeQrisService $nativeQris,
+        private readonly PakasirCallbackProcessor $processor,
+        private readonly StorefrontInvoiceUrl $invoiceUrls,
+        private readonly StorefrontFunnelEvents $events,
+        private readonly OrderLifecycle $orders,
+    ) {}
+
+    public function execute(Order $order): StorefrontShopSignedStatusRefreshResult
+    {
+        $payment = $this->latestPayment($order);
+
+        if (! $this->isPakasirPayment($payment)) {
+            return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
+        }
+
+        $wasQrisReady = $this->hasPayableNativeQris($payment);
+        $qrisRecoveryFailed = false;
+        $qrisRecoveredDuringRetry = false;
+
+        $projection = $this->orders->project($order, $payment);
+        if ($this->shouldRecoverQris($projection, $payment)) {
+            try {
+                $this->nativeQris->ensureCreated($payment);
+            } catch (Throwable $exception) {
+                report($exception);
+                $qrisRecoveryFailed = true;
+            }
+
+            $payment->refresh();
+            if (! $wasQrisReady && $this->hasPayableNativeQris($payment)) {
+                $qrisRecoveredDuringRetry = true;
+                $this->events->qrisCreated($order, $payment, [
+                    'source' => 'status_retry',
+                    'idempotent_reuse' => false,
+                ]);
+            }
+        }
+
+        if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
+            $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment);
+            $this->events->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'qris_not_ready',
+                'qris_readiness_state' => $readiness['state'],
+                'failure_kind' => 'qris_recovery_failed',
+            ]);
+
+            return StorefrontShopSignedStatusRefreshResult::qrisNotReady(
+                title: $readiness['title'],
+                message: $readiness['message'],
+            );
+        }
+
+        if ($this->shouldRefreshFromProvider($projection, $payment)) {
+            try {
+                $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+            } catch (Throwable $exception) {
+                report($exception);
+                $this->events->checkoutSubmitted(null, $order, [
+                    'status_endpoint_result' => 'provider_failure',
+                    'failure_kind' => $exception::class,
+                ]);
+
+                return StorefrontShopSignedStatusRefreshResult::retryableProviderFailure();
+            }
+        }
+
+        $order->refresh();
+        $payment->refresh();
+        $projection = $this->orders->project($order, $payment);
+        $qrisReady = $this->hasPayableNativeQris($payment);
+        if (! $wasQrisReady && $qrisReady && ! $qrisRecoveredDuringRetry) {
+            $this->events->qrisCreated($order, $payment, [
+                'source' => 'status_refresh',
+                'idempotent_reuse' => false,
+            ]);
+        }
+        if ($projection->isPaid) {
+            $this->events->paymentVerified($order, $payment, [
+                'source' => 'status_refresh',
+                'status_endpoint_result' => 'paid',
+            ]);
+        }
+        if ($projection->isTerminal) {
+            $this->events->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'terminal',
+                'recovery_cause' => $projection->terminalCause,
+            ]);
+        }
+        $shouldReload = ! $projection->isPaid
+            && ! $projection->isTerminal
+            && ! $wasQrisReady
+            && $qrisReady;
+
+        return StorefrontShopSignedStatusRefreshResult::refreshed(
+            paymentStatus: $payment->status,
+            orderStatus: $order->order_status,
+            isPaid: $projection->isPaid,
+            isTerminal: $this->state($projection) === StorefrontShopSignedInvoiceState::Terminal,
+            qrisReady: $qrisReady,
+            shouldReload: $shouldReload,
+            redirectUrl: $this->invoiceUrls->show($order),
+            message: $shouldReload ? 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.' : $this->statusMessage($order, $payment),
+        );
+    }
+
+    private function latestPayment(Order $order): ?Payment
+    {
+        return $order->payments()->latest('created_at')->first();
+    }
+
+    private function shouldRefreshFromProvider(OrderLifecycleProjection $projection, Payment $payment): bool
+    {
+        return $this->hasPayableNativeQris($payment) && $projection->isPendingPayment;
+    }
+
+    private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
+    {
+        return $this->isPakasirPayment($payment)
+            && $projection->isPendingPayment
+            && ! $this->hasPayableNativeQris($payment);
+    }
+
+    private function isPakasirPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === 'pakasir';
+    }
+
+    private function hasPayableNativeQris(?Payment $payment): bool
+    {
+        return $payment?->isPayableNativePakasirQris() === true;
+    }
+
+    private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState
+    {
+        if ($projection->isPaid) {
+            return StorefrontShopSignedInvoiceState::Paid;
+        }
+
+        if ($projection->isPendingPayment) {
+            return StorefrontShopSignedInvoiceState::Pending;
+        }
+
+        return StorefrontShopSignedInvoiceState::Terminal;
+    }
+
+    private function statusMessage(Order $order, ?Payment $payment): string
+    {
+        $projection = $this->orders->project($order, $payment);
+
+        return match (true) {
+            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
+            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
+            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
+            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
+            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
+        };
+    }
+
+    /**
+     * @return array{state: string, title: string, message: string}
+     */
+    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment): array
+    {
+        if (! $projection->isPendingPayment) {
+            return ['state' => 'terminal', 'title' => 'QRIS tidak aktif', 'message' => 'Invoice ini tidak sedang menunggu pembayaran QRIS.'];
+        }
+
+        if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {
+            return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
+        }
+
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+            return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
+        }
+
+        return ['state' => 'creating', 'title' => 'Sedang membuat QRIS', 'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.'];
+    }
+}

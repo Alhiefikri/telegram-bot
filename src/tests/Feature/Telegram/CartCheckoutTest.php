@@ -18,6 +18,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
 use App\Services\Telegram\TelegramCheckoutIntents;
@@ -704,13 +705,14 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_binance_pending_checkout_notification_shows_usdt_total_to_admin(): void
     {
+        config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
-        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'binance_pay_enabled' => true, 'is_active' => true]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['name' => 'AI Premium', 'price_amount' => 30000, 'usdt_price_amount' => 2_500_000, 'stock' => 5]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'BINANCE_PAY_ID', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay());
 
         (new SendAdminOrderPendingNotification($order->id))->handle(app(TelegramAdminOrderNotifier::class));
 
@@ -729,7 +731,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
         $this->fakeTelegramHttp();
 
         (new SendManualCheckoutNotifications($order->id))->handle(app(TelegramCheckoutIntents::class));
@@ -756,7 +758,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
         $order->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
         $this->fakeTelegramHttp();
 
@@ -1014,11 +1016,11 @@ class CartCheckoutTest extends TelegramBotTestSupport
         ProductStockItem::create(['product_id' => $otherProduct->id, 'secret' => 'other@example.test|pass']);
 
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($buyer->carts()->firstOrFail(), 'hosted', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($buyer->carts()->firstOrFail(), CheckoutPaymentIntents::pakasir());
         $order->payments()->firstOrFail()->update(['provider_payment_method' => 'qris']);
 
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($otherBuyer), $otherProduct, 1);
-        $otherOrder = app(OrderCheckoutService::class)->checkout($otherBuyer->carts()->firstOrFail(), 'hosted', 'pakasir');
+        $otherOrder = app(OrderCheckoutService::class)->checkout($otherBuyer->carts()->firstOrFail(), CheckoutPaymentIntents::pakasir());
         $otherOrder->payments()->firstOrFail()->update(['provider_payment_method' => 'qris']);
 
         $this->assertSame(1, $product->fresh()->reserved_stock);
@@ -1046,7 +1048,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_buyer_cancel_callback_deletes_binance_checkout_photo_and_releases_stock(): void
     {
+        config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['binance_pay_enabled' => true, 'is_active' => true]);
         $buyer = Customer::factory()->create(['telegram_id' => 12345]);
         $product = Product::factory()->create([
             'name' => 'Cancelable Binance Checkout',
@@ -1057,7 +1061,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cancelable-binance@example.test|pass']);
         $cart = app(CartService::class)->activeCartFor($buyer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'BINANCE_PAY_ID', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay());
 
         $this->assertSame(1, $product->fresh()->reserved_stock);
 

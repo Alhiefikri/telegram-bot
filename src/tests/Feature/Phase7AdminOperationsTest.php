@@ -19,6 +19,7 @@ use App\Policies\PaymentPolicy;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -216,7 +217,7 @@ class Phase7AdminOperationsTest extends TestCase
         $product = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 2);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
 
         $completed = app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
 

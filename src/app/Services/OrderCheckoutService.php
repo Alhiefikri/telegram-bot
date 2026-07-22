@@ -7,10 +7,11 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
-use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Services\Checkout\CheckoutPaymentIntent;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -23,14 +24,15 @@ class OrderCheckoutService
         private readonly ProductCredentialAllocator $credentials,
     ) {}
 
-    public function checkout(Cart $cart, string $paymentMethod = 'manual', string $provider = 'manual', ?CarbonInterface $expiresAt = null, ?string $checkoutKey = null): Order
+    public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
     {
-        $expiresAt ??= now()->addMinutes($this->paymentDeadlineMinutes($paymentMethod));
+        $paymentIntent ??= CheckoutPaymentIntents::manualQris();
+        $expiresAt = $paymentIntent->expiresAt();
 
         $order = null;
         for ($i = 0; $i < 5; $i++) {
             try {
-                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentMethod, $provider, $expiresAt, $checkoutKey), 5);
+                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentIntent, $expiresAt, $checkoutKey), 5);
 
                 return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {
@@ -43,7 +45,7 @@ class OrderCheckoutService
         throw new InvalidCheckout('Unable to create unique checkout references.');
     }
 
-    private function checkoutOnce(Cart $cart, string $paymentMethod, string $provider, CarbonInterface $expiresAt, ?string $checkoutKey): Order
+    private function checkoutOnce(Cart $cart, CheckoutPaymentIntent $paymentIntent, CarbonInterface $expiresAt, ?string $checkoutKey): Order
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             return $existing;
@@ -71,19 +73,11 @@ class OrderCheckoutService
 
         $products = $this->inventory->lockedCheckoutProducts($items);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
+        $paymentIntent->assertReady($lockedCart, $items, $products);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
-        $usdtTotal = $provider === 'manual' && $paymentMethod === 'BINANCE_PAY_ID'
-            ? $items->sum(function ($item) use ($products): int {
-                $price = $products[$item->product_id]->usdt_price_amount;
-                if ($price === null) {
-                    throw new InvalidCheckout('A cart item has no USDT price.');
-                }
-
-                return $price * $item->quantity;
-            }) : null;
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => 'IDR', 'expires_at' => $expiresAt]);
-        Payment::create(['order_id' => $order->id, 'provider' => $provider, 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentMethod, 'amount' => $usdtTotal ?? $total, 'currency' => $usdtTotal === null ? 'IDR' : 'USDT', 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
+        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
+        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'amount' => $paymentIntent->paymentAmount($items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
@@ -100,17 +94,6 @@ class OrderCheckoutService
     private function isUniqueViolation(QueryException $e): bool
     {
         return in_array((string) ($e->errorInfo[0] ?? ''), ['23000', '23505'], true) || str_contains(strtolower($e->getMessage()), 'unique');
-    }
-
-    private function paymentDeadlineMinutes(string $paymentMethod): int
-    {
-        $settings = ManualPaymentSetting::current();
-
-        if ($paymentMethod === 'BINANCE_PAY_ID') {
-            return $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES;
-        }
-
-        return $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES;
     }
 
     private function assertWebReservationBudget(Cart $cart, $items, $products): void

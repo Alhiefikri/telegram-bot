@@ -83,6 +83,26 @@ class StorefrontOrderAccessTest extends TestCase
             ->assertDontSee($secret, false);
     }
 
+    public function test_recovery_key_grant_remains_valid_for_thirty_minutes_only(): void
+    {
+        [$order, $key, $secret] = $this->paidOrderWithAccessKey();
+
+        $this->post(route('storefront.order-access.store'), [
+            'invoice_number' => $order->invoice_number,
+            'access_key' => $key,
+        ])->assertRedirect(route('storefront.order-access.show', $order));
+
+        $this->travel(29)->minutes();
+        $this->get(route('storefront.order-access.show', $order))
+            ->assertOk()
+            ->assertSee($secret, false);
+
+        $this->travel(2)->minutes();
+        $this->get(route('storefront.order-access.show', $order))
+            ->assertForbidden()
+            ->assertDontSee($secret, false);
+    }
+
     public function test_access_key_is_only_stored_as_a_hash_on_the_order(): void
     {
         [$order, $key] = $this->paidOrderWithAccessKey();

@@ -13,6 +13,9 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntent;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
@@ -166,16 +169,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             $requestedPaymentMode = $this->checkoutIntents->requestedPaymentMode();
             $paymentMode = $this->checkoutIntents->paymentMode();
+            $paymentIntent = $this->paymentIntent($binance, $paymentMode);
             $order = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                 'step' => 'order_checkout',
                 'payment_mode' => $paymentMode,
                 'customer_correlation_id' => DogfoodTiming::correlation($context->customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
-            ], fn () => $binance
-                ? $this->checkout->checkout($cart, 'BINANCE_PAY_ID', 'manual', checkoutKey: $checkoutKey)
-                : ($paymentMode === 'pakasir'
-                    ? $this->checkout->checkout($cart, $this->checkoutIntents->pakasirPaymentMethod(), 'pakasir', checkoutKey: $checkoutKey)
-                    : $this->checkout->checkout($cart, $this->checkoutIntents->manualPaymentMethod(), 'manual', checkoutKey: $checkoutKey)));
+            ], fn () => $this->checkout->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
 
@@ -186,17 +186,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $this->bot->sendMessage($context->chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage($context->customer));
         }
 
-        $payment = $order->payments()->latest()->first();
-        if ($payment?->method === 'BINANCE_PAY_ID') {
-            SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-        } elseif ($payment?->provider === 'pakasir') {
-            SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-        } else {
-            SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
-        }
+        match ($paymentIntent->postCreationBehavior()) {
+            CheckoutPostCreationBehavior::BinancePayInstructions => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
+            CheckoutPostCreationBehavior::PakasirInstructions => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
+            CheckoutPostCreationBehavior::ManualQrisInstructions => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
+        };
+        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string
@@ -215,6 +210,19 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         ]);
 
         return hash_hmac('sha256', $payload, (string) config('app.key'));
+    }
+
+    private function paymentIntent(bool $binance, string $paymentMode): CheckoutPaymentIntent
+    {
+        if ($binance) {
+            return CheckoutPaymentIntents::binancePay();
+        }
+
+        if ($paymentMode === 'pakasir') {
+            return CheckoutPaymentIntents::pakasir($this->checkoutIntents->pakasirPaymentMethod());
+        }
+
+        return CheckoutPaymentIntents::manualQris();
     }
 
     private function checkoutIntentPayload(string $data): string

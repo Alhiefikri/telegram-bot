@@ -23,6 +23,7 @@ use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
@@ -75,8 +76,8 @@ class ProductionConcurrencyTest extends TestCase
         $secondCart = $this->cartForProduct($product);
 
         $results = $this->runConcurrently([
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), 'manual', 'manual')->id,
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), 'manual', 'manual')->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), CheckoutPaymentIntents::manualQris())->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), CheckoutPaymentIntents::manualQris())->id,
         ]);
 
         $this->assertSame(1, $this->successfulResultCount($results));
@@ -110,8 +111,8 @@ class ProductionConcurrencyTest extends TestCase
         $secondCart = $this->cartForProduct($product);
 
         $results = $this->runConcurrently([
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), 'BINANCE_PAY_ID', 'manual')->id,
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), 'BINANCE_PAY_ID', 'manual')->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), CheckoutPaymentIntents::binancePay())->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), CheckoutPaymentIntents::binancePay())->id,
         ]);
 
         $this->assertSame(1, $this->successfulResultCount($results));
@@ -363,7 +364,7 @@ class ProductionConcurrencyTest extends TestCase
         $user = User::factory()->create();
 
         $results = $this->runConcurrently([
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), 'manual', 'manual')->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), CheckoutPaymentIntents::manualQris())->id,
             fn () => app(ProductStockItemManager::class)->deleteAvailable(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), User::findOrFail($user->id), '127.0.0.1')->id,
         ]);
 
@@ -387,7 +388,7 @@ class ProductionConcurrencyTest extends TestCase
         $user = User::factory()->create();
 
         $this->runConcurrently([
-            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), 'manual', 'manual')->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), CheckoutPaymentIntents::manualQris())->id,
             fn () => app(ProductStockItemManager::class)->updateAvailableSecret(Product::findOrFail($product->id), ProductStockItem::findOrFail($item->id), 'new-secret', User::findOrFail($user->id), '127.0.0.1')->id,
         ]);
 
@@ -672,7 +673,7 @@ class ProductionConcurrencyTest extends TestCase
         }
         $cart = $this->cartForProduct($product, $quantity);
 
-        return app(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual', $expiresAt);
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($expiresAt));
     }
 
     private function manualReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
@@ -680,7 +681,7 @@ class ProductionConcurrencyTest extends TestCase
         $product = Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0, 'price_amount' => 10000]);
         $cart = $this->cartForProduct($product, $quantity);
 
-        return app(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual', $expiresAt);
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($expiresAt));
     }
 
     private function pakasirReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order

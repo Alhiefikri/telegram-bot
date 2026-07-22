@@ -19,6 +19,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -375,7 +376,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
 
         app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
 
@@ -397,7 +398,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
 
         app(AdminOrderOperations::class)->completeManualOrder($order, $user, '127.0.0.1');
 

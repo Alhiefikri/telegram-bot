@@ -13,11 +13,13 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Providers\AppServiceProvider;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -44,7 +46,7 @@ class PakasirGatewayTest extends TestCase
 
     public function test_generates_deterministic_hosted_payment_url_for_existing_payment(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $url = app(PakasirClient::class)->hostedPaymentUrl($payment);
@@ -60,7 +62,7 @@ class PakasirGatewayTest extends TestCase
     {
         config()->set('services.pakasir.redirect_url', null);
         config()->set('services.pakasir.qris_only', false);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $url = app(PakasirClient::class)->hostedPaymentUrl($payment);
@@ -73,7 +75,7 @@ class PakasirGatewayTest extends TestCase
         Http::fake([
             'https://app.pakasir.com/api/transactiondetail*' => Http::response(['transaction' => ['status' => 'completed']], 200),
         ]);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $response = app(PakasirClient::class)->transactionDetail($payment);
@@ -87,7 +89,7 @@ class PakasirGatewayTest extends TestCase
         Http::fake([
             'https://app.pakasir.com/api/transactioncancel' => Http::response(['transaction' => ['status' => 'cancelled']], 200),
         ]);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $response = app(PakasirClient::class)->cancelTransaction($payment);
@@ -105,7 +107,7 @@ class PakasirGatewayTest extends TestCase
     {
         config()->set('services.telegram.token', null);
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->subMinute());
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
         $payment = $order->payments()->firstOrFail();
 
         $this->artisan('orders:expire-pending')
@@ -122,7 +124,7 @@ class PakasirGatewayTest extends TestCase
     {
         config()->set('services.telegram.token', null);
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'QR_MANUAL', 'manual', now()->subMinute());
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::manualQris(now()->subMinute()));
 
         $this->artisan('orders:expire-pending')->assertSuccessful();
 
@@ -151,7 +153,7 @@ class PakasirGatewayTest extends TestCase
 
             return Http::response(['transaction' => ['status' => 'completed']], 200);
         });
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $response = app(PakasirClient::class)->transactionDetail($payment);
@@ -182,7 +184,7 @@ class PakasirGatewayTest extends TestCase
                 'api_key' => 'provider-should-not-echo-this',
             ],
         ], 200));
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $transaction = app(PakasirClient::class)->createQrisTransaction($payment);
@@ -230,7 +232,7 @@ class PakasirGatewayTest extends TestCase
 
             return Http::response(['message' => 'provider unavailable'], 500);
         });
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         try {
@@ -269,7 +271,7 @@ class PakasirGatewayTest extends TestCase
             'Bearer provider-authorization-token',
             'provider-signature',
         ];
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $providerPayload = [
             'payment' => [
@@ -380,7 +382,7 @@ class PakasirGatewayTest extends TestCase
                 'expired_at' => $providerExpiry->utc()->toAtomString(),
             ],
         ], 200));
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir', now()->addHour());
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->addHour()));
         $payment = $order->payments()->firstOrFail();
 
         app(PakasirNativeQrisService::class)->ensureCreated($payment);
@@ -406,7 +408,7 @@ class PakasirGatewayTest extends TestCase
                 ],
             ], 200),
         ]);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $service = app(PakasirNativeQrisService::class);
 
@@ -446,7 +448,7 @@ class PakasirGatewayTest extends TestCase
                     'expired_at' => '2026-07-04T16:30:00Z',
                 ]),
             ], 200));
-            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
             $payment = $order->payments()->firstOrFail();
 
             try {
@@ -515,7 +517,7 @@ class PakasirGatewayTest extends TestCase
         Http::fake();
         config(['services.telegram.payment_mode' => 'manual']);
 
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'QR_MANUAL', 'manual');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::manualQris());
         $payment = $order->payments()->firstOrFail();
 
         $this->assertSame('manual', $payment->provider);

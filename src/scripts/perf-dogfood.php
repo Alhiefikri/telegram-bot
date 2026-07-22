@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramUpdate;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\Telegram\FakeTelegramBotClient;
@@ -680,7 +681,7 @@ $runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE, 'Store C
 $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'publish paid order proof to Store Channel', 'paid manual order fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
     $configureStoreChannelFixture(false, true);
     $cart = $makeFixtureCart((int) $adminUserId, $product);
-    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual');
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     $payment = $order->payments()->latest()->firstOrFail();
     $app->make(OrderStateMachine::class)->markPaymentPaid($payment);
 
@@ -693,7 +694,7 @@ $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post
 $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'manual retry failed proof to Store Channel', 'failed sales proof fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
     $configureStoreChannelFixture(false, true);
     $cart = $makeFixtureCart((int) $adminUserId, $product);
-    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'manual', 'manual');
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     $payment = $order->payments()->latest()->firstOrFail();
     $paidOrder = $app->make(OrderStateMachine::class)->markPaymentPaid($payment);
     SalesProofPost::query()->updateOrCreate(
@@ -705,7 +706,7 @@ $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post
 });
 $runFixtureScenario(DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'Pakasir transaction-detail', 'reconcile real pending transaction fixture', 'pakasir:reconcile against DOGFOOD_PAKASIR_PENDING_ORDER_ID', 1, function () use ($app, $adminUserId, $fixtures, $makeFixtureCart, $makePakasirFixtureProduct) {
     $cart = $makeFixtureCart((int) $adminUserId, $makePakasirFixtureProduct());
-    $order = $app->make(OrderCheckoutService::class)->checkout($cart, 'hosted', 'pakasir');
+    $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::pakasir());
     $payment = $order->payments()->latest()->firstOrFail();
     $payment->update([
         'merchant_ref' => $fixtures->pakasirPendingOrderId(),

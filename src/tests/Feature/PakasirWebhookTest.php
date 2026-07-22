@@ -20,11 +20,13 @@ use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -53,7 +55,7 @@ class PakasirWebhookTest extends TestCase
     {
         Queue::fake();
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
         $firstDeliveryAt = Carbon::parse('2026-07-05 10:00:00', config('app.timezone'));
@@ -110,7 +112,7 @@ class PakasirWebhookTest extends TestCase
     {
         Queue::fake();
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir', now()->subMinute());
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
         $payment = $order->payments()->firstOrFail();
 
         app(OrderStateMachine::class)->expirePendingOrder($order);
@@ -155,7 +157,7 @@ class PakasirWebhookTest extends TestCase
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]),
         ]);
         config()->set('services.telegram.token', 'bot-token');
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $order->customer()->update(['username' => 'AdamBuyer']);
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
@@ -181,7 +183,7 @@ class PakasirWebhookTest extends TestCase
     public function test_wrong_amount_wrong_project_unknown_order_api_mismatch_and_api_failure_fail_closed(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 6), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 6), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount + 1))->assertUnprocessable();
@@ -191,7 +193,7 @@ class PakasirWebhookTest extends TestCase
         $this->fakeDetail($payment->merchant_ref, $payment->amount, ['status' => 'pending']);
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertUnprocessable();
 
-        $apiFailureOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $apiFailureOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $apiFailurePayment = $apiFailureOrder->payments()->firstOrFail();
         Http::fake(['https://app.pakasir.com/api/transactiondetail*' => Http::response(['message' => 'down'], 500)]);
         $this->postJson('/api/webhook/pakasir', $this->payload($apiFailurePayment->merchant_ref, $apiFailurePayment->amount))->assertUnprocessable();
@@ -208,7 +210,7 @@ class PakasirWebhookTest extends TestCase
     public function test_digit_string_amounts_are_accepted_for_callback_and_transaction_detail_verification(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $amount = (string) $payment->amount;
         $this->fakeProviderDetail($payment->merchant_ref, $amount);
@@ -225,7 +227,7 @@ class PakasirWebhookTest extends TestCase
         Queue::fake();
 
         foreach ($this->malformedAmountCases(10000) as $case => $amount) {
-            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
             $payment = $order->payments()->firstOrFail();
             $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
 
@@ -245,7 +247,7 @@ class PakasirWebhookTest extends TestCase
         Queue::fake();
 
         foreach ($this->malformedAmountCases(10000) as $case => $amount) {
-            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+            $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
             $payment = $order->payments()->firstOrFail();
             $this->fakeProviderDetail($payment->merchant_ref, $amount);
 
@@ -264,7 +266,7 @@ class PakasirWebhookTest extends TestCase
     public function test_native_qris_callback_fails_closed_when_transaction_detail_method_mismatches(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $payment->update(['provider_payment_method' => 'qris']);
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount, ['payment_method' => 'hosted']);
@@ -281,7 +283,7 @@ class PakasirWebhookTest extends TestCase
     public function test_callback_rejects_nested_transaction_when_top_level_envelope_is_mismatched(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
 
@@ -309,7 +311,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_completed_callback_with_missing_api_key_fails_closed_after_logging(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         config()->set('services.pakasir.api_key', '');
 
@@ -322,7 +324,7 @@ class PakasirWebhookTest extends TestCase
     public function test_completed_callback_with_missing_project_slug_fails_closed_after_logging(): void
     {
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         config()->set('services.pakasir.slug', '');
 
@@ -337,7 +339,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 1);
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeDetail($payment->merchant_ref, $payment->amount);
 
@@ -387,7 +389,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $firstDeliveryAt = Carbon::parse('2026-07-05 10:30:00', config('app.timezone'));
         Carbon::setTestNow($firstDeliveryAt);
@@ -450,7 +452,7 @@ class PakasirWebhookTest extends TestCase
     public function test_callback_payload_sensitive_fields_are_sanitized_before_storage(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
 
@@ -489,7 +491,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         foreach ($this->malformedAmountCases(10000) as $case => $amount) {
@@ -504,7 +506,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.pakasir.webhook_rate_limit_per_minute', 60);
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         $validPayload = $this->payload($payment->merchant_ref, $payment->amount);
@@ -529,7 +531,7 @@ class PakasirWebhookTest extends TestCase
     public function test_reconcile_command_processes_completed_pakasir_payment_and_logs_reconciliation(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeDetail($payment->merchant_ref, $payment->amount);
 
@@ -549,7 +551,7 @@ class PakasirWebhookTest extends TestCase
     {
         Queue::fake();
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
 
         app(OrderStateMachine::class)->cancelPendingOrder($order);
@@ -587,7 +589,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_does_not_poll_old_released_payments_indefinitely(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         app(OrderStateMachine::class)->cancelPendingOrder($order);
         $payment->forceFill(['updated_at' => now()->subHours(73)])->save();
@@ -618,7 +620,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_skips_mismatches_without_mutating_order(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeDetail($payment->merchant_ref, $payment->amount, ['amount' => $payment->amount + 1]);
 
@@ -631,7 +633,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_skips_malformed_transaction_detail_amount_without_mutating_order(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $this->fakeDetail($payment->merchant_ref, $payment->amount, ['amount' => $payment->amount.'.00']);
 
@@ -646,7 +648,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.telegram.token', 'bot-token');
         $providerExpiry = now()->subMinute()->startOfSecond();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir', now()->addHour());
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->addHour()));
         $payment = $order->payments()->firstOrFail();
         $payment->update(['provider_payment_method' => 'qris']);
         $this->fakeDetail($payment->merchant_ref, $payment->amount, [
@@ -669,7 +671,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_reports_api_failures_without_mutating_order(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         Http::fake(['https://app.pakasir.com/api/transactiondetail*' => Http::response(['message' => 'down'], 500)]);
 
@@ -684,7 +686,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_redacts_transaction_detail_url_secrets_from_failures_without_mutating_order(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         $secret = 'SECRET-issue-108';
         $providerUrl = 'https://app.pakasir.com/api/transactiondetail?project=warung-ai&amount='
@@ -731,7 +733,7 @@ class PakasirWebhookTest extends TestCase
 
     public function test_reconcile_command_fails_safely_when_api_key_is_missing(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), 'qris', 'pakasir');
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
         config()->set('services.pakasir.api_key', '');
         Http::fake();
@@ -753,7 +755,7 @@ class PakasirWebhookTest extends TestCase
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
-        $order = app(OrderCheckoutService::class)->checkout($cart, 'hosted', 'pakasir', now()->subMinute());
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
 
         $this->artisan('orders:expire-pending')->assertSuccessful();
 
