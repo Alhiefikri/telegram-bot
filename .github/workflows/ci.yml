@@ -98,6 +98,7 @@ jobs:
 
       - name: Upload PHPUnit report on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: phpunit-failure-${{ github.run_attempt }}
@@ -166,8 +167,21 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend assets for PostgreSQL integration tests
+        run: npm run build
 
       - name: Prepare Laravel PostgreSQL test environment
         run: |
@@ -205,7 +219,7 @@ jobs:
             "$phpunit_status" \
             "$artifact_dir/phpunit.log" \
             "$DB_DATABASE" > "$artifact_dir/report.md"
-          cat "$artifact_dir/report.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          tee -a "$GITHUB_STEP_SUMMARY" < "$artifact_dir/report.md"
           exit "$phpunit_status"
 
       - name: Run PostgreSQL concurrency deploy gate without skips
@@ -217,6 +231,7 @@ jobs:
 
       - name: Upload PostgreSQL release evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: postgres-release-gate-${{ github.run_attempt }}
@@ -298,6 +313,7 @@ jobs:
 
       - name: Upload Playwright diagnostics on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-failure-${{ github.run_attempt }}
@@ -409,6 +425,7 @@ jobs:
 
       - name: Upload Docker diagnostics on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: docker-failure-${{ github.run_attempt }}

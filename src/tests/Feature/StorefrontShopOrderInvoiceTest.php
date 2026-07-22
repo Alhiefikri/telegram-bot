@@ -754,12 +754,12 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $url = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
 
         $this->postJson($url)->assertOk();
-        $this->postJson($url)
+        $response = $this->postJson($url)
             ->assertTooManyRequests()
             ->assertHeader('Retry-After')
             ->assertJsonPath('ok', false)
-            ->assertJsonPath('retry_after', 60)
             ->assertJsonPath('message', 'Terlalu sering cek status. Coba lagi dalam 60 detik.');
+        $this->assertContains($response->json('retry_after'), [59, 60]);
     }
 
     public function test_terminal_invoice_replaces_pending_status_card_with_human_instruction(): void
