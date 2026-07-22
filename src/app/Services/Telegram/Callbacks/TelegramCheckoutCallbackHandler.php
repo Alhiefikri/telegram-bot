@@ -8,6 +8,7 @@ use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
@@ -190,7 +191,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         } elseif ($payment?->provider === 'pakasir') {
-            $this->checkoutIntents->sendPakasirPaymentInstructions($context->chatId, $order, $payment);
+            SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
         } else {
             SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();

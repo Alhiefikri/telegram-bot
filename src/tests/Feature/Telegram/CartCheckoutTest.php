@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -24,10 +25,45 @@ use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\Support\TelegramBotTestSupport;
 
 class CartCheckoutTest extends TelegramBotTestSupport
 {
+    public function test_pakasir_checkout_instruction_job_releases_claim_after_send_failure_and_retries(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $order = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'manual_checkout_customer_notification_started_at' => null,
+            'manual_checkout_customer_notified_at' => null,
+        ]);
+        Payment::factory()->for($order)->create(['provider' => 'pakasir']);
+
+        $failingIntents = $this->mock(TelegramCheckoutIntents::class);
+        $failingIntents->shouldReceive('sendPakasirPaymentInstructions')
+            ->once()
+            ->andThrow(new RuntimeException('Telegram sendPhoto temporarily failed.'));
+
+        $job = new SendPakasirCheckoutInstructions($order->id);
+
+        try {
+            $job->handle($failingIntents);
+            $this->fail('The first outbound attempt should fail.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('Telegram sendPhoto temporarily failed.', $e->getMessage());
+        }
+
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+
+        $successfulIntents = $this->mock(TelegramCheckoutIntents::class);
+        $successfulIntents->shouldReceive('sendPakasirPaymentInstructions')->once();
+        $job->handle($successfulIntents);
+
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+    }
+
     public function test_product_detail_buy_button_shows_quantity_choices_and_quantity_adds_cart_item(): void
     {
         $this->fakeTelegramHttp();
