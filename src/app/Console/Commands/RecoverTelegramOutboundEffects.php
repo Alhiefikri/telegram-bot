@@ -99,7 +99,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->chunkById((int) $this->option('chunk'), function ($events) use (&$dispatched): void {
                 foreach ($events as $event) {
                     SendProductPriceChangeNotifications::dispatch($event->id, now()->toISOString())
-                        ->onQueue((string) $this->option('queue'));
+                        ->onQueue('telegram-broadcast');
                     $dispatched++;
                 }
             });

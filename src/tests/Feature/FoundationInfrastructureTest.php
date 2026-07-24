@@ -17,7 +17,7 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame('jobs', config('queue.connections.database.table'));
     }
 
-    public function test_supervisor_database_workers_isolate_update_and_outbound_queues(): void
+    public function test_supervisor_database_workers_isolate_update_outbound_and_broadcast_queues(): void
     {
         $contents = file_get_contents(base_path('../supervisord.conf'));
 
@@ -26,10 +26,13 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('--queue=default', $contents);
         $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-outbound,notifications', $contents);
+        $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
+        $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
 
         $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
         $this->assertStringContainsString('laravel-update-worker:*', $healthCheck);
         $this->assertStringContainsString('laravel-outbound-worker:*', $healthCheck);
+        $this->assertStringContainsString('laravel-broadcast-worker:*', $healthCheck);
     }
 
     public function test_docker_scheduler_runs_laravel_schedule_run_loop(): void

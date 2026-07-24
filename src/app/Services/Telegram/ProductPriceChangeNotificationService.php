@@ -7,15 +7,19 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Support\Money;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use RuntimeException;
 use Throwable;
 
 class ProductPriceChangeNotificationService
 {
     private const CLAIM_TTL_MINUTES = 15;
+
+    private const RETRY_DELAY_SECONDS = 30;
+
+    public const BATCH_SIZE = 25;
 
     public const MAX_RECIPIENT_ATTEMPTS = 5;
 
@@ -47,18 +51,19 @@ class ProductPriceChangeNotificationService
         ]);
     }
 
-    public function processEvent(int $eventId): void
+    public function processBatch(int $eventId, int $batchSize = self::BATCH_SIZE): ProductPriceChangeBatchResult
     {
         if (blank(config('services.telegram.token'))) {
-            return;
+            return new ProductPriceChangeBatchResult(0, 0, 0, false);
         }
 
         $event = ProductPriceChangeEvent::query()->findOrFail($eventId);
-        $this->ensureRecipients($event);
-        $event->forceFill(['recipients_materialized_at' => now()])->save();
-        $failedRecipients = 0;
+        if ($event->recipients_materialized_at === null) {
+            $this->ensureRecipients($event);
+            $event->forceFill(['recipients_materialized_at' => now()])->save();
+        }
 
-        ProductPriceChangeNotificationRecipient::query()
+        $recipients = ProductPriceChangeNotificationRecipient::query()
             ->where('event_id', $event->id)
             ->whereNull('sent_at')
             ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
@@ -66,18 +71,29 @@ class ProductPriceChangeNotificationService
                 $query->whereNull('send_started_at')
                     ->orWhere('send_started_at', '<=', now()->subMinutes(self::CLAIM_TTL_MINUTES));
             })
+            ->where(function ($query): void {
+                $query->whereNull('failed_at')
+                    ->orWhere('failed_at', '<=', now()->subSeconds(self::RETRY_DELAY_SECONDS));
+            })
             ->orderBy('id')
-            ->chunkById(50, function ($recipients) use ($event, &$failedRecipients): void {
-                foreach ($recipients as $recipient) {
-                    if (! $this->sendRecipient($event, $recipient)) {
-                        $failedRecipients++;
-                    }
-                }
-            });
+            ->limit(max(1, $batchSize))
+            ->get();
 
-        if ($failedRecipients > 0) {
-            throw new RuntimeException("Product price change notification failed for {$failedRecipients} recipient(s).");
+        $transientFailures = 0;
+        $terminalFailures = 0;
+
+        foreach ($recipients as $recipient) {
+            $outcome = $this->sendRecipient($event, $recipient);
+            $transientFailures += $outcome === 'transient_failure' ? 1 : 0;
+            $terminalFailures += $outcome === 'terminal_failure' ? 1 : 0;
         }
+
+        return new ProductPriceChangeBatchResult(
+            processed: $recipients->count(),
+            transientFailures: $transientFailures,
+            terminalFailures: $terminalFailures,
+            hasMore: $this->hasPendingRecipients($event->id),
+        );
     }
 
     private function ensureRecipients(ProductPriceChangeEvent $event): void
@@ -107,7 +123,7 @@ class ProductPriceChangeNotificationService
             });
     }
 
-    private function sendRecipient(ProductPriceChangeEvent $event, ProductPriceChangeNotificationRecipient $recipient): bool
+    private function sendRecipient(ProductPriceChangeEvent $event, ProductPriceChangeNotificationRecipient $recipient): string
     {
         $token = (string) Str::uuid();
         $claimed = DB::transaction(function () use ($recipient, $token): ?ProductPriceChangeNotificationRecipient {
@@ -140,7 +156,7 @@ class ProductPriceChangeNotificationService
         }, 5);
 
         if (! $claimed) {
-            return true;
+            return 'skipped';
         }
 
         try {
@@ -153,6 +169,7 @@ class ProductPriceChangeNotificationService
                 $this->replyMarkup($event, $claimed->locale === 'en'),
             );
         } catch (Throwable $e) {
+            $terminal = $e instanceof RequestException && $e->response?->status() === 403;
             ProductPriceChangeNotificationRecipient::query()
                 ->whereKey($claimed->id)
                 ->where('send_claim_token', $token)
@@ -162,6 +179,7 @@ class ProductPriceChangeNotificationService
                     'send_claim_token' => null,
                     'failed_at' => now(),
                     'last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
+                    'attempts' => $terminal ? self::MAX_RECIPIENT_ATTEMPTS : $claimed->attempts,
                 ]);
 
             Log::warning('telegram.product_price_change_notification_failed', [
@@ -169,11 +187,13 @@ class ProductPriceChangeNotificationService
                 'recipient_id' => $claimed->id,
                 'customer_id' => $claimed->customer_id,
                 'attempts' => $claimed->attempts,
+                'terminal' => $terminal,
+                'status' => $e instanceof RequestException ? $e->response?->status() : null,
                 'exception' => $e::class,
                 'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
             ]);
 
-            return false;
+            return $terminal ? 'terminal_failure' : 'transient_failure';
         }
 
         ProductPriceChangeNotificationRecipient::query()
@@ -188,7 +208,16 @@ class ProductPriceChangeNotificationService
                 'last_error' => null,
             ]);
 
-        return true;
+        return 'sent';
+    }
+
+    private function hasPendingRecipients(int $eventId): bool
+    {
+        return ProductPriceChangeNotificationRecipient::query()
+            ->where('event_id', $eventId)
+            ->whereNull('sent_at')
+            ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
+            ->exists();
     }
 
     private function message(ProductPriceChangeEvent $event, bool $english): string

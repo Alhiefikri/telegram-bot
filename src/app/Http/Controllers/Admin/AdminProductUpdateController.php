@@ -73,7 +73,7 @@ class AdminProductUpdateController extends Controller
 
         if ($event !== null) {
             SendProductPriceChangeNotifications::dispatch($event->id, now()->toISOString())
-                ->onQueue('notifications')
+                ->onQueue('telegram-broadcast')
                 ->afterCommit();
         }
 

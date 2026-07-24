@@ -56,7 +56,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'new_usdt_price_amount' => 2_250_000,
         ]);
 
-        app(ProductPriceChangeNotificationService::class)->processEvent($event->id);
+        app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
         $idRequest = $this->telegramSendFor(7001);
         $enRequest = $this->telegramSendFor(7002);
@@ -123,7 +123,7 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertSame(3_000_000, $event->old_usdt_price_amount);
         $this->assertSame(3_250_000, $event->new_usdt_price_amount);
 
-        Queue::assertPushedOn('notifications', SendProductPriceChangeNotifications::class);
+        Queue::assertPushedOn('telegram-broadcast', SendProductPriceChangeNotifications::class);
         $this->assertSame(50000, $order->fresh()->total_amount);
         $this->assertSame(50000, $order->orderItems()->firstOrFail()->unit_price);
         $this->assertSame(3_000_000, $order->payments()->firstOrFail()->amount);
@@ -146,8 +146,8 @@ class ProductPriceChangeNotificationTest extends TestCase
             'new_usdt_price_amount' => 2_000_000,
         ]);
 
-        app(ProductPriceChangeNotificationService::class)->processEvent($increase->id);
-        app(ProductPriceChangeNotificationService::class)->processEvent($increase->id);
+        app(ProductPriceChangeNotificationService::class)->processBatch($increase->id);
+        app(ProductPriceChangeNotificationService::class)->processBatch($increase->id);
 
         $request = $this->telegramSendFor(8001);
         $this->assertStringContainsString('📢 Price Update', (string) $request['text']);
@@ -159,7 +159,7 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertSame(1, ProductPriceChangeNotificationRecipient::where('event_id', $increase->id)->whereNotNull('sent_at')->count());
     }
 
-    public function test_failed_recipient_marks_failure_and_normal_retry_skips_already_sent_recipients(): void
+    public function test_transient_failure_is_retried_without_resending_successful_recipients(): void
     {
         config()->set('services.telegram.token', 'bot-token');
         $failEnglishRecipient = true;
@@ -183,12 +183,9 @@ class ProductPriceChangeNotificationTest extends TestCase
             'new_usdt_price_amount' => null,
         ]);
 
-        try {
-            app(ProductPriceChangeNotificationService::class)->processEvent($event->id);
-            $this->fail('Expected processEvent to fail after recording failed recipient state.');
-        } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('failed for 1 recipient', $exception->getMessage());
-        }
+        $firstBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
+        $this->assertTrue($firstBatch->hasMore);
+        $this->assertSame(1, $firstBatch->transientFailures);
 
         $this->assertSame(1, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('sent_at')->count());
         $failedRecipient = ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('failed_at')->sole();
@@ -197,13 +194,77 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $sendCountBeforeRetry = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->count();
         $failEnglishRecipient = false;
-        app(ProductPriceChangeNotificationService::class)->processEvent($event->id);
+        $failedRecipient->forceFill(['failed_at' => now()->subMinute()])->save();
+        $secondBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
         $retrySends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
         $newRetrySends = $retrySends->slice($sendCountBeforeRetry)->values();
         $this->assertCount(1, $newRetrySends);
         $this->assertSame('9002', (string) $newRetrySends->first()[0]['chat_id']);
         $this->assertSame(2, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('sent_at')->count());
+        $this->assertFalse($secondBatch->hasMore);
+    }
+
+    public function test_forbidden_recipient_is_terminal_and_does_not_fail_or_retry_the_event(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => false,
+                'error_code' => 403,
+                'description' => 'Forbidden: bot was blocked by the user',
+            ], 403),
+        ]);
+        Customer::factory()->create(['telegram_id' => 9020, 'locale' => 'id']);
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+        ]);
+
+        $result = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
+
+        $recipient = ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->sole();
+        $this->assertSame(ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS, $recipient->attempts);
+        $this->assertNotNull($recipient->failed_at);
+        $this->assertStringContainsString('403', (string) $recipient->last_error);
+        $this->assertFalse($result->hasMore);
+        $this->assertSame(1, $result->terminalFailures);
+
+        app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')));
+    }
+
+    public function test_job_processes_a_bounded_batch_and_dispatches_continuation_on_broadcast_queue(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        Queue::fake();
+        Customer::factory()->count(26)->sequence(fn ($sequence) => [
+            'telegram_id' => 9100 + $sequence->index,
+            'locale' => 'id',
+        ])->create();
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+        ]);
+
+        (new SendProductPriceChangeNotifications($event->id, now()->toISOString()))
+            ->handle(app(ProductPriceChangeNotificationService::class));
+
+        $this->assertSame(25, ProductPriceChangeNotificationRecipient::where('event_id', $event->id)->whereNotNull('sent_at')->count());
+        Queue::assertPushedOn('telegram-broadcast', SendProductPriceChangeNotifications::class);
     }
 
     public function test_recipient_at_attempt_cap_is_not_retried_or_redispatched_forever(): void
@@ -233,7 +294,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'last_error' => 'blocked',
         ]);
 
-        app(ProductPriceChangeNotificationService::class)->processEvent($event->id);
+        app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
         Http::assertNothingSent();
         $this->artisan('telegram:recover-outbound')
@@ -260,6 +321,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=1')
             ->assertSuccessful();
 
+        Queue::assertPushedOn('telegram-broadcast', SendProductPriceChangeNotifications::class);
         Queue::assertPushed(SendProductPriceChangeNotifications::class, fn (SendProductPriceChangeNotifications $job): bool => $job->eventId === $event->id);
     }
 
