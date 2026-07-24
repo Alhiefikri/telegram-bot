@@ -15,12 +15,12 @@ class AdminBroadcastController extends Controller
     {
         $startedAt = DogfoodTiming::now();
 
-        $result = $broadcast->sendToActiveUsers($request->validated('message'));
+        $result = $broadcast->queueAdminBroadcast($request->validated('message'));
         AdminTelegramDogfoodTiming::logRequestFinished('admin.broadcast', $startedAt, $result);
 
         $status = $result['skipped']
             ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
-            : "Broadcast terkirim ke {$result['sent']} user. Gagal: {$result['failed']}.";
+            : "Broadcast #{$result['broadcast_id']} masuk antrean. Progres bisa dipantau di tab Broadcast.";
 
         return redirect()
             ->route('admin.dashboard', ['tab' => 'broadcast'])

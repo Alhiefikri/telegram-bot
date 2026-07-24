@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramBroadcast;
 use App\Models\User;
 use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\FakeSalesProofPostPublisher;
@@ -47,6 +48,7 @@ final class AdminDashboardData
             'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
             'productsTab' => $this->productsData->forProducts($canManageProducts),
             'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
+            'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),
         ];
     }
@@ -137,6 +139,16 @@ final class AdminDashboardData
             'update_url' => route('admin.store-channel.update'),
             'test_url' => route('admin.store-channel.test'),
             'fake_sales_proof' => $this->fakeSalesProof->dashboardState($setting, $ready, $canManage),
+        ];
+    }
+
+    private function broadcastTab(): array
+    {
+        return [
+            'recent' => TelegramBroadcast::query()
+                ->latest('id')
+                ->limit(10)
+                ->get(['id', 'status', 'recipient_count', 'sent_count', 'failed_count', 'pending_count', 'created_at', 'completed_at']),
         ];
     }
 

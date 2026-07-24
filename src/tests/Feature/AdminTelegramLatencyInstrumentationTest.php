@@ -7,24 +7,22 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AdminTelegramLatencyInstrumentationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_broadcast_dogfood_timing_reports_request_recipients_and_failures(): void
+    public function test_admin_broadcast_dogfood_timing_reports_queued_request_without_recipient_calls(): void
     {
         config()->set('services.dogfood_timing.enabled', true);
         config()->set('services.telegram.token', 'bot-token');
+        Queue::fake();
         $logs = $this->captureDogfoodInfoLogs();
-        Http::fake(fn (HttpRequest $request) => (string) $request['chat_id'] === '222222222'
-            ? Http::response(['ok' => false, 'description' => 'rate limited'], 429)
-            : Http::response(['ok' => true, 'result' => ['message_id' => 77]])
-        );
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         Customer::factory()->create(['telegram_id' => 111111111]);
         Customer::factory()->create(['telegram_id' => 222222222]);
@@ -34,25 +32,20 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
                 'message' => 'Sensitive broadcast body',
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'broadcast']))
-            ->assertSessionHas('status', 'Broadcast terkirim ke 1 user. Gagal: 1.');
+            ->assertSessionHas('status', 'Broadcast #1 masuk antrean. Progres bisa dipantau di tab Broadcast.');
 
         $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.broadcast'
-            && $context['recipient_count'] === 2
-            && $context['sent'] === 1
-            && $context['failed'] === 1
+            && $context['recipient_count'] === 0
+            && $context['sent'] === 0
+            && $context['failed'] === 0
             && $context['skipped'] === false
+            && $context['queued'] === true
             && array_key_exists('request_duration_ms', $context)
             && array_key_exists('telegram_total_duration_ms', $context)
-            && count($context['per_recipient_telegram']) === 2
-            && $context['per_recipient_telegram'][0]['status'] === 'ok'
-            && $context['per_recipient_telegram'][1]['status'] === 'error'
-            && $context['per_recipient_telegram'][1]['exception'] !== ''
+            && $context['per_recipient_telegram'] === []
         );
 
-        $this->assertDogfoodLog($logs, 'dogfood.telegram.broadcast_finished', fn (array $context): bool => $context['recipient_count'] === 2
-            && $context['sent'] === 1
-            && $context['failed'] === 1
-        );
+        Http::assertNothingSent();
 
         $this->assertDogfoodLogsDoNotContain($logs, ['111111111', '222222222', 'bot-token', 'Sensitive broadcast body']);
     }
