@@ -195,10 +195,10 @@ esac
 docker pull "$APP_IMAGE"
 
 echo "Recording the pre-release failed-job ID watermark with the candidate image."
-APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot > "$FAILED_JOBS_BASELINE_FILE"
+APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE"
 
 echo "Running candidate database migration before application cutover."
-if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan migrate --force; then
+if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan migrate --force </dev/null; then
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   record_result "migration-failed-no-cutover"

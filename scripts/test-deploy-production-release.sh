@@ -9,6 +9,11 @@ PREVIOUS_IMAGE=ghcr.io/example/telegram-bot@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 LEGACY_PREVIOUS_IMAGE=telegram-bot-prod-app
 CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
+grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: failed-job snapshot can consume the streamed SSH script stdin\n' >&2; exit 1; }
+grep -Fq 'php artisan migrate --force </dev/null' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: candidate migration can consume the streamed SSH script stdin\n' >&2; exit 1; }
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
