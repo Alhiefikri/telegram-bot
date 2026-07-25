@@ -405,7 +405,7 @@ async function main() {
   compose(['up', '-d', '--build', '--force-recreate'], { inherit: true });
   await waitForHealth();
 
-  timedCommand('ops:health --db --queue-schema --supervisor', ['php', 'artisan', 'ops:health', '--db', '--queue-schema', '--supervisor']);
+  timedCommand('ops:health --db --queue-schema --queue-depth --supervisor', ['php', 'artisan', 'ops:health', '--db', '--queue-schema', '--queue-depth', '--supervisor']);
   await waitForSchedulerHealth();
   const fixtures = JSON.parse(compose(['exec', '-T', 'app', 'php', 'scripts/benchmark-production-fixtures.php']));
 

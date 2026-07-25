@@ -185,7 +185,7 @@ The first value is the configured immutable GHCR reference and the second is the
 
 The post-deploy release interface is intentionally cheap but deeper than liveness:
 
-- `php artisan ops:health --db --queue-schema --supervisor`
+- `php artisan ops:health --db --queue-schema --queue-depth --supervisor`
 - `php artisan ops:health --scheduler-heartbeat=180` in the scheduler container
 - `php artisan ops:check-failed-jobs --snapshot` before release mutation, followed by `php artisan ops:check-failed-jobs --max=0 --baseline-stdin` after cutover
 - `php artisan ops:check-queue-depth --max=50 --max-oldest-age=120`
@@ -217,7 +217,7 @@ git checkout --detach "$PREVIOUS_COMMIT"
 git reset --hard "$PREVIOUS_COMMIT"
 docker pull "$PREVIOUS_IMAGE"
 APP_IMAGE="$PREVIOUS_IMAGE" docker compose -p telegram-bot-prod --env-file .env up -d --no-build --remove-orphans
-docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor
+docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor
 docker compose -p telegram-bot-prod --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180
 docker compose -p telegram-bot-prod --env-file .env ps
 ```

@@ -350,10 +350,11 @@ Checklist operasional:
 - jalankan queue worker di process manager seperti Supervisor;
 - monitor tabel/job failed jobs;
 - pastikan queue `default` diproses untuk update Telegram;
-- pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi admin;
-- pastikan queue `notifications` ikut diproses karena receipt dan Sales Proof Post dikirim melalui queue tersebut.
+- pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi pending order yang berasal dari checkout;
+- pastikan queue `notifications` diproses oleh worker pool terpisah karena receipt pembayaran, paid/expired notifications, Sales Proof Post, dan cleanup instruksi checkout dikirim melalui queue tersebut;
+- atur kapasitas Docker/Supervisor dengan `LARAVEL_UPDATE_WORKER_PROCESSES`, `LARAVEL_OUTBOUND_WORKER_PROCESSES`, `LARAVEL_NOTIFICATION_WORKER_PROCESSES`, dan `LARAVEL_BROADCAST_WORKER_PROCESSES` tanpa mengubah kode aplikasi.
 
-Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, while `laravel-outbound-worker` handles `telegram-outbound,notifications`. Manual checkout creates the pending order on the update worker, then dispatches customer payment instructions and admin notification to `telegram-outbound` so slow Telegram `sendPhoto`/`sendMessage` calls do not occupy the update worker. Before changing worker counts again, run the dogfood benchmark from clean dogfood volumes and compare queue wait, update-worker handler time, manual outbound job time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs before this split; use newer clean runs for current queue behavior.
+Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, and `laravel-broadcast-worker` handles `telegram-broadcast`. Manual checkout creates the pending order on the update worker, then dispatches customer payment instructions and pending-order admin notification to `telegram-outbound` so slow checkout `sendPhoto`/`sendMessage` calls do not occupy the update worker. Payment receipts, paid/expired admin notifications, Sales Proof Post publishing, and checkout-instruction cleanup run on `notifications`, so a burst of checkout instructions does not delay critical payment-facing work. Safe defaults are one process per pool; raise only the saturated pool after checking `php artisan ops:health --queue-depth` and container CPU/memory. Roll back safely by setting the changed `LARAVEL_*_WORKER_PROCESSES` value back to `1` and redeploying/restarting Supervisor; do not merge `notifications` back into `telegram-outbound` because that removes the isolation guarantee. Before changing worker counts again, run the dogfood benchmark from clean dogfood volumes and compare queue wait, update-worker handler time, manual outbound job time, notification job time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs before the later notification split; use newer clean runs for current queue behavior.
 
 Manual checkout notification retry behavior:
 
@@ -405,7 +406,7 @@ GET /up
 Command operasional project:
 
 ```bash
-php artisan ops:health --db --queue-schema --supervisor
+php artisan ops:health --db --queue-schema --queue-depth --supervisor
 php artisan ops:health --scheduler-heartbeat=180
 ```
 
@@ -521,7 +522,7 @@ Langkah cek:
 - cek konfigurasi webhook Telegram di Bot API;
 - cek `TELEGRAM_WEBHOOK_SECRET` dan header secret;
 - cek queue worker dan failed jobs;
-- jalankan `php artisan ops:health --db --queue-schema --supervisor`.
+- jalankan `php artisan ops:health --db --queue-schema --queue-depth --supervisor`.
 
 ### Webhook Telegram gagal
 

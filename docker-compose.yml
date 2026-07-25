@@ -72,6 +72,10 @@ x-app-environment: &app-environment
   PAKASIR_TRANSACTION_DETAIL_RETRY_DELAY_MS: ${PAKASIR_TRANSACTION_DETAIL_RETRY_DELAY_MS:-250}
   PAKASIR_TRANSACTION_DETAIL_RETRY_MAX_DELAY_MS: ${PAKASIR_TRANSACTION_DETAIL_RETRY_MAX_DELAY_MS:-1000}
   PAKASIR_REDIRECT_URL: ${PAKASIR_REDIRECT_URL:-}
+  LARAVEL_UPDATE_WORKER_PROCESSES: ${LARAVEL_UPDATE_WORKER_PROCESSES:-1}
+  LARAVEL_OUTBOUND_WORKER_PROCESSES: ${LARAVEL_OUTBOUND_WORKER_PROCESSES:-1}
+  LARAVEL_NOTIFICATION_WORKER_PROCESSES: ${LARAVEL_NOTIFICATION_WORKER_PROCESSES:-1}
+  LARAVEL_BROADCAST_WORKER_PROCESSES: ${LARAVEL_BROADCAST_WORKER_PROCESSES:-1}
 
 services:
   app:
@@ -90,7 +94,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "php artisan ops:health --db --queue-schema --supervisor >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "php artisan ops:health --db --queue-schema --queue-depth --supervisor >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

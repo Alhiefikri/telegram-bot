@@ -153,5 +153,5 @@ After env/config changes that affect the running bot, refresh with:
 ```bash
 docker compose -p telegram-bot-prod --env-file .env up -d --build --remove-orphans
 docker compose -p telegram-bot-prod --env-file .env ps
-docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor
+docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor
 ```

@@ -21,6 +21,7 @@ use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductStockItem;
+use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
@@ -30,6 +31,7 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\TelegramUpdateReplayGuard;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -460,6 +462,36 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame($events[1]->new_price_amount, $product->fresh()->price_amount);
     }
 
+    public function test_concurrent_duplicate_telegram_update_workers_run_side_effect_once(): void
+    {
+        $this->requireConcurrencyLane();
+
+        $update = TelegramUpdate::create([
+            'update_id' => 990001,
+            'payload' => [
+                'update_id' => 990001,
+                'message' => [
+                    'message_id' => 1,
+                    'text' => '/start',
+                    'from' => ['id' => 990001, 'first_name' => 'Concurrent'],
+                    'chat' => ['id' => 990001, 'type' => 'private'],
+                ],
+            ],
+            'created_at' => now(),
+        ]);
+
+        $results = $this->runConcurrently([
+            fn () => $this->claimTelegramUpdateWithAuditSideEffect($update->id),
+            fn () => $this->claimTelegramUpdateWithAuditSideEffect($update->id),
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $this->assertNotNull($update->fresh()->processed_at);
+        $this->assertNull($update->fresh()->processing_started_at);
+        $this->assertSame(1, AuditLog::where('action', 'telegram_update.concurrent_side_effect')->where('subject_id', (string) $update->id)->count());
+    }
+
     private function requireConcurrencyLane(): void
     {
         if (! $this->shouldRunConcurrencyLane()) {
@@ -600,6 +632,25 @@ class ProductionConcurrencyTest extends TestCase
             ], JSON_THROW_ON_ERROR));
             exit(1);
         }
+    }
+
+    private function claimTelegramUpdateWithAuditSideEffect(int $updateId): int
+    {
+        app(TelegramUpdateReplayGuard::class)->processOnce(
+            TelegramUpdate::findOrFail($updateId),
+            function (TelegramUpdate $update): void {
+                usleep(150_000);
+                AuditLog::create([
+                    'action' => 'telegram_update.concurrent_side_effect',
+                    'subject_type' => TelegramUpdate::class,
+                    'subject_id' => (string) $update->id,
+                    'new_values' => ['update_id' => $update->update_id],
+                    'created_at' => now(),
+                ]);
+            }
+        );
+
+        return AuditLog::where('action', 'telegram_update.concurrent_side_effect')->where('subject_id', (string) $updateId)->count();
     }
 
     private function successfulResultCount(array $results): int

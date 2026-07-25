@@ -273,7 +273,7 @@ After code, configuration, route, queue, scheduler, or mail changes, refresh the
 ```bash
 docker compose -p telegram-bot-prod --env-file .env up -d --build --remove-orphans
 docker compose -p telegram-bot-prod --env-file .env ps
-docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --supervisor
+docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor
 ```
 
 Deploy production only through the `Deploy production` GitHub Actions workflow from `main` after CI and mail smoke validation pass.

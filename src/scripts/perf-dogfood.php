@@ -336,7 +336,11 @@ $processPayload = function (array $payload) use ($app): void {
         '--stop-when-empty' => true,
     ]);
     $app->make(ConsoleKernel::class)->call('queue:work', [
-        '--queue' => 'telegram-outbound,notifications',
+        '--queue' => 'telegram-outbound',
+        '--stop-when-empty' => true,
+    ]);
+    $app->make(ConsoleKernel::class)->call('queue:work', [
+        '--queue' => 'notifications',
         '--stop-when-empty' => true,
     ]);
 };

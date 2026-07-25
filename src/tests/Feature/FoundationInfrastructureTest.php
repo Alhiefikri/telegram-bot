@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class FoundationInfrastructureTest extends TestCase
@@ -17,22 +19,58 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame('jobs', config('queue.connections.database.table'));
     }
 
-    public function test_supervisor_database_workers_isolate_update_outbound_and_broadcast_queues(): void
+    public function test_supervisor_database_workers_isolate_update_outbound_notifications_and_broadcast_queues(): void
     {
         $contents = file_get_contents(base_path('../supervisord.conf'));
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
 
         $this->assertStringContainsString('queue:work database', $contents);
         $this->assertStringContainsString('[program:laravel-update-worker]', $contents);
         $this->assertStringContainsString('--queue=default', $contents);
+        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_UPDATE_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
-        $this->assertStringContainsString('--queue=telegram-outbound,notifications', $contents);
+        $this->assertStringContainsString('--queue=telegram-outbound', $contents);
+        $this->assertStringNotContainsString('--queue=telegram-outbound,notifications', $contents);
+        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_OUTBOUND_WORKER_PROCESSES)s', $contents);
+        $this->assertStringContainsString('[program:laravel-notification-worker]', $contents);
+        $this->assertStringContainsString('--queue=notifications', $contents);
+        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_NOTIFICATION_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
+        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_BROADCAST_WORKER_PROCESSES)s', $contents);
+
+        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES'] as $variable) {
+            $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
+            $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
+        }
 
         $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
         $this->assertStringContainsString('laravel-update-worker:*', $healthCheck);
         $this->assertStringContainsString('laravel-outbound-worker:*', $healthCheck);
+        $this->assertStringContainsString('laravel-notification-worker:*', $healthCheck);
         $this->assertStringContainsString('laravel-broadcast-worker:*', $healthCheck);
+    }
+
+    public function test_ops_health_reports_operational_queue_depths(): void
+    {
+        if (! Schema::hasTable('jobs')) {
+            Schema::create('jobs', function (Blueprint $table): void {
+                $table->id();
+                $table->string('queue')->index();
+                $table->longText('payload');
+                $table->unsignedTinyInteger('attempts');
+                $table->unsignedInteger('reserved_at')->nullable();
+                $table->unsignedInteger('available_at');
+                $table->unsignedInteger('created_at');
+            });
+        }
+
+        $this->artisan('ops:health --queue-depth')
+            ->expectsOutput('Queue default: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
+            ->assertSuccessful();
     }
 
     public function test_docker_scheduler_runs_laravel_schedule_run_loop(): void
@@ -44,6 +82,7 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('scheduler:', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('php artisan ops:health --scheduler-heartbeat=180', $compose);
+        $this->assertStringContainsString('php artisan ops:health --db --queue-schema --queue-depth --supervisor', $compose);
         $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
         $this->assertStringContainsString('php artisan schedule:run', $script);
         $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);

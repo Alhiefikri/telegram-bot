@@ -22,7 +22,7 @@ printf 'Mini app dashboard smoke check passed: %s\n' "$MINI_APP_DASHBOARD_URL"
 
 PROJECT_NAME=${SMOKE_COMPOSE_PROJECT:-${COMPOSE_PROJECT_NAME:-}}
 if [ "${SMOKE_PUBLIC_ONLY:-false}" != "true" ] && [ -n "$PROJECT_NAME" ]; then
-  docker compose -p "$PROJECT_NAME" exec -T app php artisan ops:health --db --queue-schema --supervisor
+  docker compose -p "$PROJECT_NAME" exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor
   SCHEDULER_DEADLINE=$((SECONDS + ${SCHEDULER_HEALTH_TIMEOUT:-120}))
   until docker compose -p "$PROJECT_NAME" exec -T scheduler php artisan ops:health --scheduler-heartbeat="${SCHEDULER_HEARTBEAT_MAX_AGE:-180}"; do
     if [ "$SECONDS" -ge "$SCHEDULER_DEADLINE" ]; then

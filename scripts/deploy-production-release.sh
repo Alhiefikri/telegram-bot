@@ -84,7 +84,7 @@ verify_service_images() {
 wait_for_health() {
   local attempt
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
-    if compose exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null; then
+    if compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null; then
       break
     fi
     [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1

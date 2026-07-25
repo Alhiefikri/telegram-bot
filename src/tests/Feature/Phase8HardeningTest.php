@@ -637,7 +637,7 @@ SH);
         $this->assertStringContainsString('flock -n 9', $release);
         $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
         foreach ([
-            'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --supervisor </dev/null',
+            'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
             'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
             'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
             'queue depth check is non-interactive' => 'compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
