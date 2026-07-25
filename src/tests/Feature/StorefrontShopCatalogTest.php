@@ -4,7 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Storefront\StorefrontCatalogSearch;
+use App\Storefront\StorefrontResponseCache;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class StorefrontShopCatalogTest extends TestCase
@@ -16,8 +19,87 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.shop.index'))
             ->assertRedirect(url('/#products'));
 
-        $this->get(route('storefront.shop.index', ['q' => 'chat gpt']))
+        $this->get(route('storefront.shop.index', ['q' => '  CHAT   GPT  ']))
             ->assertRedirect(url('/?q=chat%20gpt#products'));
+    }
+
+    public function test_landing_search_is_normalized_bounded_and_case_appropriate(): void
+    {
+        Product::factory()->create(['name' => 'Chat GPT Plus Ready', 'description' => 'Akun premium AI', 'stock' => 2, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Claude Pro Ready', 'description' => 'Akun premium AI', 'stock' => 2, 'reserved_stock' => 0]);
+
+        $this->get(route('storefront.home', ['q' => '  CHAT   GPT  ']))
+            ->assertOk()
+            ->assertSee('value="chat gpt"', false)
+            ->assertSee('maxlength="'.StorefrontCatalogSearch::MAX_LENGTH.'"', false)
+            ->assertSee('Chat GPT Plus Ready')
+            ->assertDontSee('Claude Pro Ready');
+
+        $queryCount = 0;
+        DB::listen(static function () use (&$queryCount): void {
+            $queryCount++;
+        });
+
+        $this->get(route('storefront.home', ['q' => str_repeat('a', StorefrontCatalogSearch::MAX_LENGTH + 1)]))
+            ->assertStatus(422);
+
+        $this->assertSame(0, $queryCount, 'Over-limit search input should fail before catalog queries run.');
+    }
+
+    public function test_search_requests_are_not_stored_as_full_page_cache_entries(): void
+    {
+        Product::factory()->create(['name' => 'Chat GPT Search Cache Probe', 'description' => 'Akun premium AI', 'stock' => 2, 'reserved_stock' => 0]);
+
+        $queryCount = 0;
+        DB::listen(static function () use (&$queryCount): void {
+            $queryCount++;
+        });
+
+        $this->get(route('storefront.home', ['q' => 'chat gpt']))
+            ->assertOk()
+            ->assertSee('Chat GPT Search Cache Probe');
+        $firstSearchQueries = $queryCount;
+
+        $queryCount = 0;
+
+        $this->get(route('storefront.home', ['q' => ' CHAT   GPT ']))
+            ->assertOk()
+            ->assertSee('Chat GPT Search Cache Probe');
+
+        $this->assertGreaterThan(0, $firstSearchQueries);
+        $this->assertGreaterThan(0, $queryCount, 'Equivalent search requests should be normalized but still render live instead of using a full-page cache row.');
+    }
+
+    public function test_unfiltered_landing_cache_retains_hits_and_invalidation(): void
+    {
+        Product::factory()->create(['name' => 'Cached Homepage Product', 'stock' => 2, 'reserved_stock' => 0]);
+
+        $queryCount = 0;
+        DB::listen(static function () use (&$queryCount): void {
+            $queryCount++;
+        });
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Cached Homepage Product');
+        $firstHomepageQueries = $queryCount;
+
+        $queryCount = 0;
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Cached Homepage Product');
+
+        $this->assertGreaterThan(0, $firstHomepageQueries);
+        $this->assertSame(0, $queryCount, 'The unfiltered homepage should keep serving the cached HTML on a cache hit.');
+
+        Product::factory()->create(['name' => 'Invalidated Homepage Product', 'stock' => 2, 'reserved_stock' => 0]);
+        app(StorefrontResponseCache::class)->invalidate();
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Cached Homepage Product')
+            ->assertSee('Invalidated Homepage Product');
     }
 
     public function test_landing_renders_single_catalog_grid(): void

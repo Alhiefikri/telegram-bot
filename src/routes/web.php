@@ -30,6 +30,7 @@ use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
 use App\Http\Controllers\StorefrontShopOrderStatusController;
+use App\Storefront\StorefrontCatalogSearch;
 use App\Storefront\StorefrontUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -48,9 +49,9 @@ Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 's
 
 Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('/', function (Request $request, StorefrontUrl $urls) {
-        $search = $request->query('q');
+        $search = StorefrontCatalogSearch::fromRequestQuery($request->query('q'));
 
-        return redirect()->to($urls->catalogUrl(search: is_string($search) ? $search : null));
+        return redirect()->to($urls->catalogUrl(search: $search !== '' ? $search : null));
     })->name('index');
     Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');

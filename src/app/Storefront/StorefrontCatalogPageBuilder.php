@@ -44,7 +44,7 @@ class StorefrontCatalogPageBuilder
 
     private function build(string $context, ?string $rawSearch): StorefrontCatalogPage
     {
-        $search = trim((string) $rawSearch);
+        $search = StorefrontCatalogSearch::normalize($rawSearch);
         $categories = $this->publicCategories();
         $products = $this->publicProducts($search);
         $catalogProducts = $this->catalogProducts($products);
@@ -73,6 +73,7 @@ class StorefrontCatalogPageBuilder
             popularProducts: $catalogProducts->filter->isPopular->values(),
             featuredProduct: $this->featuredProduct(),
             search: $search,
+            searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
             searchAction: $this->urls->catalogUrl(),
             clearSearchUrl: $this->urls->catalogUrl(),
             emptyCategoryTitle: $copy['catalog']['empty_category_title'],
@@ -110,9 +111,7 @@ class StorefrontCatalogPageBuilder
                     ->where('order_status', OrderStatus::Completed)
                     ->where('payment_status', PaymentStatus::Paid))], 'quantity')
             ->publicVisible()
-            ->when($search !== '', fn ($query) => $query->where(fn ($query) => $query
-                ->where('name', 'like', "%{$search}%")
-                ->orWhere('description', 'like', "%{$search}%")))
+            ->tap(fn ($query) => StorefrontCatalogSearch::apply($query, $search))
             ->storefrontOrder()
             ->limit(24)
             ->get();

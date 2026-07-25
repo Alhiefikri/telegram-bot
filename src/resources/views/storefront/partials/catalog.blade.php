@@ -13,7 +13,7 @@
         <div class="relative mx-auto mb-10 max-w-xl">
             <form action="{{ $catalogPage->searchAction }}" method="GET" class="relative">
                 <label for="storefront-search" class="sr-only">Cari produk</label>
-                <input id="storefront-search" type="text" name="q" value="{{ $catalogPage->search }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-14 w-full pl-12 pr-16 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none">
+                <input id="storefront-search" type="text" name="q" value="{{ $catalogPage->search }}" maxlength="{{ $catalogPage->searchMaxLength }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-14 w-full pl-12 pr-16 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none">
                 <div class="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--sf-ink)]">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

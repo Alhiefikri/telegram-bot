@@ -36,6 +36,7 @@ final readonly class StorefrontCatalogPage
         public Collection $popularProducts,
         public ?StorefrontCatalogProduct $featuredProduct,
         public string $search,
+        public int $searchMaxLength,
         public string $searchAction,
         public string $clearSearchUrl,
         public string $emptyCategoryTitle,

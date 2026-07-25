@@ -24,9 +24,17 @@ class StorefrontResponseCache
 
     public function get(string $search): string
     {
-        $search = trim($search);
+        $search = StorefrontCatalogSearch::normalize($search);
         $startedAt = DogfoodTiming::now();
         $querySnapshot = DogfoodTiming::querySnapshot();
+
+        if ($search !== '') {
+            $html = $this->render($search);
+            $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'search_uncached');
+
+            return $html;
+        }
+
         $version = $this->version();
         $key = $this->key($version, $search);
 
