@@ -477,6 +477,13 @@ function initShopPaymentStatus() {
                     return;
                 }
 
+                if (data.status === 'in_progress') {
+                    const retryAfter = data.retry_after || 3;
+                    setStatus(data.title || 'Status sedang dicek', data.message || `Coba lagi dalam ${secondsLabel(retryAfter)}.`);
+                    cooldown(retryAfter);
+                    return;
+                }
+
                 if (isTerminalStatus(data)) {
                     setStatus('Status pembayaran final', data.message || 'QRIS ini tidak bisa dibayar lagi. Buat order baru dari katalog.');
                     container.setAttribute('data-terminal', 'true');
@@ -487,7 +494,11 @@ function initShopPaymentStatus() {
 
                 if (data.ok === false) {
                     setStatus(data.title || 'Status belum bisa dicek', data.message || 'Coba lagi beberapa saat lagi.');
-                    button.disabled = false;
+                    if (data.retry_after) {
+                        cooldown(data.retry_after);
+                    } else {
+                        button.disabled = false;
+                    }
                     return;
                 }
 

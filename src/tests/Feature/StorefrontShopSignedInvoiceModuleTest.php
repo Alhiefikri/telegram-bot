@@ -146,6 +146,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
             'ok' => true,
+            'status' => 'paid',
             'payment_status' => PaymentStatus::Paid->value,
             'order_status' => OrderStatus::Completed->value,
             'is_paid' => true,
@@ -218,8 +219,10 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
             'ok' => false,
+            'status' => 'provider_failure',
             'title' => 'Status belum bisa dicek',
             'message' => 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.',
+            'retry_after' => 3,
         ], $result->payload());
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
@@ -243,6 +246,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             $this->assertSame(422, $result->statusCode());
             $this->assertSame([
                 'ok' => false,
+                'status' => 'unsupported_payment',
                 'message' => 'Pembayaran QRIS tidak ditemukan.',
             ], $result->payload());
         }
@@ -268,6 +272,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(200, $result->statusCode());
         $this->assertSame([
             'ok' => true,
+            'status' => 'terminal',
             'payment_status' => PaymentStatus::Expired->value,
             'order_status' => OrderStatus::Expired->value,
             'is_paid' => false,

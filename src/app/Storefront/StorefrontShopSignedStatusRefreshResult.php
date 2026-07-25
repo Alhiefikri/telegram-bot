@@ -11,6 +11,8 @@ class StorefrontShopSignedStatusRefreshResult
 
     private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.';
 
+    private const IN_PROGRESS = 'Status QRIS sedang dicek. Coba lagi beberapa detik lagi.';
+
     private function __construct(
         public readonly bool $ok,
         private readonly int $statusCode,
@@ -23,6 +25,8 @@ class StorefrontShopSignedStatusRefreshResult
         public readonly ?string $redirectUrl = null,
         public readonly ?string $title = null,
         public readonly ?string $message = null,
+        public readonly ?string $status = null,
+        public readonly ?int $retryAfter = null,
     ) {}
 
     public static function unsupportedPayment(): self
@@ -30,17 +34,32 @@ class StorefrontShopSignedStatusRefreshResult
         return new self(
             ok: false,
             statusCode: 422,
+            status: 'unsupported_payment',
             message: self::PAKASIR_NOT_FOUND,
         );
     }
 
-    public static function retryableProviderFailure(): self
+    public static function retryableProviderFailure(?int $retryAfter = null): self
     {
         return new self(
             ok: false,
             statusCode: 200,
+            status: 'provider_failure',
             title: 'Status belum bisa dicek',
             message: self::RETRYABLE_PROVIDER_FAILURE,
+            retryAfter: $retryAfter,
+        );
+    }
+
+    public static function inProgress(int $retryAfter): self
+    {
+        return new self(
+            ok: false,
+            statusCode: 202,
+            status: 'in_progress',
+            title: 'Status sedang dicek',
+            message: self::IN_PROGRESS,
+            retryAfter: $retryAfter,
         );
     }
 
@@ -49,6 +68,7 @@ class StorefrontShopSignedStatusRefreshResult
         return new self(
             ok: false,
             statusCode: 200,
+            status: 'qris_not_ready',
             title: $title,
             message: $message,
         );
@@ -67,6 +87,11 @@ class StorefrontShopSignedStatusRefreshResult
         return new self(
             ok: true,
             statusCode: 200,
+            status: match (true) {
+                $isPaid => 'paid',
+                $isTerminal => 'terminal',
+                default => 'refreshed',
+            },
             paymentStatus: $paymentStatus,
             orderStatus: $orderStatus,
             isPaid: $isPaid,
@@ -84,20 +109,23 @@ class StorefrontShopSignedStatusRefreshResult
     }
 
     /**
-     * @return array<string, bool|string|null>
+     * @return array<string, bool|int|string|null>
      */
     public function payload(): array
     {
         if (! $this->ok) {
             return array_filter([
                 'ok' => false,
+                'status' => $this->status,
                 'title' => $this->title,
                 'message' => $this->message,
+                'retry_after' => $this->retryAfter,
             ], fn ($value): bool => $value !== null);
         }
 
         return [
             'ok' => true,
+            'status' => $this->status,
             'payment_status' => $this->paymentStatus?->value,
             'order_status' => $this->orderStatus?->value,
             'is_paid' => $this->isPaid,

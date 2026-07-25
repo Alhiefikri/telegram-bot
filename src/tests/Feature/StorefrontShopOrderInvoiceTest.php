@@ -13,9 +13,11 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Storefront\StorefrontInvoiceUrl;
+use App\Storefront\StorefrontShopPaymentRefreshCoordinator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -333,6 +335,165 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(OrderStatus::Completed, $order->order_status);
         Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
             && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
+    }
+
+    public function test_signed_status_endpoint_returns_in_progress_when_same_payment_refresh_is_already_active(): void
+    {
+        $this->pakasirConfigIsReady();
+        config()->set('services.pakasir.status_refresh_in_progress_retry_after_seconds', 4);
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 73000,
+            providerFee: 500,
+            providerTotalPayment: 73500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE173LOCKED99',
+        );
+        Http::fake([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['unexpected' => true], 500),
+        ]);
+
+        $coordinator = app(StorefrontShopPaymentRefreshCoordinator::class);
+        $lock = Cache::lock($coordinator->lockKey($payment), 15);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+                ->assertStatus(202)
+                ->assertJsonPath('ok', false)
+                ->assertJsonPath('status', 'in_progress')
+                ->assertJsonPath('retry_after', 4);
+        } finally {
+            $lock->release();
+        }
+
+        Http::assertNothingSent();
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+    }
+
+    public function test_signed_status_endpoint_keeps_different_payment_refreshes_independent(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$lockedOrder, $lockedPayment] = $this->pendingNativeQrisOrder(
+            totalAmount: 73000,
+            providerFee: 500,
+            providerTotalPayment: 73500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE173LOCKA99',
+        );
+        [$otherOrder, $otherPayment] = $this->pendingNativeQrisOrder(
+            totalAmount: 88000,
+            providerFee: 600,
+            providerTotalPayment: 88600,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE173OTHER99',
+        );
+        unset($lockedOrder);
+        $this->providerTransactionDetailIsPending($otherPayment);
+
+        $coordinator = app(StorefrontShopPaymentRefreshCoordinator::class);
+        $lock = Cache::lock($coordinator->lockKey($lockedPayment), 15);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $otherOrder, null, false))
+                ->assertOk()
+                ->assertJsonPath('ok', true)
+                ->assertJsonPath('status', 'refreshed')
+                ->assertJsonPath('payment_status', PaymentStatus::Pending->value)
+                ->assertJsonPath('order_status', OrderStatus::PendingPayment->value);
+        } finally {
+            $lock->release();
+        }
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
+            && str_contains($request->url(), 'order_id='.$otherPayment->merchant_ref));
+        Http::assertSentCount(1);
+    }
+
+    public function test_signed_status_endpoint_releases_single_flight_after_provider_failure_so_later_request_can_retry(): void
+    {
+        $this->pakasirConfigIsReady();
+        config()->set('services.pakasir.transaction_detail_max_attempts', 1);
+        config()->set('services.pakasir.status_refresh_in_progress_retry_after_seconds', 6);
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 73000,
+            providerFee: 500,
+            providerTotalPayment: 73500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE173RETRY99',
+        );
+
+        Http::fake([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::sequence()
+                ->push(['message' => 'upstream unavailable'], 500)
+                ->push([
+                    'transaction' => [
+                        'project' => 'lhie-test',
+                        'order_id' => $payment->merchant_ref,
+                        'amount' => $payment->amount,
+                        'payment_method' => 'qris',
+                        'status' => 'completed',
+                    ],
+                ], 200),
+        ]);
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('status', 'provider_failure')
+            ->assertJsonPath('retry_after', 6);
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('status', 'paid')
+            ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
+            ->assertJsonPath('order_status', OrderStatus::Completed->value)
+            ->assertJsonPath('is_paid', true);
+
+        Http::assertSentCount(2);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+    }
+
+    public function test_signed_status_endpoint_skips_provider_lookup_for_paid_and_terminal_states(): void
+    {
+        $this->pakasirConfigIsReady();
+        config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 20);
+
+        $cases = [
+            'paid' => [OrderStatus::Completed, PaymentStatus::Paid, 'paid'],
+            'cancelled' => [OrderStatus::Cancelled, PaymentStatus::Pending, 'terminal'],
+            'expired_order' => [OrderStatus::Expired, PaymentStatus::Pending, 'terminal'],
+            'expired_payment' => [OrderStatus::PendingPayment, PaymentStatus::Expired, 'terminal'],
+            'failed_payment' => [OrderStatus::PendingPayment, PaymentStatus::Failed, 'terminal'],
+        ];
+
+        foreach ($cases as $label => [$orderStatus, $paymentStatus, $expectedStatus]) {
+            Http::fake([
+                'https://app.pakasir.test/api/transactiondetail*' => Http::response(['unexpected' => $label], 500),
+            ]);
+            [$order, $payment] = $this->pendingNativeQrisOrder(
+                totalAmount: 73000,
+                providerFee: 500,
+                providerTotalPayment: 73500,
+                paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE173'.strtoupper($label).'99',
+            );
+            $order->update([
+                'order_status' => $orderStatus,
+                'payment_status' => $paymentStatus,
+            ]);
+            $payment->update([
+                'status' => $paymentStatus,
+                'paid_at' => $paymentStatus === PaymentStatus::Paid ? now() : null,
+            ]);
+
+            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+                ->assertOk()
+                ->assertJsonPath('ok', true)
+                ->assertJsonPath('status', $expectedStatus)
+                ->assertJsonPath('payment_status', $paymentStatus->value)
+                ->assertJsonPath('order_status', $orderStatus->value);
+
+            Http::assertNothingSent();
+        }
     }
 
     public function test_signed_status_endpoint_accepts_legacy_absolute_signed_links_after_relative_signature_migration(): void

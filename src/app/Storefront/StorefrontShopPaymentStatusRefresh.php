@@ -20,6 +20,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
+        private readonly StorefrontShopPaymentRefreshCoordinator $coordinator,
     ) {}
 
     public function execute(Order $order): StorefrontShopSignedStatusRefreshResult
@@ -68,8 +69,27 @@ class StorefrontShopPaymentStatusRefresh
         }
 
         if ($this->shouldRefreshFromProvider($projection, $payment)) {
+            $lock = null;
+            $skipProviderLookup = $this->coordinator->recentlyRefreshed($payment);
+
+            if (! $skipProviderLookup) {
+                $lock = $this->coordinator->acquire($payment);
+                if ($lock === null) {
+                    $this->events->checkoutSubmitted(null, $order, [
+                        'status_endpoint_result' => 'in_progress',
+                    ]);
+
+                    return StorefrontShopSignedStatusRefreshResult::inProgress(
+                        $this->coordinator->retryAfterSeconds(),
+                    );
+                }
+            }
+
             try {
-                $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+                if (! $skipProviderLookup) {
+                    $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+                    $this->coordinator->markRecentlyRefreshed($payment);
+                }
             } catch (Throwable $exception) {
                 report($exception);
                 $this->events->checkoutSubmitted(null, $order, [
@@ -77,7 +97,13 @@ class StorefrontShopPaymentStatusRefresh
                     'failure_kind' => $exception::class,
                 ]);
 
-                return StorefrontShopSignedStatusRefreshResult::retryableProviderFailure();
+                return StorefrontShopSignedStatusRefreshResult::retryableProviderFailure(
+                    $this->coordinator->retryAfterSeconds(),
+                );
+            } finally {
+                if ($lock !== null) {
+                    $lock->release();
+                }
             }
         }
 

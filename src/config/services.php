@@ -51,6 +51,9 @@ return [
         'redirect_url' => env('PAKASIR_REDIRECT_URL'),
         'webhook_rate_limit_per_minute' => env('PAKASIR_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
         'status_refresh_rate_limit_per_minute' => env('PAKASIR_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+        'status_refresh_lock_lease_seconds' => (int) env('PAKASIR_STATUS_REFRESH_LOCK_LEASE_SECONDS', 15),
+        'status_refresh_single_flight_window_seconds' => (int) env('PAKASIR_STATUS_REFRESH_SINGLE_FLIGHT_WINDOW_SECONDS', 5),
+        'status_refresh_in_progress_retry_after_seconds' => (int) env('PAKASIR_STATUS_REFRESH_IN_PROGRESS_RETRY_AFTER_SECONDS', 3),
     ],
 
     'storefront' => [
