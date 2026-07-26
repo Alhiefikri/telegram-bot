@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
 use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 use App\Support\Money;
@@ -17,7 +18,42 @@ class TelegramAdminStatsIntents
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly PaymentReceiptReport $receiptReport,
+        private readonly TelegramMessageChunker $messageChunker,
     ) {}
+
+    public function showProductStock(string $chatId): void
+    {
+        $products = Product::query()
+            ->where('is_active', true)
+            ->withAvailability()
+            ->orderBy('name')
+            ->get()
+            ->sortBy(fn (Product $product) => $product->availableStock())
+            ->values();
+
+        if ($products->isEmpty()) {
+            $this->bot->sendMessage($chatId, "📦 Stok Produk\n━━━━━━━━━━━━━━\nBelum ada produk aktif.");
+
+            return;
+        }
+
+        $lines = ['📦 Stok Produk', '━━━━━━━━━━━━━━'];
+        foreach ($products as $product) {
+            $available = $product->availableStock();
+            $icon = $available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅');
+            $line = $icon.' '.$product->name.': '.($available > 0 ? $available : 'habis');
+            if ($product->reserved_stock > 0) {
+                $line .= ' ('.$product->reserved_stock.' direservasi)';
+            }
+            $lines[] = $line;
+        }
+        $lines[] = '';
+        $lines[] = 'Total produk aktif: '.$products->count();
+
+        foreach ($this->messageChunker->fromLines($lines) as $chunk) {
+            $this->bot->sendMessage($chatId, $chunk);
+        }
+    }
 
     public function showDailyStats(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
     {

@@ -86,6 +86,19 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($text === '📦 Cek Stok' || $text === '/stok') {
+            $this->session->forget($customer);
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, $this->text($customer, 'Akses ditolak.', 'Access denied.'));
+
+                return;
+            }
+
+            $this->adminStats->showProductStock($chatId);
+
+            return;
+        }
+
         if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
             $this->session->forget($customer);
             $this->catalog->sendCategoryCatalog($customer, $chatId);
@@ -232,7 +245,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik Harian'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || str_starts_with($text, '/broadcast ');

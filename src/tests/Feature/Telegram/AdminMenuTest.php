@@ -3,6 +3,8 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\Customer;
+use App\Models\Product;
+use App\Models\ProductStockItem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
@@ -23,6 +25,7 @@ class AdminMenuTest extends TelegramBotTestSupport
             && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
             && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik Harian'
             && ($request['reply_markup']['keyboard'][3][0]['callback_data'] ?? null) === 'statistik_harian'
+            && ($request['reply_markup']['keyboard'][3][1]['text'] ?? null) === '📦 Cek Stok'
             && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
             && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
             && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya'));
@@ -224,6 +227,46 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains($request['text'], '📊 Statistik Hari Ini'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Aku belum paham perintah itu'));
+    }
+
+    public function test_admin_can_open_product_stock_overview_from_the_reply_keyboard_button(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Product::factory()->create(['name' => 'Gemini Pro', 'stock' => 12, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Netflix Premium', 'stock' => 3, 'reserved_stock' => 1]);
+        Product::factory()->create(['name' => 'Canva Pro', 'stock' => 1, 'reserved_stock' => 1]);
+        $credentialProduct = Product::factory()->create(['name' => 'ChatGPT Plus', 'stock' => 5, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $credentialProduct->id, 'secret' => 'akun-gpt@example.test | password: Secret-123']);
+        Product::factory()->create(['name' => 'Produk Mati', 'is_active' => false, 'stock' => 9]);
+
+        $this->postTelegramWebhook($this->messageUpdate(316, '📦 Cek Stok', ['id' => 999], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '999'
+            && str_contains($request['text'], '📦 Stok Produk')
+            && str_contains($request['text'], '✅ Gemini Pro: 12')
+            && str_contains($request['text'], '⚠️ Netflix Premium: 2 (1 direservasi)')
+            && str_contains($request['text'], '❌ Canva Pro: habis (1 direservasi)')
+            && str_contains($request['text'], '⚠️ ChatGPT Plus: 1')
+            && str_contains($request['text'], 'Total produk aktif: 4')
+            && ! str_contains($request['text'], 'Produk Mati')
+            && strpos($request['text'], 'Canva Pro') < strpos($request['text'], 'Gemini Pro'));
+    }
+
+    public function test_non_admin_cannot_open_product_stock_overview(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Product::factory()->create(['name' => 'Gemini Pro', 'stock' => 12, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(317, '📦 Cek Stok', ['id' => 111], 111))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '111'
+            && $request['text'] === 'Akses ditolak.');
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Stok Produk'));
     }
 
     public function test_daily_stats_callback_from_group_is_denied_before_sending_stats(): void
