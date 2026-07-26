@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
-class Phase7AdminOperationsTest extends TestCase
+class AdminOrderPaymentOperationsTest extends TestCase
 {
     use RefreshDatabase;
 

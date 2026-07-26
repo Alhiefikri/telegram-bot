@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
-class ExampleTest extends TestCase
+class StorefrontLandingPageTest extends TestCase
 {
     use RefreshDatabase;
 

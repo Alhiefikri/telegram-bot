@@ -17,7 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
-class Phase3AdminCatalogTest extends TestCase
+class AdminCatalogPolicyAndStockAuditTest extends TestCase
 {
     use RefreshDatabase;
 

@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class Phase8HardeningTest extends TestCase
+class ProductionReleaseHardeningTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -723,7 +723,7 @@ SH);
             'tests/Feature/PakasirWebhookTest.php',
             'tests/Feature/Telegram/CartCheckoutTest.php',
             'tests/Feature/Telegram/PaymentProofAdminCallbackTest.php',
-            'tests/Feature/Phase7AdminOperationsTest.php',
+            'tests/Feature/AdminOrderPaymentOperationsTest.php',
         ] as $criticalTest) {
             $this->assertStringContainsString($criticalTest, $postgresConfig);
         }

@@ -13,7 +13,7 @@
             <file>tests/Feature/PakasirWebhookTest.php</file>
             <file>tests/Feature/Telegram/CartCheckoutTest.php</file>
             <file>tests/Feature/Telegram/PaymentProofAdminCallbackTest.php</file>
-            <file>tests/Feature/Phase7AdminOperationsTest.php</file>
+            <file>tests/Feature/AdminOrderPaymentOperationsTest.php</file>
         </testsuite>
     </testsuites>
     <source>

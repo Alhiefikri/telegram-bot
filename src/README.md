@@ -642,7 +642,9 @@ Langkah cek:
 - `src/config/orders.php` — konfigurasi TTL pending payment.
 - `scripts/concurrency-deploy-gate.sh` — deploy gate PostgreSQL untuk race test inventory/cart/checkout/payment/admin stock.
 - `src/phpunit.concurrency.xml` — konfigurasi PHPUnit khusus concurrency gate tanpa override SQLite default.
-- `src/tests/Feature/Phase6TelegramBotTest.php` — coverage flow customer Telegram, checkout manual, receipt, callback paid, dan rate limit.
-- `src/tests/Feature/Phase7AdminOperationsTest.php` — coverage operasi admin, resend receipt, complete manual order, reconcile payment, dan health check.
-- `src/tests/Feature/Phase8HardeningTest.php` — coverage hardening operasional/security sesuai fase project.
-- `src/tests/Feature/Phase4OrderCartDomainTest.php` — coverage cart/order state machine, expiry, cancel, paid/refund transitions, dan stok.
+- `src/tests/Feature/Telegram/` — coverage flow customer Telegram, checkout manual, receipt, callback paid, dan rate limit.
+- `src/tests/Feature/AdminOrderPaymentOperationsTest.php` — coverage operasi admin, resend receipt, complete manual order, reconcile payment, dan health check.
+- `src/tests/Feature/ProductionReleaseHardeningTest.php` — coverage hardening operasional/security untuk release production.
+- `src/tests/Feature/OrderCartDomainTest.php` — coverage cart/order state machine, expiry, cancel, paid/refund transitions, dan stok.
+- `src/tests/Feature/CoreSchemaAndModelCastsTest.php` — coverage skema tabel inti, primary key UUID, dan cast enum/JSON model.
+- `src/tests/Feature/AdminCatalogPolicyAndStockAuditTest.php` — coverage policy katalog per role, penyesuaian stok, dan audit log.

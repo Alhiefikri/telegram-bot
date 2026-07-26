@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class Phase2CoreDatabaseTest extends TestCase
+class CoreSchemaAndModelCastsTest extends TestCase
 {
     use RefreshDatabase;
 

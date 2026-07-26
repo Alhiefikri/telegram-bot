@@ -37,7 +37,7 @@ use Illuminate\Support\Facades\Queue;
 use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
-class Phase4OrderCartDomainTest extends TestCase
+class OrderCartDomainTest extends TestCase
 {
     use PakasirNativeQrisScenarios;
     use RefreshDatabase;
