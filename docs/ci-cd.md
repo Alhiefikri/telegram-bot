@@ -12,9 +12,11 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 
 - `.github/workflows/ci.yml`
   - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
+  - Rejects duplicate migration filename prefixes via `./scripts/check-migration-prefixes.sh`, so migration order stays deterministic. Prefixes that already shipped with a duplicate are allowlisted in `scripts/migration-prefix-allowlist.txt` and are never renamed, because Laravel keys the `migrations` table by filename.
   - PHP 8.4 + Composer validate/install.
+  - Enforces the Laravel Pint code style with `./vendor/bin/pint --test`.
   - Laravel test suite via `composer test`.
-  - Keeps the fast SQLite suite parallel, then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
+  - Keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`), then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
   - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.
   - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
   - Node 24 + `npm ci`.
@@ -164,7 +166,7 @@ Every production migration must follow expand-and-contract compatibility because
 
 Do not include destructive renames, column/table drops, incompatible type changes, irreversible data rewrites, or long blocking DDL in the automatic release migration. Those changes require a verified database backup and explicit human approval before dispatching the workflow. If a change cannot preserve compatibility with the retained image, treat it as a planned maintenance release with a documented restore procedure rather than relying on automatic application rollback.
 
-The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, rollback health failure, and external-smoke rollback. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. CI runs these contracts through the PHP hardening suite and release harness.
+The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, rollback health failure, and external-smoke rollback. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. `./scripts/test-check-migration-prefixes.sh` verifies that the migration prefix guard fails on a new duplicate, tolerates an allowlisted historical duplicate, and rejects a stale allowlist entry. CI runs these contracts through the PHP hardening suite and release harness.
 
 ## Image identity and retention
 

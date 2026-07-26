@@ -100,7 +100,7 @@ jobs:
           mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
 
       - name: Run PHPUnit suite
-        run: composer test -- --log-junit junit.xml
+        run: composer test -- --parallel --log-junit junit.xml
 
       - name: Upload PHPUnit report on failure
         if: failure()
