@@ -13,6 +13,9 @@ vendor/
 *.sql.gz
 *.dump
 
+# Locally downloaded tooling binaries, fetched on demand rather than committed
+*.deb
+
 src/.env
 src/.env.*
 !src/.env.example
