@@ -21,6 +21,13 @@ class TelegramCatalogIntents
             ->whereHas('products', fn ($q) => $q->where('is_active', true))
             ->orderBy('sort_order')->orderBy('name')->get();
         $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->exists();
+
+        if ($categories->count() + ($hasUncategorized ? 1 : 0) === 1) {
+            $this->sendCategoryProducts($customer, $chatId, $hasUncategorized ? 'uncategorized' : (string) $categories->first()->id);
+
+            return;
+        }
+
         $keyboard = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->values()->all();
         if ($hasUncategorized) {
             $keyboard[] = [['text' => $this->locale->text($customer, '📂 Lainnya', '📂 Other'), 'callback_data' => 'category:uncategorized']];
@@ -149,7 +156,9 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->text($customer, 'Pilih produk untuk melihat detail.', 'Choose a product to view its details.');
 
         $keyboard = $products->values()->map(fn ($product) => [$this->productButton($product)])->all();
-        $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Pilih Kategori', '⬅️ Choose Category'), 'callback_data' => 'back:categories']];
+        if ($this->hasMultipleCategoryOptions()) {
+            $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Pilih Kategori', '⬅️ Choose Category'), 'callback_data' => 'back:categories']];
+        }
 
         $this->bot->sendMessage($chatId, $products->isEmpty() ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\n━━━━━━━━━━━━━━\nCoba cek kategori lain dulu ya.", "📂 No products in this category\n━━━━━━━━━━━━━━\nPlease check another category.") : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -193,6 +202,17 @@ class TelegramCatalogIntents
         $keyboard[] = [['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
+
+    private function hasMultipleCategoryOptions(): bool
+    {
+        $categoryCount = Category::query()
+            ->where('is_active', true)
+            ->whereHas('products', fn ($q) => $q->where('is_active', true))
+            ->count();
+        $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->exists();
+
+        return $categoryCount + ($hasUncategorized ? 1 : 0) > 1;
     }
 
     private function descriptionText(Customer $customer, Product $product): string

@@ -130,8 +130,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(114, 'cb-english-qris', 'buy:qris:'.$product->id))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], 'Browse Products')
-            && ! str_contains((string) $request['text'], 'Lihat Produk'));
+            && str_contains((string) $request['text'], 'Product List')
+            && ! str_contains((string) $request['text'], 'Daftar Produk'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Netflix Premium')
             && str_contains((string) $request['text'], '💰 Price: Rp25.000')
@@ -201,13 +201,46 @@ class CatalogSearchTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $category = Category::factory()->create(['name' => 'AI Tools']);
+        $otherCategory = Category::factory()->create(['name' => 'Streaming']);
         Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Netflix', 'category_id' => $otherCategory->id, 'stock' => 3, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(133, '/lihat produk'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Lihat Produk')
             && str_contains(json_encode($r->data()), 'category:'.$category->id));
+    }
+
+    public function test_katalog_with_single_category_skips_category_selection(): void
+    {
+        $this->fakeTelegramHttp();
+        $category = Category::factory()->create(['name' => 'AI Tools']);
+        $product = Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(135, '/produk'))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Daftar Produk')
+            && str_contains($r['text'], 'Kategori: AI Tools')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id)
+            && ! str_contains(json_encode($r->data()), 'back:categories'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Pilih kategori yang kamu mau'));
+    }
+
+    public function test_katalog_with_only_uncategorized_products_skips_category_selection(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(136, '/produk'))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Daftar Produk')
+            && str_contains($r['text'], 'Kategori: Lainnya')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id)
+            && ! str_contains(json_encode($r->data()), 'back:categories'));
     }
 
     public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
