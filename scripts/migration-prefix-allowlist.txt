@@ -1,0 +1,7 @@
+# Migration timestamp prefixes that already shipped to production with a
+# duplicate. Renaming an applied migration would make Laravel re-run it, because
+# the `migrations` table is keyed by filename, so these stay as they are.
+#
+# Do not add new entries. Give every new migration a unique timestamp instead.
+2026_07_20_000001
+2026_07_21_000001

@@ -34,6 +34,9 @@ jobs:
         working-directory: src
         run: composer audit --locked --no-dev --abandoned=fail
 
+      - name: Reject duplicate migration filename prefixes
+        run: ./scripts/check-migration-prefixes.sh
+
       - name: Audit npm dependencies at high severity
         working-directory: src
         run: npm audit --audit-level=high
@@ -81,6 +84,9 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
+      - name: Check PHP code style with Pint
+        run: ./vendor/bin/pint --test
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -113,6 +119,7 @@ jobs:
         run: |
           ./scripts/test-deploy-production-release.sh
           ./scripts/test-redact-release-diagnostics.sh
+          ./scripts/test-check-migration-prefixes.sh
 
   postgres-release-gate:
     name: PostgreSQL migration and concurrency release gate
