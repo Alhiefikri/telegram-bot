@@ -48,6 +48,9 @@ class StorefrontCatalogPageBuilder
         $categories = $this->publicCategories();
         $products = $this->publicProducts($search);
         $catalogProducts = $this->catalogProducts($products);
+        $featuredProduct = $search === ''
+            ? $this->featuredFromCatalog($catalogProducts)
+            : $this->featuredProduct();
         $copy = config('storefront');
         $brand = $this->storefront->brand();
         $isShop = $context === StorefrontCatalogPage::CONTEXT_SHOP;
@@ -71,7 +74,7 @@ class StorefrontCatalogPageBuilder
             categoryFilters: $this->categoryFilters($categories, $catalogProducts),
             products: $catalogProducts,
             popularProducts: $catalogProducts->filter->isPopular->values(),
-            featuredProduct: $this->featuredProduct(),
+            featuredProduct: $featuredProduct,
             search: $search,
             searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
             searchAction: $this->urls->catalogUrl(),
@@ -160,6 +163,27 @@ class StorefrontCatalogPageBuilder
                 slug: $category->slug,
             ))
             ->values();
+    }
+
+    /**
+     * Reuse the already-fetched catalog for the featured slot when the catalog is
+     * unfiltered. storefrontOrder() sorts available products first and the
+     * presentation's isAvailable flag mirrors the availableForPurchase() scope, so
+     * the first available entry equals featuredProduct()->first() without a second
+     * products query. Search results keep the global featuredProduct() query so the
+     * featured slot stays independent of the active filter.
+     *
+     * @param  Collection<int, StorefrontCatalogProduct>  $catalogProducts
+     */
+    private function featuredFromCatalog(Collection $catalogProducts): ?StorefrontCatalogProduct
+    {
+        $featured = $catalogProducts->first(
+            fn (StorefrontCatalogProduct $product): bool => $product->presentation->isAvailable,
+        );
+
+        return $featured !== null
+            ? new StorefrontCatalogProduct($featured->presentation)
+            : null;
     }
 
     private function featuredProduct(): ?StorefrontCatalogProduct

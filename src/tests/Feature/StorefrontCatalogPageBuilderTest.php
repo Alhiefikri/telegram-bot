@@ -145,6 +145,36 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame('Canva Ready', $featuredProduct->presentation->name);
     }
 
+    public function test_featured_product_reuses_catalog_without_a_second_products_query(): void
+    {
+        $this->unavailableProduct(['name' => 'Akun Habis']);
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $page = app(StorefrontCatalogPageBuilder::class)->home(null);
+        $productListingQueries = collect(DB::getQueryLog())
+            ->filter(fn (array $entry): bool => str_contains($entry['query'], 'sold_quantity'))
+            ->count();
+        DB::disableQueryLog();
+
+        $this->assertSame(1, $productListingQueries);
+        $this->assertNotNull($page->featuredProduct);
+        $this->assertSame('Canva Ready', $page->featuredProduct->presentation->name);
+    }
+
+    public function test_featured_product_stays_global_when_search_filters_it_out(): void
+    {
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
+        $this->availableProduct(['name' => 'Chat GPT Plus', 'stock' => 5]);
+
+        $page = app(StorefrontCatalogPageBuilder::class)->home('chat');
+
+        $this->assertSame(['Chat GPT Plus'], $page->products->map(fn ($entry) => $entry->presentation->name)->all());
+        $this->assertNotNull($page->featuredProduct);
+        $this->assertSame('Canva Ready', $page->featuredProduct->presentation->name);
+    }
+
     public function test_products_order_credential_managed_products_by_available_product_invariant(): void
     {
         $this->credentialManagedProductWithClaimedCredentials(
