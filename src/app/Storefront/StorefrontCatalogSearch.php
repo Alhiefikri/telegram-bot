@@ -68,7 +68,9 @@ final class StorefrontCatalogSearch
             return $query;
         }
 
-        $pattern = '%'.$search.'%';
+        // Escape LIKE wildcards so a user-supplied "%" or "_" matches literally
+        // rather than broadening the scan (mirrors the Telegram catalog search path).
+        $pattern = '%'.addcslashes($search, '\\%_').'%';
 
         return $query->where(fn (Builder $query) => $query
             ->whereLike('name', $pattern)

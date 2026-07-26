@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,43 @@ class PaymentReceiptReport
      * @return Collection<int, Payment>
      */
     public function canonicalPaidPayments(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): Collection
+    {
+        return $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)
+            ->orderBy('canonical_payments.paid_at')
+            ->orderBy('canonical_payments.id')
+            ->get([
+                'canonical_payments.id',
+                'canonical_payments.order_id',
+                'canonical_payments.amount',
+                'canonical_payments.currency',
+                'canonical_payments.provider_fee',
+                'canonical_payments.paid_at',
+            ]);
+    }
+
+    /**
+     * Net IDR receipts summed in the database. Mirrors idrNetTotal(netAmount())
+     * over canonicalPaidPayments() but without hydrating every paid payment into
+     * memory on each dashboard request.
+     */
+    public function idrNetTotalCanonical(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
+    {
+        $net = '(canonical_payments.amount - COALESCE(canonical_payments.provider_fee, 0))';
+
+        return (int) $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)
+            ->where(function ($query): void {
+                $query
+                    ->whereNull('canonical_payments.currency')
+                    ->orWhere('canonical_payments.currency', '')
+                    ->orWhereRaw('UPPER(canonical_payments.currency) = ?', ['IDR']);
+            })
+            ->sum(DB::raw("CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END"));
+    }
+
+    /**
+     * @return Builder<Payment>
+     */
+    private function canonicalPaidPaymentsQuery(?Carbon $start, ?Carbon $end, bool $includeEnd): Builder
     {
         $query = Payment::query()
             ->from('payments as canonical_payments')
@@ -45,17 +83,7 @@ class PaymentReceiptReport
             $query->where('canonical_payments.paid_at', $includeEnd ? '<=' : '<', $end);
         }
 
-        return $query
-            ->orderBy('canonical_payments.paid_at')
-            ->orderBy('canonical_payments.id')
-            ->get([
-                'canonical_payments.id',
-                'canonical_payments.order_id',
-                'canonical_payments.amount',
-                'canonical_payments.currency',
-                'canonical_payments.provider_fee',
-                'canonical_payments.paid_at',
-            ]);
+        return $query;
     }
 
     /**

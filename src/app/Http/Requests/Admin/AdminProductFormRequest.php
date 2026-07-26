@@ -30,7 +30,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string', 'max:1000'],
             'delivery_note' => ['nullable', 'string', 'max:2000'],
-            'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
         ];
     }
 
@@ -51,6 +51,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'image.image' => 'File harus berupa gambar yang valid.',
             'image.mimes' => 'Gambar produk harus JPG, PNG, atau WebP.',
             'image.max' => 'Ukuran gambar produk maksimal 5 MB.',
+            'image.dimensions' => 'Dimensi gambar produk maksimal 6000 x 6000 piksel.',
         ];
     }
 }

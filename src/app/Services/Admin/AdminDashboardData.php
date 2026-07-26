@@ -71,7 +71,7 @@ final class AdminDashboardData
         $gmvAmount = (int) Order::query()
             ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
             ->sum('total_amount');
-        $readOnlyBalanceAmount = $this->receiptReport->idrNetTotal($this->receiptReport->canonicalPaidPayments());
+        $readOnlyBalanceAmount = $this->receiptReport->idrNetTotalCanonical();
 
         return [
             'read_only_balance_amount' => $readOnlyBalanceAmount,
