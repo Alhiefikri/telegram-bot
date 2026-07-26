@@ -33,9 +33,9 @@
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
         @else
-            <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center">
+            <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center transition-transform duration-500 ease-out group-hover:scale-[1.05]">
                 <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
                     {!! $coverTheme['logo'] !!}
                 </div>

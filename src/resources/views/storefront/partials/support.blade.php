@@ -1,6 +1,7 @@
 <section id="support" class="mx-auto max-w-6xl px-5 py-12 sm:px-6">
-    <div class="neo-panel relative overflow-hidden bg-[var(--sf-accent)] p-8 text-white sm:p-12">
+    <div class="neo-panel-pop relative overflow-hidden bg-[var(--sf-accent)] p-8 text-white sm:p-12">
         <div class="pointer-events-none absolute -bottom-8 -left-8 h-32 w-32 -rotate-12 border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] shadow-[7px_7px_0_var(--sf-shadow)]"></div>
+        <div class="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rotate-12 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-lime)] shadow-[5px_5px_0_var(--sf-shadow)]"></div>
 
         <div class="relative z-10 flex flex-col items-center justify-between gap-8 lg:flex-row">
             <div class="max-w-2xl text-center lg:text-left">

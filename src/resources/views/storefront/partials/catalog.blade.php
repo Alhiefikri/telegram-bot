@@ -3,10 +3,11 @@
     <div class="relative z-10 mx-auto max-w-6xl px-5 sm:px-6">
         <div class="mx-auto mb-12 max-w-2xl text-center">
             <div class="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-                <span>✦</span>
+                <span class="neo-spin-slow inline-block" aria-hidden="true">✦</span>
                 <span>Katalog aktif · {{ $catalogPage->productCount() }} produk publik</span>
             </div>
             <h2 class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['catalog']['title'] }}</h2>
+            <div class="headline-underline mx-auto mt-4 w-28" aria-hidden="true"></div>
             <p class="mx-auto mt-3 max-w-md text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['catalog']['body'] }}</p>
         </div>
 

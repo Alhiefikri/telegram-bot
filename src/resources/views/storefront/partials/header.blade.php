@@ -20,7 +20,7 @@
         </nav>
 
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-            <a href="{{ $shopUrl }}" class="neo-button hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
+            <a href="{{ $shopUrl }}" class="neo-button neo-sheen hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
                 <span>Katalog Web</span>
             </a>
 

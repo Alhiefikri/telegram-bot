@@ -22,7 +22,7 @@
 
                 <div class="flex flex-col gap-3 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
                     <div class="flex flex-wrap items-center gap-2">
-                        <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 font-display text-xs font-black text-[var(--sf-ink)]">
+                        <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 font-display text-xs font-black text-[var(--sf-ink)] shadow-[2px_2px_0_var(--sf-shadow)]">
                             {{ $storefront->idr($presentation->priceAmount) }}
                         </span>
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
@@ -33,8 +33,9 @@
                         </span>
                     </div>
 
-                    <span class="inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-3 text-sm font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)]">
-                        {{ $presentation->cardActionLabel }}
+                    <span class="neo-sheen inline-flex h-11 items-center justify-center gap-2 rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-3 text-sm font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)]">
+                        <span>{{ $presentation->cardActionLabel }}</span>
+                        <span aria-hidden="true" class="transition-transform duration-300 group-hover:translate-x-1">→</span>
                     </span>
                 </div>
             </div>

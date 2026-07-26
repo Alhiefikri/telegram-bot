@@ -6,7 +6,7 @@
                 $isNumeric = !empty($cleanedVal) && is_numeric($cleanedVal);
                 $suffix = str_replace($cleanedVal, '', $stat['value']);
             @endphp
-            <div class="neo-panel-tight reveal-item bg-[var(--sf-surface)] p-6">
+            <div class="neo-panel-tight reveal-item p-6 transition-transform duration-300 hover:rotate-0 {{ ['bg-[var(--sf-yellow)] md:-rotate-1', 'bg-[var(--sf-violet-soft)]', 'bg-[#eafff3] md:rotate-1'][$index % 3] }}">
                 @if ($isNumeric)
                     <p class="counter-number font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl"
                        data-counter="{{ $cleanedVal }}"

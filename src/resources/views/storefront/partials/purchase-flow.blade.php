@@ -9,7 +9,7 @@
         <div class="grid gap-6 sm:grid-cols-3 lg:grid-cols-1">
             @foreach ($copy['payment_flow']['steps'] as $index => $step)
                 <div class="neo-panel neo-hover reveal-item relative bg-[var(--sf-surface)] p-6">
-                    <span class="mb-5 flex h-12 w-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] font-display text-base font-black text-white shadow-[4px_4px_0_var(--sf-shadow)]">
+                    <span class="mb-5 flex h-12 w-12 -rotate-3 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] font-display text-base font-black shadow-[4px_4px_0_var(--sf-shadow)] {{ ['bg-[var(--sf-accent)] text-white', 'bg-[var(--sf-violet)] text-white', 'bg-[var(--sf-yellow)] text-[var(--sf-ink)]'][$index % 3] }}">
                         0{{ $index + 1 }}
                     </span>
                     <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $step['title'] ?? 'Langkah' }}</h3>

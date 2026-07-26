@@ -255,6 +255,73 @@ function initCounters() {
     counters.forEach((counter) => counterObserver.observe(counter));
 }
 
+function initScrollProgress() {
+    const bar = document.getElementById('scroll-progress');
+
+    if (!bar) {
+        return;
+    }
+
+    let ticking = false;
+    const update = () => {
+        ticking = false;
+        const doc = document.documentElement;
+        const max = doc.scrollHeight - window.innerHeight;
+        const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+        bar.style.setProperty('--scroll-progress', progress.toFixed(4));
+    };
+    const requestUpdate = () => {
+        if (!ticking) {
+            ticking = true;
+            window.requestAnimationFrame(update);
+        }
+    };
+
+    window.addEventListener('scroll', requestUpdate, { passive: true });
+    window.addEventListener('resize', requestUpdate, { passive: true });
+    update();
+}
+
+function initRevealStagger() {
+    const items = document.querySelectorAll('.reveal-item');
+
+    if (!items.length || !('IntersectionObserver' in window)) {
+        return;
+    }
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+    }
+
+    const revealObserver = new IntersectionObserver((entries) => {
+        let batchIndex = 0;
+
+        entries.forEach((entry) => {
+            if (!entry.isIntersecting) {
+                return;
+            }
+
+            const target = entry.target;
+            target.style.transitionDelay = `${Math.min(batchIndex, 5) * 80}ms`;
+            batchIndex += 1;
+            target.addEventListener('transitionend', () => {
+                target.style.transitionDelay = '';
+            }, { once: true });
+            target.classList.add('reveal-in');
+            revealObserver.unobserve(target);
+        });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+    items.forEach((item) => {
+        if (item.getBoundingClientRect().top < window.innerHeight * 0.92) {
+            return;
+        }
+
+        item.classList.add('reveal-armed');
+        revealObserver.observe(item);
+    });
+}
+
 function initFaqAccordion() {
     document.querySelectorAll('.faq-toggle').forEach((toggle) => {
         toggle.addEventListener('click', () => {
@@ -740,6 +807,8 @@ export default function initStorefront() {
         initMobileMenu();
         initCategoryFilters();
         initCounters();
+        initScrollProgress();
+        initRevealStagger();
         initFaqAccordion();
         initPaymentActions();
         initSupportFunnelEvents();

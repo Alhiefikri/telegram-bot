@@ -7,7 +7,7 @@
 
     <div class="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
         @foreach ($copy['benefits'] as $index => $benefit)
-            <article class="neo-panel neo-hover h-full bg-[var(--sf-surface)] p-7">
+            <article class="neo-panel neo-hover reveal-item h-full p-7 {{ ['bg-[#eafff3] md:-rotate-1', 'bg-[#fff8d9] md:translate-y-2', 'bg-[var(--sf-violet-soft)] md:rotate-1'][$index % 3] }}">
                 <div class="mb-6 flex h-12 w-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] {{ $index === 0 ? 'bg-[var(--sf-green)]' : ($index === 1 ? 'bg-[var(--sf-yellow)]' : 'bg-[var(--sf-blue)] text-white') }} text-sm font-black shadow-[4px_4px_0_var(--sf-shadow)]">
                     @if($index === 0)
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
