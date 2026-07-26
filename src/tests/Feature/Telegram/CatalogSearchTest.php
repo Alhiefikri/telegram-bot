@@ -6,9 +6,9 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramMenuIntents;
@@ -248,6 +248,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
     }
+
     public function test_search_product_button_shows_usdt_and_respects_telegram_label_limit(): void
     {
         config()->set('services.binance.pay_id', '987654321');
@@ -291,7 +292,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains((string) $request['text'], 'Daftar Produk')
             && ! str_contains(json_encode($request['reply_markup']['inline_keyboard']), 'USDT'));
     }
-
 
     public function test_cari_without_keyword_sends_usage_instruction(): void
     {

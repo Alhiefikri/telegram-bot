@@ -39,8 +39,8 @@ use Tests\TestCase;
 
 class Phase4OrderCartDomainTest extends TestCase
 {
-    use RefreshDatabase;
     use PakasirNativeQrisScenarios;
+    use RefreshDatabase;
 
     public function test_duplicate_checkout_returns_existing_order(): void
     {

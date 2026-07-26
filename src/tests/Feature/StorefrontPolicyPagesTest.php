@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Product;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -45,7 +46,7 @@ class StorefrontPolicyPagesTest extends TestCase
 
     public function test_storefront_footer_links_to_real_policy_destinations(): void
     {
-        foreach ([route('storefront.home'), route('storefront.products.show', ['product' => \App\Models\Product::factory()->create()])] as $url) {
+        foreach ([route('storefront.home'), route('storefront.products.show', ['product' => Product::factory()->create()])] as $url) {
             $this->get($url)
                 ->assertOk()
                 ->assertSee('href="'.route('storefront.policies.privacy').'"', false)

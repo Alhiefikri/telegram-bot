@@ -10,10 +10,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class TelegramBroadcast extends Model
 {
     public const STATUS_QUEUED = 'queued';
+
     public const STATUS_IN_PROGRESS = 'in_progress';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const STATUS_PARTIALLY_FAILED = 'partially_failed';
+
     public const STATUS_FAILED = 'failed';
+
     public const STATUS_SKIPPED = 'skipped';
 
     protected function casts(): array

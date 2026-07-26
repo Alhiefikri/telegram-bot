@@ -3,7 +3,6 @@
 namespace App\Storefront;
 
 use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;

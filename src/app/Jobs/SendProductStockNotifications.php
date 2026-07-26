@@ -5,9 +5,9 @@ namespace App\Jobs;
 use App\Enums\InventoryMovementType;
 use App\Models\InventoryMovement;
 use App\Services\Telegram\TelegramProductNotificationService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SendProductStockNotifications implements ShouldQueue

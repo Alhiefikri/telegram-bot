@@ -105,7 +105,6 @@ class TelegramWebhookIngress
             ];
         }
 
-
         return $minimized;
     }
 

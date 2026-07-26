@@ -10,11 +10,14 @@ abstract class AdminProductFormRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $value = trim((string) $this->input('usdt_price_amount', ''));
-        if ($value === '') { return; }
+        if ($value === '') {
+            return;
+        }
         if (preg_match('/^(\d+)(?:\.(\d{1,6}))?$/', $value, $m)) {
             $this->merge(['usdt_price_amount' => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
         }
     }
+
     /**
      * @return array<string, list<mixed>>
      */

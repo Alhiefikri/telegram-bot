@@ -252,6 +252,7 @@ class TelegramCatalogIntents
 
         return $button;
     }
+
     private function productButtonLabel(string $prefix, string $name, string $suffix): string
     {
         $maxLength = 64;

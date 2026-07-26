@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class AdminTelegramBroadcastQueueTest extends TestCase
@@ -54,7 +55,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         });
         Customer::factory()->count(50)->sequence(fn ($sequence) => ['telegram_id' => 100000 + $sequence->index])->create();
         $broadcast = TelegramBroadcast::create([
-            'broadcast_key' => (string) \Illuminate\Support\Str::uuid(),
+            'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
             'message' => 'Batch me',
             'status' => TelegramBroadcast::STATUS_QUEUED,
@@ -92,7 +93,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         Customer::factory()->create(['telegram_id' => 111111111]);
         Customer::factory()->create(['telegram_id' => 222222222]);
         $broadcast = TelegramBroadcast::create([
-            'broadcast_key' => (string) \Illuminate\Support\Str::uuid(),
+            'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
             'message' => 'Retry me',
             'status' => TelegramBroadcast::STATUS_QUEUED,
@@ -128,7 +129,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         Customer::factory()->create(['telegram_id' => 111111111]);
         Customer::factory()->create(['telegram_id' => 222222222]);
         $broadcast = TelegramBroadcast::create([
-            'broadcast_key' => (string) \Illuminate\Support\Str::uuid(),
+            'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
             'message' => 'Terminal me',
             'status' => TelegramBroadcast::STATUS_QUEUED,
@@ -159,7 +160,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         Customer::factory()->create(['telegram_id' => 111111111]);
         Customer::factory()->create(['telegram_id' => 222222222]);
         $broadcast = TelegramBroadcast::create([
-            'broadcast_key' => (string) \Illuminate\Support\Str::uuid(),
+            'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
             'message' => 'No duplicates',
             'status' => TelegramBroadcast::STATUS_QUEUED,
