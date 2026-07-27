@@ -24,7 +24,7 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains($request['text'], 'Menu utama')
             && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
             && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik Harian'
-            && ($request['reply_markup']['keyboard'][3][0]['callback_data'] ?? null) === 'statistik_harian'
+            && ! array_key_exists('callback_data', $request['reply_markup']['keyboard'][3][0] ?? [])
             && ($request['reply_markup']['keyboard'][3][1]['text'] ?? null) === '📦 Cek Stok'
             && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
             && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
@@ -199,6 +199,21 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains($request['text'], 'selamat datang di LHIE STORE')
             && ! str_contains(json_encode($request['reply_markup']), 'Mini App Dashboard')
             && ! str_contains(json_encode($request['reply_markup']), '/admin'));
+    }
+
+    public function test_start_welcome_hides_mini_app_dashboard_in_group_chat(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->messageUpdate(318, '/start', ['id' => 999], -100123, 'group'))->assertOk();
+
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (str_contains(json_encode($request['reply_markup'] ?? []), 'Mini App Dashboard')
+                || str_contains(json_encode($request['reply_markup'] ?? []), 'web_app')));
     }
 
     public function test_non_admin_cannot_trigger_forged_daily_stats_callback(): void

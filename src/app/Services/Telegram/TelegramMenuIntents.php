@@ -21,7 +21,7 @@ class TelegramMenuIntents
         $this->bot->sendMessage($chatId, '🌐 Pilih bahasa / Choose your language', $this->locale->languageKeyboard());
     }
 
-    public function sendWelcome(Customer $customer, string $chatId): void
+    public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
         $firstName = trim((string) $customer->first_name) ?: $this->locale->text($customer, 'Kak', 'there');
         [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
@@ -43,7 +43,7 @@ class TelegramMenuIntents
             'Mau mulai dari mana nih?',
         ]);
 
-        $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId);
+        $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId, $isPrivateChat);
         $bannerReference = config('services.telegram.welcome_banner_url');
 
         if (is_string($bannerReference) && trim($bannerReference) !== '') {
@@ -81,7 +81,7 @@ class TelegramMenuIntents
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];
             }
-            $keyboard[] = [['text' => '📊 Statistik Harian', 'callback_data' => 'statistik_harian'], ['text' => '📦 Cek Stok']];
+            $keyboard[] = [['text' => '📊 Statistik Harian'], ['text' => '📦 Cek Stok']];
             $keyboard[] = [['text' => '📣 Broadcast Info']];
         }
 
@@ -115,7 +115,7 @@ class TelegramMenuIntents
         };
     }
 
-    private function welcomeInlineKeyboard(Customer $customer, string $chatId): array
+    private function welcomeInlineKeyboard(Customer $customer, string $chatId, bool $isPrivateChat): array
     {
         $keyboard = [
             [
@@ -124,7 +124,7 @@ class TelegramMenuIntents
             ],
         ];
 
-        if ($this->adminAccess->isAdmin($customer, $chatId)) {
+        if ($isPrivateChat && $this->adminAccess->isAdmin($customer, $chatId)) {
             $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];

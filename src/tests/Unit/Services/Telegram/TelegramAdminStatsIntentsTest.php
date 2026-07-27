@@ -13,11 +13,20 @@ use App\Services\Telegram\TelegramAdminStatsIntents;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class TelegramAdminStatsIntentsTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_stats_payment_queries_have_window_and_canonical_lookup_indexes(): void
+    {
+        $indexes = collect(Schema::getIndexes('payments'))->keyBy('name');
+
+        $this->assertSame(['status', 'paid_at'], $indexes->get('payments_status_paid_at_index')['columns'] ?? null);
+        $this->assertSame(['order_id', 'status', 'paid_at', 'id'], $indexes->get('payments_order_status_paid_at_id_index')['columns'] ?? null);
+    }
 
     public function test_usdt_payment_micro_units_are_not_reported_as_rupiah_millions(): void
     {
