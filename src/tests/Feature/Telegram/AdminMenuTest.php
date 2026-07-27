@@ -8,6 +8,7 @@ use App\Models\ProductStockItem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class AdminMenuTest extends TelegramBotTestSupport
@@ -23,7 +24,8 @@ class AdminMenuTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'Menu utama')
             && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik Harian'
+            && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik'
+            && ! str_contains(json_encode($request['reply_markup']), '📊 Statistik Harian')
             && ! array_key_exists('callback_data', $request['reply_markup']['keyboard'][3][0] ?? [])
             && ($request['reply_markup']['keyboard'][3][1]['text'] ?? null) === '📦 Cek Stok'
             && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
@@ -230,18 +232,42 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
     }
 
-    public function test_admin_can_open_daily_stats_from_the_reply_keyboard_button(): void
+    public static function statisticsLabels(): array
+    {
+        return [
+            'current label' => ['📊 Statistik'],
+            'legacy label' => ['📊 Statistik Harian'],
+        ];
+    }
+
+    #[DataProvider('statisticsLabels')]
+    public function test_admin_can_open_store_growth_stats_from_current_and_legacy_labels(string $label): void
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
 
-        $this->postTelegramWebhook($this->messageUpdate(315, '📊 Statistik Harian', ['id' => 999], 999))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(315, $label, ['id' => 999], 999))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '999'
             && str_contains($request['text'], '📊 Statistik Hari Ini'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Aku belum paham perintah itu'));
+    }
+
+    public function test_store_growth_stats_are_private_chat_only(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook(
+            $this->messageUpdate(319, '📊 Statistik', ['id' => 999], -100123, 'group')
+        )->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains((string) $request['text'], 'Lanjut di chat pribadi'));
+        Http::assertNotSent(fn ($request) => str_contains((string) ($request['text'] ?? ''), '📊 Pertumbuhan Store'));
     }
 
     public function test_admin_can_open_product_stock_overview_from_the_reply_keyboard_button(): void

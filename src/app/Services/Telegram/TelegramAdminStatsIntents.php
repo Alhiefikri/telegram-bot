@@ -63,6 +63,11 @@ class TelegramAdminStatsIntents
         $this->sendStats($chatId, $this->calculateTodayStats(), '📊 Statistik Hari Ini');
     }
 
+    public function showStoreGrowth(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
+    {
+        $this->showDailyStats($customer, $chatId, $callbackQueryId);
+    }
+
     public function sendAutomatedDailyStats(string $chatId): void
     {
         $this->sendStats($chatId, $this->calculateYesterdayStats(), '📊 Rekap Kemarin');

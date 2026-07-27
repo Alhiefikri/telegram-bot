@@ -42,7 +42,11 @@ class TelegramAdminStatsCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        $this->adminStats->showDailyStats($context->customer, $context->chatId, $context->callbackQueryId);
+        $this->adminStats->showStoreGrowth(
+            $context->customer,
+            $context->chatId,
+            $context->callbackQueryId,
+        );
 
         return true;
     }

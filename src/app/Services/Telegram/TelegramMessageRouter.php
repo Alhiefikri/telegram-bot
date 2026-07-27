@@ -74,7 +74,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '📊 Statistik Harian') {
+        if (in_array($text, ['📊 Statistik', '📊 Statistik Harian'], true)) {
             $this->session->forget($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
                 $this->bot->sendMessage($chatId, $this->text($customer, 'Akses ditolak.', 'Access denied.'));
@@ -82,7 +82,7 @@ class TelegramMessageRouter
                 return;
             }
 
-            $this->adminStats->showDailyStats($customer, $chatId);
+            $this->adminStats->showStoreGrowth($customer, $chatId);
 
             return;
         }
@@ -251,7 +251,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || str_starts_with($text, '/broadcast ');
