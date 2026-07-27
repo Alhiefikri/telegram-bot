@@ -126,7 +126,9 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $body);
         $this->assertStringContainsString('caption_entities', $body);
         $this->assertStringContainsString('"type":"code"', $body);
-        $this->assertStringContainsString('do not round the amount', $body);
+        $this->assertStringContainsString('⚠️ IMPORTANT: Send exactly', $body);
+        $this->assertStringContainsString('including every decimal digit', $body);
+        $this->assertStringContainsString('Do not round or change the amount.', $body);
         $this->assertStringNotContainsString('screenshot', $body);
     }
 

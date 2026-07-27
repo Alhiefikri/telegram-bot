@@ -481,12 +481,54 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Binance Pay (USDT)')
             ->assertSee('6 USDT')
+            ->assertSee('⚠️ IMPORTANT')
+            ->assertSee('Send exactly 6 USDT, including every decimal digit.')
+            ->assertSee('Do not round or change the amount.')
             ->assertSee('987654321')
             ->assertSee('/payment '.$order->invoice_number)
             ->assertSee('data-copy-text="6 USDT"', false)
             ->assertSee('data-copy-text="987654321"', false)
             ->assertSee('data-copy-text="/payment '.$order->invoice_number.'"', false)
             ->assertSee('data-copy-status', false);
+    }
+
+    public function test_binance_auto_verification_checkout_highlights_the_exact_unique_amount(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'read-only-key');
+        config()->set('services.binance.api_secret', 'read-only-secret');
+        config()->set('services.binance.unique_amount_min_offset_micro', 321);
+        config()->set('services.binance.unique_amount_max_offset_micro', 321);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 1,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'automatic_binance_buyer',
+            'payment_method' => 'binance_pay',
+        ]);
+
+        $order = Order::with('payments')->sole();
+        $payment = $order->payments->sole();
+        $this->assertTrue($payment->binance_auto_verification_enabled);
+        $this->assertSame(3_000_321, $payment->amount);
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('⚠️ IMPORTANT')
+            ->assertSee('Send exactly 3.000321 USDT, including every decimal digit.')
+            ->assertSee('Do not round or change the amount.')
+            ->assertSee("tap “I've Paid”", false)
+            ->assertDontSee('/payment '.$order->invoice_number);
     }
 
     public function test_shop_checkout_rejects_unrecognized_payment_method_before_creating_rows(): void
