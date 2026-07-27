@@ -229,7 +229,22 @@ class AdminMenuTest extends TelegramBotTestSupport
             && $request['callback_query_id'] === 'forged-stats'
             && $request['text'] === 'Akses ditolak.');
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
+            && str_contains((string) ($request['text'] ?? ''), '📊 Pertumbuhan Store'));
+    }
+
+    public function test_admin_can_trigger_legacy_daily_stats_callback_in_private_chat(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        config()->set('app.url', 'https://admin.example.test');
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(320, 'legacy-stats', 'statistik_harian', ['id' => 999], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'legacy-stats');
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '999'
+            && str_contains((string) $request['text'], '📊 Pertumbuhan Store'));
     }
 
     public static function statisticsLabels(): array
@@ -321,6 +336,6 @@ class AdminMenuTest extends TelegramBotTestSupport
             && $request['callback_query_id'] === 'group-stats'
             && $request['text'] === 'Demi keamanan, lanjutkan di chat pribadi dengan bot ya.');
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Statistik Hari Ini'));
+            && str_contains((string) ($request['text'] ?? ''), '📊 Pertumbuhan Store'));
     }
 }
