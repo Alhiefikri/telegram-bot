@@ -46,6 +46,12 @@ class ProductionConfigurationValidator
             throw new RuntimeException('BINANCE_API_BASE_URL must use HTTPS in production.');
         }
 
+        $binanceApiKeyConfigured = filled($this->config->get('services.binance.api_key'));
+        $binanceApiSecretConfigured = filled($this->config->get('services.binance.api_secret'));
+        if ($binanceApiKeyConfigured !== $binanceApiSecretConfigured) {
+            throw new RuntimeException('BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.');
+        }
+
         if (! str_starts_with((string) $this->config->get('app.url'), 'https://')) {
             throw new RuntimeException('APP_URL must use HTTPS in production.');
         }

@@ -6,6 +6,7 @@ use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
@@ -13,6 +14,8 @@ use UnexpectedValueException;
 
 class BinancePayClient
 {
+    private const HISTORY_CACHE_KEY = 'binance:pay-history:recent';
+
     public function configured(): bool
     {
         return filled(config('services.binance.api_key')) && filled(config('services.binance.api_secret'));
@@ -29,10 +32,43 @@ class BinancePayClient
             throw new RuntimeException('Binance Pay API credentials are not configured.');
         }
 
+        $limit = max(1, min(100, $limit));
+        $cacheSeconds = max(0, (int) config('services.binance.history_cache_seconds', 20));
+        if ($cacheSeconds === 0) {
+            return $this->requestPayTransactions($startTimeMs, $endTimeMs, $limit);
+        }
+
+        if (($cached = $this->cachedTransactionsCovering($startTimeMs, $endTimeMs, $limit)) !== null) {
+            return $cached;
+        }
+
+        $lockSeconds = max(1, (int) config('services.binance.history_lock_seconds', 15));
+
+        return Cache::lock(self::HISTORY_CACHE_KEY.':lock', $lockSeconds)->block($lockSeconds, function () use ($startTimeMs, $endTimeMs, $limit, $cacheSeconds): array {
+            if (($cached = $this->cachedTransactionsCovering($startTimeMs, $endTimeMs, $limit)) !== null) {
+                return $cached;
+            }
+
+            $transactions = $this->requestPayTransactions($startTimeMs, $endTimeMs, $limit);
+            Cache::put(self::HISTORY_CACHE_KEY, [
+                'start_time_ms' => $startTimeMs,
+                'end_time_ms' => $endTimeMs,
+                'limit' => $limit,
+                'transactions' => $transactions,
+            ], now()->addSeconds($cacheSeconds));
+
+            return $transactions;
+        });
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function requestPayTransactions(?int $startTimeMs, ?int $endTimeMs, int $limit): array
+    {
+
         $params = array_filter([
             'startTime' => $startTimeMs,
             'endTime' => $endTimeMs,
-            'limit' => max(1, min(100, $limit)),
+            'limit' => $limit,
         ], fn ($value) => $value !== null);
         $params['recvWindow'] = max(1000, (int) config('services.binance.recv_window_ms', 10000));
         $params['timestamp'] = (int) round(microtime(true) * 1000);
@@ -62,6 +98,26 @@ class BinancePayClient
         $data = $response['data'] ?? [];
 
         return is_array($data) ? array_values(array_filter($data, 'is_array')) : [];
+    }
+
+    /** @return null|list<array<string, mixed>> */
+    private function cachedTransactionsCovering(?int $startTimeMs, ?int $endTimeMs, int $limit): ?array
+    {
+        $cached = Cache::get(self::HISTORY_CACHE_KEY);
+        if (! is_array($cached) || ! is_array($cached['transactions'] ?? null)) {
+            return null;
+        }
+
+        $cachedStart = $cached['start_time_ms'] ?? null;
+        $coversStart = $cachedStart === null || ($startTimeMs !== null && is_numeric($cachedStart) && (int) $cachedStart <= $startTimeMs);
+        $coversEnd = ($cached['end_time_ms'] ?? null) === $endTimeMs;
+        $coversLimit = (int) ($cached['limit'] ?? 0) >= $limit;
+
+        if (! $coversStart || ! $coversEnd || ! $coversLimit) {
+            return null;
+        }
+
+        return array_values(array_filter($cached['transactions'], 'is_array'));
     }
 
     private function providerRequestException(ConnectionException|RequestException $exception): RuntimeException

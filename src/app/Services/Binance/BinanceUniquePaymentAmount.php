@@ -12,6 +12,11 @@ class BinanceUniquePaymentAmount
 
     public function __construct(private readonly BinancePayClient $client) {}
 
+    public function enabled(): bool
+    {
+        return $this->client->configured();
+    }
+
     /**
      * Add a small random micro-USDT offset so every active Binance order has a
      * distinct payable amount. The offset alone identifies the order during
@@ -21,7 +26,7 @@ class BinanceUniquePaymentAmount
      */
     public function allocate(int $baseAmountMicro): int
     {
-        if (! $this->client->configured()) {
+        if (! $this->enabled()) {
             return $baseAmountMicro;
         }
 

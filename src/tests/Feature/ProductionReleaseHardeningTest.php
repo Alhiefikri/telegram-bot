@@ -775,6 +775,24 @@ SH);
         $this->assertStringContainsString('max-size: "10m"', $compose);
     }
 
+    public function test_docker_compose_forwards_binance_auto_verification_configuration(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $envExample = file_get_contents(base_path('../.env.example'));
+
+        foreach ([
+            'BINANCE_API_KEY',
+            'BINANCE_API_SECRET',
+            'BINANCE_API_BASE_URL',
+            'BINANCE_HISTORY_CACHE_SECONDS',
+            'BINANCE_HISTORY_LOCK_SECONDS',
+            'BINANCE_VERIFY_CLOCK_SKEW_SECONDS',
+        ] as $name) {
+            $this->assertStringContainsString($name.': ${'.$name, $compose);
+            $this->assertStringContainsString($name.'=', $envExample);
+        }
+    }
+
     public function test_docker_image_builds_assets_during_image_build(): void
     {
         $dockerfile = file_get_contents(base_path('../Dockerfile'));

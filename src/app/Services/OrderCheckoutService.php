@@ -79,7 +79,7 @@ class OrderCheckoutService
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
-        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'amount' => $this->paymentAmountFor($paymentIntent, $items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
+        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binanceAmounts->enabled(), 'amount' => $this->paymentAmountFor($paymentIntent, $items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];

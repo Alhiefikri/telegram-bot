@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Binance\BinancePayClient;
 use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Telegram\TelegramBinanceVerificationEscalator;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -16,8 +17,11 @@ class ReconcileBinancePayments extends Command
 
     protected $description = 'Automatically confirm pending Binance Pay payments from the account trade history.';
 
-    public function handle(BinancePayClient $client, BinanceAutoVerification $verification): int
-    {
+    public function handle(
+        BinancePayClient $client,
+        BinanceAutoVerification $verification,
+        TelegramBinanceVerificationEscalator $escalator,
+    ): int {
         if (! $verification->enabled()) {
             $this->info('binance:reconcile skipped: Binance Pay API credentials are not configured.');
 
@@ -73,6 +77,10 @@ class ReconcileBinancePayments extends Command
 
             if ($result->outcome === BinanceVerificationOutcome::TransactionAlreadyUsed) {
                 $this->warn('Payment '.$payment->id.' matched an already-claimed Binance transaction.');
+            }
+
+            if ($result->needsAdminAttention()) {
+                $escalator->notify($payment->order()->firstOrFail(), $payment, $result);
             }
         }
 

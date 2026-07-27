@@ -10,7 +10,6 @@ use App\Models\Payment;
 use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationResult;
-use Illuminate\Support\Facades\Log;
 
 class TelegramBinanceVerifyIntents
 {
@@ -19,7 +18,7 @@ class TelegramBinanceVerifyIntents
         private TelegramLocale $locale,
         private TelegramBinanceVerifySession $session,
         private BinanceAutoVerification $verification,
-        private TelegramAdminAccess $adminAccess,
+        private TelegramBinanceVerificationEscalator $escalator,
     ) {}
 
     public function handleVerifyTap(Customer $customer, string $chatId, string $callbackQueryId, string $orderId): void
@@ -190,7 +189,7 @@ class TelegramBinanceVerifyIntents
             case BinanceVerificationOutcome::Mismatch:
             case BinanceVerificationOutcome::TransactionAlreadyUsed:
             case BinanceVerificationOutcome::OrderNotPending:
-                $this->escalateToAdmin($order, $payment, $result, $submittedOrderId);
+                $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
                     "⚠️ Pembayaran kamu butuh pengecekan manual\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nDetail pembayaran tidak sepenuhnya cocok dengan pesanan ini, jadi admin sudah kami beri tahu dan akan menyelesaikannya segera. Kamu tidak perlu melakukan apa-apa lagi.",
@@ -199,7 +198,7 @@ class TelegramBinanceVerifyIntents
                 break;
 
             case BinanceVerificationOutcome::NotConfigured:
-                $this->escalateToAdmin($order, $payment, $result, $submittedOrderId);
+                $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
                     'Verifikasi otomatis sedang tidak tersedia. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan ya.',
@@ -214,46 +213,6 @@ class TelegramBinanceVerifyIntents
                     'Verification is temporarily unavailable. Please try again in a minute — your payment is safe.',
                 ));
                 break;
-        }
-    }
-
-    private function escalateToAdmin(Order $order, Payment $payment, BinanceVerificationResult $result, ?string $submittedOrderId): void
-    {
-        $adminChatId = $this->adminAccess->adminChatId();
-        if ($adminChatId === null) {
-            Log::warning('Binance verification escalation has no admin chat configured.', [
-                'order_id' => $order->id,
-                'outcome' => $result->outcome->value,
-            ]);
-
-            return;
-        }
-
-        $lines = [
-            '⚠️ Verifikasi Binance butuh perhatian',
-            '━━━━━━━━━━━━━━',
-            "🧾 Invoice: {$order->invoice_number}",
-            '💵 Tagihan: '.$this->formatUsdt((int) $payment->amount).' USDT',
-            '📌 Hasil: '.$result->outcome->value,
-        ];
-
-        if ($submittedOrderId !== null) {
-            $lines[] = '🔢 Order ID dikirim buyer: '.$submittedOrderId;
-        }
-
-        if ($result->transaction !== null) {
-            $transaction = $result->transaction;
-            $lines[] = '🔎 Transaksi ditemukan: '.$this->formatUsdt(abs($transaction->amountMicro())).' '.$transaction->currency()
-                .' · Order ID '.$transaction->orderId();
-        }
-
-        $lines[] = '';
-        $lines[] = 'Cek riwayat Binance Pay lalu selesaikan lewat dashboard admin.';
-
-        try {
-            $this->bot->sendMessage($adminChatId, implode("\n", $lines));
-        } catch (\Throwable $exception) {
-            report($exception);
         }
     }
 

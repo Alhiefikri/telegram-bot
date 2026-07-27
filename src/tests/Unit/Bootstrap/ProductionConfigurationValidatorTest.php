@@ -54,6 +54,8 @@ class ProductionConfigurationValidatorTest extends TestCase
             'missing Telegram webhook secret' => ['services.telegram.webhook_secret', '', 'TELEGRAM_WEBHOOK_SECRET must be configured in production.'],
             'debug enabled' => ['app.debug', true, 'APP_DEBUG must be false in production.'],
             'insecure Pakasir URL' => ['services.pakasir.base_url', 'http://pakasir.example.test', 'PAKASIR_BASE_URL must use HTTPS in production.'],
+            'Binance API key without secret' => ['services.binance.api_key', 'binance-key', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
+            'Binance API secret without key' => ['services.binance.api_secret', 'binance-secret', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'insecure application URL' => ['app.url', 'http://store.example.test', 'APP_URL must use HTTPS in production.'],
             'example application URL' => ['app.url', 'https://example.com/', 'APP_URL must not use the example domain in production.'],
             'dogfood timing enabled' => ['services.dogfood_timing.enabled', true, 'Dogfood runtime flags are not allowed in production.'],
@@ -76,6 +78,11 @@ class ProductionConfigurationValidatorTest extends TestCase
                     'webhook_secret' => 'telegram-secret',
                 ],
                 'pakasir' => ['base_url' => 'https://pakasir.example.test'],
+                'binance' => [
+                    'api_key' => '',
+                    'api_secret' => '',
+                    'base_url' => 'https://api.binance.com',
+                ],
                 'dogfood_timing' => [
                     'enabled' => false,
                     'fake_telegram_outbound' => false,

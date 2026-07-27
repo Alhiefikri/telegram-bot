@@ -17,6 +17,8 @@ use App\Services\Binance\BinanceUsdtAmount;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -38,12 +40,15 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             'recv_window_ms' => 10000,
             'history_max_attempts' => 1,
             'history_retry_delay_ms' => 0,
+            'history_cache_seconds' => 20,
+            'history_lock_seconds' => 5,
             'unique_amount_min_offset_micro' => 101,
             'unique_amount_max_offset_micro' => 9999,
-            'verify_clock_skew_seconds' => 120,
+            'verify_clock_skew_seconds' => 0,
             'verify_rate_limit_attempts' => 5,
             'verify_rate_limit_decay_seconds' => 300,
         ]);
+        Cache::forget('binance:pay-history:recent');
     }
 
     public function test_usdt_amount_parsing_is_exact_and_rejects_unrepresentable_values(): void
@@ -86,6 +91,25 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertSame(self::BASE_USDT_MICRO, $payment->amount);
     }
 
+    public function test_database_rejects_duplicate_pending_binance_amounts(): void
+    {
+        $this->enableBinancePay();
+        [, $payment] = $this->createBinanceOrder();
+        $otherOrder = Order::factory()->create();
+
+        $this->expectException(QueryException::class);
+
+        Payment::factory()->create([
+            'order_id' => $otherOrder->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'binance_auto_verification_enabled' => true,
+            'amount' => $payment->amount,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+    }
+
     public function test_instruction_message_offers_ive_paid_button_when_auto_verify_is_enabled(): void
     {
         $this->fakeTelegramHttp();
@@ -123,12 +147,12 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
         $this->assertSame(PaymentStatus::Paid, $payment->status);
-        $this->assertSame('445011487581044736', $payment->provider_reference);
+        $this->assertSame('P_487581044736', $payment->provider_reference);
         $this->assertNotNull($payment->paid_at);
 
         $event = PaymentEvent::query()->where('provider', 'binance')->sole();
         $this->assertSame($payment->id, $event->payment_id);
-        $this->assertSame('445011487581044736', $event->provider_reference);
+        $this->assertSame('P_487581044736', $event->provider_reference);
         $this->assertNotNull($event->processed_at);
 
         $confirmMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -136,7 +160,29 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertCount(1, $confirmMessages);
     }
 
-    public function test_ive_paid_tap_rejects_outgoing_wrong_amount_and_stale_transactions(): void
+    public function test_auto_verification_accepts_transaction_id_when_order_id_is_absent(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([[
+                'transactionId' => 'P_TRANSACTION_ONLY',
+                'orderType' => 'C2C',
+                'amount' => $this->usdtString($payment->amount),
+                'currency' => 'USDT',
+                'transactionTime' => now()->getTimestampMs(),
+                'payerInfo' => ['name' => 'Buyer'],
+                'receiverInfo' => ['accountId' => '987654321'],
+            ]])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(302, 'binance-verify-transaction-only', 'binance:verify:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame('P_TRANSACTION_ONLY', $payment->fresh()->provider_reference);
+    }
+
+    public function test_ive_paid_tap_rejects_outgoing_wrong_amount_and_escalates_stale_or_wrong_currency_matches(): void
     {
         $this->enableBinancePay();
         [$order, $payment] = $this->createBinanceOrder();
@@ -161,10 +207,82 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertSame(PaymentStatus::Pending, $order->payments()->sole()->status);
         $this->assertNull($order->payments()->sole()->provider_reference);
 
-        $notFound = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Payment not detected yet'));
-        $this->assertCount(1, $notFound);
-        $this->assertStringContainsString('binance:orderid:'.$order->id, json_encode($notFound->first()[0]['reply_markup'] ?? []));
+        $manualCheck = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'manual check'));
+        $this->assertCount(1, $manualCheck);
+
+        $adminNotice = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), $order->invoice_number));
+        $this->assertCount(1, $adminNotice);
+    }
+
+    public function test_positive_amount_sent_to_another_receiver_never_completes_the_order(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445000000000000009',
+                    $this->usdtString($payment->amount),
+                    now()->getTimestampMs(),
+                    receiverPayId: '111222333',
+                    receiverBinanceId: '987654321',
+                ),
+            ])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(312, 'binance-verify', 'binance:verify:'.$order->id))->assertOk();
+
+        $order->refresh();
+        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->payments()->sole()->status);
+        $this->assertNull($order->payments()->sole()->provider_reference);
+    }
+
+    public function test_exact_amount_with_wrong_currency_escalates_instead_of_becoming_not_found(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445000000000000010',
+                    $this->usdtString($payment->amount),
+                    now()->getTimestampMs(),
+                    currency: 'BUSD',
+                ),
+            ])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(313, 'binance-verify', 'binance:verify:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $adminNotice = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), $order->invoice_number));
+        $this->assertCount(1, $adminNotice);
+    }
+
+    public function test_exact_payment_from_before_checkout_never_completes_the_new_order(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445000000000000011',
+                    $this->usdtString($payment->amount),
+                    now()->subSeconds(30)->getTimestampMs(),
+                ),
+            ])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(314, 'binance-verify', 'binance:verify:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertNull($payment->fresh()->provider_reference);
     }
 
     public function test_one_transaction_can_never_pay_two_orders(): void
@@ -217,11 +335,32 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         }
 
         $binanceCalls = Http::recorded(fn ($request) => str_contains($request->url(), 'api.binance.test'));
-        $this->assertCount(2, $binanceCalls);
+        $this->assertCount(1, $binanceCalls);
 
         $throttled = Http::recorded(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && str_contains((string) ($request['text'] ?? ''), 'Too many attempts'));
         $this->assertCount(1, $throttled);
+    }
+
+    public function test_recent_history_is_shared_across_orders_to_protect_the_high_weight_endpoint(): void
+    {
+        $this->enableBinancePay();
+        [$firstOrder, $firstPayment] = $this->createBinanceOrder(telegramId: 12345);
+        [$secondOrder, $secondPayment] = $this->createBinanceOrder(telegramId: 54321);
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction('445000000000000021', $this->usdtString($firstPayment->amount), now()->getTimestampMs()),
+                $this->binanceTransaction('445000000000000022', $this->usdtString($secondPayment->amount), now()->getTimestampMs()),
+            ])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(317, 'binance-verify-first', 'binance:verify:'.$firstOrder->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(318, 'binance-verify-second', 'binance:verify:'.$secondOrder->id, chatId: 54321))->assertOk();
+
+        $binanceCalls = Http::recorded(fn ($request) => str_starts_with($request->url(), 'https://api.binance.test/'));
+        $this->assertCount(1, $binanceCalls);
+        $this->assertSame(OrderStatus::Completed, $firstOrder->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $secondOrder->fresh()->order_status);
     }
 
     public function test_provider_outage_keeps_order_pending_and_tells_buyer_to_retry(): void
@@ -261,7 +400,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
 
         $order->refresh();
         $this->assertSame(OrderStatus::Completed, $order->order_status);
-        $this->assertSame('445064386362580992', $order->payments()->sole()->provider_reference);
+        $this->assertSame('P_386362580992', $order->payments()->sole()->provider_reference);
     }
 
     public function test_order_id_fallback_with_wrong_amount_escalates_instead_of_delivering(): void
@@ -327,7 +466,33 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $order->refresh();
         $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame('445088888888888888', $order->payments()->sole()->provider_reference);
+        $this->assertSame('P_888888888888', $order->payments()->sole()->provider_reference);
+    }
+
+    public function test_reconcile_command_notifies_admin_about_matching_amount_mismatch(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445088888888888889',
+                    $this->usdtString($payment->amount),
+                    now()->getTimestampMs(),
+                    currency: 'BUSD',
+                ),
+            ])),
+        ]);
+
+        $this->artisan('binance:reconcile')
+            ->expectsOutputToContain('flagged=1')
+            ->assertExitCode(0);
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $adminNotice = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), $order->invoice_number));
+        $this->assertCount(1, $adminNotice);
     }
 
     public function test_reconcile_command_is_a_safe_noop_without_credentials_or_pending_payments(): void
@@ -383,8 +548,14 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
     }
 
     /** @return array<string, mixed> */
-    private function binanceTransaction(string $orderId, string $amount, int $transactionTimeMs, string $currency = 'USDT'): array
-    {
+    private function binanceTransaction(
+        string $orderId,
+        string $amount,
+        int $transactionTimeMs,
+        string $currency = 'USDT',
+        string $receiverPayId = '987654321',
+        ?string $receiverBinanceId = null,
+    ): array {
         return [
             'uid' => 1251268604,
             'orderId' => $orderId,
@@ -395,6 +566,11 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             'transactionTime' => $transactionTimeMs,
             'note' => '',
             'payerInfo' => ['name' => 'Buyer', 'binanceId' => 1215081702],
+            'receiverInfo' => array_filter([
+                'name' => 'Store',
+                'accountId' => $receiverPayId,
+                'binanceId' => $receiverBinanceId,
+            ], fn ($value) => $value !== null),
         ];
     }
 

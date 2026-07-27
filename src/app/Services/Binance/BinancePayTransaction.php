@@ -12,6 +12,8 @@ final readonly class BinancePayTransaction
         private int $transactionTimeMs,
         private string $orderType,
         private string $note,
+        private string $receiverAccountId,
+        private string $receiverBinanceId,
         private array $sanitizedPayload,
     ) {}
 
@@ -27,7 +29,7 @@ final readonly class BinancePayTransaction
         $currency = strtoupper(self::stringValue($payload['currency'] ?? null));
         $transactionTime = $payload['transactionTime'] ?? null;
 
-        if ($orderId === '' || $transactionId === '' || $amount === '' || $currency === '' || ! is_numeric($transactionTime)) {
+        if ($transactionId === '' || $amount === '' || $currency === '' || ! is_numeric($transactionTime)) {
             return null;
         }
 
@@ -35,6 +37,10 @@ final readonly class BinancePayTransaction
         if ($amountMicro === null) {
             return null;
         }
+
+        $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
+        $receiverAccountId = self::stringValue($receiver['accountId'] ?? null);
+        $receiverBinanceId = self::stringValue($receiver['binanceId'] ?? null);
 
         return new self(
             orderId: $orderId,
@@ -44,6 +50,8 @@ final readonly class BinancePayTransaction
             transactionTimeMs: (int) $transactionTime,
             orderType: self::stringValue($payload['orderType'] ?? null),
             note: self::stringValue($payload['note'] ?? null),
+            receiverAccountId: $receiverAccountId,
+            receiverBinanceId: $receiverBinanceId,
             sanitizedPayload: self::sanitize($payload),
         );
     }
@@ -78,9 +86,17 @@ final readonly class BinancePayTransaction
         return $this->note;
     }
 
-    public function isIncoming(): bool
+    public function isIncomingTo(string $merchantPayId): bool
     {
-        return $this->amountMicro > 0;
+        if ($this->amountMicro <= 0 || $merchantPayId === '') {
+            return false;
+        }
+
+        if ($this->receiverAccountId !== '') {
+            return hash_equals($this->receiverAccountId, $merchantPayId);
+        }
+
+        return $this->receiverBinanceId !== '' && hash_equals($this->receiverBinanceId, $merchantPayId);
     }
 
     /** @return array<string, mixed> */
@@ -93,6 +109,7 @@ final readonly class BinancePayTransaction
     private static function sanitize(array $payload): array
     {
         $payer = is_array($payload['payerInfo'] ?? null) ? $payload['payerInfo'] : [];
+        $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
 
         return array_filter([
             'orderId' => self::stringValue($payload['orderId'] ?? null),
@@ -104,6 +121,9 @@ final readonly class BinancePayTransaction
             'note' => self::stringValue($payload['note'] ?? null),
             'payerName' => self::stringValue($payer['name'] ?? null),
             'payerBinanceId' => is_numeric($payer['binanceId'] ?? null) ? (string) $payer['binanceId'] : null,
+            'receiverName' => self::stringValue($receiver['name'] ?? null),
+            'receiverBinanceId' => is_scalar($receiver['binanceId'] ?? null) ? self::stringValue($receiver['binanceId']) : null,
+            'receiverAccountId' => is_scalar($receiver['accountId'] ?? null) ? self::stringValue($receiver['accountId']) : null,
         ], fn ($value) => $value !== null && $value !== '');
     }
 

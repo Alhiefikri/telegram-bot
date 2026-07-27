@@ -89,14 +89,24 @@ class BinanceAutoVerification
      */
     public function matchAndConfirm(Payment $payment, array $rawTransactions): BinanceVerificationResult
     {
-        $candidates = collect($rawTransactions)
+        $transactions = collect($rawTransactions)
             ->map(fn (array $payload): ?BinancePayTransaction => BinancePayTransaction::fromPayload($payload))
             ->filter()
+            ->values();
+
+        $candidates = $transactions
             ->filter(fn (BinancePayTransaction $transaction): bool => $this->transactionMatchesPayment($transaction, $payment))
             ->sortBy(fn (BinancePayTransaction $transaction): int => $transaction->transactionTimeMs())
             ->values();
 
         if ($candidates->isEmpty()) {
+            $mismatch = $transactions->first(fn (BinancePayTransaction $transaction): bool => $transaction->isIncomingTo(trim((string) config('services.binance.pay_id')))
+                && $transaction->amountMicro() === (int) $payment->amount);
+
+            if ($mismatch !== null) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $mismatch);
+            }
+
             return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
         }
 
@@ -149,7 +159,7 @@ class BinanceAutoVerification
 
     private function transactionMatchesPayment(BinancePayTransaction $transaction, Payment $payment): bool
     {
-        return $transaction->isIncoming()
+        return $transaction->isIncomingTo(trim((string) config('services.binance.pay_id')))
             && $transaction->currency() === strtoupper((string) $payment->currency)
             && $transaction->amountMicro() === (int) $payment->amount
             && $transaction->transactionTimeMs() >= $payment->created_at->getTimestampMs() - $this->clockSkewMs();
@@ -173,7 +183,7 @@ class BinanceAutoVerification
                 // double-claim guard: one Binance transaction can only ever
                 // complete one order, even under concurrent verification.
                 $locked->update([
-                    'provider_reference' => $transaction->orderId(),
+                    'provider_reference' => $transaction->transactionId(),
                     'provider_payload' => $transaction->sanitizedPayload(),
                 ]);
 
@@ -185,7 +195,7 @@ class BinanceAutoVerification
                     'provider' => 'binance',
                     'event_type' => PaymentEventType::Reconciliation,
                     'merchant_ref' => $locked->merchant_ref,
-                    'provider_reference' => $transaction->orderId(),
+                    'provider_reference' => $transaction->transactionId(),
                     'provider_status' => 'SUCCESS',
                     'raw_payload' => $transaction->sanitizedPayload(),
                     'received_at' => $receivedAt,

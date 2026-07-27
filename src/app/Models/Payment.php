@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_create_attempted_at',
     'provider_create_last_error',
     'method',
+    'binance_auto_verification_enabled',
     'amount',
     'currency',
     'status',
@@ -43,6 +44,7 @@ class Payment extends Model
     {
         return [
             'amount' => 'integer',
+            'binance_auto_verification_enabled' => 'boolean',
             'provider_payload' => 'array',
             'provider_fee' => 'integer',
             'provider_total_payment' => 'integer',

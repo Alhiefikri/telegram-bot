@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
+use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
@@ -131,6 +132,35 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, $product->reserved_stock);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
         $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_binance_auto_verification_checkout_never_commits_duplicate_amounts(): void
+    {
+        $this->requireConcurrencyLane();
+        config()->set('services.binance', [
+            'pay_id' => '123456789',
+            'api_key' => 'read-only-key',
+            'api_secret' => 'read-only-secret',
+            'unique_amount_min_offset_micro' => 101,
+            'unique_amount_max_offset_micro' => 101,
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'first-binance-secret']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'second-binance-secret']);
+        $firstCart = $this->cartForProduct($product);
+        $secondCart = $this->cartForProduct($product);
+
+        $results = $this->runConcurrently([
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), CheckoutPaymentIntents::binancePay())->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), CheckoutPaymentIntents::binancePay())->id,
+        ]);
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([RuntimeException::class], $this->failedResultClasses($results));
+        $this->assertSame(1, Payment::query()->where('binance_auto_verification_enabled', true)->count());
+        $this->assertSame(1, Payment::query()->where('amount', 2_000_101)->count());
     }
 
     public function test_concurrent_cart_quantity_allows_each_cart_to_hold_last_stock_until_checkout(): void
