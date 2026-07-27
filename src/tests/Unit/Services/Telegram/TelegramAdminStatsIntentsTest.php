@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Services\Telegram\TelegramAdminStatsIntents;
+use App\Services\Telegram\TelegramStoreStatsReport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -26,6 +27,84 @@ class TelegramAdminStatsIntentsTest extends TestCase
 
         $this->assertSame(['status', 'paid_at'], $indexes->get('payments_status_paid_at_index')['columns'] ?? null);
         $this->assertSame(['order_id', 'status', 'paid_at', 'id'], $indexes->get('payments_order_status_paid_at_id_index')['columns'] ?? null);
+    }
+
+    public function test_growth_current_periods_use_asia_jakarta_day_monday_week_and_month_ranges(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+
+        // Wednesday today: appears in today, week, and month.
+        $this->createPaidOrderAt('2026-07-08 10:00:00', 10000, 1);
+        // Tuesday in the current week: appears in week and month only.
+        $this->createPaidOrderAt('2026-07-07 10:00:00', 20000, 2);
+        // Earlier in July before this Monday: appears in month only.
+        $this->createPaidOrderAt('2026-07-02 10:00:00', 30000, 3);
+        // June: excluded from all current periods.
+        $this->createPaidOrderAt('2026-06-20 10:00:00', 40000, 4);
+
+        $report = app(TelegramStoreStatsReport::class)->growth();
+
+        $this->assertSame(1, $report['periods']['today']['current']['paid_orders']);
+        $this->assertSame(3, $report['periods']['week']['current']['sold_products']);
+        $this->assertSame(6, $report['periods']['month']['current']['sold_products']);
+        $this->assertSame(60000, $report['periods']['month']['current']['sales_value']);
+    }
+
+    public function test_growth_previous_periods_compare_equivalent_elapsed_time_windows(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+
+        $this->createPaidOrderAt('2026-07-07 14:59:59', 11000, 1); // previous-day window included
+        $this->createPaidOrderAt('2026-06-30 15:00:00', 12000, 1); // previous-week window included
+        $this->createPaidOrderAt('2026-06-08 15:00:00', 13000, 1); // previous-month window included
+        $this->createPaidOrderAt('2026-06-08 15:00:01', 14000, 1); // just outside previous-month window
+
+        $report = app(TelegramStoreStatsReport::class)->growth();
+
+        $this->assertSame(1, $report['periods']['today']['previous']['paid_orders']);
+        $this->assertSame(1, $report['periods']['week']['previous']['paid_orders']);
+        $this->assertSame(1, $report['periods']['month']['previous']['paid_orders']);
+    }
+
+    public function test_growth_previous_month_end_clamps_to_shorter_previous_month(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-03-31 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+
+        $this->createPaidOrderAt('2026-02-28 14:59:59', 21000, 1);
+        $this->createPaidOrderAt('2026-03-01 00:00:00', 22000, 1);
+
+        $report = app(TelegramStoreStatsReport::class)->growth();
+
+        $this->assertSame(1, $report['periods']['month']['previous']['paid_orders']);
+        $this->assertSame(21000, $report['periods']['month']['previous']['sales_value']);
+        $this->assertSame(1, $report['periods']['month']['current']['paid_orders']);
+        $this->assertSame(22000, $report['periods']['month']['current']['sales_value']);
+    }
+
+    public function test_growth_uses_canonical_paid_payment_and_keeps_genuine_currencies_separate(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+
+        $duplicateOrder = $this->createPaidOrderAt('2026-07-08 10:00:00', 50000, 1, 'IDR', 1000);
+        Payment::factory()->for($duplicateOrder)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'provider_fee' => 0,
+            'paid_at' => Carbon::parse('2026-07-08 10:05:00', 'Asia/Jakarta'),
+        ]);
+        $this->createPaidOrderAt('2026-07-08 11:00:00', 2_500_000, 1, 'USDT', 0);
+
+        $report = app(TelegramStoreStatsReport::class)->growth();
+        $current = $report['periods']['month']['current'];
+
+        $this->assertSame(2, $current['paid_orders']);
+        $this->assertSame(49000, $current['receipts']['IDR']);
+        $this->assertSame(2_500_000, $current['receipts']['USDT']);
     }
 
     public function test_usdt_payment_micro_units_are_not_reported_as_rupiah_millions(): void
@@ -336,5 +415,42 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $replyMarkup = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         $this->assertStringContainsString('🌐 Mini App Dashboard', $replyMarkup);
         $this->assertStringContainsString('web_app', $replyMarkup);
+    }
+
+    private function createPaidOrderAt(
+        string $paidAt,
+        int $amount,
+        int $quantity,
+        string $currency = 'IDR',
+        int $providerFee = 0,
+    ): Order {
+        $timestamp = Carbon::parse($paidAt, 'Asia/Jakarta');
+        $customer = Customer::factory()->create();
+        $product = Product::factory()->create([
+            'price_amount' => $amount,
+            'currency' => $currency,
+        ]);
+        $order = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => $amount,
+            'currency' => $currency,
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ]);
+        OrderItem::factory()->for($order)->for($product)->create([
+            'quantity' => $quantity,
+            'unit_price' => $amount,
+            'subtotal' => $amount * $quantity,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => $amount,
+            'currency' => $currency,
+            'provider_fee' => $providerFee,
+            'paid_at' => $timestamp,
+        ]);
+
+        return $order;
     }
 }

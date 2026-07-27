@@ -3,13 +3,9 @@
 namespace App\Services\Telegram;
 
 use App\Models\Customer;
-use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Product;
-use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 use App\Support\Money;
-use Illuminate\Support\Carbon;
 
 class TelegramAdminStatsIntents
 {
@@ -17,7 +13,7 @@ class TelegramAdminStatsIntents
 
     public function __construct(
         private readonly TelegramBotClient $bot,
-        private readonly PaymentReceiptReport $receiptReport,
+        private readonly TelegramStoreStatsReport $statsReport,
         private readonly TelegramMessageChunker $messageChunker,
     ) {}
 
@@ -96,10 +92,7 @@ class TelegramAdminStatsIntents
      */
     public function calculateTodayStats(): array
     {
-        $reportEndAt = now();
-        $reportStartAt = $reportEndAt->copy()->startOfDay();
-
-        return $this->calculateStats($reportStartAt, $reportEndAt, true);
+        return $this->statsReport->today();
     }
 
     /**
@@ -107,51 +100,7 @@ class TelegramAdminStatsIntents
      */
     private function calculateYesterdayStats(): array
     {
-        $reportEndAt = now()->copy()->startOfDay();
-        $reportStartAt = $reportEndAt->copy()->subDay();
-
-        return $this->calculateStats($reportStartAt, $reportEndAt);
-    }
-
-    /**
-     * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
-     */
-    private function calculateStats(Carbon $reportStartAt, Carbon $reportEndAt, bool $includeEnd = false): array
-    {
-        $endOperator = $includeEnd ? '<=' : '<';
-
-        $newOrders = Order::query()
-            ->where('created_at', '>=', $reportStartAt)
-            ->where('created_at', $endOperator, $reportEndAt)
-            ->count();
-
-        // Reporting periods use the configured application timezone and exclude the end boundary.
-        $canonicalPaidPayments = $this->receiptReport->canonicalPaidPayments($reportStartAt, $reportEndAt, $includeEnd);
-        $paidOrderIds = $canonicalPaidPayments->pluck('order_id')->all();
-        $paidOrders = count($paidOrderIds);
-
-        // Get total sold products for paid orders in the reporting window.
-        $soldProducts = 0;
-        if ($paidOrders > 0) {
-            $soldProducts = OrderItem::query()
-                ->whereIn('order_id', $paidOrderIds)
-                ->sum('quantity');
-        }
-
-        $salesValue = $paidOrders > 0
-            ? (int) Order::query()->whereIn('id', $paidOrderIds)->sum('total_amount')
-            : 0;
-
-        $receipts = $this->receiptReport->netReceiptsByCurrency($canonicalPaidPayments);
-
-        return [
-            'new_orders' => $newOrders,
-            'paid_orders' => $paidOrders,
-            'sold_products' => (int) $soldProducts,
-            'sales_value' => $salesValue,
-            'receipts' => $receipts,
-            'earning' => $receipts['IDR'] ?? 0,
-        ];
+        return $this->statsReport->yesterday();
     }
 
     /**
