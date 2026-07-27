@@ -107,6 +107,97 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame(2_500_000, $current['receipts']['USDT']);
     }
 
+    public function test_show_store_growth_sends_one_readable_report_with_sections_timestamp_and_dashboard_button(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('app.url', 'https://admin.example.test');
+
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+        ]);
+
+        $customer = Customer::factory()->create();
+        $this->createPaidOrderAt('2026-07-08 10:00:00', 10000, 1);
+        $this->createPaidOrderAt('2026-07-07 10:00:00', 10000, 1);
+
+        app(TelegramAdminStatsIntents::class)->showStoreGrowth($customer, 'admin-chat-123');
+
+        $sends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $sends);
+
+        $request = $sends->first()[0];
+        $text = (string) $request['text'];
+
+        $this->assertStringContainsString('📊 Pertumbuhan Store', $text);
+        $this->assertStringContainsString('Diperbarui 08 Jul 2026 15:00 WIB', $text);
+        $this->assertStringContainsString('☀️ Hari Ini', $text);
+        $this->assertStringContainsString('🗓 Minggu Ini', $text);
+        $this->assertStringContainsString('📅 Bulan Ini', $text);
+        $this->assertLessThanOrEqual(4096, mb_strlen($text));
+
+        $replyMarkup = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('🌐 Mini App Dashboard', $replyMarkup);
+        $this->assertStringContainsString('web_app', $replyMarkup);
+    }
+
+    public function test_store_growth_output_formats_all_change_indicator_baseline_states_truthfully(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+        config()->set('services.telegram.token', 'bot-token');
+
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+        ]);
+
+        $customer = Customer::factory()->create();
+        $this->createPaidOrderAt('2026-07-08 09:00:00', 10000, 1);
+        $this->createPaidOrderAt('2026-07-08 10:00:00', 10000, 1);
+        $this->createPaidOrderAt('2026-07-08 11:00:00', 10000, 1, 'USDT');
+        $this->createPaidOrderAt('2026-07-07 09:00:00', 15000, 2);
+        $this->createPaidOrderAt('2026-07-07 10:00:00', 15000, 2);
+
+        app(TelegramAdminStatsIntents::class)->showStoreGrowth($customer, 'admin-chat-123');
+
+        $text = (string) Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->first()[0]['text'];
+
+        $this->assertStringContainsString('Order Dibayar: 3 (📈 +50%)', $text);
+        $this->assertStringContainsString('Produk Terjual: 3 (📉 -25%)', $text);
+        $this->assertStringContainsString('Nilai Penjualan: Rp30.000 (➖ 0%)', $text);
+        $this->assertStringContainsString('• USDT: 0.01 USDT (📈 Baru)', $text);
+        $this->assertStringNotContainsString('INF', $text);
+        $this->assertStringNotContainsString('NAN', $text);
+        $this->assertStringNotContainsString('Division by zero', $text);
+    }
+
+    public function test_store_growth_output_compares_each_receipt_currency_independently(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+        config()->set('services.telegram.token', 'bot-token');
+
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+        ]);
+
+        $customer = Customer::factory()->create();
+        $this->createPaidOrderAt('2026-07-08 10:00:00', 20000, 1, 'IDR', 1000);
+        $this->createPaidOrderAt('2026-07-08 11:00:00', 2_000_000, 1, 'USDT');
+        $this->createPaidOrderAt('2026-07-07 10:00:00', 10000, 1, 'IDR', 500);
+
+        app(TelegramAdminStatsIntents::class)->showStoreGrowth($customer, 'admin-chat-123');
+
+        $text = (string) Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->first()[0]['text'];
+
+        $this->assertMatchesRegularExpression('/• Rupiah: Rp19\.000 \(📈 \+100%\)/', $text);
+        $this->assertMatchesRegularExpression('/• USDT: 2 USDT \(📈 Baru\)/', $text);
+        $this->assertStringNotContainsString('Total Pembayaran:', $text);
+        $this->assertStringNotContainsString('Pembayaran Diterima: Rp', $text);
+        $this->assertStringNotContainsString('Pembayaran Diterima: 2 USDT', $text);
+    }
+
     public function test_usdt_payment_micro_units_are_not_reported_as_rupiah_millions(): void
     {
         Carbon::setTestNow('2026-07-08 15:00:00');

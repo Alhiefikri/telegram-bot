@@ -250,7 +250,7 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '999'
-            && str_contains($request['text'], '📊 Statistik Hari Ini'));
+            && str_contains($request['text'], '📊 Pertumbuhan Store'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Aku belum paham perintah itu'));
     }

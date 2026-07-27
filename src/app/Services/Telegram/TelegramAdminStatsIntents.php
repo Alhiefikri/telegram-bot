@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 use App\Support\Money;
+use Illuminate\Support\Carbon;
 
 class TelegramAdminStatsIntents
 {
@@ -53,15 +54,16 @@ class TelegramAdminStatsIntents
 
     public function showDailyStats(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
     {
-        if ($callbackQueryId !== null) {
-            $this->bot->answerCallbackQuery($callbackQueryId);
-        }
-        $this->sendStats($chatId, $this->calculateTodayStats(), '📊 Statistik Hari Ini');
+        $this->showStoreGrowth($customer, $chatId, $callbackQueryId);
     }
 
     public function showStoreGrowth(Customer $customer, string $chatId, ?string $callbackQueryId = null): void
     {
-        $this->showDailyStats($customer, $chatId, $callbackQueryId);
+        if ($callbackQueryId !== null) {
+            $this->bot->answerCallbackQuery($callbackQueryId);
+        }
+
+        $this->sendMessageWithDashboard($chatId, $this->formatGrowthMessage($this->statsReport->growth()));
     }
 
     public function sendAutomatedDailyStats(string $chatId): void
@@ -74,8 +76,11 @@ class TelegramAdminStatsIntents
      */
     private function sendStats(string $chatId, array $stats, string $title): void
     {
-        $message = $this->formatMessage($stats, $title);
+        $this->sendMessageWithDashboard($chatId, $this->formatMessage($stats, $title));
+    }
 
+    private function sendMessageWithDashboard(string $chatId, string $message): void
+    {
         $keyboard = [];
         $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
         if ($adminDashboardButton !== null) {
@@ -121,6 +126,93 @@ class TelegramAdminStatsIntents
         ];
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array{report_end_at: Carbon, periods: array<string, array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}>}  $report
+     */
+    private function formatGrowthMessage(array $report): string
+    {
+        $reportEnd = $report['report_end_at']->copy()->timezone('Asia/Jakarta');
+        $lines = [
+            '📊 Pertumbuhan Store',
+            '━━━━━━━━━━━━━━',
+            'Diperbarui '.$reportEnd->format('d M Y H:i').' WIB',
+        ];
+
+        foreach ([
+            'today' => '☀️ Hari Ini',
+            'week' => '🗓 Minggu Ini',
+            'month' => '📅 Bulan Ini',
+        ] as $periodKey => $title) {
+            $period = $report['periods'][$periodKey];
+            $current = $period['current'];
+            $previous = $period['previous'];
+
+            $lines[] = '';
+            $lines[] = $title;
+            $lines[] = 'Order Baru: '.$current['new_orders'].' ('.$this->changeIndicator($current['new_orders'], $previous['new_orders']).')';
+            $lines[] = 'Order Dibayar: '.$current['paid_orders'].' ('.$this->changeIndicator($current['paid_orders'], $previous['paid_orders']).')';
+            $lines[] = 'Produk Terjual: '.$current['sold_products'].' ('.$this->changeIndicator($current['sold_products'], $previous['sold_products']).')';
+            $lines[] = 'Nilai Penjualan: '.Money::rupiah($current['sales_value']).' ('.$this->changeIndicator($current['sales_value'], $previous['sales_value']).')';
+            $lines[] = 'Pembayaran Diterima:';
+            array_push($lines, ...$this->growthReceiptLines($current['receipts'], $previous['receipts']));
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function changeIndicator(int $current, int $previous): string
+    {
+        if ($previous === 0) {
+            return $current === 0 ? '➖ 0%' : '📈 Baru';
+        }
+
+        $percentage = (($current - $previous) / $previous) * 100;
+        if (abs($percentage) < 0.05) {
+            return '➖ 0%';
+        }
+
+        $formatted = number_format(abs($percentage), fmod(abs($percentage), 1.0) === 0.0 ? 0 : 1, ',', '.');
+
+        return $percentage > 0 ? '📈 +'.$formatted.'%' : '📉 -'.$formatted.'%';
+    }
+
+    /**
+     * @param  array<string, int>  $currentReceipts
+     * @param  array<string, int>  $previousReceipts
+     * @return list<string>
+     */
+    private function growthReceiptLines(array $currentReceipts, array $previousReceipts): array
+    {
+        $currencies = array_values(array_unique([...array_keys($currentReceipts), ...array_keys($previousReceipts)]));
+        sort($currencies);
+
+        $lines = [];
+        foreach ($currencies as $currency) {
+            $current = $currentReceipts[$currency] ?? 0;
+            $previous = $previousReceipts[$currency] ?? 0;
+            $lines[] = '• '.$this->receiptCurrencyLabel($currency).': '.$this->formatReceiptAmount($currency, $current).' ('.$this->changeIndicator($current, $previous).')';
+        }
+
+        return $lines === [] ? ['• Belum ada'] : $lines;
+    }
+
+    private function receiptCurrencyLabel(string $currency): string
+    {
+        return match ($currency) {
+            'IDR' => 'Rupiah',
+            default => $currency,
+        };
+    }
+
+    private function formatReceiptAmount(string $currency, int $amount): string
+    {
+        return match ($currency) {
+            'IDR' => Money::rupiah($amount),
+            'USDT' => Money::usdt($amount),
+            default => $amount.' '.$currency,
+        };
     }
 
     /**
