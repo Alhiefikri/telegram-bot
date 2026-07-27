@@ -1,5 +1,16 @@
 ## Agent skills
 
+### Superpowers workflow
+
+Superpowers is the primary software-development workflow for this repository.
+At the start of every user task, load `using-superpowers` before responding or
+taking action. Then load every applicable process skill before any domain or
+implementation skill. The workflows are mandatory when their trigger applies.
+
+Use the Jcode-native tool mapping documented in
+`docs/agents/superpowers.md`. Project-local Superpowers skills live in
+`.agents/skills/`; harness-adapted copies live in `agent/skills/`.
+
 ### Issue tracker
 
 Issues and PRDs for this repo live as GitHub issues. External PRs are not treated as a request surface. See `docs/agents/issue-tracker.md`.
