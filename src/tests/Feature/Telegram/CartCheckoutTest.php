@@ -180,7 +180,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertCount(1, $photoSends);
         $photoBody = $photoSends->first()[0]->body();
         $this->assertStringContainsString('filename="binance.jpeg"', $photoBody);
-        $this->assertStringContainsString('Binance Pay ID', $photoBody);
+        $this->assertStringContainsString('BINANCE PAY ID', $photoBody);
         $this->assertStringContainsString('987654321', $photoBody);
         $this->assertStringContainsString('5 USDT', $photoBody);
         $this->assertStringContainsString('name="caption_entities"', $photoBody);

@@ -17,6 +17,16 @@ return [
         'telegram_bot_url' => env('STOREFRONT_TELEGRAM_BOT_URL', 'https://t.me/lhiestore_bot?start=landing'),
     ],
 
+    'guide_catalog' => [
+        [
+            'eyebrow' => 'ChatGPT',
+            'title' => 'Panduan login ChatGPT',
+            'description' => 'Masuk memakai email Outlook atau iCloud, gunakan kode MFA, lalu amankan akun setelah login.',
+            'methods' => ['Outlook', 'iCloud', 'Google Authenticator'],
+            'route' => 'storefront.login-guide',
+        ],
+    ],
+
     'hero' => [
         'eyebrow' => 'Produk digital & layanan premium siap pakai',
         'headline' => 'Produk digital siap pakai, checkout tanpa ribet.',

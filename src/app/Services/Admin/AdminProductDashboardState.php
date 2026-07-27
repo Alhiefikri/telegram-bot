@@ -60,6 +60,8 @@ class AdminProductDashboardState
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
+                'productUsageGuideTitle' => old('usage_guide_title', $editingProduct['usage_guide_title'] ?? ''),
+                'productUsageGuideUrl' => old('usage_guide_url', $editingProduct['usage_guide_url'] ?? ''),
                 'productIsActive' => (bool) old('is_active', $editingProduct['is_active'] ?? true),
                 'productImageUrl' => $editingProduct['image_url'] ?? '',
                 'productDeliveryNoteOpen' => $productCreateErrors->has('delivery_note')

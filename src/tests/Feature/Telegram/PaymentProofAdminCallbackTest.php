@@ -497,7 +497,14 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'en']);
         Customer::factory()->create(['telegram_id' => 54321, 'username' => 'other', 'locale' => 'id']);
-        $product = Product::factory()->create(['name' => 'Netflix Premium', 'delivery_note' => 'Rotate the password and MFA after signing in.', 'stock' => 0, 'reserved_stock' => 0]);
+        $product = Product::factory()->create([
+            'name' => 'Netflix Premium',
+            'delivery_note' => 'Rotate the password and MFA after signing in.',
+            'usage_guide_title' => 'Netflix setup guide',
+            'usage_guide_url' => '/netflix/setup',
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
         app(StockAdjustmentService::class)->adjust($product, 1, 'seed credential', null, null, [
             'email: buyer@example.test | password: Secret-123',
         ]);
@@ -519,10 +526,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('email: buyer@example.test | password: Secret-123', $receiptText);
         $this->assertStringContainsString('Delivery note:', $receiptText);
         $this->assertStringContainsString('Rotate the password and MFA after signing in.', $receiptText);
-        $this->assertStringContainsString('Need help signing in and securing the account?', $receiptText);
-        $this->assertStringContainsString(route('storefront.login-guide'), $receiptText);
-        $this->assertSame('Login & Security Guide', $receiptRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
-        $this->assertSame(route('storefront.login-guide'), $receiptRequest['reply_markup']['inline_keyboard'][0][0]['url'] ?? null);
+        $this->assertStringContainsString('Netflix setup guide', $receiptText);
+        $this->assertStringContainsString(url('/netflix/setup'), $receiptText);
+        $this->assertStringNotContainsString('Need help signing in and securing the account?', $receiptText);
+        $this->assertStringNotContainsString('/gpt/panduan-login-akun', $receiptText);
+        $this->assertSame('Netflix setup guide', $receiptRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertSame(url('/netflix/setup'), $receiptRequest['reply_markup']['inline_keyboard'][0][0]['url'] ?? null);
         $this->assertSame('Contact Support', $receiptRequest['reply_markup']['inline_keyboard'][1][0]['text'] ?? null);
         $this->assertSame('https://t.me/store_support', $receiptRequest['reply_markup']['inline_keyboard'][1][0]['url'] ?? null);
         $visibleReceipt = json_encode($receiptRequest->data(), JSON_THROW_ON_ERROR);
@@ -985,8 +994,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && $r['chat_id'] === 777
             && str_contains($r['text'], 'Pembayaran diterima')
-            && data_get($r->data(), 'reply_markup.inline_keyboard.1.0.text') === 'Hubungi Support'
-            && data_get($r->data(), 'reply_markup.inline_keyboard.1.0.url') === 'https://t.me/store_support');
+            && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 1
+            && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.text') === 'Hubungi Support'
+            && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.url') === 'https://t.me/store_support');
     }
 
     public function test_receipt_omits_support_button_without_admin_contact(): void
@@ -1004,8 +1014,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '779'
-            && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 1
-            && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.text') === 'Panduan Login & Keamanan');
+            && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 0
+            && ! str_contains((string) $r['text'], '/gpt/panduan-login-akun'));
     }
 
     public function test_legacy_pending_order_uses_current_product_delivery_note_as_fallback(): void

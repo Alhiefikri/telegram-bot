@@ -1059,6 +1059,8 @@ class StorefrontShopCheckoutTest extends TestCase
             attributes: [
                 'name' => 'Allocated Account Product',
                 'delivery_note' => 'Ganti password dan MFA setelah login pertama.',
+                'usage_guide_title' => 'Panduan penggunaan provider lama',
+                'usage_guide_url' => '/provider-lama/cara-pakai',
                 'price_amount' => 42000,
                 'stock' => 1,
             ],
@@ -1071,7 +1073,11 @@ class StorefrontShopCheckoutTest extends TestCase
         );
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
 
-        $product->update(['delivery_note' => 'Catatan baru yang tidak boleh diterima pembeli lama.']);
+        $product->update([
+            'delivery_note' => 'Catatan baru yang tidak boleh diterima pembeli lama.',
+            'usage_guide_title' => 'Panduan provider baru',
+            'usage_guide_url' => '/provider-baru/cara-pakai',
+        ]);
 
         app(OrderStateMachine::class)->markPaymentPaid($payment);
 
@@ -1084,9 +1090,16 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('invoice plus Recovery Key tetap bisa dipakai')
             ->assertSee('Ganti password dan MFA setelah login pertama.')
             ->assertDontSee('Catatan baru yang tidak boleh diterima pembeli lama.')
-            ->assertSee('Panduan login & keamanan');
-        $this->assertSame('Ganti password dan MFA setelah login pertama.', $order->orderItems()->sole()->delivery_note);
-        $this->assertTrue($order->orderItems()->sole()->delivery_note_snapshotted);
+            ->assertSee('Panduan penggunaan provider lama')
+            ->assertSee(url('/provider-lama/cara-pakai'), false)
+            ->assertDontSee('Panduan provider baru')
+            ->assertDontSee('/provider-baru/cara-pakai', false);
+        $orderItem = $order->orderItems()->sole();
+        $this->assertSame('Ganti password dan MFA setelah login pertama.', $orderItem->delivery_note);
+        $this->assertTrue($orderItem->delivery_note_snapshotted);
+        $this->assertSame('Panduan penggunaan provider lama', $orderItem->usage_guide_title);
+        $this->assertSame('/provider-lama/cara-pakai', $orderItem->usage_guide_url);
+        $this->assertTrue($orderItem->usage_guide_snapshotted);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }

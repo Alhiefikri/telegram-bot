@@ -54,6 +54,7 @@ class StorefrontShopOrderPresenter
             'binancePayId' => (string) config('services.binance.pay_id'),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
+            'usageGuides' => $invoice->usageGuides,
             'accountCopyText' => $invoice->accountCopyText,
             'paidDeliveryType' => $invoice->paidDeliveryType,
             'manualFulfillmentStatus' => $invoice->manualFulfillmentStatus,

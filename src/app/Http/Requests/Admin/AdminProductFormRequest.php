@@ -9,6 +9,11 @@ abstract class AdminProductFormRequest extends FormRequest
 {
     protected function prepareForValidation(): void
     {
+        $this->merge([
+            'usage_guide_title' => $this->nullableTrimmedString('usage_guide_title'),
+            'usage_guide_url' => $this->nullableTrimmedString('usage_guide_url'),
+        ]);
+
         $value = trim((string) $this->input('usdt_price_amount', ''));
         if ($value === '') {
             return;
@@ -30,6 +35,18 @@ abstract class AdminProductFormRequest extends FormRequest
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string', 'max:1000'],
             'delivery_note' => ['nullable', 'string', 'max:2000'],
+            'usage_guide_title' => ['nullable', 'string', 'max:160', 'required_with:usage_guide_url'],
+            'usage_guide_url' => [
+                'nullable',
+                'string',
+                'max:2048',
+                'required_with:usage_guide_title',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || ! $this->isSafeUsageGuideUrl($value)) {
+                        $fail('URL panduan harus berupa URL HTTP/HTTPS atau path lokal yang diawali satu garis miring.');
+                    }
+                },
+            ],
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
         ];
     }
@@ -46,6 +63,10 @@ abstract class AdminProductFormRequest extends FormRequest
             'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 6 desimal.',
             'description.required' => 'Deskripsi singkat wajib diisi.',
             'delivery_note.max' => 'Catatan pengiriman rahasia maksimal 2000 karakter.',
+            'usage_guide_title.required_with' => 'Judul panduan wajib diisi jika URL panduan diisi.',
+            'usage_guide_title.max' => 'Judul panduan maksimal 160 karakter.',
+            'usage_guide_url.required_with' => 'URL panduan wajib diisi jika judul panduan diisi.',
+            'usage_guide_url.max' => 'URL panduan maksimal 2048 karakter.',
             'category_id.exists' => 'Kategori tidak valid.',
             'image.uploaded' => 'Upload gambar gagal. Maksimal 5 MB; coba kompres atau pilih gambar lain.',
             'image.image' => 'File harus berupa gambar yang valid.',
@@ -53,5 +74,25 @@ abstract class AdminProductFormRequest extends FormRequest
             'image.max' => 'Ukuran gambar produk maksimal 5 MB.',
             'image.dimensions' => 'Dimensi gambar produk maksimal 6000 x 6000 piksel.',
         ];
+    }
+
+    private function nullableTrimmedString(string $key): ?string
+    {
+        $value = trim((string) $this->input($key, ''));
+
+        return $value === '' ? null : $value;
+    }
+
+    private function isSafeUsageGuideUrl(string $value): bool
+    {
+        if (str_starts_with($value, '/') && ! str_starts_with($value, '//')) {
+            return true;
+        }
+
+        if (filter_var($value, FILTER_VALIDATE_URL) === false) {
+            return false;
+        }
+
+        return in_array(strtolower((string) parse_url($value, PHP_URL_SCHEME)), ['http', 'https'], true);
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
+use App\Services\ProductUsageGuide;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 
 class StorefrontShopSignedInvoice
@@ -17,6 +18,7 @@ class StorefrontShopSignedInvoice
         private readonly TelegramQrCodeRenderer $qrCodes,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
+        private readonly ProductUsageGuide $usageGuides,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
     ) {}
@@ -50,6 +52,9 @@ class StorefrontShopSignedInvoice
             qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
             accountGroups: $accountGroups,
+            usageGuides: $state === StorefrontShopSignedInvoiceState::Paid
+                ? $this->usageGuides->forOrder($order)
+                : [],
             accountCopyText: $this->accountCopyText($accountGroups),
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
             manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
@@ -193,7 +198,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @return list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>
+     * @return list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>
      */
     private function accountGroups(Order $order, StorefrontShopSignedInvoiceState $state): array
     {
@@ -222,6 +227,7 @@ class StorefrontShopSignedInvoice
                 return [
                     'product_name' => (string) $item->product_name,
                     'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
+                    'usage_guide' => $this->usageGuides->forItem($item),
                     'secrets' => $secrets,
                     'copy_text' => collect($secrets)
                         ->map(fn (array $secret, int $index): string => ($index + 1).".\n".$secret['text'])
@@ -234,7 +240,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
      */
     private function accountCopyText(array $accountGroups): string
     {
@@ -244,7 +250,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
      */
     private function paidDeliveryType(Order $order, StorefrontShopSignedInvoiceState $state, array $accountGroups): string
     {

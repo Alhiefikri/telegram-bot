@@ -31,7 +31,7 @@ final class AdminDashboardProductsData
     {
         $products = Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->latest()
@@ -80,6 +80,8 @@ final class AdminDashboardProductsData
                     'name' => $product->name,
                     'description' => $product->description,
                     'delivery_note' => $product->delivery_note,
+                    'usage_guide_title' => $product->usage_guide_title,
+                    'usage_guide_url' => $product->usage_guide_url,
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
                     'usdt_price_amount' => $product->usdt_price_amount === null ? null : number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''),
@@ -118,6 +120,8 @@ final class AdminDashboardProductsData
                         'categoryId' => $product->category_id,
                         'description' => $product->description,
                         'deliveryNote' => $product->delivery_note,
+                        'usageGuideTitle' => $product->usage_guide_title,
+                        'usageGuideUrl' => $product->usage_guide_url,
                         'isActive' => $product->is_active,
                         'imageUrl' => $this->images->publicUrl($product->image_path),
                         'updateUrl' => $updateUrl,

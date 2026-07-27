@@ -10,6 +10,27 @@ class StorefrontLoginGuideController extends Controller
 {
     public function __construct(private readonly StorefrontPresenter $storefront) {}
 
+    public function index(): View
+    {
+        $brand = $this->storefront->brand();
+        $guides = collect(config('storefront.guide_catalog', []))
+            ->map(fn (array $guide): array => [
+                ...$guide,
+                'url' => route($guide['route']),
+            ])
+            ->all();
+
+        return view('storefront.guides', [
+            'brand' => $brand,
+            'copy' => config('storefront'),
+            'storefront' => $this->storefront,
+            'guides' => $guides,
+            'pageTitle' => 'Pusat Panduan | '.$brand,
+            'pageDescription' => 'Pilih panduan penggunaan produk Lhie Store, termasuk login ChatGPT melalui Outlook, iCloud, dan MFA.',
+            'canonicalUrl' => route('storefront.guides.index'),
+        ]);
+    }
+
     public function show(Request $request): View
     {
         $brand = $this->storefront->brand();
@@ -24,8 +45,8 @@ class StorefrontLoginGuideController extends Controller
             'guide' => $guide,
             'invoiceReturnUrl' => $returnUrl,
             'invoiceNumber' => $invoiceNumber,
-            'pageTitle' => 'Panduan Login Akun | '.$brand,
-            'pageDescription' => 'Panduan masuk dan mengamankan akun digital Lhie Store memakai Outlook, iCloud, dan Google Authenticator.',
+            'pageTitle' => 'Panduan Login ChatGPT | '.$brand,
+            'pageDescription' => 'Panduan masuk dan mengamankan akun ChatGPT dari Lhie Store memakai Outlook, iCloud, dan Google Authenticator.',
             'canonicalUrl' => route('storefront.login-guide'),
         ]);
     }

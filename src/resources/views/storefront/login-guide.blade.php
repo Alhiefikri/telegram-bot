@@ -12,7 +12,7 @@
                 </a>
 
                 <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] md:flex" aria-label="Navigasi panduan login">
-                    <a href="{{ route('storefront.home') }}#products" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
+                    <a href="{{ route('storefront.guides.index') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Semua Panduan</a>
                     <a href="#alur" class="rounded-md bg-[var(--sf-surface)] px-4 py-2 shadow-[3px_3px_0_var(--sf-shadow)]">Alur</a>
                     <a href="#langkah" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
                     <a href="#bantuan" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>

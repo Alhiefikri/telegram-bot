@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['category_id', 'name', 'description', 'delivery_note', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active'])]
+#[Fillable(['category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */

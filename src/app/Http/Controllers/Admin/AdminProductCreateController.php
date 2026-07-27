@@ -27,6 +27,8 @@ class AdminProductCreateController extends Controller
             'name' => $validated['name'],
             'description' => $validated['description'],
             'delivery_note' => $validated['delivery_note'] ?? null,
+            'usage_guide_title' => $validated['usage_guide_title'] ?? null,
+            'usage_guide_url' => $validated['usage_guide_url'] ?? null,
             'price_amount' => (int) $validated['price_amount'],
             'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
             'currency' => 'IDR',
@@ -41,7 +43,7 @@ class AdminProductCreateController extends Controller
             'product.created',
             $product,
             null,
-            $product->only(['category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
+            $product->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
             $user,
             $request->ip(),
         );

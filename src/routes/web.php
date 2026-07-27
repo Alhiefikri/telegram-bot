@@ -36,7 +36,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', StorefrontController::class)->name('storefront.home');
-Route::get('/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
+Route::get('/panduan', [StorefrontLoginGuideController::class, 'index'])->name('storefront.guides.index');
+Route::get('/gpt/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
+Route::redirect('/panduan-login-akun', '/gpt/panduan-login-akun');
 Route::get('/privasi', [StorefrontPolicyController::class, 'privacy'])->name('storefront.policies.privacy');
 Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->name('storefront.policies.terms');
 Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
@@ -59,7 +61,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
     Route::post('orders/{order}/cancel', StorefrontShopOrderCancelController::class)->middleware('storefront.signed')->name('orders.cancel');
 });
-Route::redirect('/cara-loginoutlook', '/panduan-login-akun');
+Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
 Route::prefix('akun')->name('customer.')->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');

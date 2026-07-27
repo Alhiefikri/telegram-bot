@@ -15,7 +15,7 @@
             <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
             <a href="{{ route('storefront.order-access.create') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
             <a href="{{ route('customer.account') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akun</a>
-            <a href="{{ route('storefront.login-guide') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan Login</a>
+            <a href="{{ route('storefront.guides.index') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
             <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
         </nav>
 
@@ -74,11 +74,11 @@
                     <span>Cara Beli</span>
                 </a>
 
-                <a href="{{ route('storefront.login-guide') }}" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
+                <a href="{{ route('storefront.guides.index') }}" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
                     <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v16H7.5A2.5 2.5 0 0 0 5 21V5.5Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8M8 11h7" /></svg>
                     </span>
-                    <span>Panduan Login</span>
+                    <span>Panduan</span>
                 </a>
 
                 <a href="{{ $homeUrl }}#faq" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">

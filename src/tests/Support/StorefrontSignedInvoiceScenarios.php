@@ -127,6 +127,8 @@ trait StorefrontSignedInvoiceScenarios
             $product = $this->availableProduct([
                 'name' => $group['product_name'],
                 'price_amount' => $unitPrice,
+                'usage_guide_title' => $group['usage_guide_title'] ?? null,
+                'usage_guide_url' => $group['usage_guide_url'] ?? null,
                 'stock' => count($secrets),
                 'reserved_stock' => count($secrets),
             ]);
@@ -136,6 +138,9 @@ trait StorefrontSignedInvoiceScenarios
                 'product_name' => $product->name,
                 'delivery_note' => $group['delivery_note'] ?? null,
                 'delivery_note_snapshotted' => array_key_exists('delivery_note', $group),
+                'usage_guide_title' => $group['usage_guide_title'] ?? null,
+                'usage_guide_url' => $group['usage_guide_url'] ?? null,
+                'usage_guide_snapshotted' => array_key_exists('usage_guide_title', $group) || array_key_exists('usage_guide_url', $group),
                 'quantity' => count($secrets),
                 'unit_price' => $unitPrice,
                 'subtotal' => $unitPrice * count($secrets),

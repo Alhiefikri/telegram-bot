@@ -16,7 +16,7 @@
             <div class="min-w-0">
                 <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">Tindakan utama</p>
                 <h2 class="mt-2 font-display text-2xl font-black text-[var(--sf-ink)]">Data akun siap digunakan</h2>
-                <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">Salin kredensial, buka panduan login tanpa meninggalkan konteks invoice, lalu amankan akun dari perangkat pribadi.</p>
+                <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">Salin kredensial dan ikuti panduan produk jika tersedia, lalu amankan akun dari perangkat pribadi.</p>
             </div>
             <div class="shrink-0" data-copy-group>
                 <button type="button"
@@ -87,6 +87,11 @@
                             <p class="mt-2">{{ data_get($copy, 'fulfillment.automatic_default_instruction') }}</p>
                         </div>
                     @endif
+                    @if ($group['usage_guide'] !== null)
+                        <a href="{{ $group['usage_guide']['url'] }}" class="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-center text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
+                            {{ $group['usage_guide']['title'] }}
+                        </a>
+                    @endif
                 </section>
             @endforeach
         </div>
@@ -130,6 +135,20 @@
         </p>
     @endif
 
+    @if ($isPaid && $accountGroups === [] && $usageGuides !== [])
+        <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
+            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">Panduan produk</h3>
+            <p class="mt-2 text-sm font-bold leading-6 text-[var(--sf-muted)]">Ikuti panduan yang sesuai dengan produk pada pesanan ini.</p>
+            <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                @foreach ($usageGuides as $guide)
+                    <a href="{{ $guide['url'] }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-center text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)]">
+                        {{ $guide['title'] }}
+                    </a>
+                @endforeach
+            </div>
+        </div>
+    @endif
+
     @if ($isPaid)
         <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
             <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">Simpan pesanan ke akun</h3>
@@ -137,8 +156,4 @@
             <a href="{{ auth('customer')->check() ? route('customer.claim.create') : route('customer.account') }}" class="neo-button mt-4 inline-flex h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white sm:w-auto">Simpan pesanan ke akun</a>
         </div>
     @endif
-
-    <a href="{{ route('storefront.login-guide', ['invoice' => $order->invoice_number, 'return' => $redirectUrl]) }}" class="mt-5 inline-flex w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 py-3 text-center font-display text-sm font-black uppercase tracking-[0.18em] text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
-        Panduan login &amp; keamanan
-    </a>
 </x-storefront.panel>

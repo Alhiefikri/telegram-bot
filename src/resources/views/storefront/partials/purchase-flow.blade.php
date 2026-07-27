@@ -44,12 +44,12 @@
 
     <div class="neo-panel mt-8 flex flex-col gap-4 bg-[var(--sf-surface)] p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Panduan login</p>
-            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">Bingung cara masuk atau amankan akun?</h3>
-            <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Setelah akun dikirim, ikuti panduan login dan pengamanan akun agar akses tetap aman.</p>
+            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Pusat panduan</p>
+            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">Pilih panduan sesuai produk dan metode login.</h3>
+            <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Panduan ChatGPT untuk Outlook, iCloud, dan MFA sudah tersedia. Panduan produk lain dapat ditambahkan di halaman yang sama.</p>
         </div>
-        <a href="{{ route('storefront.login-guide') }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
-            Lihat Panduan
+        <a href="{{ route('storefront.guides.index') }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
+            Buka Pusat Panduan
         </a>
     </div>
 </section>

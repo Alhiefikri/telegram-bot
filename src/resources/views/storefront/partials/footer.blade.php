@@ -17,7 +17,7 @@
             <ul class="space-y-3 text-sm font-semibold text-white/70">
                 <li><a href="{{ $shopUrl ?? $storefront->catalogUrl() }}" class="transition-colors hover:text-[var(--sf-yellow)]">Katalog Lengkap</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#cara-beli" class="transition-colors hover:text-[var(--sf-yellow)]">Cara Pembelian</a></li>
-                <li><a href="{{ route('storefront.login-guide') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Panduan Login</a></li>
+                <li><a href="{{ route('storefront.guides.index') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Pusat Panduan</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="transition-colors hover:text-[var(--sf-yellow)]">FAQ</a></li>
             </ul>
         </div>
@@ -37,7 +37,7 @@
             <ul class="space-y-3 text-sm font-semibold text-white/70">
                 <li><a href="{{ route('storefront.order-access.create') }}" class="font-black text-[var(--sf-yellow)] transition-colors hover:text-white">Akses Pesanan</a></li>
                 <li><a href="{{ route('storefront.policies.recovery') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Pemulihan Pesanan</a></li>
-                <li><a href="{{ route('storefront.login-guide') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Panduan Login</a></li>
+                <li><a href="{{ route('storefront.guides.index') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Pusat Panduan</a></li>
                 <li><span>Simpan invoice dan recovery key</span></li>
             </ul>
         </div>

@@ -33,6 +33,9 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('Kategori')
             ->assertSee('Deskripsi singkat')
             ->assertSee('Catatan pengiriman rahasia')
+            ->assertSee('Panduan pemakaian produk')
+            ->assertSee('Judul panduan')
+            ->assertSee('URL panduan')
             ->assertDontSee('Fitur utama')
             ->assertDontSee('Paket / spesifikasi')
             ->assertSee('Akun Premium')
@@ -67,6 +70,8 @@ class AdminDashboardProductFormsTest extends TestCase
                 'category_id' => (string) $category->id,
                 'description' => 'Akses Canva Pro siap pakai.',
                 'delivery_note' => "Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.",
+                'usage_guide_title' => 'Panduan penggunaan Canva Pro',
+                'usage_guide_url' => 'https://docs.example.test/canva/getting-started',
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
             ->assertSessionHas('status', 'Produk Canva Pro 1 Bulan berhasil dibuat. Tambahkan stok saat item sudah siap.');
@@ -84,6 +89,8 @@ class AdminDashboardProductFormsTest extends TestCase
         $product = Product::where('name', 'Canva Pro 1 Bulan')->firstOrFail();
         $this->assertSame('Akses Canva Pro siap pakai.', $product->description);
         $this->assertSame("Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.", $product->delivery_note);
+        $this->assertSame('Panduan penggunaan Canva Pro', $product->usage_guide_title);
+        $this->assertSame('https://docs.example.test/canva/getting-started', $product->usage_guide_url);
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $admin->id,
@@ -252,6 +259,8 @@ class AdminDashboardProductFormsTest extends TestCase
                 'category_id' => (string) $category->id,
                 'description' => 'Akses streaming siap pakai.',
                 'delivery_note' => 'Login dari perangkat pribadi lalu ganti password.',
+                'usage_guide_title' => 'Panduan penggunaan Netflix',
+                'usage_guide_url' => '/netflix/cara-pakai',
                 'is_active' => '0',
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
@@ -265,6 +274,8 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame(2, $product->reserved_stock);
         $this->assertSame('Akses streaming siap pakai.', $product->description);
         $this->assertSame('Login dari perangkat pribadi lalu ganti password.', $product->delivery_note);
+        $this->assertSame('Panduan penggunaan Netflix', $product->usage_guide_title);
+        $this->assertSame('/netflix/cara-pakai', $product->usage_guide_url);
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $admin->id,
             'action' => 'product.updated',
@@ -304,6 +315,33 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('\u0022productModalOpen\u0022:true', false)
             ->assertSee('\u0022productModalMode\u0022:\u0022create\u0022', false)
             ->assertSee('Periksa kembali field produk yang ditandai.');
+    }
+
+    public function test_product_usage_guide_requires_a_title_and_safe_url_together(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $base = [
+            'name' => 'Provider Guide Validation',
+            'price_amount' => '25000',
+            'description' => 'Produk untuk menguji panduan provider.',
+        ];
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), $base + [
+                'usage_guide_title' => 'Panduan provider',
+                'usage_guide_url' => '',
+            ])
+            ->assertSessionHasErrors('usage_guide_url', null, 'productCreate');
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), $base + [
+                'usage_guide_title' => '',
+                'usage_guide_url' => 'javascript:alert(1)',
+            ])
+            ->assertSessionHasErrors(['usage_guide_title', 'usage_guide_url'], null, 'productCreate');
+
+        $this->assertDatabaseCount('products', 0);
     }
 
     public function test_invalid_product_update_reopens_edit_modal_with_submitted_state(): void

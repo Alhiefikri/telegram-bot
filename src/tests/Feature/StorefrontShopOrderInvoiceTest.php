@@ -559,7 +559,6 @@ class StorefrontShopOrderInvoiceTest extends TestCase
                 'Data akun',
                 'Alpha Account',
                 'alpha-one@example.test|AlphaSecret1',
-                'Panduan login &amp; keamanan',
                 'Ringkasan invoice',
             ], false)
             ->assertSee('Data akun')
@@ -569,7 +568,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Beta Account')
             ->assertSee('beta@example.test|BetaSecret', false)
             ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
-            ->assertSee('Panduan login & keamanan')
+            ->assertDontSee('Panduan login & keamanan')
             ->assertDontSee('Pembayaran QRIS');
 
         $credentialEvent = AuditLog::where('action', 'storefront.credentials_opened')->where('subject_id', (string) $paidOrder->id)->firstOrFail();
@@ -592,6 +591,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
                 'product_name' => 'Alpha Account',
                 'unit_price' => 45000,
                 'delivery_note' => "Login dari browser pribadi.\nGanti password setelah login pertama.",
+                'usage_guide_title' => 'Panduan penggunaan Alpha Provider',
+                'usage_guide_url' => '/alpha/cara-pakai',
                 'secrets' => [
                     'alpha-one@example.test|AlphaSecret1|MFA-ONE',
                     'alpha-two@example.test|AlphaSecret2|MFA-TWO',
@@ -614,7 +615,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
                 'Data akun 2',
                 'Instruksi produk',
                 'Login dari browser pribadi.',
-                'Panduan login &amp; keamanan',
+                'Panduan penggunaan Alpha Provider',
             ], false)
             ->assertSee('data-copy-success="Semua data akun tersalin."', false)
             ->assertSee('data-copy-success="Email tersalin."', false)
@@ -622,8 +623,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('data-copy-success="MFA Secret tersalin."', false)
             ->assertSee('aria-live="polite"', false)
             ->assertSee('Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
-            ->assertSee('invoice='.$paidOrder->invoice_number, false)
-            ->assertSee('/panduan-login-akun?', false);
+            ->assertSee(url('/alpha/cara-pakai'), false)
+            ->assertDontSee('Bingung cara masuk');
     }
 
     public function test_paid_invoice_without_allocated_stock_items_renders_admin_follow_up_copy(): void
@@ -646,6 +647,9 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         OrderItem::factory()->create([
             'order_id' => $paidOrder->id,
             'product_name' => 'Consulting Credit',
+            'usage_guide_title' => 'Panduan aktivasi Consulting Credit',
+            'usage_guide_url' => '/consulting/aktivasi',
+            'usage_guide_snapshotted' => true,
             'quantity' => 1,
             'unit_price' => 64000,
             'subtotal' => 64000,
@@ -655,7 +659,9 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertOk()
             ->assertSee('Pembayaran diterima, menunggu diproses')
             ->assertSee('Produk ini tidak punya kredensial otomatis di invoice.')
-            ->assertSee('Panduan login & keamanan');
+            ->assertSee('Panduan aktivasi Consulting Credit')
+            ->assertSee(url('/consulting/aktivasi'), false)
+            ->assertDontSee('Panduan login & keamanan');
     }
 
     public function test_manual_fulfillment_distinguishes_processing_and_completed_states_without_promising_time(): void
@@ -764,7 +770,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertDontSee('Fulfillment manual');
     }
 
-    public function test_login_guide_preserves_invoice_context_from_invoice_link(): void
+    public function test_login_guide_preserves_explicit_invoice_context(): void
     {
         $this->pakasirConfigIsReady();
         [$paidOrder] = $this->paidOrderWithAccountSecret(
@@ -773,9 +779,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         );
         $invoiceUrl = URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false);
 
-        $invoiceResponse = $this->get($invoiceUrl)->assertOk();
-        $this->assertStringContainsString('invoice='.$paidOrder->invoice_number, $invoiceResponse->getContent());
-        $this->assertStringContainsString('return=%2Fshop%2Forders%2F'.$paidOrder->getKey(), $invoiceResponse->getContent());
+        $this->get($invoiceUrl)->assertOk();
 
         $this->get(route('storefront.login-guide', [
             'invoice' => $paidOrder->invoice_number,

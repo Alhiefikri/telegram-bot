@@ -93,6 +93,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
             [
                 'product_name' => 'Module Secret Product',
                 'delivery_note' => null,
+                'usage_guide' => null,
                 'secrets' => [
                     [
                         'text' => 'paid-account@example.test|Visible',
@@ -103,6 +104,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
                 'copy_text' => "1.\npaid-account@example.test|Visible",
             ],
         ], $paidInvoice->accountGroups);
+        $this->assertSame([], $paidInvoice->usageGuides);
         $this->assertSame("Module Secret Product\n1.\npaid-account@example.test|Visible", $paidInvoice->accountCopyText);
         $this->assertSame('automatic_available', $paidInvoice->paidDeliveryType);
         $this->assertSame('processing', $paidInvoice->manualFulfillmentStatus);

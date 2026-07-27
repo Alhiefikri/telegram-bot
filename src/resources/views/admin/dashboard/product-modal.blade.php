@@ -173,6 +173,51 @@
                             </div>
                         </x-admin-dashboard.card>
 
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <div>
+                                <p class="font-display text-sm font-extrabold text-neo-ink">📘 Panduan pemakaian produk</p>
+                                <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">Opsional dan berbeda untuk setiap produk/provider. Hanya tampil ke pembeli jika kedua field diisi.</p>
+                            </div>
+
+                            <div class="mt-3 grid gap-3">
+                                <div>
+                                    <x-admin-dashboard.field-label for="product-usage-guide-title">Judul panduan</x-admin-dashboard.field-label>
+                                    <x-admin-dashboard.input
+                                        id="product-usage-guide-title"
+                                        name="usage_guide_title"
+                                        placeholder="Contoh: Panduan login ChatGPT"
+                                        maxlength="160"
+                                        class="mt-1.5"
+                                        x-model="productUsageGuideTitle"
+                                    />
+                                </div>
+                                @error('usage_guide_title', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('usage_guide_title', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+
+                                <div>
+                                    <x-admin-dashboard.field-label for="product-usage-guide-url">URL panduan</x-admin-dashboard.field-label>
+                                    <x-admin-dashboard.input
+                                        id="product-usage-guide-url"
+                                        name="usage_guide_url"
+                                        placeholder="Contoh: /gpt/panduan-login-akun"
+                                        maxlength="2048"
+                                        class="mt-1.5"
+                                        x-model="productUsageGuideUrl"
+                                    />
+                                </div>
+                                @error('usage_guide_url', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('usage_guide_url', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+                        </x-admin-dashboard.card>
+
                         <div class="grid grid-cols-2 gap-2 pt-1">
                             <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">
                                 Batal

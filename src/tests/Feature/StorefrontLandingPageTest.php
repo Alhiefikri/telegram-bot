@@ -36,9 +36,11 @@ class StorefrontLandingPageTest extends TestCase
 
         $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
 
-        foreach (['Cara Beli', 'Panduan Login', 'FAQ', 'Katalog Web', 'Akses Pesanan'] as $customerLinkText) {
+        foreach (['Cara Beli', 'Panduan', 'FAQ', 'Katalog Web', 'Akses Pesanan'] as $customerLinkText) {
             $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
         }
+
+        $this->assertStringContainsString('/panduan', $mobileMenuHtml);
 
         $this->assertStringNotContainsString('/admin/login', $mobileMenuHtml);
         $this->assertStringNotContainsString('Login Admin', $mobileMenuHtml);
@@ -144,11 +146,11 @@ class StorefrontLandingPageTest extends TestCase
             ->assertOk()
             ->assertSee('Produk')
             ->assertSee('Cara Beli')
-            ->assertSee('Panduan Login')
+            ->assertSee('Pusat panduan')
             ->assertSee('FAQ')
             ->assertSee('Akses Pesanan')
             ->assertSee('Belanja produk digital dalam tiga langkah')
-            ->assertSee('/panduan-login-akun', false)
+            ->assertSee('/panduan', false)
             ->assertSee('Pilih produk dari katalog, checkout sebagai tamu di website, lalu simpan invoice dan Recovery Key untuk akses ulang pesanan website.')
             ->assertSee('Pengiriman digital')
             ->assertSee('Invoice dan Recovery Key untuk pesanan website.')
@@ -162,16 +164,30 @@ class StorefrontLandingPageTest extends TestCase
         Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
+    public function test_guide_hub_lists_chatgpt_login_methods_and_links_to_the_specific_guide(): void
+    {
+        $this->get('/panduan')
+            ->assertOk()
+            ->assertSee('Pilih panduan yang Anda butuhkan.')
+            ->assertSee('Panduan login ChatGPT')
+            ->assertSee('Outlook')
+            ->assertSee('iCloud')
+            ->assertSee('Google Authenticator')
+            ->assertSee('/gpt/panduan-login-akun', false);
+    }
+
     public function test_login_guide_page_explains_login_security_with_extracted_screenshot_assets(): void
     {
-        $response = $this->get('/panduan-login-akun')
+        $response = $this->get('/gpt/panduan-login-akun')
             ->assertOk()
             ->assertSee('Cara login ChatGPT pakai Outlook/iCloud + MFA')
             ->assertSee('Data login yang harus disiapkan')
             ->assertSee('Tambahkan MFA Secret ke Google Authenticator')
             ->assertSee('Checklist keamanan')
+            ->assertSee('Semua Panduan')
+            ->assertSee('/panduan', false)
             ->assertDontSee('Download PDF')
-            ->assertDontSee('/panduan-login-akun/pdf', false);
+            ->assertDontSee('/gpt/panduan-login-akun/pdf', false);
 
         $content = $response->getContent();
 
@@ -180,7 +196,8 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertGreaterThanOrEqual(3, count(array_unique($assetReferences[0])), 'Login guide should render multiple extracted screenshot assets instead of full-page PDF screenshots.');
         $this->assertDoesNotMatchRegularExpression('#storefront/login-guide/page-\d+\.jpg#', $content);
 
-        $this->get('/cara-loginoutlook')->assertRedirect('/panduan-login-akun');
+        $this->get('/panduan-login-akun')->assertRedirect('/gpt/panduan-login-akun');
+        $this->get('/cara-loginoutlook')->assertRedirect('/gpt/panduan-login-akun');
     }
 
     public function test_empty_catalog_renders_customer_facing_state(): void

@@ -8,7 +8,8 @@ use App\Models\Payment;
 class StorefrontShopSignedInvoiceReadResult
 {
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
+     * @param  list<array{title: string, url: string}>  $usageGuides
      */
     public function __construct(
         public readonly Order $order,
@@ -28,6 +29,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly ?string $qrisImageDataUri,
         public readonly ?string $hostedPaymentUrl,
         public readonly array $accountGroups,
+        public readonly array $usageGuides,
         public readonly string $accountCopyText,
         public readonly string $paidDeliveryType,
         public readonly string $manualFulfillmentStatus,

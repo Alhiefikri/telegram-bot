@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Services\CredentialDeliveryFormatter;
+use App\Services\ProductUsageGuide;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,7 @@ class TelegramReceiptNotifier
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
+        private ProductUsageGuide $usageGuides,
         private TelegramMessageChunker $messageChunker,
         private TelegramSupportContact $supportContact,
     ) {}
@@ -62,6 +64,7 @@ class TelegramReceiptNotifier
                 return;
             }
 
+            $guides = $this->usageGuides->forOrder($claimed);
             $lines = [
                 $this->locale->text($claimed->customer, '✅ Pembayaran diterima', '✅ Payment received'),
                 '━━━━━━━━━━━━━━',
@@ -80,9 +83,11 @@ class TelegramReceiptNotifier
                 array_push($lines, ...$accountLines);
                 $lines[] = '';
                 $lines[] = $this->locale->text($claimed->customer, '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.', '⚠️ Save these details securely and do not share them with anyone.');
-                $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, 'Bingung cara masuk dan amankan akunnya?', 'Need help signing in and securing the account?');
-                $lines[] = $this->locale->text($claimed->customer, 'Panduan: ', 'Guide: ').route('storefront.login-guide');
+                foreach ($guides as $guide) {
+                    $lines[] = '';
+                    $lines[] = '📘 '.$guide['title'];
+                    $lines[] = $guide['url'];
+                }
                 $lines[] = '';
                 $lines[] = $this->locale->text($claimed->customer, 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.', 'If you have a login problem, contact /support and include this invoice.');
                 $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE 🌙', 'Thank you for shopping at LHIE STORE 🌙');
@@ -100,7 +105,7 @@ class TelegramReceiptNotifier
                     $this->bot->sendMessage(
                         $claimed->customer->telegram_id,
                         $chunk,
-                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer) : [],
+                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer, $guides) : [],
                         $this->credentialOptions($chunk),
                     );
                 }
@@ -150,11 +155,15 @@ class TelegramReceiptNotifier
         return $lines;
     }
 
-    private function receiptReplyMarkup(Customer $customer): array
+    /** @param  list<array{title: string, url: string}>  $guides */
+    private function receiptReplyMarkup(Customer $customer, array $guides): array
     {
-        $rows = [[
-            ['text' => $this->locale->text($customer, 'Panduan Login & Keamanan', 'Login & Security Guide'), 'url' => route('storefront.login-guide')],
-        ]];
+        $rows = collect($guides)
+            ->map(fn (array $guide): array => [[
+                'text' => $guide['title'],
+                'url' => $guide['url'],
+            ]])
+            ->all();
 
         $supportUrl = $this->supportContact->resolve()['url'];
         if ($supportUrl !== '') {
