@@ -1,7 +1,7 @@
 # Desain Statistik Pertumbuhan Telegram
 
-**Tanggal:** 2026-07-27  
-**Status:** Disetujui untuk direncanakan  
+**Tanggal:** 2026-07-27
+**Status:** Disetujui untuk direncanakan
 **Ruang lingkup:** Tombol statistik admin Telegram dan respons statistik interaktif
 
 ## Tujuan
