@@ -4,6 +4,7 @@ use App\Jobs\SendDailyAdminStatsNotification;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
+Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping();

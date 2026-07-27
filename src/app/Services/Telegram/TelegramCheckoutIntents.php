@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -23,6 +24,7 @@ class TelegramCheckoutIntents
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
+        private BinanceAutoVerification $binanceVerification,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -78,9 +80,11 @@ class TelegramCheckoutIntents
 
     public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
     {
-        // Manual Binance Pay payments are confirmed from a photo sent with /payment.
+        // With API credentials configured, payments are verified automatically;
+        // otherwise they are confirmed from a photo sent with /payment.
+        $autoVerify = $this->binanceVerification->enabled();
         $payId = (string) config('services.binance.pay_id');
-        $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer));
+        $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer), $autoVerify);
         $amount = $this->formatUsdt($payment->amount);
 
         $photoPath = public_path('binance.jpeg');
@@ -89,11 +93,20 @@ class TelegramCheckoutIntents
             throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
         }
 
+        $keyboard = [];
+        if ($autoVerify) {
+            $keyboard[] = [[
+                'text' => $this->locale->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
+                'callback_data' => 'binance:verify:'.$order->id,
+            ]];
+        }
+        $keyboard[] = [[
+            'text' => $this->locale->text($customer, '❌ Batalkan Order', '❌ Cancel Order'),
+            'callback_data' => 'buyer:cancel-pending:'.$order->id,
+        ]];
+
         return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [
-            'inline_keyboard' => [[[
-                'text' => $this->locale->text($customer, '❌ Batalkan Order', '❌ Cancel Order'),
-                'callback_data' => 'buyer:cancel-pending:'.$order->id,
-            ]]],
+            'inline_keyboard' => $keyboard,
         ], [
             'caption_entities' => [
                 $this->codeEntityForLine($text, $amount.' USDT', $amount),

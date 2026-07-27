@@ -41,6 +41,11 @@ class ProductionConfigurationValidator
             throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
         }
 
+        $binanceBaseUrl = (string) $this->config->get('services.binance.base_url', '');
+        if (! blank($binanceBaseUrl) && ! str_starts_with($binanceBaseUrl, 'https://')) {
+            throw new RuntimeException('BINANCE_API_BASE_URL must use HTTPS in production.');
+        }
+
         if (! str_starts_with((string) $this->config->get('app.url'), 'https://')) {
             throw new RuntimeException('APP_URL must use HTTPS in production.');
         }

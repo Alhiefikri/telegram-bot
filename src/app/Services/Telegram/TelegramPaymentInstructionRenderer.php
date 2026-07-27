@@ -59,11 +59,20 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
-    public function binancePay(Order $order, Payment $payment, string $payId, ?string $locale): string
+    public function binancePay(Order $order, Payment $payment, string $payId, ?string $locale, bool $autoVerify = false): string
     {
         $order->loadMissing('orderItems');
         $amount = rtrim(rtrim(number_format($payment->amount / 1_000_000, 6, '.', ''), '0'), '.');
         $items = $this->orderItemsSummary($order);
+
+        if ($autoVerify) {
+            if ($locale === 'en') {
+                return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 Send EXACTLY this amount (tap to copy):\n{$amount} USDT\n\n📥 Binance Pay ID (tap to copy):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Open Binance → Pay → Send, then scan the QR code above or send to the Binance Pay ID above.\n2️⃣ Transfer EXACTLY {$amount} USDT — the unique final digits identify your order, so do not round the amount.\n3️⃣ After transferring, tap ✅ I've Paid below. Verification is automatic 24/7 and your product is delivered to this chat within moments.\n\n⚠️ If verification cannot find your transfer, you can submit the Order ID from your Binance receipt as a backup.";
+            }
+
+            return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 Kirim TEPAT sejumlah ini (tap untuk salin):\n{$amount} USDT\n\n📥 Binance Pay ID (tap untuk salin):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Buka Binance → Pay → Kirim, lalu scan QR code di atas atau kirim ke Binance Pay ID di atas.\n2️⃣ Transfer TEPAT {$amount} USDT — digit unik di belakang adalah penanda pesananmu, jadi jangan dibulatkan.\n3️⃣ Setelah transfer, tap ✅ Saya Sudah Bayar di bawah. Verifikasi berjalan otomatis 24 jam dan produk langsung dikirim ke chat ini.\n\n⚠️ Kalau verifikasi belum menemukan transfermu, kamu bisa kirim Order ID dari bukti transfer Binance sebagai cadangan.";
+        }
+
         if ($locale === 'en') {
             return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 Send EXACTLY this amount:\n{$amount} USDT\n\n📥 Binance Pay ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ In Binance Pay, enter the Binance Pay ID above or scan the QR code above.\n2️⃣ Transfer exactly {$amount} USDT. Do not change the amount.\n3️⃣ Send the payment screenshot to this bot as a photo with the caption /payment.\n4️⃣ If you already sent the screenshot, reply to that photo with /payment.\n\n⚠️ Payment is confirmed manually only after the admin verifies the screenshot and the exact amount.";
         }

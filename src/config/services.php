@@ -3,6 +3,19 @@
 return [
     'binance' => [
         'pay_id' => env('BINANCE_PAY_ID'),
+        'api_key' => env('BINANCE_API_KEY'),
+        'api_secret' => env('BINANCE_API_SECRET'),
+        'base_url' => env('BINANCE_API_BASE_URL', 'https://api.binance.com'),
+        'http_timeout_seconds' => (float) env('BINANCE_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('BINANCE_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
+        'recv_window_ms' => (int) env('BINANCE_RECV_WINDOW_MS', 10000),
+        'history_max_attempts' => (int) env('BINANCE_HISTORY_MAX_ATTEMPTS', 3),
+        'history_retry_delay_ms' => (int) env('BINANCE_HISTORY_RETRY_DELAY_MS', 250),
+        'unique_amount_min_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MIN_OFFSET_MICRO', 101),
+        'unique_amount_max_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MAX_OFFSET_MICRO', 9999),
+        'verify_clock_skew_seconds' => (int) env('BINANCE_VERIFY_CLOCK_SKEW_SECONDS', 120),
+        'verify_rate_limit_attempts' => (int) env('BINANCE_VERIFY_RATE_LIMIT_ATTEMPTS', 5),
+        'verify_rate_limit_decay_seconds' => (int) env('BINANCE_VERIFY_RATE_LIMIT_DECAY_SECONDS', 300),
     ],
 
     /*

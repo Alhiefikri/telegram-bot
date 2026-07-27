@@ -20,6 +20,7 @@ use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramBinanceVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBroadcastCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCartCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
@@ -60,6 +61,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramOrderCallbackHandler::class),
             $app->make(TelegramCartCallbackHandler::class),
             $app->make(TelegramCheckoutCallbackHandler::class),
+            $app->make(TelegramBinanceVerifyCallbackHandler::class),
             $app->make(TelegramPaymentProofCallbackHandler::class),
         ]));
     }
