@@ -66,6 +66,8 @@ class KlikQrisTransactionTest extends TestCase
     {
         return [
             'documented sandbox storage png' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png', true],
+            'query secret rejected' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png?token=secret-query', false],
+            'fragment secret rejected' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png#secret-fragment', false],
             'nested sandbox storage path rejected' => ['https://klikqris.com/storage/sandbox/merchant/qris_STEST-123.png', false],
             'http rejected' => ['http://klikqris.com/storage/sandbox/qris_STEST-123.png', false],
             'subdomain rejected' => ['https://evil.klikqris.com/storage/sandbox/qris_STEST-123.png', false],

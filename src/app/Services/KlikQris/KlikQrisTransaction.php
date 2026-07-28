@@ -120,6 +120,8 @@ final readonly class KlikQrisTransaction
             || array_key_exists('user', $parts)
             || array_key_exists('pass', $parts)
             || array_key_exists('port', $parts)
+            || array_key_exists('query', $parts)
+            || array_key_exists('fragment', $parts)
         ) {
             return false;
         }

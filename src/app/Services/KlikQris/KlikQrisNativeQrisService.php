@@ -80,6 +80,10 @@ class KlikQrisNativeQrisService
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
             $providerTotal = $transaction->totalAmount();
+            if (filled($transaction->qrisUrl()) && ! KlikQrisTransaction::isAllowedSandboxQrisUrl($transaction->qrisUrl())) {
+                throw new RuntimeException('KlikQRIS provider returned an untrusted QRIS URL.');
+            }
+
             $isPayableCreated = $this->isPayableProviderTransaction($transaction, $lockedPayment, $providerExpiresAt);
             $paymentUpdates = [
                 'provider_payload' => $transaction->sanitizedPayload(),
