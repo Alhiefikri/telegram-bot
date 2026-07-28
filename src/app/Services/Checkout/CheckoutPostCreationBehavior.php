@@ -7,4 +7,5 @@ enum CheckoutPostCreationBehavior
     case ManualQrisInstructions;
     case BinancePayInstructions;
     case PakasirInstructions;
+    case KlikQrisInstructions;
 }
