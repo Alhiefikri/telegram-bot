@@ -110,10 +110,10 @@ def test_hyprland_conf_updated(tmp_path):
         repo_src_dir=str(Path(__file__).resolve().parent.parent / "src")
     )
 
-    conf_text = hypr_conf.read_text()
-    assert "windowrule = float, match:class ^(com.cachyos.currencycalc)$" in conf_text
-    assert "windowrule = size 420 540, match:class ^(com.cachyos.currencycalc)$" in conf_text
-    assert "windowrule = center, match:class ^(com.cachyos.currencycalc)$" in conf_text
+    conf_text = (hypr_dir / "windowrules.conf").read_text() if (hypr_dir / "windowrules.conf").exists() else hypr_conf.read_text()
+    assert "windowrule = float true,match:class ^(com.cachyos.currencycalc)$" in conf_text
+    assert "windowrule = size 420 540,match:class ^(com.cachyos.currencycalc)$" in conf_text
+    assert "windowrule = center true,match:class ^(com.cachyos.currencycalc)$" in conf_text
 
 
 def test_revert_script_restores_config(tmp_path):

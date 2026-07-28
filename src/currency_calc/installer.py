@@ -161,21 +161,29 @@ fi
         new_css = css_content + "\n\n/* Currency Calculator Waybar Module */\n#custom-currency {\n    background-color: rgba(30, 30, 46, 0.8);\n    color: #cdd6f4;\n    padding: 0 10px;\n    margin: 0 4px;\n    border-radius: 8px;\n}\n"
         style_file.write_text(new_css.lstrip())
 
-    # 7. Update Hyprland configuration (Use match:class syntax for Hyprland v0.53+)
-    hypr_conf = hypr_path / "userprefs.conf"
-    if not hypr_conf.exists():
-        hypr_conf = hypr_path / "hyprland.conf"
+    # 7. Update Hyprland windowrules.conf (HyDE Framework compatible syntax)
+    hypr_rules_conf = hypr_path / "windowrules.conf"
+    if not hypr_rules_conf.exists():
+        hypr_rules_conf = hypr_path / "userprefs.conf"
+    if not hypr_rules_conf.exists():
+        hypr_rules_conf = hypr_path / "hyprland.conf"
 
-    hypr_text = hypr_conf.read_text() if hypr_conf.exists() else ""
+    hypr_text = hypr_rules_conf.read_text() if hypr_rules_conf.exists() else ""
     rules = [
-        "windowrule = float, match:class ^(com.cachyos.currencycalc)$",
-        "windowrule = size 420 540, match:class ^(com.cachyos.currencycalc)$",
-        "windowrule = center, match:class ^(com.cachyos.currencycalc)$",
+        "windowrule = float true,match:class ^(com.cachyos.currencycalc)$",
+        "windowrule = size 420 540,match:class ^(com.cachyos.currencycalc)$",
+        "windowrule = center true,match:class ^(com.cachyos.currencycalc)$",
     ]
     needed_rules = [r for r in rules if r not in hypr_text]
     if needed_rules:
-        new_hypr = hypr_text + "\n\n# Currency Calculator Floating Window Rules\n" + "\n".join(needed_rules) + "\n"
-        hypr_conf.write_text(new_hypr.lstrip())
+        if "# hyprlang endif" in hypr_text:
+            new_hypr = hypr_text.replace(
+                "# hyprlang endif",
+                "# Currency Calculator Rules\n" + "\n".join(needed_rules) + "\n\n# hyprlang endif"
+            )
+        else:
+            new_hypr = hypr_text + "\n\n# Currency Calculator Rules\n" + "\n".join(needed_rules) + "\n"
+        hypr_rules_conf.write_text(new_hypr)
 
     # 8. Reload Waybar if active
     try:
@@ -190,7 +198,7 @@ fi
         "revert_script": str(revert_script),
         "config_file": str(config_file),
         "style_file": str(style_file),
-        "hypr_conf": str(hypr_conf),
+        "hypr_conf": str(hypr_rules_conf),
     }
 
 
