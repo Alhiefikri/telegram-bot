@@ -208,22 +208,32 @@ class CurrencyCalcWindow(Adw.ApplicationWindow):
             self.copy_to_clipboard()
             return True
         elif keyval == Gdk.KEY_Escape:
-            self.close()
+            self.set_visible(False)
             return True
         return False
 
 
 def main() -> None:
-    """Application entrypoint for launching GTK4 Libadwaita application."""
+    """Application entrypoint for launching GTK4 Libadwaita application with pre-warmed toggle."""
     Adw.init()
     style_manager = Adw.StyleManager.get_default()
     style_manager.set_color_scheme(Adw.ColorScheme.PREFER_DARK)
 
     app = Adw.Application(application_id="com.cachyos.currencycalc")
+    active_win: CurrencyCalcWindow | None = None
 
     def on_activate(application: Adw.Application) -> None:
-        win = CurrencyCalcWindow(application=application)
-        win.present()
+        nonlocal active_win
+        if active_win is None:
+            active_win = CurrencyCalcWindow(application=application)
+            active_win.connect("close-request", lambda w: w.set_visible(False) or True)
+            active_win.present()
+        else:
+            if active_win.get_visible():
+                active_win.set_visible(False)
+            else:
+                active_win.set_visible(True)
+                active_win.present()
 
     app.connect("activate", on_activate)
     app.run(sys.argv)
