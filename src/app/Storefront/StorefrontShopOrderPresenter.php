@@ -50,6 +50,8 @@ class StorefrontShopOrderPresenter
             'qrisReadinessMessage' => $invoice->qrisReadinessMessage,
             'qrisRetryLabel' => $invoice->qrisRetryLabel,
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
+            'qrisImageSource' => $invoice->qrisImageSource,
+            'payableAmountDisplay' => $invoice->payableAmountDisplay,
             'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
             'binancePayId' => (string) config('services.binance.pay_id'),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,

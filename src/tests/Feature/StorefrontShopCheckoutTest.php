@@ -21,6 +21,7 @@ use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Support\PakasirCheckoutFlow;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
@@ -61,7 +62,8 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->assertContains('storefront.signed', $showRoute->middleware());
         $this->assertContains('storefront.signed', $statusRoute->middleware());
-        $this->assertContains('throttle:pakasir-status-refresh', $statusRoute->middleware());
+        $this->assertContains('throttle:automatic-payment-status-refresh', $statusRoute->middleware());
+        $this->assertNotNull(app(RateLimiter::class)->limiter('pakasir-status-refresh'));
 
         $order = Order::factory()->create();
         $showUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
