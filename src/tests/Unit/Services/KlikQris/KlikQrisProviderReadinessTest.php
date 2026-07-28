@@ -6,7 +6,6 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisSandboxCheckoutSelector;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -94,13 +93,15 @@ class KlikQrisProviderReadinessTest extends TestCase
 
     public function test_provider_transaction_token_is_encrypted_at_rest(): void
     {
-        $this->artisan('migrate')->assertSuccessful();
+        $this->artisan('migrate', [
+            '--path' => getcwd().'/database/migrations/2026_07_28_000001_add_provider_transaction_token_to_payments.php',
+            '--realpath' => true,
+        ])->assertSuccessful();
 
-        if (! Schema::hasColumn('payments', 'provider_transaction_token')) {
-            Schema::table('payments', function (Blueprint $table): void {
-                $table->text('provider_transaction_token')->nullable();
-            });
-        }
+        $this->assertTrue(
+            Schema::hasColumn('payments', 'provider_transaction_token'),
+            'The provider_transaction_token column must come from the committed payments migration.',
+        );
 
         $payment = Payment::factory()->create([
             'provider_transaction_token' => 'sandbox-token-123',
