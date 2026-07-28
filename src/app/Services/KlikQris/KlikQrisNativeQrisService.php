@@ -2,6 +2,7 @@
 
 namespace App\Services\KlikQris;
 
+use App\Enums\PaymentEventType;
 use App\Models\Order;
 use App\Models\Payment;
 use Illuminate\Support\Facades\Cache;
@@ -46,7 +47,7 @@ class KlikQrisNativeQrisService
                     $transaction = $this->provider->createTransaction($payment);
                     $transaction->assertMatches($payment);
                 } catch (Throwable $exception) {
-                    if ($this->isDefinitiveCreateFailure($exception)) {
+                    if ($exception instanceof KlikQrisCreatePreRequestException) {
                         $this->markCreationDefinitivelyFailed($payment, $exception);
 
                         throw $exception;
@@ -79,17 +80,17 @@ class KlikQrisNativeQrisService
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
             $providerTotal = $transaction->totalAmount();
-            $isValidFinalAmount = $providerTotal >= (int) $lockedPayment->amount;
+            $isPayableCreated = $this->isPayableProviderTransaction($transaction, $lockedPayment, $providerExpiresAt);
             $paymentUpdates = [
                 'provider_payload' => $transaction->sanitizedPayload(),
-                'provider_fee' => $isValidFinalAmount ? $providerTotal - (int) $lockedPayment->amount : null,
+                'provider_fee' => $providerTotal >= (int) $lockedPayment->amount ? $providerTotal - (int) $lockedPayment->amount : null,
                 'provider_total_payment' => $providerTotal,
                 'provider_payment_method' => 'qris',
                 'provider_created_at' => now(),
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_transaction_token' => $transaction->signature(),
-                'provider_create_state' => $isValidFinalAmount ? 'created' : 'provider_total_invalid',
-                'provider_create_last_error' => $isValidFinalAmount ? null : 'invalid_provider_total_payment',
+                'provider_create_state' => $isPayableCreated ? 'created' : $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt),
+                'provider_create_last_error' => $isPayableCreated ? null : $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt),
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -103,7 +104,7 @@ class KlikQrisNativeQrisService
             }
 
             $payment->refresh();
-            if ($isValidFinalAmount) {
+            if ($isPayableCreated && ! $this->hasProviderCreateEvent($lockedPayment)) {
                 $this->events->logProviderCreate($payment, $transaction);
             }
 
@@ -132,38 +133,34 @@ class KlikQrisNativeQrisService
     {
         $providerException = $exception->getPrevious() ?? $exception;
 
-        Payment::query()
-            ->whereKey($payment->id)
-            ->update([
+        DB::transaction(function () use ($payment, $providerException): void {
+            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            if ($this->hasPayablePersistedQris($locked)) {
+                return;
+            }
+
+            $locked->update([
                 'provider_create_state' => 'outcome_unknown',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
             ]);
+        });
     }
 
     private function markCreationDefinitivelyFailed(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
 
-        Payment::query()
-            ->whereKey($payment->id)
-            ->update([
+        DB::transaction(function () use ($payment, $providerException): void {
+            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            if ($this->hasPayablePersistedQris($locked)) {
+                return;
+            }
+
+            $locked->update([
                 'provider_create_state' => 'create_failed',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
             ]);
-    }
-
-    private function isDefinitiveCreateFailure(Throwable $exception): bool
-    {
-        $message = $exception->getMessage();
-
-        return str_contains($message, 'sandbox is not ready')
-            || str_contains($message, 'response validation failed')
-            || str_contains($message, 'response parse failed')
-            || str_contains($message, 'HTTP 400')
-            || str_contains($message, 'HTTP 401')
-            || str_contains($message, 'HTTP 403')
-            || str_contains($message, 'HTTP 404')
-            || str_contains($message, 'HTTP 422');
+        });
     }
 
     private function recoverCreationOutcome(Payment $payment): void
@@ -173,8 +170,25 @@ class KlikQrisNativeQrisService
             $transaction->assertMatches($payment);
             $this->persistCreatedTransaction($payment, $transaction);
         } catch (Throwable $exception) {
-            $this->markCreationOutcomeUnknown($payment, $exception);
+            $this->markRecoveryUnconfirmed($payment, $exception);
         }
+    }
+
+    private function markRecoveryUnconfirmed(Payment $payment, Throwable $exception): void
+    {
+        $providerException = $exception->getPrevious() ?? $exception;
+
+        DB::transaction(function () use ($payment, $providerException): void {
+            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            if ($this->hasPayablePersistedQris($locked)) {
+                return;
+            }
+
+            $locked->update([
+                'provider_create_state' => 'recovery_unconfirmed',
+                'provider_create_last_error' => substr($providerException::class, 0, 500),
+            ]);
+        });
     }
 
     private function hasPersistedQrisPayload(Payment $payment): bool
@@ -185,5 +199,49 @@ class KlikQrisNativeQrisService
     private function hasPayablePersistedQris(Payment $payment): bool
     {
         return $payment->isPayableNativeKlikQris();
+    }
+
+    private function isPayableProviderTransaction(KlikQrisTransaction $transaction, Payment $payment, mixed $providerExpiresAt): bool
+    {
+        return $transaction->isPending()
+            && $transaction->totalAmount() >= (int) $payment->amount
+            && filled($transaction->qrisUrl())
+            && KlikQrisTransaction::isAllowedSandboxQrisUrl($transaction->qrisUrl())
+            && filled($transaction->signature())
+            && $providerExpiresAt !== null
+            && $providerExpiresAt->isFuture();
+    }
+
+    private function nonPayableState(KlikQrisTransaction $transaction, Payment $payment, mixed $providerExpiresAt): string
+    {
+        if (! $transaction->isPending()) {
+            return 'provider_'.$transaction->status();
+        }
+
+        if ($transaction->totalAmount() < (int) $payment->amount) {
+            return 'provider_total_invalid';
+        }
+
+        if (! filled($transaction->qrisUrl()) || ! KlikQrisTransaction::isAllowedSandboxQrisUrl($transaction->qrisUrl())) {
+            return 'provider_qris_unusable';
+        }
+
+        if (! filled($transaction->signature())) {
+            return 'provider_signature_missing';
+        }
+
+        if ($providerExpiresAt === null || ! $providerExpiresAt->isFuture()) {
+            return 'provider_expired';
+        }
+
+        return 'provider_not_payable';
+    }
+
+    private function hasProviderCreateEvent(Payment $payment): bool
+    {
+        return $payment->paymentEvents()
+            ->where('provider', 'klikqris')
+            ->where('event_type', PaymentEventType::ProviderCreate->value)
+            ->exists();
     }
 }

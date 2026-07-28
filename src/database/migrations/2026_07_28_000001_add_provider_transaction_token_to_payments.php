@@ -8,10 +8,6 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasColumn('payments', 'provider_transaction_token')) {
-            return;
-        }
-
         Schema::table('payments', function (Blueprint $table): void {
             $table->text('provider_transaction_token')->nullable()->after('provider_payment_number_hash');
         });
@@ -19,10 +15,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (! Schema::hasColumn('payments', 'provider_transaction_token')) {
-            return;
-        }
-
         Schema::table('payments', function (Blueprint $table): void {
             $table->dropColumn('provider_transaction_token');
         });

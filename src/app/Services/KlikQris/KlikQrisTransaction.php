@@ -68,24 +68,29 @@ final readonly class KlikQrisTransaction
             throw new RuntimeException('Persisted KlikQRIS transaction payload is invalid.');
         }
 
-        $payload['data'] = array_replace($data, [
-            'order_id' => $payment->merchant_ref,
-            'amount' => $payment->amount,
-            'total_amount' => $payment->provider_total_payment,
-            'status' => $data['status'] ?? 'PENDING',
-        ]);
-
-        if ($payment->provider_expires_at !== null) {
-            $payload['data']['expired_at'] = $payment->provider_expires_at->utc()->toAtomString();
+        foreach (['order_id', 'amount', 'total_amount', 'status', 'qris_url', 'expired_at'] as $key) {
+            if (! array_key_exists($key, $data)) {
+                throw new RuntimeException('Persisted KlikQRIS transaction payload is incomplete.');
+            }
         }
 
-        if (filled($payment->provider_transaction_token)) {
-            $payload['data']['signature'] = $payment->provider_transaction_token;
+        if (! filled($payment->provider_transaction_token)) {
+            throw new RuntimeException('Persisted KlikQRIS transaction token is missing.');
         }
+
+        $payload['data'] = array_replace($data, ['signature' => $payment->provider_transaction_token]);
 
         try {
             $transaction = self::fromStatusPayload($payload);
             $transaction->assertMatches($payment);
+
+            if (! self::isAllowedSandboxQrisUrl($transaction->qrisUrl())) {
+                throw new RuntimeException('Persisted KlikQRIS transaction QRIS URL is not trusted.');
+            }
+
+            if ($payment->provider_expires_at === null || $transaction->expiresAt() === null || ! $transaction->expiresAt()->equalTo($payment->provider_expires_at)) {
+                throw new RuntimeException('Persisted KlikQRIS transaction expiry is inconsistent.');
+            }
 
             if (! $payment->isPayableNativeKlikQris()) {
                 throw new RuntimeException('Persisted KlikQRIS transaction is not payable.');
@@ -97,6 +102,22 @@ final readonly class KlikQrisTransaction
         } catch (UnexpectedValueException $exception) {
             throw new RuntimeException('Persisted KlikQRIS transaction is inconsistent.', previous: $exception);
         }
+    }
+
+    public static function isAllowedSandboxQrisUrl(?string $url): bool
+    {
+        if (! is_string($url) || trim($url) === '') {
+            return false;
+        }
+
+        $parts = parse_url($url);
+        if (! is_array($parts)) {
+            return false;
+        }
+
+        return strtolower((string) ($parts['scheme'] ?? '')) === 'https'
+            && strtolower((string) ($parts['host'] ?? '')) === 'klikqris.com'
+            && str_starts_with((string) ($parts['path'] ?? ''), '/sandbox/');
     }
 
     /**

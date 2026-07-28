@@ -17,7 +17,11 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
 
     public function createTransaction(Payment $payment): KlikQrisTransaction
     {
-        $this->assertReady();
+        try {
+            $this->assertReady();
+        } catch (Throwable $exception) {
+            throw new KlikQrisCreatePreRequestException('KlikQRIS create request was not sent: readiness failed.', $exception);
+        }
 
         try {
             $response = $this->request()->post($this->endpoint('/qris/create'), [
@@ -27,12 +31,12 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
                 'keterangan' => 'Payment '.$payment->merchant_ref,
             ]);
         } catch (ConnectionException $exception) {
-            throw new RuntimeException('KlikQRIS create request failed: connection error.', previous: $exception);
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: connection error.', $exception);
         } catch (Throwable $exception) {
-            throw new RuntimeException('KlikQRIS create request failed: '.class_basename($exception).'.', previous: $exception);
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: '.class_basename($exception).'.', $exception);
         }
 
-        $this->throwIfHttpFailed($response, 'create');
+        $this->throwIfCreateHttpFailed($response);
 
         return $this->parseCreateResponse($response, $payment);
     }
@@ -96,6 +100,15 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         throw new RuntimeException(sprintf('KlikQRIS %s request failed with HTTP %d.', $operation, $response->status()));
     }
 
+    private function throwIfCreateHttpFailed(Response $response): void
+    {
+        if (! $response->failed()) {
+            return;
+        }
+
+        throw new KlikQrisCreateOutcomeUnknownException(sprintf('KlikQRIS create outcome is unknown after HTTP %d.', $response->status()));
+    }
+
     private function parseCreateResponse(Response $response, Payment $payment): KlikQrisTransaction
     {
         $payload = $this->jsonPayload($response, 'create');
@@ -106,7 +119,7 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
 
             return $transaction;
         } catch (UnexpectedValueException $exception) {
-            throw new RuntimeException('KlikQRIS create response validation failed: '.class_basename($exception).'.', previous: $exception);
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: response validation failed.', $exception);
         }
     }
 
@@ -129,6 +142,10 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
     {
         $payload = $response->json();
         if (! is_array($payload)) {
+            if ($operation === 'create') {
+                throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: invalid JSON.');
+            }
+
             throw new RuntimeException('KlikQRIS '.$operation.' response parse failed: invalid JSON.');
         }
 

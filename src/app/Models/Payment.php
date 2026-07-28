@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PaymentStatus;
+use App\Services\KlikQris\KlikQrisTransaction;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -118,7 +119,7 @@ class Payment extends Model
         $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
         $url = trim((string) ($data['qris_url'] ?? ''));
 
-        return $url !== '' ? $url : null;
+        return KlikQrisTransaction::isAllowedSandboxQrisUrl($url) ? $url : null;
     }
 
     public function klikQrisTotalAmountDisplay(): ?string

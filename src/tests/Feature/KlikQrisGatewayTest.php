@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\KlikQris\KlikQrisClient;
+use App\Services\KlikQris\KlikQrisCreateOutcomeUnknownException;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -77,7 +78,8 @@ class KlikQrisGatewayTest extends TestCase
             app(KlikQrisProviderAdapter::class)->createTransaction(KlikQrisSandboxScenarios::klikQrisPayment());
             $this->fail('Expected KlikQRIS create connection failure.');
         } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('KlikQRIS create request failed', $exception->getMessage());
+            $this->assertInstanceOf(KlikQrisCreateOutcomeUnknownException::class, $exception);
+            $this->assertStringContainsString('KlikQRIS create outcome is unknown', $exception->getMessage());
         }
 
         $this->assertSame(1, $attempts);
@@ -160,7 +162,7 @@ class KlikQrisGatewayTest extends TestCase
         $secrets = ['test-only-key', 'merchant-test', 'opaque-test-signature', 'secret-response-body', 'Bearer secret-authorization'];
 
         Http::fake(fn () => Http::response('secret-response-body', 200, ['authorization' => 'Bearer secret-authorization']));
-        $this->assertSanitizedFailure(fn () => app(KlikQrisProviderAdapter::class)->createTransaction($payment), $secrets, 'KlikQRIS create response parse failed');
+        $this->assertSanitizedFailure(fn () => app(KlikQrisProviderAdapter::class)->createTransaction($payment), $secrets, 'KlikQRIS create outcome is unknown');
     }
 
     public function test_mismatched_payload_exception_is_sanitized(): void
@@ -173,7 +175,7 @@ class KlikQrisGatewayTest extends TestCase
             'api_key' => 'test-only-key',
             'signature' => 'opaque-test-signature',
         ]), 200));
-        $this->assertSanitizedFailure(fn () => app(KlikQrisProviderAdapter::class)->createTransaction($payment), $secrets, 'KlikQRIS create response validation failed');
+        $this->assertSanitizedFailure(fn () => app(KlikQrisProviderAdapter::class)->createTransaction($payment), $secrets, 'KlikQRIS create outcome is unknown');
     }
 
     public function test_readiness_failure_happens_before_any_http_request(): void
@@ -184,7 +186,7 @@ class KlikQrisGatewayTest extends TestCase
         $this->assertSanitizedFailure(
             fn () => app(KlikQrisProviderAdapter::class)->createTransaction(KlikQrisSandboxScenarios::klikQrisPayment()),
             ['test-only-key', 'merchant-test'],
-            'KlikQRIS sandbox is not ready'
+            'KlikQRIS create request was not sent'
         );
         Http::assertNothingSent();
     }
