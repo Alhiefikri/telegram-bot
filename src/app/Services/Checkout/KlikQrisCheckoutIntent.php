@@ -52,7 +52,10 @@ final readonly class KlikQrisCheckoutIntent implements CheckoutPaymentIntent
                 ->sandbox()
                 ->assertReady('KlikQRIS sandbox checkout is not ready.');
         } catch (RuntimeException $exception) {
-            throw new InvalidCheckout($exception->getMessage(), previous: $exception);
+            throw new InvalidCheckout(
+                'KlikQRIS sandbox checkout is not ready. Please try another payment method or contact support.',
+                previous: $exception,
+            );
         }
     }
 

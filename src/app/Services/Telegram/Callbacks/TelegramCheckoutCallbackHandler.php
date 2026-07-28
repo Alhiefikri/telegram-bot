@@ -170,6 +170,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $requestedPaymentMode = $this->checkoutIntents->requestedPaymentMode();
             $paymentMode = $this->checkoutIntents->paymentMode();
             $paymentIntent = $this->paymentIntent($binance, $paymentMode);
+            $this->assertSupportedPostCreationBehavior($paymentIntent->postCreationBehavior());
             $order = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                 'step' => 'order_checkout',
                 'payment_mode' => $paymentMode,
@@ -190,8 +191,16 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::BinancePayInstructions => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
             CheckoutPostCreationBehavior::PakasirInstructions => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
             CheckoutPostCreationBehavior::ManualQrisInstructions => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
+            CheckoutPostCreationBehavior::KlikQrisInstructions => throw new InvalidCheckout('KlikQRIS Telegram checkout is not available yet.'),
         };
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+    }
+
+    private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void
+    {
+        if ($behavior === CheckoutPostCreationBehavior::KlikQrisInstructions) {
+            throw new InvalidCheckout('KlikQRIS Telegram checkout is not available yet.');
+        }
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string
@@ -220,6 +229,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
         if ($paymentMode === 'pakasir') {
             return CheckoutPaymentIntents::pakasir($this->checkoutIntents->pakasirPaymentMethod());
+        }
+
+        if ($paymentMode === 'klikqris') {
+            return CheckoutPaymentIntents::klikQris();
         }
 
         return CheckoutPaymentIntents::manualQris();

@@ -224,8 +224,14 @@ class OrderCartDomainTest extends TestCase
             );
             $this->fail('Expected KlikQRIS production checkout to fail closed.');
         } catch (InvalidCheckout $exception) {
-            $this->assertStringStartsWith('KlikQRIS sandbox checkout is not ready.', $exception->getMessage());
-            $this->assertStringContainsString('allowed only when APP_ENV is local or testing', $exception->getMessage());
+            $this->assertSame('KlikQRIS sandbox checkout is not ready. Please try another payment method or contact support.', $exception->getMessage());
+            $this->assertNotNull($exception->getPrevious());
+            $this->assertStringContainsString('allowed only when APP_ENV is local or testing', $exception->getPrevious()->getMessage());
+            $this->assertStringNotContainsString('APP_ENV', $exception->getMessage());
+            $this->assertStringNotContainsString('KLIKQRIS', $exception->getMessage());
+            $this->assertStringNotContainsString('klikqris.com', $exception->getMessage());
+            $this->assertStringNotContainsString('merchant-test', $exception->getMessage());
+            $this->assertStringNotContainsString('test-only-key', $exception->getMessage());
         }
 
         $this->assertSame(0, Order::count());

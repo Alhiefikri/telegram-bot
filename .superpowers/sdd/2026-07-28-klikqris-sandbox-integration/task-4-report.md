@@ -113,3 +113,93 @@ Result: no output.
 
 - Task 4 intentionally stops after checkout intent and enum behavior. Provider create/persistence, Telegram instruction delivery, and QRIS rendering remain for later tasks.
 - The task commit SHA is not embedded here to avoid the self-referential commit-hash problem; it is reported after committing.
+
+## Fix Round 1
+
+### Review Items Addressed
+
+1. `KlikQrisCheckoutIntent::assertReady()` now throws a stable customer-safe `InvalidCheckout` message:
+
+```text
+KlikQRIS sandbox checkout is not ready. Please try another payment method or contact support.
+```
+
+The underlying readiness exception is retained as `previous` for internal diagnostics, but the customer-facing exception message no longer includes `APP_ENV`, config/env key names, URLs, merchant IDs, API keys, or readiness detail text.
+
+2. `TelegramCheckoutCallbackHandler` now fails closed before calling `OrderCheckoutService::checkout()` when a `CheckoutPostCreationBehavior::KlikQrisInstructions` intent reaches Telegram before the later KlikQRIS instruction-delivery task supports it. The enum match was also made exhaustive defensively, but the side-effect prevention happens before order/payment/stock persistence.
+
+### RED
+
+Customer-safe readiness RED:
+
+```bash
+cd src && php artisan test tests/Feature/OrderCartDomainTest.php --filter=klik_qris_checkout_fails_closed_in_production
+```
+
+Failure before fix:
+
+```text
+Failed asserting that two strings are identical.
+-'KlikQRIS sandbox checkout is not ready. Please try another payment method or contact support.'
++'KlikQRIS sandbox checkout is not ready. KlikQRIS sandbox checkout is allowed only when APP_ENV is local or testing.'
+```
+
+Telegram fail-closed RED:
+
+```bash
+cd src && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter=telegram_rejects_klik_qris
+```
+
+Failure before fix:
+
+```text
+Failed asserting that 1 is identical to 0.
+```
+
+The failure was on `Order::count()`, proving the unsupported KlikQRIS Telegram path persisted an order before the fix.
+
+### GREEN
+
+Focused GREEN:
+
+```bash
+cd src && php artisan test tests/Feature/OrderCartDomainTest.php --filter=klik_qris_checkout_fails_closed_in_production \
+  && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter=telegram_rejects_klik_qris
+```
+
+Result:
+
+```text
+PASS Tests\Feature\OrderCartDomainTest
+Tests: 1 passed (12 assertions)
+
+PASS Tests\Feature\Telegram\CartCheckoutTest
+Tests: 1 passed (9 assertions)
+```
+
+### Regressions
+
+```bash
+cd src && php artisan test tests/Feature/OrderCartDomainTest.php \
+  && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter='checkout|klik_qris|qris' \
+  && ./vendor/bin/pint --dirty
+```
+
+Result:
+
+```text
+PASS Tests\Feature\OrderCartDomainTest
+Tests: 35 passed (168 assertions)
+
+PASS Tests\Feature\Telegram\CartCheckoutTest
+Tests: 35 passed (342 assertions)
+
+Laravel Pint
+PASS 4 files
+```
+
+### Scope Review
+
+- No review/ledger files changed.
+- No admin switch, selector activation, production routing, QR send, provider create, persistence, webhook, or Task 5/6 behavior added.
+- Telegram change is minimum boundary safety: it recognizes an internally mocked future `klikqris` payment mode only to construct the intent and reject its unsupported post-creation behavior before checkout side effects.

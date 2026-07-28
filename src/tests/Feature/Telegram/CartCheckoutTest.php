@@ -269,6 +269,35 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(2, $product->fresh()->reserved_stock);
     }
 
+    public function test_telegram_rejects_klik_qris_checkout_intent_before_order_payment_or_stock_side_effects(): void
+    {
+        $this->fakeTelegramHttp();
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
+            'sandbox_api_key' => 'test-only-key',
+            'sandbox_merchant_id' => 'merchant-test',
+            'qris_ttl_minutes' => 15,
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $checkoutIntents = $this->mock(TelegramCheckoutIntents::class);
+        $checkoutIntents->shouldReceive('requestedPaymentMode')->once()->andReturn('klikqris');
+        $checkoutIntents->shouldReceive('paymentMode')->once()->andReturn('klikqris');
+        $checkoutIntents->shouldReceive('sendPaymentInstructions')->zeroOrMoreTimes();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Unsupported KlikQRIS', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(6261, 'unsupported-klikqris', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99021))->assertOk();
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, Cart::where('status', CartStatus::CheckedOut)->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Checkout belum berhasil'));
+    }
+
     public function test_duplicate_direct_binance_quantity_callbacks_share_one_checkout_intent(): void
     {
         config()->set('services.binance.pay_id', '987654321');
