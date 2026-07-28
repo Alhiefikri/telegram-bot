@@ -32,7 +32,7 @@ class KlikQrisWebhookTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $this->travelTo('2026-07-28 07:05:00');
     }
 

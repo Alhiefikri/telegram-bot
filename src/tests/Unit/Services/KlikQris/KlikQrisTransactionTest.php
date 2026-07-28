@@ -5,6 +5,7 @@ namespace Tests\Unit\Services\KlikQris;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisAmount;
 use App\Services\KlikQris\KlikQrisCallback;
+use App\Services\KlikQris\KlikQrisPayloadSanitizer;
 use App\Services\KlikQris\KlikQrisTransaction;
 use Carbon\CarbonImmutable;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -126,6 +127,31 @@ class KlikQrisTransactionTest extends TestCase
         $this->assertArrayNotHasKey('Authorization', $sanitized['data']['nested']);
         $this->assertArrayNotHasKey('access_token', $sanitized['data']['nested']);
         $this->assertArrayNotHasKey('client_secret', $sanitized['data']['nested']);
+    }
+
+    public function test_payload_sanitizer_removes_merchant_credential_key_variants_recursively(): void
+    {
+        $sanitized = KlikQrisPayloadSanitizer::sanitize([
+            'id_merchant' => 'MERCHANT_SECRET_ONE',
+            'merchant_id' => 'MERCHANT_SECRET_TWO',
+            'merchant' => 'MERCHANT_SECRET_THREE',
+            'idmerchant' => 'MERCHANT_SECRET_FOUR',
+            'ID-MERCHANT' => 'MERCHANT_SECRET_FIVE',
+            'nested' => [
+                'merchantId' => 'MERCHANT_SECRET_SIX',
+                'merchant_identifier' => 'MERCHANT_SECRET_SEVEN',
+                'safe_merchant_display_name' => 'Safe Merchant Label',
+            ],
+            'safe' => 'kept',
+        ]);
+
+        $json = json_encode($sanitized, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('kept', $sanitized['safe']);
+        $this->assertSame('Safe Merchant Label', $sanitized['nested']['safe_merchant_display_name']);
+        foreach (['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN'] as $suffix) {
+            $this->assertStringNotContainsString('MERCHANT_SECRET_'.$suffix, $json);
+        }
     }
 
     public function test_transaction_assert_matches_payment_identity_and_total_when_present(): void

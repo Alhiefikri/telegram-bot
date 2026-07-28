@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisSandboxCheckoutSelector;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -18,13 +19,7 @@ class KlikQrisProviderReadinessTest extends TestCase
 
     public function test_sandbox_is_ready_only_when_enabled_with_complete_sandbox_configuration_outside_production(): void
     {
-        config()->set('services.klikqris', [
-            'sandbox_enabled' => true,
-            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
-            'sandbox_api_key' => 'test-only-key',
-            'sandbox_merchant_id' => 'merchant-test',
-            'qris_ttl_minutes' => 15,
-        ]);
+        $this->configureReadySandbox();
 
         $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandbox()->isReady());
         $this->assertTrue(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
@@ -44,6 +39,54 @@ class KlikQrisProviderReadinessTest extends TestCase
 
         $this->assertFalse($report->isReady());
         $this->assertContains('APP_ENV', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
+    }
+
+    public function test_sandbox_selector_is_disabled_when_callback_route_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        app('router')->setRoutes(new RouteCollection);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_CALLBACK_ROUTE', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
+    }
+
+    public function test_sandbox_selector_is_disabled_when_queue_connection_is_not_operationally_configured(): void
+    {
+        $this->configureReadySandbox();
+        config()->set('queue.default', 'sync');
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('QUEUE_CONNECTION', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
+    }
+
+    public function test_sandbox_selector_is_disabled_when_queue_schema_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        Schema::dropIfExists('jobs');
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('QUEUE_JOBS_TABLE', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
+    }
+
+    public function test_sandbox_selector_is_disabled_when_reconciliation_scheduler_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        config()->set('services.klikqris.reconciliation_command', null);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_RECONCILIATION_SCHEDULE', $report->problemLabels());
         $this->assertFalse(app(KlikQrisSandboxCheckoutSelector::class)->enabled());
     }
 
@@ -73,6 +116,20 @@ class KlikQrisProviderReadinessTest extends TestCase
         $this->expectExceptionMessage('KlikQRIS sandbox is not ready.');
 
         $report->assertReady('KlikQRIS sandbox is not ready.');
+    }
+
+    private function configureReadySandbox(): void
+    {
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
+            'sandbox_api_key' => 'test-only-key',
+            'sandbox_merchant_id' => 'merchant-test',
+            'qris_ttl_minutes' => 15,
+            'status_retry_delay_ms' => 0,
+            'reconciliation_command' => 'klikqris:reconcile --chunk=100',
+        ]);
+        config()->set('queue.default', 'database');
     }
 
     public function test_sandbox_rejects_base_url_paths_other_than_api_sandbox_after_normalization(): void

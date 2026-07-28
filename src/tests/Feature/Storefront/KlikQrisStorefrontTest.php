@@ -35,7 +35,7 @@ class KlikQrisStorefrontTest extends TestCase
 
     public function test_checkout_uses_klikqris_sandbox_direct_qris_without_hosted_or_snap_fallback(): void
     {
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'pakasir',
             'pakasir_enabled' => false,
@@ -123,7 +123,7 @@ class KlikQrisStorefrontTest extends TestCase
 
     public function test_klikqris_pending_status_refresh_marks_paid_and_single_flight_skips_duplicate_provider_requests(): void
     {
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $payment = KlikQrisSandboxScenarios::klikQrisPayment([
             'amount' => 1000,
             'provider_total_payment' => 1016,
@@ -165,7 +165,7 @@ class KlikQrisStorefrontTest extends TestCase
 
     public function test_klikqris_provider_failure_returns_retryable_json_without_details(): void
     {
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $payment = KlikQrisSandboxScenarios::klikQrisPayment([
             'amount' => 1000,
             'provider_total_payment' => 1016,
@@ -188,6 +188,49 @@ class KlikQrisStorefrontTest extends TestCase
         $this->assertStringNotContainsString('SECRET_FAIL_SIGNATURE', $json);
         $this->assertStringNotContainsString('api_key', $json);
         $this->assertStringNotContainsString('signature', $json);
+    }
+
+    public function test_storefront_base64_only_create_does_not_render_missing_or_unsafe_media(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::query()->create([
+            'payment_mode' => 'pakasir',
+            'pakasir_enabled' => false,
+            'pakasir_checkout_flow' => PakasirCheckoutFlow::HOSTED,
+        ]);
+        $base64 = KlikQrisSandboxScenarios::pngDataUri('storefront-base64-only');
+        Http::fake([
+            'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) use ($base64) {
+                return Http::response(['data' => [
+                    'order_id' => $request['order_id'],
+                    'amount' => 1000,
+                    'total_amount' => 1016,
+                    'status' => 'PENDING',
+                    'qris_url' => null,
+                    'qris_image' => $base64,
+                    'signature' => 'STORE_TOKEN_SHOULD_NOT_RENDER',
+                    'merchant_id' => 'MERCHANT_SECRET_STOREFRONT',
+                    'expired_at' => now()->addMinutes(15)->toISOString(),
+                ]]);
+            },
+        ]);
+        $product = $this->availableProduct(['price_amount' => 1000, 'stock' => 1]);
+
+        $result = app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+            productId: $product->id,
+            quantity: 1,
+            buyerName: 'Base64 Buyer',
+        ));
+        $payment = Payment::query()->where('provider', 'klikqris')->firstOrFail();
+        $html = $this->get($result->redirectUrl)->assertOk()->getContent();
+
+        $this->assertSame('transient_qris_image', $payment->fresh()->provider_create_state);
+        $this->assertFalse($payment->fresh()->isPayableNativeKlikQris());
+        $this->assertStringNotContainsString('<img src="data:image/png;base64,', $html);
+        $this->assertStringNotContainsString($base64, $html);
+        $this->assertStringNotContainsString('STORE_TOKEN_SHOULD_NOT_RENDER', $html);
+        $this->assertStringNotContainsString('MERCHANT_SECRET_STOREFRONT', $html);
+        $this->assertStringContainsString('QRIS belum siap dibayar', $html);
     }
 
     public function test_pakasir_status_refresh_still_uses_pakasir_and_manual_or_binance_remain_unsupported(): void

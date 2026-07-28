@@ -61,6 +61,10 @@ class KlikQrisNativeQrisService
                 $transaction = $this->persistCreatedTransaction($payment, $transaction);
 
                 if (! $this->hasPayablePersistedQris($payment->fresh())) {
+                    if ($this->hasTransientInitialImage($transaction)) {
+                        return $transaction;
+                    }
+
                     throw new RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
                 }
 
@@ -85,6 +89,7 @@ class KlikQrisNativeQrisService
             }
 
             $isPayableCreated = $this->isPayableProviderTransaction($transaction, $lockedPayment, $providerExpiresAt);
+            $nonPayableState = $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt);
             $paymentUpdates = [
                 'provider_payload' => $transaction->sanitizedPayload(),
                 'provider_fee' => $providerTotal >= (int) $lockedPayment->amount ? $providerTotal - (int) $lockedPayment->amount : null,
@@ -93,8 +98,8 @@ class KlikQrisNativeQrisService
                 'provider_created_at' => now(),
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_transaction_token' => $transaction->signature(),
-                'provider_create_state' => $isPayableCreated ? 'created' : $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt),
-                'provider_create_last_error' => $isPayableCreated ? null : $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt),
+                'provider_create_state' => $isPayableCreated ? 'created' : $nonPayableState,
+                'provider_create_last_error' => $isPayableCreated ? null : $nonPayableState,
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -227,6 +232,10 @@ class KlikQrisNativeQrisService
         }
 
         if (! filled($transaction->qrisUrl()) || ! KlikQrisTransaction::isAllowedSandboxQrisUrl($transaction->qrisUrl())) {
+            if ($this->hasTransientInitialImage($transaction)) {
+                return 'transient_qris_image';
+            }
+
             return 'provider_qris_unusable';
         }
 
@@ -239,6 +248,15 @@ class KlikQrisNativeQrisService
         }
 
         return 'provider_not_payable';
+    }
+
+    private function hasTransientInitialImage(KlikQrisTransaction $transaction): bool
+    {
+        return $transaction->isPending()
+            && ! filled($transaction->qrisUrl())
+            && filled($transaction->qrisImageBase64())
+            && filled($transaction->signature())
+            && $transaction->expiresAt()?->isFuture() === true;
     }
 
     private function hasProviderCreateEvent(Payment $payment): bool

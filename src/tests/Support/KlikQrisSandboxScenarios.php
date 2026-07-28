@@ -21,7 +21,19 @@ final class KlikQrisSandboxScenarios
             'status_retry_delay_ms' => 0,
             'webhook_rate_limit_per_minute' => 30,
             'status_refresh_rate_limit_per_minute' => 3,
+            'reconciliation_command' => 'klikqris:reconcile --chunk=100',
         ];
+    }
+
+    public static function configureReadySandbox(): void
+    {
+        config()->set('services.klikqris', self::readyConfig());
+        config()->set('queue.default', 'database');
+    }
+
+    public static function pngDataUri(string $body = 'test-qris-png'): string
+    {
+        return 'data:image/png;base64,'.base64_encode("\x89PNG\r\n\x1A\n".$body);
     }
 
     public static function klikQrisPayment(array $attributes = []): Payment

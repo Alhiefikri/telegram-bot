@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Cart;
@@ -30,6 +31,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
 
 class CartCheckoutTest extends TelegramBotTestSupport
@@ -273,30 +275,12 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_telegram_dispatches_klik_qris_checkout_intent_without_pakasir_or_manual_instruction_jobs(): void
     {
-        $this->fakeTelegramHttp([
-            'https://klikqris.com/api/sandbox/qris/create' => function ($request) {
-                $orderId = (string) ($request['order_id'] ?? 'INV-KLIK-E2E');
-
-                return Http::response(['data' => [
-                    'order_id' => $orderId,
-                    'amount' => 25000,
-                    'total_amount' => 25016,
-                    'status' => 'PENDING',
-                    'qris_url' => 'https://klikqris.com/storage/sandbox/qris_cart_checkout.png',
-                    'qris_image' => 'data:image/png;base64,'.base64_encode("\x89PNG\r\n\x1A\n".'cart-checkout-png'),
-                    'expired_at' => now()->addMinutes(15)->toIso8601String(),
-                    'signature' => 'opaque-test-signature',
-                ]], 200);
-            },
-            'https://klikqris.com/storage/sandbox/qris_cart_checkout.png' => Http::response("\x89PNG\r\n\x1A\n".'cart-checkout-png', 200, ['Content-Type' => 'image/png']),
+        Queue::fake([
+            SendKlikQrisCheckoutInstructions::class,
+            SendManualCheckoutNotifications::class,
+            SendPakasirCheckoutInstructions::class,
         ]);
-        config()->set('services.klikqris', [
-            'sandbox_enabled' => true,
-            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
-            'sandbox_api_key' => 'test-only-key',
-            'sandbox_merchant_id' => 'merchant-test',
-            'qris_ttl_minutes' => 15,
-        ]);
+        $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $this->app->bind(
             TelegramCheckoutPaymentIntentSelector::class,
@@ -304,6 +288,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
             {
                 public function select(bool $binance): TelegramCheckoutPaymentIntentSelection
                 {
+                    KlikQrisSandboxScenarios::configureReadySandbox();
+
                     return new TelegramCheckoutPaymentIntentSelection(
                         requestedPaymentMode: 'klikqris',
                         paymentMode: 'klikqris',
@@ -323,9 +309,13 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame('klikqris', $payment->provider);
         $this->assertSame(CartStatus::CheckedOut, Cart::query()->sole()->status);
         $this->assertSame(1, $product->fresh()->reserved_stock);
-        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
-            && str_contains($request->body(), 'klikqris-')));
-        $this->assertCount(0, Http::recorded(fn ($request) => str_contains($request->url(), 'pakasir')));
+        Queue::assertPushedOn(
+            'telegram-outbound',
+            SendKlikQrisCheckoutInstructions::class,
+            fn (SendKlikQrisCheckoutInstructions $job): bool => $job->orderId === $order->id,
+        );
+        Queue::assertNotPushed(SendPakasirCheckoutInstructions::class);
+        Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
     public function test_duplicate_direct_binance_quantity_callbacks_share_one_checkout_intent(): void

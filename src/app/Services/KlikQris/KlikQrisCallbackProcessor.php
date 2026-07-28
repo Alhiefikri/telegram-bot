@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use UnexpectedValueException;
 
 class KlikQrisCallbackProcessor
@@ -29,13 +30,25 @@ class KlikQrisCallbackProcessor
             return $event;
         }
 
-        $transaction = $this->client->transactionStatus($payment);
+        try {
+            $transaction = $this->client->transactionStatus($payment);
+        } catch (RuntimeException $exception) {
+            if (! $exception->getPrevious() instanceof UnexpectedValueException) {
+                throw $exception;
+            }
+
+            report($exception);
+
+            return $event->fresh();
+        }
 
         return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
     }
 
     public function processReconciliationForPayment(Payment $payment, KlikQrisTransaction $transaction): PaymentEvent
     {
+        $transaction->assertMatches($payment);
+
         $event = $this->events->logReconciliation($transaction, $payment);
 
         return $this->applyAuthoritativeTransaction($payment, $transaction, $event);

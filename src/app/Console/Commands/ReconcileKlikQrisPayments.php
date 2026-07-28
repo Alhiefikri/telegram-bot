@@ -37,6 +37,12 @@ class ReconcileKlikQrisPayments extends Command
 
         $readinessReport = $readiness->sandbox();
         if (! $readinessReport->isReady()) {
+            if ($readiness->sandboxDisabledForEnvironment()) {
+                $this->info('klikqris:reconcile skipped safely: KlikQRIS sandbox is disabled for this environment.');
+
+                return self::SUCCESS;
+            }
+
             $this->error('klikqris:reconcile failed: KlikQRIS sandbox is not ready.');
 
             return self::FAILURE;

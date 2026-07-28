@@ -6,6 +6,8 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
@@ -22,7 +24,7 @@ class KlikQrisReconciliationTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $this->travelTo('2026-07-28 07:05:00');
     }
 
@@ -162,6 +164,53 @@ class KlikQrisReconciliationTest extends TestCase
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_mismatched_status_response_creates_no_reconciliation_event_provider_status_or_fulfillment(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-EXPECTED']);
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+            'order_id' => 'KLIK-DIFFERENT',
+            'status' => 'SUCCESS',
+        ]), 200));
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('processed=0 skipped=0 failed=1')
+            ->assertExitCode(1);
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        $this->assertSame(0, PaymentEvent::query()->where('payment_id', $payment->id)->where('event_type', 'reconciliation')->count());
+        $this->assertFalse(PaymentEvent::query()->where('payment_id', $payment->id)->where('provider_status', 'SUCCESS')->exists());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_disabled_or_production_reconcile_command_is_inert_and_successful(): void
+    {
+        config()->set('services.klikqris.sandbox_enabled', false);
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('klikqris:reconcile skipped safely: KlikQRIS sandbox is disabled for this environment.')
+            ->assertExitCode(0);
+
+        $this->app['env'] = 'production';
+        config()->set('app.env', 'production');
+        config()->set('services.klikqris.sandbox_enabled', true);
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('klikqris:reconcile skipped safely: KlikQRIS sandbox is disabled for this environment.')
+            ->assertExitCode(0);
+    }
+
+    public function test_enabled_but_misconfigured_local_reconcile_command_still_fails(): void
+    {
+        config()->set('services.klikqris.sandbox_enabled', true);
+        config()->set('services.klikqris.sandbox_api_key', null);
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('klikqris:reconcile failed: KlikQRIS sandbox is not ready.')
+            ->assertExitCode(1);
+    }
+
     public function test_command_validates_bounded_chunk_option(): void
     {
         $this->artisan('klikqris:reconcile --chunk=0')->assertExitCode(1);
@@ -170,12 +219,20 @@ class KlikQrisReconciliationTest extends TestCase
 
     public function test_schedule_registers_one_minute_klikqris_reconcile_without_overlap(): void
     {
-        Artisan::call('schedule:list');
-        $output = Artisan::output();
         $schedule = file_get_contents(base_path('routes/console.php'));
 
-        $this->assertSame(1, substr_count($output, 'klikqris:reconcile --chunk=100'));
-        $this->assertSame(1, substr_count($schedule, "Schedule::command('klikqris:reconcile --chunk=100')->everyMinute()->withoutOverlapping();"));
+        $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandboxSchedulingEnabled());
+        $this->assertStringContainsString('klikqris:reconcile --chunk=100', $schedule);
+        $this->assertStringContainsString('sandboxSchedulingEnabled()', $schedule);
+    }
+
+    public function test_schedule_does_not_register_klikqris_reconcile_when_sandbox_cannot_be_enabled(): void
+    {
+        config()->set('services.klikqris.sandbox_enabled', false);
+
+        Artisan::call('schedule:list');
+
+        $this->assertStringNotContainsString('klikqris:reconcile --chunk=100', Artisan::output());
     }
 
     private function payableKlikQrisPayment(array $attributes = []): Payment

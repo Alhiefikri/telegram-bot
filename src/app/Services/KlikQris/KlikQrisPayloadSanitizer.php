@@ -26,8 +26,17 @@ final class KlikQrisPayloadSanitizer
     private static function isSensitiveKey(string $key): bool
     {
         $normalized = strtolower($key);
+        $compact = preg_replace('/[^a-z0-9]/', '', $normalized) ?? $normalized;
 
         if (in_array($normalized, ['signature', 'qris_image'], true)) {
+            return true;
+        }
+
+        if (in_array($compact, ['merchant', 'merchantid', 'idmerchant'], true)) {
+            return true;
+        }
+
+        if (str_contains($compact, 'merchant') && ! str_contains($compact, 'display') && ! str_contains($compact, 'name')) {
             return true;
         }
 

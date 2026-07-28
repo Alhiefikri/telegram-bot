@@ -20,7 +20,7 @@ class KlikQrisGatewayTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
     }
 
     public function test_provider_adapter_is_bound_to_sandbox_client(): void

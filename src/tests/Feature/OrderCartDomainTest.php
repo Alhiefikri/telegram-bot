@@ -34,6 +34,7 @@ use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
@@ -125,13 +126,7 @@ class OrderCartDomainTest extends TestCase
 
     public function test_klik_qris_checkout_persists_idr_payment_for_current_product_total_with_default_deadline(): void
     {
-        config()->set('services.klikqris', [
-            'sandbox_enabled' => true,
-            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
-            'sandbox_api_key' => 'test-only-key',
-            'sandbox_merchant_id' => 'merchant-test',
-            'qris_ttl_minutes' => 15,
-        ]);
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $startedAt = now()->startOfMinute();
         Carbon::setTestNow($startedAt);
 

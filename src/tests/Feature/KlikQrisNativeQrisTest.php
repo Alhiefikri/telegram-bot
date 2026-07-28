@@ -30,7 +30,7 @@ class KlikQrisNativeQrisTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        KlikQrisSandboxScenarios::configureReadySandbox();
         $this->travelTo('2026-07-28 07:00:00');
     }
 
@@ -62,6 +62,60 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame(1, $fresh->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
         $this->assertArrayNotHasKey('signature', $fresh->paymentEvents()->first()->raw_payload['data']);
         Http::assertSentCount(1);
+    }
+
+    public function test_base64_only_create_returns_transient_image_without_persisting_base64_or_stored_payability(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+        $base64 = KlikQrisSandboxScenarios::pngDataUri('native-base64-only');
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
+            'qris_url' => null,
+            'qris_image' => $base64,
+            'id_merchant' => 'MERCHANT_SECRET_CREATE',
+            'nested' => ['merchant_id' => 'MERCHANT_SECRET_NESTED'],
+        ]), 200));
+
+        $transaction = app(KlikQrisNativeQrisService::class)->ensureCreated($payment);
+        $fresh = $payment->fresh();
+        $persistedJson = json_encode($fresh->provider_payload, JSON_THROW_ON_ERROR);
+
+        $this->assertSame($base64, $transaction->qrisImageBase64());
+        $this->assertNull($transaction->qrisUrl());
+        $this->assertSame('transient_qris_image', $fresh->provider_create_state);
+        $this->assertSame(1016, $fresh->provider_total_payment);
+        $this->assertFalse($fresh->isPayableNativeKlikQris());
+        $this->assertArrayNotHasKey('qris_image', $fresh->provider_payload['data']);
+        $this->assertStringNotContainsString($base64, $persistedJson);
+        $this->assertStringNotContainsString('MERCHANT_SECRET_CREATE', $persistedJson);
+        $this->assertStringNotContainsString('MERCHANT_SECRET_NESTED', $persistedJson);
+        $this->assertSame(0, $fresh->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
+    }
+
+    public function test_base64_only_retry_uses_status_recovery_without_reposting_or_leaking_base64(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+        $base64 = KlikQrisSandboxScenarios::pngDataUri('retry-base64-only');
+        Http::fakeSequence()
+            ->push(KlikQrisSandboxScenarios::createPayload($payment, [
+                'qris_url' => null,
+                'qris_image' => $base64,
+            ]), 200)
+            ->push(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'status' => 'PENDING',
+                'qris_url' => null,
+                'qris_image' => $base64,
+            ]), 200);
+
+        app(KlikQrisNativeQrisService::class)->ensureCreated($payment);
+
+        $this->expectException(RuntimeException::class);
+        try {
+            app(KlikQrisNativeQrisService::class)->ensureCreated($payment->fresh());
+        } finally {
+            Http::assertSentCount(2);
+            $this->assertSame('provider_qris_unusable', $payment->fresh()->provider_create_state);
+            $this->assertStringNotContainsString($base64, json_encode($payment->fresh()->provider_payload, JSON_THROW_ON_ERROR));
+        }
     }
 
     public function test_sequential_calls_return_persisted_payment_without_second_create_request(): void
