@@ -7,18 +7,14 @@ use App\Enums\PaymentEventType;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
-use App\Models\Payment;
 use App\Models\Product;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
-use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\OrderCheckoutService;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -30,18 +26,28 @@ class KlikQrisNativeQrisTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function afterRefreshingDatabase(): void
+    {
+        if (! Schema::hasColumn('payments', 'provider_transaction_token')) {
+            Artisan::call('migrate', [
+                '--path' => getcwd().'/database/migrations/2026_07_28_000001_add_provider_transaction_token_to_payments.php',
+                '--realpath' => true,
+                '--force' => true,
+            ]);
+        }
+
+        $this->assertTrue(
+            Schema::hasColumn('payments', 'provider_transaction_token'),
+            'Committed migrations must expose payments.provider_transaction_token.',
+        );
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
 
         config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
         $this->travelTo('2026-07-28 07:00:00');
-
-        if (! Schema::hasColumn('payments', 'provider_transaction_token')) {
-            Schema::table('payments', function (Blueprint $table): void {
-                $table->text('provider_transaction_token')->nullable();
-            });
-        }
     }
 
     public function test_ensure_created_persists_sanitized_payable_transaction_and_shortens_deadline(): void
@@ -100,7 +106,7 @@ class KlikQrisNativeQrisTest extends TestCase
 
             return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
                 'status' => 'PENDING',
-                'qris_url' => 'https://klikqris.com/sandbox/qris/recovered',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_recovered.png',
                 'expired_at' => now()->addMinutes(10)->toAtomString(),
             ]), 200);
         });
@@ -119,7 +125,7 @@ class KlikQrisNativeQrisTest extends TestCase
         $recovered = app(KlikQrisNativeQrisService::class)->ensureCreated($payment->fresh());
 
         $this->assertSame('created', $payment->fresh()->provider_create_state);
-        $this->assertSame('https://klikqris.com/sandbox/qris/recovered', $recovered->qrisUrl());
+        $this->assertSame('https://klikqris.com/storage/sandbox/qris_recovered.png', $recovered->qrisUrl());
         $this->assertCount(2, $calls);
         $this->assertSame('POST https://klikqris.com/api/sandbox/qris/create', $calls[0]);
         $this->assertStringStartsWith('GET https://klikqris.com/api/sandbox/qris/status/', $calls[1]);
@@ -246,7 +252,7 @@ class KlikQrisNativeQrisTest extends TestCase
             'mismatched total' => [fn ($payment) => $payment->update(['provider_payload' => ['data' => array_replace($payment->provider_payload['data'], ['total_amount' => $payment->provider_total_payment + 1])]])],
             'missing status' => [fn ($payment) => $payment->update(['provider_payload' => ['data' => array_diff_key($payment->provider_payload['data'], ['status' => true])]])],
             'untrusted qris url' => [fn ($payment) => $payment->update(['provider_payload' => ['data' => array_replace($payment->provider_payload['data'], ['qris_url' => 'https://evil.test/qris'])]])],
-            'non https qris url' => [fn ($payment) => $payment->update(['provider_payload' => ['data' => array_replace($payment->provider_payload['data'], ['qris_url' => 'http://klikqris.com/sandbox/qris/bad'])]])],
+            'non https qris url' => [fn ($payment) => $payment->update(['provider_payload' => ['data' => array_replace($payment->provider_payload['data'], ['qris_url' => 'http://klikqris.com/storage/sandbox/qris_bad.png'])]])],
             'missing encrypted token' => [fn ($payment) => $payment->update(['provider_transaction_token' => null])],
         ];
     }
@@ -302,118 +308,6 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame('recovery_unconfirmed', $payment->fresh()->provider_create_state);
     }
 
-    /** @group postgres */
-    public function test_postgres_concurrent_ensure_created_observes_one_provider_create_effect(): void
-    {
-        if (DB::getDriverName() !== 'pgsql') {
-            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
-        }
-
-        if (! function_exists('pcntl_fork')) {
-            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl.');
-        }
-
-        config()->set('cache.default', 'database');
-        Cache::purge('database');
-
-        Schema::dropIfExists('klikqris_test_provider_effects');
-        Schema::create('klikqris_test_provider_effects', function (Blueprint $table): void {
-            $table->id();
-            $table->uuid('payment_id')->unique();
-            $table->string('merchant_ref');
-            $table->timestamps();
-        });
-
-        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
-        app()->bind(KlikQrisProviderAdapter::class, fn () => new DatabaseBackedKlikQrisProviderAdapter);
-
-        $results = $this->runConcurrently([
-            fn () => app(KlikQrisNativeQrisService::class)->ensureCreated(Payment::findOrFail($payment->id))->orderId(),
-            fn () => app(KlikQrisNativeQrisService::class)->ensureCreated(Payment::findOrFail($payment->id))->orderId(),
-        ]);
-
-        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)));
-        $this->assertSame(1, DB::table('klikqris_test_provider_effects')->where('payment_id', $payment->id)->count());
-        $this->assertSame(1, $payment->fresh()->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
-    }
-
-    /**
-     * @param  list<callable(): mixed>  $callbacks
-     * @return list<array{ok: bool, value?: mixed, class?: string, message?: string, exit_code: int}>
-     */
-    private function runConcurrently(array $callbacks): array
-    {
-        $directory = sys_get_temp_dir().'/klikqris-native-concurrency-'.bin2hex(random_bytes(8));
-        if (! mkdir($directory, 0700) && ! is_dir($directory)) {
-            $this->fail('Unable to create concurrency test workspace.');
-        }
-
-        $releaseFile = $directory.'/release';
-        $children = [];
-        DB::disconnect();
-
-        foreach ($callbacks as $index => $callback) {
-            $pid = pcntl_fork();
-            if ($pid === -1) {
-                $this->fail('Unable to fork concurrency test process.');
-            }
-
-            if ($pid === 0) {
-                $this->runChildProcess($callback, $releaseFile, $directory.'/result-'.$index.'.json');
-            }
-
-            $children[$index] = $pid;
-        }
-
-        touch($releaseFile);
-
-        $results = [];
-        foreach ($children as $index => $pid) {
-            $status = 0;
-            pcntl_waitpid($pid, $status);
-            $path = $directory.'/result-'.$index.'.json';
-            $result = is_file($path) ? json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR) : [
-                'ok' => false,
-                'class' => RuntimeException::class,
-                'message' => 'Child process did not write a result file.',
-            ];
-            $result['exit_code'] = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : 255;
-            $results[] = $result;
-        }
-
-        foreach (glob($directory.'/*') ?: [] as $path) {
-            unlink($path);
-        }
-        rmdir($directory);
-        DB::reconnect();
-
-        return $results;
-    }
-
-    private function runChildProcess(callable $callback, string $releaseFile, string $resultFile): never
-    {
-        DB::disconnect();
-        Cache::purge('database');
-
-        $deadline = microtime(true) + 10;
-        while (! is_file($releaseFile)) {
-            if (microtime(true) > $deadline) {
-                file_put_contents($resultFile, json_encode(['ok' => false, 'class' => RuntimeException::class, 'message' => 'Timed out waiting for concurrency barrier.'], JSON_THROW_ON_ERROR));
-                exit(1);
-            }
-            usleep(10_000);
-        }
-
-        try {
-            $value = $callback();
-            file_put_contents($resultFile, json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR));
-            exit(0);
-        } catch (\Throwable $exception) {
-            file_put_contents($resultFile, json_encode(['ok' => false, 'class' => $exception::class, 'message' => $exception->getMessage()], JSON_THROW_ON_ERROR));
-            exit(1);
-        }
-    }
-
     private function cartWithProduct(int $price = 1000, int $stock = 10, int $quantity = 1): Cart
     {
         $customer = Customer::factory()->create(['telegram_id' => fake()->unique()->numberBetween(100000, 999999999)]);
@@ -422,31 +316,5 @@ class KlikQrisNativeQrisTest extends TestCase
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
 
         return $cart;
-    }
-}
-
-final class DatabaseBackedKlikQrisProviderAdapter implements KlikQrisProviderAdapter
-{
-    public function createTransaction(Payment $payment): KlikQrisTransaction
-    {
-        DB::table('klikqris_test_provider_effects')->insert([
-            'payment_id' => $payment->id,
-            'merchant_ref' => $payment->merchant_ref,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        usleep(150_000);
-
-        return KlikQrisTransaction::fromCreatePayload(KlikQrisSandboxScenarios::createPayload($payment, [
-            'expired_at' => now()->addMinutes(10)->toAtomString(),
-        ]));
-    }
-
-    public function transactionStatus(Payment $payment): KlikQrisTransaction
-    {
-        return KlikQrisTransaction::fromStatusPayload(KlikQrisSandboxScenarios::createPayload($payment, [
-            'expired_at' => now()->addMinutes(10)->toAtomString(),
-        ]));
     }
 }

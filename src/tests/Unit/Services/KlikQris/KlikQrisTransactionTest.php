@@ -56,6 +56,30 @@ class KlikQrisTransactionTest extends TestCase
         ];
     }
 
+    #[DataProvider('sandboxQrisUrls')]
+    public function test_sandbox_qris_url_allowlist_accepts_only_documented_storage_sandbox_shape(string $url, bool $expected): void
+    {
+        $this->assertSame($expected, KlikQrisTransaction::isAllowedSandboxQrisUrl($url));
+    }
+
+    public static function sandboxQrisUrls(): array
+    {
+        return [
+            'documented sandbox storage png' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png', true],
+            'nested sandbox storage path rejected' => ['https://klikqris.com/storage/sandbox/merchant/qris_STEST-123.png', false],
+            'http rejected' => ['http://klikqris.com/storage/sandbox/qris_STEST-123.png', false],
+            'subdomain rejected' => ['https://evil.klikqris.com/storage/sandbox/qris_STEST-123.png', false],
+            'suffix host rejected' => ['https://klikqris.com.evil.test/storage/sandbox/qris_STEST-123.png', false],
+            'userinfo spoof rejected' => ['https://klikqris.com@evil.test/storage/sandbox/qris_STEST-123.png', false],
+            'explicit port rejected' => ['https://klikqris.com:443/storage/sandbox/qris_STEST-123.png', false],
+            'old sandbox root rejected' => ['https://klikqris.com/sandbox/qris/STEST-123', false],
+            'unrelated storage path rejected' => ['https://klikqris.com/storage/production/qris_STEST-123.png', false],
+            'encoded traversal rejected' => ['https://klikqris.com/storage/sandbox/%2e%2e/production/qris.png', false],
+            'literal traversal rejected' => ['https://klikqris.com/storage/sandbox/../production/qris.png', false],
+            'not a png rejected' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.svg', false],
+        ];
+    }
+
     public function test_transaction_normalizes_payload_and_removes_secrets_recursively_without_removing_qris_url(): void
     {
         $transaction = KlikQrisTransaction::fromPayload($this->transactionPayload([

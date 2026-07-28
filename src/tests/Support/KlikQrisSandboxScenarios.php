@@ -43,7 +43,7 @@ final class KlikQrisSandboxScenarios
             'amount' => $payment->amount,
             'total_amount' => $payment->amount + 16,
             'status' => 'PENDING',
-            'qris_url' => 'https://klikqris.com/sandbox/qris/'.rawurlencode($payment->merchant_ref),
+            'qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png',
             'expired_at' => '2026-07-28T07:16:00Z',
             'signature' => 'opaque-test-signature',
         ], $overrides)];

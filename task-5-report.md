@@ -206,3 +206,63 @@ Observed RED evidence from the first focused run:
 - The reviewer was correct that 404 during `creating` recovery lacks a provider guarantee and must not create again.
 - Known concern: local SQLite PHPUnit schema still missed `provider_transaction_token` after the original Task 1 migration was restored as source-of-truth. To keep tests executable while preserving the original migration, a compatibility migration and a test harness fallback remain. This should be revisited if the migration chain is cleaned up globally, because the reviewer specifically asked to remove the test fallback.
 - Known concern: the PostgreSQL concurrency test is implemented but only verified locally through its SQLite conditional-skip path. It needs an isolated pgsql testing database to execute the forked path safely.
+
+## Fix Round 2 Report - 2026-07-28
+
+### Base and scope
+- Base before Fix Round 2: `110d684`.
+- Scope stayed on Task 5 review blockers only.
+- No Task 6, production, admin, routing, Telegram QR delivery, or Pakasir behavior changes.
+
+### Files changed
+- `src/app/Services/KlikQris/KlikQrisTransaction.php`
+- `src/database/migrations/2026_06_22_000007_create_payments_table.php`
+- `src/database/migrations/2026_07_28_000001_add_provider_transaction_token_to_payments.php`
+- `src/phpunit.postgres.xml`
+- `src/tests/Feature/KlikQrisNativeQrisTest.php`
+- `src/tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php`
+- `src/tests/Support/KlikQrisSandboxScenarios.php`
+- `src/tests/Unit/Services/KlikQris/KlikQrisProviderReadinessTest.php`
+- `src/tests/Unit/Services/KlikQris/KlikQrisTransactionTest.php`
+- `task-5-report.md`
+- `.superpowers/sdd/2026-07-28-klikqris-sandbox-integration/task-5-report.md`
+
+### RED phase
+- Added a URL allowlist data-provider test for the documented QR shape `https://klikqris.com/storage/sandbox/qris_....png` plus rejects for http, subdomain/suffix host, userinfo spoofing, explicit port, old `/sandbox/` path, unrelated storage path, encoded traversal, literal traversal, nested path, and non-png extension.
+- RED command: `cd src && php artisan test tests/Unit/Services/KlikQris/KlikQrisTransactionTest.php --filter=sandbox_qris_url_allowlist_accepts_only_documented_storage_sandbox_shape`.
+- RED result: failed because documented `/storage/sandbox/` URLs were rejected and the old `/sandbox/` path was still accepted.
+- Removed the forbidden `Schema::table('payments', ...)` fallback from `KlikQrisNativeQrisTest::setUp()` and ran focused tests.
+- RED result after fallback removal: PHPUnit in-memory schema failed with `no such column: provider_transaction_token`, proving the previous fallback masked a schema/migration harness issue.
+- Removed the broken forked concurrency method from the `RefreshDatabase` class and moved the scenario to a separate non-transactional PostgreSQL test class.
+
+### GREEN implementation summary
+- `KlikQrisTransaction::isAllowedSandboxQrisUrl()` now accepts only HTTPS URLs with exact host `klikqris.com`, no user/pass, no explicit port, and a documented `/storage/sandbox/qris_*.png` path with no encoded/literal traversal.
+- Scenario fixtures and readiness tests now use the documented storage sandbox QR URL shape.
+- Payment helpers, persistence, and reconstruction now treat the documented sandbox QR URL as payable.
+- The RefreshDatabase native feature class no longer contains the process-concurrency method, helpers, DB-backed fake adapter, or manual `Schema::table` fallback.
+- Added `KlikQrisNativeQrisPostgresConcurrencyTest`, a separate class without `RefreshDatabase`. It skips only for non-pgsql or missing pcntl, hard-guards `APP_ENV=testing`, requires isolated test DB naming, runs committed migrations before fork, creates committed payment/effect table fixtures, forks two workers, and asserts two child successes, one provider effect, and one ProviderCreate event.
+- Added the new PostgreSQL concurrency class to `phpunit.postgres.xml`.
+- Added migration-level schema support so the token column is owned by committed migrations and the test no longer manually creates it. The base payments migration includes the column for fresh schemas, while Task 1/compatibility migrations are guarded so fresh and upgraded schemas both remain safe.
+- Because this worktree's Laravel `database_path()` resolved to the main checkout rather than the worktree path during PHPUnit, the native feature class uses `afterRefreshingDatabase()` to assert the committed migration exposes `provider_transaction_token`, and if the in-memory cached schema lacks it, applies the committed Task 1 migration by real worktree path. This is not a manual `Schema::table` fallback, but it is documented as a harness workaround.
+
+### PostgreSQL concurrency evidence and skip reason
+- New test: `Tests\Feature\KlikQrisNativeQrisPostgresConcurrencyTest::test_postgres_process_concurrency_observes_one_provider_create_effect_with_committed_fixtures`.
+- Listed by PHPUnit alongside the native tests.
+- SQLite local run skips it because `DB::getDriverName() !== 'pgsql'`.
+- The pgsql path was not run locally because no isolated PostgreSQL testing DB was configured and I did not mutate any active or production-like DB stack.
+- Under pgsql with pcntl and an isolated DB name matching `test` or `testing`, the test will run migrations, commit fixtures before fork, reconnect children, use database cache locks, and assert one provider create effect plus one ProviderCreate event.
+
+### Commands and results
+- RED URL test: `cd src && php artisan test tests/Unit/Services/KlikQris/KlikQrisTransactionTest.php --filter=sandbox_qris_url_allowlist_accepts_only_documented_storage_sandbox_shape` failed as expected before implementation.
+- Focused SQLite after fixes: `cd src && php -d opcache.enable_cli=0 artisan test tests/Feature/KlikQrisNativeQrisTest.php tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` -> `18 passed, 1 skipped, 69 assertions`.
+- Test list: `cd src && php -d opcache.enable_cli=0 ./vendor/bin/phpunit --list-tests tests/Feature/KlikQrisNativeQrisTest.php tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` listed 18 native tests plus the new PostgreSQL concurrency test.
+- Combined focused/regression suite: `cd src && php -d opcache.enable_cli=0 artisan test tests/Feature/KlikQrisNativeQrisTest.php tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php tests/Feature/KlikQrisGatewayTest.php tests/Unit/Services/KlikQris/KlikQrisTransactionTest.php tests/Unit/Services/KlikQris/KlikQrisProviderReadinessTest.php tests/Feature/PakasirGatewayTest.php tests/Feature/PakasirWebhookTest.php` -> `128 passed, 1 skipped, 738 assertions`.
+- Pint fix/check: `cd src && ./vendor/bin/pint ...` fixed 2 style issues, then `./vendor/bin/pint --test ...` -> `PASS 10 files`.
+- Verification commands used `php -d opcache.enable_cli=0` for tests because local CLI OPcache has `opcache.enable_cli=1`, `opcache.revalidate_freq=180`, and was serving stale edited migration files during rapid TDD loops.
+
+### Self-review and concerns
+- The documented QR shape blocker is fixed and covered by positive and negative allowlist tests.
+- The broken in-transaction PostgreSQL concurrency test is removed from the RefreshDatabase class and replaced with a committed-fixture fork test.
+- The forbidden `Schema::table` test fallback is removed.
+- Known concern: the native feature test's `afterRefreshingDatabase()` committed-migration hook exists only because this worktree's Laravel path helpers resolve to the main checkout in this environment and the in-memory RefreshDatabase schema otherwise omitted the committed token migration. It uses the committed migration rather than manual schema mutation, but it is still a harness workaround worth removing once path resolution is fixed globally.
+- Known concern: pgsql fork path is implemented but locally verified only through the SQLite skip path because no isolated pgsql testing database was available.

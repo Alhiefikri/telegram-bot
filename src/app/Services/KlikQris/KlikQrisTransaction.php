@@ -115,9 +115,22 @@ final readonly class KlikQrisTransaction
             return false;
         }
 
-        return strtolower((string) ($parts['scheme'] ?? '')) === 'https'
-            && strtolower((string) ($parts['host'] ?? '')) === 'klikqris.com'
-            && str_starts_with((string) ($parts['path'] ?? ''), '/sandbox/');
+        if (strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || strtolower((string) ($parts['host'] ?? '')) !== 'klikqris.com'
+            || array_key_exists('user', $parts)
+            || array_key_exists('pass', $parts)
+            || array_key_exists('port', $parts)
+        ) {
+            return false;
+        }
+
+        $path = (string) ($parts['path'] ?? '');
+        $decodedPath = rawurldecode($path);
+
+        return $path === $decodedPath
+            && preg_match('/^\/storage\/sandbox\/qris_[A-Za-z0-9._~-]+\.png$/', $path) === 1
+            && ! str_contains($decodedPath, '/../')
+            && ! str_contains($decodedPath, '/./');
     }
 
     /**

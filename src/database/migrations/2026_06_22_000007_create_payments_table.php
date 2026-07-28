@@ -14,6 +14,7 @@ return new class extends Migration
             $table->string('provider')->index();
             $table->string('merchant_ref')->unique();
             $table->string('provider_reference')->nullable()->unique();
+            $table->text('provider_transaction_token')->nullable();
             $table->string('method');
             $table->bigInteger('amount');
             $table->string('currency', 3)->default('IDR');

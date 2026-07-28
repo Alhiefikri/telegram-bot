@@ -121,7 +121,7 @@ class KlikQrisProviderReadinessTest extends TestCase
             'provider' => 'klikqris',
             'provider_payment_method' => 'qris',
             'provider_payload' => [
-                'qris_url' => '  https://klikqris.com/sandbox/qris/sandbox-123  ',
+                'qris_url' => '  https://klikqris.com/storage/sandbox/qris_sandbox-123.png  ',
             ],
             'amount' => 10000,
             'provider_total_payment' => 10025,
@@ -131,7 +131,7 @@ class KlikQrisProviderReadinessTest extends TestCase
 
         $this->assertTrue($payment->isNativeKlikQris());
         $this->assertTrue($payment->isPayableNativeKlikQris());
-        $this->assertSame('https://klikqris.com/sandbox/qris/sandbox-123', $payment->klikQrisQrisUrl());
+        $this->assertSame('https://klikqris.com/storage/sandbox/qris_sandbox-123.png', $payment->klikQrisQrisUrl());
         $this->assertSame('Rp 10.025', $payment->klikQrisTotalAmountDisplay());
     }
 
@@ -140,7 +140,7 @@ class KlikQrisProviderReadinessTest extends TestCase
         $basePayment = [
             'provider' => 'klikqris',
             'provider_payment_method' => 'qris',
-            'provider_payload' => ['qris_url' => 'https://klikqris.com/sandbox/qris/sandbox-123'],
+            'provider_payload' => ['qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox-123.png'],
             'amount' => 10000,
             'provider_total_payment' => 9999,
             'provider_expires_at' => now()->addMinutes(10),
