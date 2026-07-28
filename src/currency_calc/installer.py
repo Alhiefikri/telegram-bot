@@ -161,13 +161,16 @@ fi
         new_css = css_content + "\n\n/* Currency Calculator Waybar Module */\n#custom-currency {\n    background-color: rgba(30, 30, 46, 0.8);\n    color: #cdd6f4;\n    padding: 0 10px;\n    margin: 0 4px;\n    border-radius: 8px;\n}\n"
         style_file.write_text(new_css.lstrip())
 
-    # 7. Update Hyprland hyprland.conf (Use windowrulev2 to prevent Hyprland parser errors)
-    hypr_conf = hypr_path / "hyprland.conf"
+    # 7. Update Hyprland configuration (Use match:class syntax for Hyprland v0.53+)
+    hypr_conf = hypr_path / "userprefs.conf"
+    if not hypr_conf.exists():
+        hypr_conf = hypr_path / "hyprland.conf"
+
     hypr_text = hypr_conf.read_text() if hypr_conf.exists() else ""
     rules = [
-        "windowrulev2 = float, class:^(com.cachyos.currencycalc)$",
-        "windowrulev2 = size 420 540, class:^(com.cachyos.currencycalc)$",
-        "windowrulev2 = center, class:^(com.cachyos.currencycalc)$",
+        "windowrule = float, match:class ^(com.cachyos.currencycalc)$",
+        "windowrule = size 420 540, match:class ^(com.cachyos.currencycalc)$",
+        "windowrule = center, match:class ^(com.cachyos.currencycalc)$",
     ]
     needed_rules = [r for r in rules if r not in hypr_text]
     if needed_rules:
