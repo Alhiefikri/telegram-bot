@@ -8,6 +8,9 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
+use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -21,6 +24,9 @@ class TelegramOrderIntents
         private PakasirProviderAdapter $pakasir,
         private PakasirCallbackProcessor $pakasirProcessor,
         private PakasirProviderReadiness $pakasirReadiness,
+        private KlikQrisProviderAdapter $klikQris,
+        private KlikQrisCallbackProcessor $klikQrisProcessor,
+        private KlikQrisProviderReadiness $klikQrisReadiness,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
         private TelegramMessageChunker $messageChunker,
@@ -55,7 +61,7 @@ class TelegramOrderIntents
         }
 
         $payment = $order->payments->first();
-        $refreshNotice = $this->refreshPendingPakasirPayment($customer, $order, $payment);
+        $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
         if ($refreshNotice !== null) {
             $order = $order->fresh(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()]);
             $payment = $order->payments->first();
@@ -125,6 +131,51 @@ class TelegramOrderIntents
         }
 
         return $this->text($customer, 'Kalau butuh bantuan, hubungi admin toko lewat /support.', 'Need help? Contact store support via /support.');
+    }
+
+    private function refreshProviderPaymentStatus(Customer $customer, Order $order, ?Payment $payment): ?string
+    {
+        return match (strtolower(trim((string) $payment?->provider))) {
+            'klikqris' => $this->refreshEligibleKlikQrisPayment($customer, $order, $payment),
+            default => $this->refreshPendingPakasirPayment($customer, $order, $payment),
+        };
+    }
+
+    private function refreshEligibleKlikQrisPayment(Customer $customer, Order $order, ?Payment $payment): ?string
+    {
+        if (! $payment
+            || $payment->provider !== 'klikqris'
+            || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
+            || blank($payment->merchant_ref)
+            || strtolower(trim((string) $payment->provider_payment_method)) !== 'qris'
+            || $payment->provider_total_payment === null
+            || ! $this->klikQrisReadiness->sandbox()->isReady()) {
+            return null;
+        }
+
+        $key = 'klikqris:status-refresh:'.$customer->id.':'.$payment->id;
+        $maxAttempts = max(1, (int) config('services.klikqris.status_refresh_rate_limit_per_minute', 3));
+        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+            $seconds = RateLimiter::availableIn($key);
+
+            return $this->text($customer, "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.", "Payment-status checks are temporarily limited. Try again in {$seconds} seconds.");
+        }
+
+        RateLimiter::hit($key, 60);
+
+        try {
+            $event = $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQris->transactionStatus($payment));
+        } catch (Throwable $e) {
+            report($e);
+
+            return $this->text($customer, 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.', 'Payment status cannot be checked automatically right now. Please try again later.');
+        }
+
+        if ($event->processed_at !== null) {
+            return $this->text($customer, 'Status pembayaran dicek ulang dan sudah terverifikasi.', 'Payment status was checked again and verified.');
+        }
+
+        return $this->text($customer, 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.', 'Payment status was checked. No completed payment was found.');
     }
 
     private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string

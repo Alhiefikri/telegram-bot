@@ -93,7 +93,7 @@ class KlikQrisCallbackProcessor
     private function isEligiblePayment(Payment $payment): bool
     {
         return strtolower(trim((string) $payment->provider)) === 'klikqris'
-            && $payment->status === PaymentStatus::Pending
+            && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             && strtolower(trim((string) $payment->provider_payment_method)) === 'qris'
             && $payment->provider_total_payment !== null;
     }

@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -14,6 +15,7 @@ use App\Models\Payment;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use Carbon\CarbonImmutable;
@@ -175,5 +177,119 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $job->handle($successfulIntents);
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertSame(1, $order->payments()->where('provider', 'klikqris')->count());
+    }
+
+    public function test_telegram_order_detail_refreshes_klikqris_success_before_rendering_without_calling_pakasir(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        config()->set('services.klikqris', KlikQrisSandboxScenarios::readyConfig());
+        $this->mock(PakasirProviderAdapter::class)
+            ->shouldReceive('transactionDetail')
+            ->never();
+        $this->fakeTelegramHttp([
+            'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-DETAIL' => Http::response(['data' => [
+                'order_id' => 'INV-KLIK-DETAIL',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'SUCCESS',
+                'paid_at' => '2026-07-28T10:10:00+00:00',
+                'signature' => 'secret-signature-token',
+            ]], 200),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-DETAIL',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 1000,
+        ]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-DETAIL',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => ['data' => [
+                'order_id' => 'INV-KLIK-DETAIL',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_detail.png',
+                'expired_at' => '2026-07-28T10:24:00+00:00',
+            ]],
+            'provider_transaction_token' => 'secret-signature-token',
+            'provider_create_state' => 'created',
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(9001, 'cb-detail', 'order:INV-KLIK-DETAIL'))
+            ->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $order->payments()->first()->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertNotEmpty($sendMessages);
+        $detailBody = $sendMessages->last()[0]->body();
+        $this->assertStringContainsString('Payment has been received', $detailBody);
+        $this->assertStringNotContainsString('secret-signature-token', $detailBody);
+    }
+
+    public function test_telegram_klikqris_pending_outage_and_rate_limit_return_current_detail_safely(): void
+    {
+        config()->set('services.klikqris', array_replace(KlikQrisSandboxScenarios::readyConfig(), [
+            'status_refresh_rate_limit_per_minute' => 1,
+        ]));
+        $this->mock(PakasirProviderAdapter::class)
+            ->shouldReceive('transactionDetail')
+            ->never();
+        $this->fakeTelegramHttp([
+            'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-PENDING' => Http::sequence()
+                ->push(['data' => [
+                    'order_id' => 'INV-KLIK-PENDING',
+                    'amount' => 1000,
+                    'total_amount' => 1016,
+                    'status' => 'PENDING',
+                    'signature' => 'secret-signature-token',
+                ]], 200)
+                ->pushStatus(500),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-PENDING',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 1000,
+        ]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-PENDING',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => ['data' => [
+                'order_id' => 'INV-KLIK-PENDING',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_pending.png',
+                'expired_at' => '2026-07-28T10:24:00+00:00',
+            ]],
+            'provider_transaction_token' => 'secret-signature-token',
+            'provider_create_state' => 'created',
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(9002, 'cb-pending', 'order:INV-KLIK-PENDING'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(9003, 'cb-limited', 'order:INV-KLIK-PENDING'))->assertOk();
+
+        $this->assertSame(PaymentStatus::Pending, $order->payments()->first()->fresh()->status);
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $body = $sendMessages->last()[0]->body();
+        $this->assertStringContainsString('temporarily limited', $body);
+        $this->assertStringContainsString('awaiting payment', $body);
+        $this->assertStringNotContainsString('secret-signature-token', $body);
+        Http::assertSent(function (Request $request): bool {
+            return str_contains($request->url(), '/qris/status/INV-KLIK-PENDING');
+        });
     }
 }
