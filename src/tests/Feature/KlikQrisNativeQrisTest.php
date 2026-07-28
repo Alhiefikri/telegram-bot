@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
+use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -192,6 +194,32 @@ class KlikQrisNativeQrisTest extends TestCase
 
         $this->assertSame(now()->addMinutes(5)->timestamp, $payment->fresh()->expired_at->timestamp);
         $this->assertSame(now()->addMinutes(5)->timestamp, $payment->fresh()->order->expires_at->timestamp);
+    }
+
+    public function test_expire_pending_orders_releases_klikqris_reservation_and_makes_old_qr_unpayable_after_provider_deadline(): void
+    {
+        config()->set('services.telegram.token', null);
+        $startedAt = now()->startOfMinute();
+        $this->travelTo($startedAt);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000, stock: 1), CheckoutPaymentIntents::klikQris($startedAt->copy()->addMinutes(30)));
+        $payment = $order->payments()->sole();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
+            'expired_at' => $startedAt->copy()->addMinutes(15)->toAtomString(),
+        ]), 200));
+
+        app(KlikQrisNativeQrisService::class)->ensureCreated($payment);
+        $this->assertTrue($payment->fresh()->isPayableNativeKlikQris());
+
+        $this->travelTo($startedAt->copy()->addMinutes(16));
+        $this->artisan('orders:expire-pending')
+            ->expectsOutputToContain('orders:expire-pending completed cleanly: processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $product = Product::firstOrFail();
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertFalse($payment->fresh()->isPayableNativeKlikQris());
     }
 
     public function test_from_persisted_payment_reconstructs_with_encrypted_token_and_fails_closed(): void

@@ -150,6 +150,31 @@ class PakasirWebhookTest extends TestCase
         Queue::assertNotPushed(PublishSalesProofPost::class);
     }
 
+    public function test_completed_callback_with_same_merchant_ref_as_klikqris_payment_finds_only_pakasir_row(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $merchantRef = 'SHARED-MERCHANT-REF';
+        $klikqris = Payment::factory()->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => $merchantRef,
+            'amount' => 10000,
+            'provider_total_payment' => 10016,
+            'status' => PaymentStatus::Pending,
+        ]);
+        $pakasirOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
+        $pakasir = $pakasirOrder->payments()->firstOrFail();
+        $pakasir->update(['merchant_ref' => $merchantRef]);
+        $this->fakeProviderDetail($merchantRef, $pakasir->amount);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($merchantRef, $pakasir->amount))->assertOk();
+
+        $this->assertSame(PaymentStatus::Pending, $klikqris->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $pakasir->fresh()->status);
+        $event = PaymentEvent::query()->where('provider', 'pakasir')->where('event_type', PaymentEventType::Callback)->sole();
+        $this->assertSame($pakasir->id, $event->payment_id);
+    }
+
     public function test_sales_proof_post_is_sent_once_and_privacy_safe_for_pakasir_paid_order(): void
     {
         config()->set('queue.default', 'sync');

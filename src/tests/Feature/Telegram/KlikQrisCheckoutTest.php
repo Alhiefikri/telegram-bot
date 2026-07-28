@@ -292,4 +292,49 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             return str_contains($request->url(), '/qris/status/INV-KLIK-PENDING');
         });
     }
+
+    public function test_expired_klikqris_order_notification_offers_fresh_qris_checkout_button(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 88]]),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-EXPIRED',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 1000,
+            'expires_at' => now()->subMinute(),
+        ]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-EXPIRED',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_expires_at' => now()->subMinute(),
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => ['data' => [
+                'order_id' => 'INV-KLIK-EXPIRED',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_expired.png',
+                'expired_at' => now()->subMinute()->toAtomString(),
+            ]],
+            'provider_transaction_token' => 'secret-signature-token',
+            'provider_create_state' => 'created',
+        ]);
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $body = $sendMessages->last()[0]->body();
+        $this->assertStringContainsString('Order expired', $body);
+        $this->assertStringContainsString('Create New QRIS', $body);
+        $this->assertStringContainsString('callback_data":"katalog', $body);
+        $this->assertStringNotContainsString('qris_expired.png', $body);
+        $this->assertStringNotContainsString('secret-signature-token', $body);
+    }
 }

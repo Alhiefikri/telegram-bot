@@ -6,7 +6,17 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Customer;
+use App\Models\InventoryMovement;
+use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Models\Product;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -205,6 +215,66 @@ class KlikQrisWebhookTest extends TestCase
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_authoritative_success_after_local_expiry_uses_late_payment_semantics_without_resurrecting_order(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 10000, stock: 1), CheckoutPaymentIntents::klikQris(now()->addMinutes(10)));
+        $payment = $order->payments()->sole();
+        $payment->update([
+            'provider_total_payment' => 10016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_expires_at' => now()->addMinutes(10),
+            'expired_at' => now()->addMinutes(10),
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment),
+        ]);
+        $product = Product::firstOrFail();
+
+        $this->travelTo(now()->addMinutes(11));
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertOk()->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $order = $payment->order->fresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertNotNull($payment->paid_at);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Expired, $order->order_status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(0, InventoryMovement::where('type', 'sale')->count());
+        $this->assertSame(0, SalesProofPost::count());
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
+    public function test_callback_with_same_merchant_ref_as_pakasir_payment_finds_only_klikqris_row(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $merchantRef = 'SHARED-MERCHANT-REF';
+        $pakasir = Payment::factory()->create([
+            'provider' => 'pakasir',
+            'merchant_ref' => $merchantRef,
+            'amount' => 10000,
+            'status' => PaymentStatus::Pending,
+        ]);
+        $klikqris = $this->payableKlikQrisPayment();
+        $klikqris->update(['merchant_ref' => $merchantRef]);
+        $klikqris->order->update(['invoice_number' => 'INV-KLIK-SHARED']);
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($klikqris->fresh()), 200));
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($klikqris->fresh()))->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Pending, $pakasir->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $klikqris->fresh()->status);
+        $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
+        $this->assertSame($klikqris->id, $event->payment_id);
+    }
+
     public function test_duplicate_top_level_critical_json_keys_are_rejected_before_status_or_event(): void
     {
         Http::fake();
@@ -255,5 +325,15 @@ class KlikQrisWebhookTest extends TestCase
             'status' => 'PAID',
             'signature' => 'opaque-callback-signature',
         ], $overrides);
+    }
+
+    private function cartWithProduct(int $price = 1000, int $stock = 10, int $quantity = 1): Cart
+    {
+        $customer = Customer::factory()->create(['telegram_id' => fake()->unique()->numberBetween(100000, 999999999)]);
+        $product = Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0, 'price_amount' => $price]);
+        $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
+
+        return $cart;
     }
 }
