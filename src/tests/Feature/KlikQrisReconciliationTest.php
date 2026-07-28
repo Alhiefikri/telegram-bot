@@ -125,6 +125,43 @@ class KlikQrisReconciliationTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_command_recovers_true_outcome_unknown_success_from_status_without_create_transaction(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-UNKNOWN-SUCCESS',
+            'status' => PaymentStatus::Pending,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_transaction_token' => null,
+            'provider_create_state' => 'outcome_unknown',
+            'provider_create_last_error' => 'Illuminate\\Http\\Client\\ConnectionException',
+        ]);
+
+        Http::fake(function ($request) use ($payment) {
+            $this->assertSame('GET', $request->method());
+            $this->assertStringContainsString('/qris/status/KLIK-UNKNOWN-SUCCESS', $request->url());
+            $this->assertStringNotContainsString('/qris/create', $request->url());
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('processed=1 skipped=0 failed=0')
+            ->assertExitCode(0);
+
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame('qris', $payment->provider_payment_method);
+        $this->assertSame(1016, $payment->provider_total_payment);
+        $this->assertSame('SUCCESS', $payment->provider_payload['data']['status'] ?? null);
+        $this->assertNull($payment->provider_create_last_error);
+        Http::assertSentCount(1);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
     public function test_command_validates_bounded_chunk_option(): void
     {
         $this->artisan('klikqris:reconcile --chunk=0')->assertExitCode(1);
