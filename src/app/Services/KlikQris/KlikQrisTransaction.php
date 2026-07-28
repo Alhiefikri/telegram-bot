@@ -4,6 +4,7 @@ namespace App\Services\KlikQris;
 
 use App\Models\Payment;
 use Carbon\CarbonImmutable;
+use RuntimeException;
 use UnexpectedValueException;
 
 final readonly class KlikQrisTransaction
@@ -49,6 +50,53 @@ final readonly class KlikQrisTransaction
     public static function fromStatusPayload(array $payload): self
     {
         return self::fromPayloadForContext($payload, requirePendingQrisMedia: false);
+    }
+
+    public static function fromPersistedPayment(Payment $payment): self
+    {
+        if (strtolower(trim((string) $payment->provider)) !== 'klikqris') {
+            throw new RuntimeException('Persisted KlikQRIS transaction provider mismatch.');
+        }
+
+        if (! is_array($payment->provider_payload)) {
+            throw new RuntimeException('Persisted KlikQRIS transaction payload is missing.');
+        }
+
+        $payload = $payment->provider_payload;
+        $data = $payload['data'] ?? $payload;
+        if (! is_array($data)) {
+            throw new RuntimeException('Persisted KlikQRIS transaction payload is invalid.');
+        }
+
+        $payload['data'] = array_replace($data, [
+            'order_id' => $payment->merchant_ref,
+            'amount' => $payment->amount,
+            'total_amount' => $payment->provider_total_payment,
+            'status' => $data['status'] ?? 'PENDING',
+        ]);
+
+        if ($payment->provider_expires_at !== null) {
+            $payload['data']['expired_at'] = $payment->provider_expires_at->utc()->toAtomString();
+        }
+
+        if (filled($payment->provider_transaction_token)) {
+            $payload['data']['signature'] = $payment->provider_transaction_token;
+        }
+
+        try {
+            $transaction = self::fromStatusPayload($payload);
+            $transaction->assertMatches($payment);
+
+            if (! $payment->isPayableNativeKlikQris()) {
+                throw new RuntimeException('Persisted KlikQRIS transaction is not payable.');
+            }
+
+            return $transaction;
+        } catch (RuntimeException $exception) {
+            throw $exception;
+        } catch (UnexpectedValueException $exception) {
+            throw new RuntimeException('Persisted KlikQRIS transaction is inconsistent.', previous: $exception);
+        }
     }
 
     /**

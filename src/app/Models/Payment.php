@@ -115,7 +115,8 @@ class Payment extends Model
     public function klikQrisQrisUrl(): ?string
     {
         $payload = is_array($this->provider_payload) ? $this->provider_payload : [];
-        $url = trim((string) ($payload['qris_url'] ?? ''));
+        $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+        $url = trim((string) ($data['qris_url'] ?? ''));
 
         return $url !== '' ? $url : null;
     }
