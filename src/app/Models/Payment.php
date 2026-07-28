@@ -128,7 +128,7 @@ class Payment extends Model
             return null;
         }
 
-        return 'Rp '.number_format((int) $this->provider_total_payment, 0, ',', '.');
+        return 'IDR '.number_format((int) $this->provider_total_payment, 2, '.', ',');
     }
 
     private function providerName(): string

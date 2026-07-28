@@ -73,7 +73,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendKlikQrisCheckoutInstructions::class);
     }
 
-    public function test_klikqris_job_sends_one_direct_telegram_photo_with_safe_caption_and_buttons(): void
+    public function test_klikqris_job_dedupes_confirmed_successful_send_but_keeps_at_least_once_retry_semantics(): void
     {
         $this->fakeTelegramHttp([
             'https://klikqris.com/storage/sandbox/qris_job.png' => Http::response(self::PNG_BYTES, 200, ['Content-Type' => 'image/png']),
@@ -115,6 +115,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
                 'total_amount' => 1016,
                 'status' => 'PENDING',
                 'qris_url' => 'https://klikqris.com/storage/sandbox/qris_job.png',
+                'qris_image' => 'data:image/png;base64,'.base64_encode(self::PNG_BYTES),
                 'expired_at' => '2026-07-28T10:24:00+00:00',
                 'signature' => 'secret-signature-token',
             ]]));
@@ -128,7 +129,8 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString(self::PNG_BYTES, $request->body());
         $this->assertStringContainsString('filename="klikqris-INV-KLIK-600.png"', $request->body());
         $caption = $request->body();
-        $this->assertStringContainsString('Rp 1.016', $caption);
+        $this->assertStringContainsString('IDR 1,016.00', $caption);
+        $this->assertStringNotContainsString('Rp 1.016', $caption);
         $this->assertStringContainsString('Do not round or change any digit', $caption);
         $this->assertStringContainsString('INV-KLIK-600', $caption);
         $this->assertStringContainsString('15 minutes', $caption);
@@ -142,7 +144,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
-    public function test_klikqris_job_releases_claim_after_send_failure_and_does_not_create_second_provider_transaction(): void
+    public function test_klikqris_job_releases_claim_after_definite_send_failure_and_keeps_provider_transaction(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $order = Order::factory()->for($customer)->create([

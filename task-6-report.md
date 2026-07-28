@@ -13,7 +13,7 @@ Task 6 now delivers native KlikQRIS QRIS checkouts directly through Telegram `se
   - Uses `provider = klikqris`.
   - Runs on the existing `telegram-outbound` queue when dispatched from checkout.
   - `ensureCreated` remains owned by the delivery path through `TelegramCheckoutIntents::sendKlikQrisPaymentInstructions`.
-  - Delivery claim owns Telegram send, preventing duplicate Telegram photos on retry.
+  - Delivery claim owns Telegram send. Confirmed successful sends are deduped by `manual_checkout_customer_notified_at`; ambiguous Telegram acceptance followed by timeout/crash may still duplicate on retry because Telegram has no idempotency key.
 
 - Added `App\Services\KlikQris\KlikQrisQrisImage`.
   - Prefers downloading the allowlisted transaction `qris_url`.
@@ -103,7 +103,7 @@ Result:
 - Invoice and 15-minute/provider deadline: covered in sendPhoto test.
 - No signature/API key/base64/redirect URL in caption/log/error: caption tests cover caption. QR image service uses generic exception messages.
 - Checkout uses Task 4 selector seam: implemented in `TelegramConfiguredCheckoutPaymentIntentSelector` and `TelegramCheckoutIntents`.
-- Unique job mirrors Pakasir semantics with provider `klikqris`: implemented and tested for retry claim release and idempotent duplicate skip.
+- Unique job mirrors Pakasir semantics with provider `klikqris`: implemented and tested for retry claim release after definite thrown failure and confirmed-success sequential dedupe. Ambiguous timeout/crash after Telegram acceptance remains at-least-once and may duplicate on retry.
 - `ensureCreated` owns create and delivery claim owns send: implemented in `sendKlikQrisPaymentInstructions` and job handle flow.
 - QR image service allowlist, no redirects, bounded timeouts/body size, HTTP/content/magic validation: implemented and tested.
 - Base64 fallback only on URL download failure: implemented and tested.

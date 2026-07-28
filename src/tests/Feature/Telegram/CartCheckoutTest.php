@@ -283,6 +283,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                     'total_amount' => 25016,
                     'status' => 'PENDING',
                     'qris_url' => 'https://klikqris.com/storage/sandbox/qris_cart_checkout.png',
+                    'qris_image' => 'data:image/png;base64,'.base64_encode("\x89PNG\r\n\x1A\n".'cart-checkout-png'),
                     'expired_at' => now()->addMinutes(15)->toIso8601String(),
                     'signature' => 'opaque-test-signature',
                 ]], 200);

@@ -132,7 +132,7 @@ class KlikQrisProviderReadinessTest extends TestCase
         $this->assertTrue($payment->isNativeKlikQris());
         $this->assertTrue($payment->isPayableNativeKlikQris());
         $this->assertSame('https://klikqris.com/storage/sandbox/qris_sandbox-123.png', $payment->klikQrisQrisUrl());
-        $this->assertSame('Rp 10.025', $payment->klikQrisTotalAmountDisplay());
+        $this->assertSame('IDR 10,025.00', $payment->klikQrisTotalAmountDisplay());
     }
 
     public function test_native_klikqris_is_not_payable_without_pending_status_valid_amount_or_unexpired_deadline(): void
