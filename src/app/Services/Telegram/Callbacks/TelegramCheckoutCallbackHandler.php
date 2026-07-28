@@ -13,8 +13,6 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
-use App\Services\Checkout\CheckoutPaymentIntent;
-use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramBotClient;
@@ -23,6 +21,7 @@ use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramCartIntents;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Support\DogfoodTiming;
@@ -37,6 +36,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private OrderCheckoutService $checkout,
         private TelegramCartIntents $cart,
         private TelegramCheckoutIntents $checkoutIntents,
+        private TelegramCheckoutPaymentIntentSelector $paymentIntentSelector,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
     ) {}
@@ -167,9 +167,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 }
             }
 
-            $requestedPaymentMode = $this->checkoutIntents->requestedPaymentMode();
-            $paymentMode = $this->checkoutIntents->paymentMode();
-            $paymentIntent = $this->paymentIntent($binance, $paymentMode);
+            $selection = $this->paymentIntentSelector->select($binance);
+            $requestedPaymentMode = $selection->requestedPaymentMode;
+            $paymentMode = $selection->paymentMode;
+            $paymentIntent = $selection->paymentIntent;
             $this->assertSupportedPostCreationBehavior($paymentIntent->postCreationBehavior());
             $order = DogfoodTiming::time('dogfood.telegram.checkout_step', [
                 'step' => 'order_checkout',
@@ -219,23 +220,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         ]);
 
         return hash_hmac('sha256', $payload, (string) config('app.key'));
-    }
-
-    private function paymentIntent(bool $binance, string $paymentMode): CheckoutPaymentIntent
-    {
-        if ($binance) {
-            return CheckoutPaymentIntents::binancePay();
-        }
-
-        if ($paymentMode === 'pakasir') {
-            return CheckoutPaymentIntents::pakasir($this->checkoutIntents->pakasirPaymentMethod());
-        }
-
-        if ($paymentMode === 'klikqris') {
-            return CheckoutPaymentIntents::klikQris();
-        }
-
-        return CheckoutPaymentIntents::manualQris();
     }
 
     private function checkoutIntentPayload(string $data): string

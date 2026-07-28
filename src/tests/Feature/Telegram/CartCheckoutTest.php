@@ -22,6 +22,8 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelection;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -280,10 +282,20 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'qris_ttl_minutes' => 15,
         ]);
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $checkoutIntents = $this->mock(TelegramCheckoutIntents::class);
-        $checkoutIntents->shouldReceive('requestedPaymentMode')->once()->andReturn('klikqris');
-        $checkoutIntents->shouldReceive('paymentMode')->once()->andReturn('klikqris');
-        $checkoutIntents->shouldReceive('sendPaymentInstructions')->zeroOrMoreTimes();
+        $this->app->bind(
+            TelegramCheckoutPaymentIntentSelector::class,
+            fn () => new class implements TelegramCheckoutPaymentIntentSelector
+            {
+                public function select(bool $binance): TelegramCheckoutPaymentIntentSelection
+                {
+                    return new TelegramCheckoutPaymentIntentSelection(
+                        requestedPaymentMode: 'manual',
+                        paymentMode: 'manual',
+                        paymentIntent: CheckoutPaymentIntents::klikQris(),
+                    );
+                }
+            },
+        );
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $product = Product::factory()->create(['name' => 'Unsupported KlikQRIS', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);

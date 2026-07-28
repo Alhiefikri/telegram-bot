@@ -203,3 +203,82 @@ PASS 4 files
 - No review/ledger files changed.
 - No admin switch, selector activation, production routing, QR send, provider create, persistence, webhook, or Task 5/6 behavior added.
 - Telegram change is minimum boundary safety: it recognizes an internally mocked future `klikqris` payment mode only to construct the intent and reject its unsupported post-creation behavior before checkout side effects.
+
+## Fix Round 2
+
+### Review Item Addressed
+
+The rereview found that the Fix Round 1 Telegram regression mocked `TelegramCheckoutIntents::requestedPaymentMode()` and `paymentMode()` to return `klikqris`, which is not a real selector state because the production `TelegramCheckoutIntents` normalizes every non-`pakasir` mode to `manual`.
+
+Fix Round 2 replaces that impossible mocked selector state with a small intent-selection seam:
+
+- `TelegramCheckoutPaymentIntentSelector` is a public interface for selecting the checkout intent and mode labels used by the Telegram handler.
+- `TelegramCheckoutPaymentIntentSelection` carries `requestedPaymentMode`, `paymentMode`, and the concrete `CheckoutPaymentIntent`.
+- `TelegramConfiguredCheckoutPaymentIntentSelector` preserves the existing real production behavior: Binance when requested by callback, Pakasir only when the real configured/effective mode is `pakasir`, otherwise manual QRIS.
+- The focused regression binds the selector interface to a fake selector returning a `CheckoutPaymentIntents::klikQris()` intent while keeping mode labels realistic as `manual`. This represents the actual boundary condition under test: an unsupported intent with `KlikQrisInstructions` reaches the Telegram handler through a collaborator seam, without pretending the current payment-mode selector can emit `klikqris`.
+
+### RED
+
+Focused RED command:
+
+```bash
+cd src && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter=telegram_rejects_klik_qris
+```
+
+Failure before implementing the seam:
+
+```text
+Failed asserting that 1 is identical to 0.
+```
+
+The new test-bound selector was ignored by the current handler, so the handler still used the old private selector path and persisted one order. This proved the public seam did not exist yet and the test was not passing against old code.
+
+### GREEN
+
+Focused GREEN after implementing the seam:
+
+```bash
+cd src && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter=telegram_rejects_klik_qris
+```
+
+Result:
+
+```text
+PASS Tests\Feature\Telegram\CartCheckoutTest
+Tests: 1 passed (6 assertions)
+```
+
+### Regressions
+
+```bash
+cd src && php artisan test tests/Feature/OrderCartDomainTest.php \
+  && php artisan test tests/Feature/Telegram/CartCheckoutTest.php --filter='checkout|klik_qris|qris' \
+  && ./vendor/bin/pint --dirty
+```
+
+Result:
+
+```text
+PASS Tests\Feature\OrderCartDomainTest
+Tests: 35 passed (168 assertions)
+
+PASS Tests\Feature\Telegram\CartCheckoutTest
+Tests: 35 passed (339 assertions)
+
+Laravel Pint
+FIXED 6 files, 2 style issues fixed
+```
+
+Focused GREEN was rerun after Pint formatting and still passed:
+
+```text
+PASS Tests\Feature\Telegram\CartCheckoutTest
+Tests: 1 passed (6 assertions)
+```
+
+### Scope Review
+
+- Did not weaken `TelegramCheckoutIntents` normalization. Non-`pakasir` settings still normalize to `manual`.
+- Did not route KlikQRIS from real Telegram callbacks, selectors, admin, storefront, or production paths.
+- Did not implement QR sending, provider create/persistence, webhooks, or Task 5/6 behavior.
+- Removed the impossible `paymentMode === 'klikqris'` branch from the handler and moved real production selection into `TelegramConfiguredCheckoutPaymentIntentSelector`.
