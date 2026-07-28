@@ -1,0 +1,182 @@
+<?php
+
+namespace App\Services\KlikQris;
+
+use App\Models\Payment;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
+use Throwable;
+use UnexpectedValueException;
+
+final readonly class KlikQrisClient implements KlikQrisProviderAdapter
+{
+    public function __construct(private KlikQrisProviderReadiness $readiness) {}
+
+    public function createTransaction(Payment $payment): KlikQrisTransaction
+    {
+        $this->assertReady();
+
+        try {
+            $response = $this->request()->post($this->endpoint('/qris/create'), [
+                'order_id' => $payment->merchant_ref,
+                'id_merchant' => $this->merchantId(),
+                'amount' => (int) $payment->amount,
+                'keterangan' => 'Payment '.$payment->merchant_ref,
+            ]);
+        } catch (ConnectionException $exception) {
+            throw new RuntimeException('KlikQRIS create request failed: connection error.', previous: $exception);
+        } catch (Throwable $exception) {
+            throw new RuntimeException('KlikQRIS create request failed: '.class_basename($exception).'.', previous: $exception);
+        }
+
+        $this->throwIfHttpFailed($response, 'create');
+
+        return $this->parseCreateResponse($response, $payment);
+    }
+
+    public function transactionStatus(Payment $payment): KlikQrisTransaction
+    {
+        $this->assertReady();
+
+        $attempt = 0;
+        $maxAttempts = max(1, (int) config('services.klikqris.status_max_attempts', 3));
+
+        while (true) {
+            $attempt++;
+
+            try {
+                $response = $this->request()->get($this->endpoint('/qris/status/'.rawurlencode((string) $payment->merchant_ref)));
+                $this->throwIfHttpFailed($response, 'status');
+
+                return $this->parseStatusResponse($response, $payment);
+            } catch (Throwable $exception) {
+                if ($attempt >= $maxAttempts || ! $this->shouldRetryStatus($exception)) {
+                    if ($exception instanceof RuntimeException) {
+                        throw $exception;
+                    }
+
+                    throw new RuntimeException('KlikQRIS status request failed: '.class_basename($exception).'.', previous: $exception);
+                }
+
+                $this->sleepBeforeStatusRetry($attempt);
+            }
+        }
+    }
+
+    private function assertReady(): void
+    {
+        try {
+            $this->readiness->sandbox()->assertReady('KlikQRIS sandbox is not ready.');
+        } catch (Throwable $exception) {
+            throw new RuntimeException('KlikQRIS sandbox is not ready: configuration unavailable.', previous: $exception);
+        }
+    }
+
+    private function request(): PendingRequest
+    {
+        return Http::asJson()
+            ->acceptJson()
+            ->timeout((float) config('services.klikqris.http_timeout_seconds', 10))
+            ->connectTimeout((float) config('services.klikqris.http_connect_timeout_seconds', 3))
+            ->withHeaders([
+                'x-api-key' => $this->apiKey(),
+                'id_merchant' => $this->merchantId(),
+            ]);
+    }
+
+    private function throwIfHttpFailed(Response $response, string $operation): void
+    {
+        if (! $response->failed()) {
+            return;
+        }
+
+        throw new RuntimeException(sprintf('KlikQRIS %s request failed with HTTP %d.', $operation, $response->status()));
+    }
+
+    private function parseCreateResponse(Response $response, Payment $payment): KlikQrisTransaction
+    {
+        $payload = $this->jsonPayload($response, 'create');
+
+        try {
+            $transaction = KlikQrisTransaction::fromCreatePayload($payload);
+            $transaction->assertMatches($payment);
+
+            return $transaction;
+        } catch (UnexpectedValueException $exception) {
+            throw new RuntimeException('KlikQRIS create response validation failed: '.class_basename($exception).'.', previous: $exception);
+        }
+    }
+
+    private function parseStatusResponse(Response $response, Payment $payment): KlikQrisTransaction
+    {
+        $payload = $this->jsonPayload($response, 'status');
+
+        try {
+            $transaction = KlikQrisTransaction::fromStatusPayload($payload);
+            $transaction->assertMatches($payment);
+
+            return $transaction;
+        } catch (UnexpectedValueException $exception) {
+            throw new RuntimeException('KlikQRIS status response validation failed: '.class_basename($exception).'.', previous: $exception);
+        }
+    }
+
+    /** @return array<mixed> */
+    private function jsonPayload(Response $response, string $operation): array
+    {
+        $payload = $response->json();
+        if (! is_array($payload)) {
+            throw new RuntimeException('KlikQRIS '.$operation.' response parse failed: invalid JSON.');
+        }
+
+        return $payload;
+    }
+
+    private function shouldRetryStatus(Throwable $exception): bool
+    {
+        if ($exception instanceof ConnectionException) {
+            return true;
+        }
+
+        if (! $exception instanceof RuntimeException) {
+            return false;
+        }
+
+        if (! preg_match('/HTTP (\d{3})/', $exception->getMessage(), $matches)) {
+            return false;
+        }
+
+        $status = (int) $matches[1];
+
+        return $status === 408 || $status === 429 || $status >= 500;
+    }
+
+    private function sleepBeforeStatusRetry(int $attempt): void
+    {
+        $baseDelayMs = max(0, (int) config('services.klikqris.status_retry_delay_ms', 250));
+        if ($baseDelayMs === 0) {
+            return;
+        }
+
+        $delayMs = min($baseDelayMs * (2 ** max(0, $attempt - 1)), 1000);
+        usleep($delayMs * 1000);
+    }
+
+    private function endpoint(string $path): string
+    {
+        return rtrim((string) config('services.klikqris.sandbox_base_url'), '/').$path;
+    }
+
+    private function apiKey(): string
+    {
+        return (string) config('services.klikqris.sandbox_api_key');
+    }
+
+    private function merchantId(): string
+    {
+        return (string) config('services.klikqris.sandbox_merchant_id');
+    }
+}

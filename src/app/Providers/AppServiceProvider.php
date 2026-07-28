@@ -14,6 +14,8 @@ use App\Services\Audit\AuditContext;
 use App\Services\Audit\HttpAuditContext;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
+use App\Services\KlikQris\KlikQrisClient;
+use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderStateMachine;
 use App\Services\Pakasir\PakasirClient;
@@ -50,6 +52,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
+        $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
         $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([
             $app->make(TelegramLocaleCallbackHandler::class),
