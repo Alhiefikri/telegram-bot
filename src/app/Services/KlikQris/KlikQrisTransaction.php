@@ -32,6 +32,30 @@ final readonly class KlikQrisTransaction
      */
     public static function fromPayload(array $payload): self
     {
+        return self::fromCreatePayload($payload);
+    }
+
+    /**
+     * @param  array<mixed>  $payload
+     */
+    public static function fromCreatePayload(array $payload): self
+    {
+        return self::fromPayloadForContext($payload, requirePendingQrisMedia: true);
+    }
+
+    /**
+     * @param  array<mixed>  $payload
+     */
+    public static function fromStatusPayload(array $payload): self
+    {
+        return self::fromPayloadForContext($payload, requirePendingQrisMedia: false);
+    }
+
+    /**
+     * @param  array<mixed>  $payload
+     */
+    private static function fromPayloadForContext(array $payload, bool $requirePendingQrisMedia): self
+    {
         $data = self::payloadData($payload);
         $orderId = self::requiredString($data, 'order_id', 'KlikQRIS order_id is required.');
         $amount = KlikQrisAmount::from($data['amount'] ?? null);
@@ -44,7 +68,7 @@ final readonly class KlikQrisTransaction
 
         $qrisUrl = self::optionalString($data['qris_url'] ?? null);
         $qrisImage = self::optionalString($data['qris_image'] ?? null);
-        if ($status === 'PENDING' && $qrisUrl === null && $qrisImage === null) {
+        if ($requirePendingQrisMedia && $status === 'PENDING' && $qrisUrl === null && $qrisImage === null) {
             throw new UnexpectedValueException('KlikQRIS pending transaction requires qris_url or qris_image.');
         }
 
@@ -56,8 +80,8 @@ final readonly class KlikQrisTransaction
             $qrisUrl,
             $qrisImage,
             self::optionalString($data['signature'] ?? null),
-            self::optionalDate($data['expired_at'] ?? null),
-            self::optionalDate($data['paid_at'] ?? null),
+            self::optionalDate($data, 'expired_at'),
+            self::optionalDate($data, 'paid_at'),
             KlikQrisPayloadSanitizer::sanitize($payload),
         );
     }
@@ -189,11 +213,16 @@ final readonly class KlikQrisTransaction
         return $string !== '' ? $string : null;
     }
 
-    private static function optionalDate(mixed $value): ?CarbonImmutable
+    /** @param array<mixed> $data */
+    private static function optionalDate(array $data, string $key): ?CarbonImmutable
     {
-        $string = self::optionalString($value);
-        if ($string === null) {
+        if (! array_key_exists($key, $data) || $data[$key] === null) {
             return null;
+        }
+
+        $string = self::optionalString($data[$key]);
+        if ($string === null) {
+            throw new UnexpectedValueException('KlikQRIS timestamp is invalid.');
         }
 
         try {

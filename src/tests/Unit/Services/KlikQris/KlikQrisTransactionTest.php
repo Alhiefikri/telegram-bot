@@ -137,6 +137,7 @@ class KlikQrisTransactionTest extends TestCase
     public static function mismatchedPayments(): array
     {
         return [
+            'provider' => [['provider' => 'pakasir'], 'KlikQRIS provider mismatch.'],
             'order id' => [['merchant_ref' => 'STEST-999'], 'KlikQRIS order_id mismatch.'],
             'amount' => [['amount' => 999], 'KlikQRIS amount mismatch.'],
             'total amount' => [['provider_total_payment' => 1017], 'KlikQRIS total_amount mismatch.'],
@@ -165,15 +166,47 @@ class KlikQrisTransactionTest extends TestCase
         $this->assertNull($transaction->qrisImageBase64());
     }
 
-    public function test_pending_transaction_requires_qris_url_or_image(): void
+    public function test_pending_create_transaction_requires_qris_url_or_image(): void
     {
         $this->expectException(UnexpectedValueException::class);
         $this->expectExceptionMessage('KlikQRIS pending transaction requires qris_url or qris_image.');
 
-        KlikQrisTransaction::fromPayload($this->transactionPayload([
+        KlikQrisTransaction::fromCreatePayload($this->transactionPayload([
             'qris_url' => '',
             'qris_image' => '',
         ]));
+    }
+
+    public function test_pending_status_transaction_allows_missing_qris_media(): void
+    {
+        $transaction = KlikQrisTransaction::fromStatusPayload($this->transactionPayload([
+            'status' => 'PENDING',
+            'qris_url' => null,
+            'qris_image' => null,
+        ]));
+
+        $this->assertTrue($transaction->isPending());
+        $this->assertNull($transaction->qrisUrl());
+        $this->assertNull($transaction->qrisImageBase64());
+    }
+
+    #[DataProvider('invalidTransactionTimestamps')]
+    public function test_transaction_fails_closed_for_invalid_present_timestamps(array $overrides): void
+    {
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('KlikQRIS timestamp is invalid.');
+
+        KlikQrisTransaction::fromStatusPayload($this->transactionPayload($overrides));
+    }
+
+    public static function invalidTransactionTimestamps(): array
+    {
+        return [
+            'invalid expired_at string' => [['expired_at' => 'not-a-date']],
+            'non scalar expired_at' => [['expired_at' => ['2026-07-28T07:00:00+00:00']]],
+            'invalid paid_at string' => [['paid_at' => 'not-a-date']],
+            'non scalar paid_at' => [['paid_at' => ['2026-07-28T06:50:00+00:00']]],
+        ];
     }
 
     public function test_callback_paid_parses_as_trigger_and_sanitizes_signature(): void
