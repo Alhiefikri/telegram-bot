@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
@@ -65,7 +66,11 @@ class AdminOrderDetailController extends Controller
             'provider_status' => $events[0]['provider_status'] ?? '-',
             'expires_at' => $payment->provider_expires_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'callback_count' => collect($events)->where('type', 'callback')->sum('received_count'),
-            'latest_reconciliation_at' => collect($events)->pluck('processed_at')->reject(fn ($value) => $value === '-')->first() ?? '-',
+            'latest_reconciliation_at' => $payment->paymentEvents
+                ->where('event_type', PaymentEventType::Reconciliation)
+                ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
+                ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
+                ->first()?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'events' => $events,
         ];
     }

@@ -62,6 +62,20 @@ class KlikQrisAdminObservabilityTest extends TestCase
             ],
             'signature' => 'EVENT_SIGNATURE_SHOULD_NOT_RENDER',
             'received_count' => 2,
+            'received_at' => Carbon::parse('2026-07-28 12:06:00'),
+            'last_received_at' => Carbon::parse('2026-07-28 12:07:00'),
+            'processed_at' => Carbon::parse('2026-07-28 12:10:00'),
+        ]);
+        PaymentEvent::factory()->for($payment)->create([
+            'provider' => 'klikqris',
+            'event_type' => PaymentEventType::Reconciliation,
+            'merchant_ref' => $payment->merchant_ref,
+            'provider_status' => 'SUCCESS',
+            'raw_payload' => [
+                'signature' => 'RECONCILIATION_SIGNATURE_SHOULD_NOT_RENDER',
+            ],
+            'signature' => 'RECONCILIATION_SIGNATURE_SHOULD_NOT_RENDER',
+            'received_count' => 1,
             'received_at' => Carbon::parse('2026-07-28 12:02:00'),
             'last_received_at' => Carbon::parse('2026-07-28 12:03:00'),
             'processed_at' => Carbon::parse('2026-07-28 12:04:00'),
@@ -80,8 +94,12 @@ class KlikQrisAdminObservabilityTest extends TestCase
             ->assertSee('2026-07-28 12:15')
             ->assertSee('Callback count')
             ->assertSee('2')
-            ->assertSee('2026-07-28 12:04')
             ->getContent();
+
+        $this->assertMatchesRegularExpression(
+            '/<dt class="text-brand-muted">\s*Latest reconciliation\s*<\/dt>\s*<dd>\s*2026-07-28 12:04\s*<\/dd>/',
+            $html,
+        );
 
         foreach ([
             'TOKEN_SHOULD_NOT_RENDER',
@@ -96,5 +114,43 @@ class KlikQrisAdminObservabilityTest extends TestCase
         ] as $secret) {
             $this->assertStringNotContainsString($secret, $html);
         }
+    }
+
+    public function test_authorized_admin_order_detail_displays_dash_without_reconciliation_events(): void
+    {
+        $this->withoutVite();
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+
+        $order = Order::factory()->create([
+            'invoice_number' => 'INV-KLIK-CALLBACK-ONLY',
+            'total_amount' => 1000,
+        ]);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'order_id' => $order->id,
+            'merchant_ref' => 'STORE/CALLBACK ONLY 1234567890',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_create_state' => 'created',
+            'status' => PaymentStatus::Pending,
+        ]);
+        PaymentEvent::factory()->for($payment)->create([
+            'provider' => 'klikqris',
+            'event_type' => PaymentEventType::Callback,
+            'merchant_ref' => $payment->merchant_ref,
+            'provider_status' => 'SUCCESS',
+            'received_count' => 1,
+            'received_at' => Carbon::parse('2026-07-28 12:06:00'),
+            'last_received_at' => Carbon::parse('2026-07-28 12:07:00'),
+            'processed_at' => Carbon::parse('2026-07-28 12:10:00'),
+        ]);
+
+        $html = $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertMatchesRegularExpression(
+            '/<dt class="text-brand-muted">\s*Latest reconciliation\s*<\/dt>\s*<dd>\s*-\s*<\/dd>/',
+            $html,
+        );
     }
 }
