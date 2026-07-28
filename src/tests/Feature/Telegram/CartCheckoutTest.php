@@ -271,9 +271,24 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(2, $product->fresh()->reserved_stock);
     }
 
-    public function test_telegram_rejects_klik_qris_checkout_intent_before_order_payment_or_stock_side_effects(): void
+    public function test_telegram_dispatches_klik_qris_checkout_intent_without_pakasir_or_manual_instruction_jobs(): void
     {
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://klikqris.com/api/sandbox/qris/create' => function ($request) {
+                $orderId = (string) ($request['order_id'] ?? 'INV-KLIK-E2E');
+
+                return Http::response(['data' => [
+                    'order_id' => $orderId,
+                    'amount' => 25000,
+                    'total_amount' => 25016,
+                    'status' => 'PENDING',
+                    'qris_url' => 'https://klikqris.com/storage/sandbox/qris_cart_checkout.png',
+                    'expired_at' => now()->addMinutes(15)->toIso8601String(),
+                    'signature' => 'opaque-test-signature',
+                ]], 200);
+            },
+            'https://klikqris.com/storage/sandbox/qris_cart_checkout.png' => Http::response("\x89PNG\r\n\x1A\n".'cart-checkout-png', 200, ['Content-Type' => 'image/png']),
+        ]);
         config()->set('services.klikqris', [
             'sandbox_enabled' => true,
             'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
@@ -289,25 +304,27 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 public function select(bool $binance): TelegramCheckoutPaymentIntentSelection
                 {
                     return new TelegramCheckoutPaymentIntentSelection(
-                        requestedPaymentMode: 'manual',
-                        paymentMode: 'manual',
+                        requestedPaymentMode: 'klikqris',
+                        paymentMode: 'klikqris',
                         paymentIntent: CheckoutPaymentIntents::klikQris(),
                     );
                 }
             },
         );
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
-        $product = Product::factory()->create(['name' => 'Unsupported KlikQRIS', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        $product = Product::factory()->create(['name' => 'Supported KlikQRIS', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(6261, 'unsupported-klikqris', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99021))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(6261, 'supported-klikqris', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99021))->assertOk();
 
-        $this->assertSame(0, Order::count());
-        $this->assertSame(0, Payment::count());
-        $this->assertSame(0, Cart::where('status', CartStatus::CheckedOut)->count());
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Checkout belum berhasil'));
+        $order = Order::query()->sole();
+        $payment = Payment::query()->sole();
+        $this->assertSame('klikqris', $payment->provider);
+        $this->assertSame(CartStatus::CheckedOut, Cart::query()->sole()->status);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains($request->body(), 'klikqris-')));
+        $this->assertCount(0, Http::recorded(fn ($request) => str_contains($request->url(), 'pakasir')));
     }
 
     public function test_duplicate_direct_binance_quantity_callbacks_share_one_checkout_intent(): void

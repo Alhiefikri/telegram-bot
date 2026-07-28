@@ -7,6 +7,7 @@ use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
@@ -190,18 +191,21 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
         match ($paymentIntent->postCreationBehavior()) {
             CheckoutPostCreationBehavior::BinancePayInstructions => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
+            CheckoutPostCreationBehavior::KlikQrisInstructions => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
             CheckoutPostCreationBehavior::PakasirInstructions => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
             CheckoutPostCreationBehavior::ManualQrisInstructions => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
-            CheckoutPostCreationBehavior::KlikQrisInstructions => throw new InvalidCheckout('KlikQRIS Telegram checkout is not available yet.'),
         };
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
     }
 
     private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void
     {
-        if ($behavior === CheckoutPostCreationBehavior::KlikQrisInstructions) {
-            throw new InvalidCheckout('KlikQRIS Telegram checkout is not available yet.');
-        }
+        match ($behavior) {
+            CheckoutPostCreationBehavior::BinancePayInstructions,
+            CheckoutPostCreationBehavior::PakasirInstructions,
+            CheckoutPostCreationBehavior::ManualQrisInstructions,
+            CheckoutPostCreationBehavior::KlikQrisInstructions => null,
+        };
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string

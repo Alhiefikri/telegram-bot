@@ -7,6 +7,9 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Binance\BinanceAutoVerification;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisQrisImage;
+use App\Services\KlikQris\KlikQrisSandboxCheckoutSelector;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -25,6 +28,9 @@ class TelegramCheckoutIntents
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
         private BinanceAutoVerification $binanceVerification,
+        private KlikQrisSandboxCheckoutSelector $klikQrisSelector,
+        private KlikQrisNativeQrisService $klikQris,
+        private KlikQrisQrisImage $klikQrisImages,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -66,6 +72,23 @@ class TelegramCheckoutIntents
         }
 
         $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
+    }
+
+    public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): void
+    {
+        $order->loadMissing('customer');
+        $transaction = $this->klikQris->ensureCreated($payment);
+        $payment->refresh();
+
+        $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->klikQris(
+                $order,
+                $payment,
+                $this->klikQrisImages->contents($transaction),
+                $this->locale->code($order->customer),
+            ),
+        );
     }
 
     public function binancePayEnabled(): bool
@@ -219,6 +242,10 @@ class TelegramCheckoutIntents
 
     public function paymentMode(): string
     {
+        if ($this->requestedPaymentMode() === 'klikqris') {
+            return 'klikqris';
+        }
+
         return $this->pakasirReadiness->effectivePaymentMode(
             $this->requestedPaymentMode(),
             $this->requestedPakasirCheckoutFlow(),
@@ -229,6 +256,10 @@ class TelegramCheckoutIntents
     {
         $settings = ManualPaymentSetting::current();
         $mode = (string) ($settings?->payment_mode ?: 'manual');
+
+        if ($this->klikQrisSelector->enabled()) {
+            return 'klikqris';
+        }
 
         return $mode === 'pakasir' ? 'pakasir' : 'manual';
     }

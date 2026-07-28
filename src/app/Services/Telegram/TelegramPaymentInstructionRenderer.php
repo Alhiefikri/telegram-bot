@@ -173,6 +173,54 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
+    public function klikQris(Order $order, Payment $payment, string $photoContents, string $locale = 'id'): TelegramPaymentInstruction
+    {
+        $order->loadMissing('orderItems');
+        $total = $payment->klikQrisTotalAmountDisplay();
+        if ($total === null) {
+            throw new \RuntimeException('KlikQRIS total amount is missing.');
+        }
+
+        $expiry = $this->earliestDate($payment->provider_expires_at, $payment->expired_at, $order->expires_at);
+        $lines = [
+            $locale === 'en' ? '✅ KlikQRIS checkout created' : '✅ Checkout KlikQRIS berhasil dibuat',
+            '━━━━━━━━━━━━━━',
+            '🧾 Invoice: '.$order->invoice_number,
+            ($locale === 'en' ? '📦 Products: ' : '📦 Produk: ').$this->orderItemsSummary($order),
+            ($locale === 'en' ? '💳 Total QRIS payment: ' : '💳 Total bayar QRIS: ').$total,
+            '',
+            '⚠️ Do not round or change any digit.',
+            $locale === 'en'
+                ? 'Scan this QRIS directly in Telegram. Pay only from the QR image above.'
+                : 'Scan QRIS ini langsung dari Telegram. Bayar hanya dari gambar QR di atas.',
+        ];
+
+        if ($expiry) {
+            $lines[] = '';
+            $lines[] = ($locale === 'en' ? '⏳ Provider deadline: ' : '⏳ Batas provider: ').$this->formatDate($expiry, $locale);
+            $lines[] = $locale === 'en'
+                ? 'This QRIS is valid for 15 minutes. After the deadline, create a new QRIS instead of paying this one.'
+                : 'QRIS ini berlaku 15 menit. Setelah batas waktu, buat QRIS baru dan jangan bayar QR ini.';
+        }
+
+        $lines[] = '';
+        $lines[] = $locale === 'en'
+            ? 'After payment succeeds, it will be verified automatically and the product will be sent directly to this chat.'
+            : 'Setelah pembayaran berhasil, sistem akan verifikasi otomatis dan produk langsung dikirim ke chat ini.';
+
+        return new TelegramPaymentInstruction(
+            photoContents: $photoContents,
+            filename: 'klikqris-'.$order->invoice_number.'.png',
+            captionLines: $lines,
+            replyMarkup: [
+                'inline_keyboard' => [
+                    [['text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
+                    [['text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                ],
+            ],
+        );
+    }
+
     /**
      * @return list<string>
      */

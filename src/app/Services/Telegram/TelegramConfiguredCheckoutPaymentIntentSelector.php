@@ -21,6 +21,14 @@ final readonly class TelegramConfiguredCheckoutPaymentIntentSelector implements 
             );
         }
 
+        if ($paymentMode === 'klikqris') {
+            return new TelegramCheckoutPaymentIntentSelection(
+                requestedPaymentMode: $requestedPaymentMode,
+                paymentMode: $paymentMode,
+                paymentIntent: CheckoutPaymentIntents::klikQris(),
+            );
+        }
+
         if ($paymentMode === 'pakasir') {
             return new TelegramCheckoutPaymentIntentSelection(
                 requestedPaymentMode: $requestedPaymentMode,

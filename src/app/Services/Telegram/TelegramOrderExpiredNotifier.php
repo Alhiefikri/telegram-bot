@@ -15,7 +15,7 @@ class TelegramOrderExpiredNotifier
             return;
         }
 
-        $order->loadMissing(['customer', 'orderItems']);
+        $order->loadMissing(['customer', 'orderItems', 'payments']);
         if (! $order->customer?->telegram_id || $order->order_status !== OrderStatus::Expired) {
             return;
         }
@@ -32,8 +32,12 @@ class TelegramOrderExpiredNotifier
             $this->locale->text($order->customer, 'Tenang, kamu masih bisa order ulang kapan aja.', 'You can place a new order anytime.'),
         ];
 
+        $buttonText = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === 'klikqris')
+            ? $this->locale->text($order->customer, '🔄 Buat QRIS Baru', '🔄 Create New QRIS')
+            : $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again');
+
         $this->bot->sendMessage((string) $order->customer->telegram_id, implode("\n", $lines), [
-            'inline_keyboard' => [[['text' => $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again'), 'callback_data' => 'katalog']]],
+            'inline_keyboard' => [[['text' => $buttonText, 'callback_data' => 'katalog']]],
         ]);
     }
 }
