@@ -53,10 +53,11 @@ class KlikQrisPaymentEventLogger
     private function logCanonical(PaymentEventType $type, string $merchantRef, string $status, array $sanitizedPayload, ?Payment $payment): PaymentEvent
     {
         $receivedAt = now();
-        $idempotencyKey = $this->idempotencyKey($sanitizedPayload);
+        $canonicalPayload = $this->canonicalize($sanitizedPayload);
+        $idempotencyKey = $this->idempotencyKey($canonicalPayload);
 
         try {
-            return DB::transaction(function () use ($type, $merchantRef, $status, $sanitizedPayload, $payment, $receivedAt, $idempotencyKey): PaymentEvent {
+            return DB::transaction(function () use ($type, $merchantRef, $status, $canonicalPayload, $payment, $receivedAt, $idempotencyKey): PaymentEvent {
                 $event = PaymentEvent::query()
                     ->where('provider', 'klikqris')
                     ->where('event_type', $type->value)
@@ -71,7 +72,7 @@ class KlikQrisPaymentEventLogger
                         'event_type' => $type,
                         'merchant_ref' => $merchantRef,
                         'provider_status' => $status,
-                        'raw_payload' => $sanitizedPayload,
+                        'raw_payload' => $canonicalPayload,
                         'idempotency_key' => $idempotencyKey,
                         'received_at' => $receivedAt,
                         'last_received_at' => $receivedAt,
@@ -87,12 +88,17 @@ class KlikQrisPaymentEventLogger
 
                 return $event->fresh();
             }, 5);
-        } catch (QueryException) {
+        } catch (QueryException $exception) {
+            if (! $this->isUniqueConflict($exception)) {
+                throw $exception;
+            }
+
             PaymentEvent::query()
                 ->where('provider', 'klikqris')
                 ->where('event_type', $type->value)
                 ->where('idempotency_key', $idempotencyKey)
                 ->update([
+                    'payment_id' => DB::raw('COALESCE(payment_id, '.($payment === null ? 'NULL' : DB::getPdo()->quote((string) $payment->id)).')'),
                     'last_received_at' => $receivedAt,
                     'received_count' => DB::raw('received_count + 1'),
                 ]);
@@ -106,26 +112,37 @@ class KlikQrisPaymentEventLogger
     }
 
     /** @param array<mixed> $payload */
-    private function idempotencyKey(array $payload): string
+    private function idempotencyKey(array $canonicalPayload): string
     {
-        $canonical = $this->canonicalize($payload);
-
-        return hash('sha256', json_encode($canonical, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode($canonicalPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
-    private function canonicalize(mixed $value): mixed
+    private function canonicalize(mixed $value, string|int|null $key = null): mixed
     {
+        if ($key === 'amount' || $key === 'total_amount') {
+            return KlikQrisAmount::from($value)->rupiah();
+        }
+
         if (! is_array($value)) {
             return $value;
         }
 
         $canonical = [];
-        foreach ($value as $key => $item) {
-            $canonical[$key] = $this->canonicalize($item);
+        foreach ($value as $childKey => $item) {
+            $canonical[$childKey] = $this->canonicalize($item, $childKey);
         }
 
         ksort($canonical);
 
         return $canonical;
+    }
+
+    private function isUniqueConflict(QueryException $exception): bool
+    {
+        $sqlState = (string) ($exception->errorInfo[0] ?? '');
+        $constraint = (string) ($exception->errorInfo[2] ?? $exception->getMessage());
+
+        return in_array($sqlState, ['23000', '23505'], true)
+            && str_contains($constraint, 'payment_events_provider_event_idempotency_unique');
     }
 }

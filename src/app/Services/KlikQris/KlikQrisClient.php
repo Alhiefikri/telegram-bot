@@ -58,6 +58,10 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
                 return $this->parseStatusResponse($response, $payment);
             } catch (Throwable $exception) {
                 if ($attempt >= $maxAttempts || ! $this->shouldRetryStatus($exception)) {
+                    if ($this->shouldRetryStatus($exception)) {
+                        throw new KlikQrisStatusUnavailableException;
+                    }
+
                     if ($exception instanceof RuntimeException) {
                         throw $exception;
                     }
@@ -128,10 +132,7 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         $payload = $this->jsonPayload($response, 'status');
 
         try {
-            $transaction = KlikQrisTransaction::fromStatusPayload($payload);
-            $transaction->assertMatches($payment);
-
-            return $transaction;
+            return KlikQrisTransaction::fromStatusPayload($payload);
         } catch (UnexpectedValueException $exception) {
             throw new RuntimeException('KlikQRIS status response validation failed: '.class_basename($exception).'.', previous: $exception);
         }

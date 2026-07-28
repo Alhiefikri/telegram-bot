@@ -7,7 +7,7 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
-use Throwable;
+use Illuminate\Support\Facades\DB;
 use UnexpectedValueException;
 
 class KlikQrisCallbackProcessor
@@ -29,11 +29,7 @@ class KlikQrisCallbackProcessor
             return $event;
         }
 
-        try {
-            $transaction = $this->client->transactionStatus($payment);
-        } catch (Throwable) {
-            return $event->fresh();
-        }
+        $transaction = $this->client->transactionStatus($payment);
 
         return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
     }
@@ -57,18 +53,31 @@ class KlikQrisCallbackProcessor
             return $event->fresh();
         }
 
-        if ($event->processed_at !== null && $payment->fresh()->status === PaymentStatus::Paid) {
-            return $event->fresh();
-        }
+        return DB::transaction(function () use ($payment, $event): PaymentEvent {
+            $lockedEvent = PaymentEvent::query()
+                ->whereKey($event->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $result = $this->orders->applyPaymentPaid($payment);
-        if ($result->shouldDispatchReceipt()) {
-            SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
-        }
+            if ($lockedEvent->processed_at !== null) {
+                return $lockedEvent->fresh();
+            }
 
-        $event->update(['processed_at' => now()]);
+            if ($payment->fresh()->status === PaymentStatus::Paid) {
+                $lockedEvent->update(['processed_at' => now()]);
 
-        return $event->fresh();
+                return $lockedEvent->fresh();
+            }
+
+            $result = $this->orders->applyPaymentPaid($payment);
+            if ($result->shouldDispatchReceipt()) {
+                SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
+            }
+
+            $lockedEvent->update(['processed_at' => now()]);
+
+            return $lockedEvent->fresh();
+        }, 5);
     }
 
     private function canVerifyCallback(KlikQrisCallback $callback, ?Payment $payment): bool

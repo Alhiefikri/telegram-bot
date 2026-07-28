@@ -119,6 +119,34 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_status_transient_outage_after_stored_callback_returns_success_but_readiness_and_contract_faults_surface(): void
+    {
+        $payment = $this->payableKlikQrisPayment();
+
+        Http::fake(fn () => Http::response(['message' => 'temporary'], 500));
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+        $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
+
+        config()->set('services.klikqris.sandbox_api_key', null);
+        Http::fake();
+        $this->withoutExceptionHandling();
+        $this->expectException(\RuntimeException::class);
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment));
+    }
+
+    public function test_invalid_status_json_fault_surfaces_after_durable_callback_log(): void
+    {
+        $payment = $this->payableKlikQrisPayment();
+        Http::fake(fn () => Http::response('not-json', 200));
+
+        $this->withoutExceptionHandling();
+        $this->expectException(\RuntimeException::class);
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment));
+    }
+
     public function test_status_outage_after_stored_callback_returns_success_and_persists_reconciliation_needed_event_without_secrets(): void
     {
         $payment = $this->payableKlikQrisPayment();
@@ -151,6 +179,44 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertArrayNotHasKey('signature', $event->raw_payload);
         $this->assertNotNull($event->processed_at);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_duplicate_callbacks_with_different_signatures_and_money_representations_coalesce(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+            'amount' => (string) $payment->amount,
+            'total_amount' => (string) $payment->provider_total_payment,
+            'signature' => 'first-signature',
+        ]))->assertOk();
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+            'amount' => $payment->amount,
+            'total_amount' => $payment->provider_total_payment,
+            'signature' => 'second-signature',
+        ]))->assertOk();
+
+        $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
+        $this->assertSame(2, $event->received_count);
+        $this->assertSame($payment->amount, $event->raw_payload['amount']);
+        $this->assertSame($payment->provider_total_payment, $event->raw_payload['total_amount']);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_duplicate_top_level_critical_json_keys_are_rejected_before_status_or_event(): void
+    {
+        Http::fake();
+        $payment = $this->payableKlikQrisPayment();
+        $json = json_encode($this->callbackPayload($payment), JSON_THROW_ON_ERROR);
+        $json = str_replace('"amount":10000', '"amount":10000,"amount":"10000"', $json);
+
+        $this->call('POST', '/api/webhook/klikqris/sandbox', [], [], [], ['CONTENT_TYPE' => 'application/json'], $json)
+            ->assertStatus(400);
+
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        Http::assertNothingSent();
     }
 
     public function test_rate_limit_uses_configured_klikqris_sandbox_limiter_without_changing_pakasir_route(): void
