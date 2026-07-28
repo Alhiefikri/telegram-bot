@@ -40,6 +40,13 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('telegram:webhook:identity:'.(string) $identity);
         });
 
+        $this->rateLimiter->for('klikqris-sandbox-webhook', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.klikqris.webhook_rate_limit_per_minute', 30));
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('klikqris:sandbox-webhook:source:'.$source);
+        });
+
         $this->rateLimiter->for('pakasir-webhook', function (Request $request) {
             $limit = (int) $this->config->get('services.pakasir.webhook_rate_limit_per_minute', 30);
             $source = $request->ip() ?: 'unknown';
