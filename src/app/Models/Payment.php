@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_expires_at',
     'provider_payment_number',
     'provider_payment_number_hash',
+    'provider_transaction_token',
     'provider_create_state',
     'provider_create_attempted_at',
     'provider_create_last_error',
@@ -51,6 +52,7 @@ class Payment extends Model
             'provider_created_at' => 'datetime',
             'provider_expires_at' => 'datetime',
             'provider_payment_number' => 'encrypted',
+            'provider_transaction_token' => 'encrypted',
             'provider_create_attempted_at' => 'datetime',
             'status' => PaymentStatus::class,
             'paid_at' => 'datetime',
@@ -91,6 +93,40 @@ class Payment extends Model
             && filled($this->provider_payment_number)
             && $this->provider_total_payment !== null
             && $this->provider_total_payment >= $this->amount;
+    }
+
+    public function isNativeKlikQris(): bool
+    {
+        return $this->providerName() === 'klikqris'
+            && $this->providerPaymentMethodName() === 'qris'
+            && filled($this->klikQrisQrisUrl());
+    }
+
+    public function isPayableNativeKlikQris(): bool
+    {
+        return $this->status === PaymentStatus::Pending
+            && $this->isNativeKlikQris()
+            && $this->provider_total_payment !== null
+            && $this->provider_total_payment >= $this->amount
+            && $this->provider_expires_at !== null
+            && $this->provider_expires_at->isFuture();
+    }
+
+    public function klikQrisQrisUrl(): ?string
+    {
+        $payload = is_array($this->provider_payload) ? $this->provider_payload : [];
+        $url = trim((string) ($payload['qris_url'] ?? ''));
+
+        return $url !== '' ? $url : null;
+    }
+
+    public function klikQrisTotalAmountDisplay(): ?string
+    {
+        if ($this->provider_total_payment === null) {
+            return null;
+        }
+
+        return 'Rp '.number_format((int) $this->provider_total_payment, 0, ',', '.');
     }
 
     private function providerName(): string

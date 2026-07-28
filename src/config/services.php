@@ -71,6 +71,20 @@ return [
         'status_refresh_in_progress_retry_after_seconds' => (int) env('PAKASIR_STATUS_REFRESH_IN_PROGRESS_RETRY_AFTER_SECONDS', 3),
     ],
 
+    'klikqris' => [
+        'sandbox_enabled' => (bool) env('KLIKQRIS_SANDBOX_ENABLED', false),
+        'sandbox_base_url' => env('KLIKQRIS_SANDBOX_BASE_URL', 'https://klikqris.com/api/sandbox'),
+        'sandbox_api_key' => env('KLIKQRIS_SANDBOX_API_KEY'),
+        'sandbox_merchant_id' => env('KLIKQRIS_SANDBOX_MERCHANT_ID'),
+        'qris_ttl_minutes' => (int) env('KLIKQRIS_QRIS_TTL_MINUTES', 15),
+        'http_timeout_seconds' => (float) env('KLIKQRIS_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('KLIKQRIS_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
+        'status_max_attempts' => (int) env('KLIKQRIS_STATUS_MAX_ATTEMPTS', 3),
+        'status_retry_delay_ms' => (int) env('KLIKQRIS_STATUS_RETRY_DELAY_MS', 250),
+        'webhook_rate_limit_per_minute' => (int) env('KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
+        'status_refresh_rate_limit_per_minute' => (int) env('KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+    ],
+
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'telegram_reservation_floor' => (int) env('STOREFRONT_TELEGRAM_RESERVATION_FLOOR', 1),
