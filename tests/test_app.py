@@ -23,7 +23,7 @@ MOCK_RATES = {
 def test_window_initialization():
     win = CurrencyCalcWindow(rates=MOCK_RATES)
     assert win.target_curr == "IDR"
-    assert win.result_label.get_text() == "0.00 IDR"
+    assert win.result_label.get_text() == "0"
     for code in ["IDR", "USD", "EUR", "SGD", "JPY", "MYR"]:
         assert code in win.badges
         assert isinstance(win.badges[code], Gtk.Button)
@@ -36,6 +36,10 @@ def test_live_expression_evaluation():
 
     win.entry.set_text("100 USD")
     assert win.result_label.get_text() == "1,620,000.00 IDR"
+
+    # Test pure math calculation
+    win.entry.set_text("50 + 20")
+    assert win.result_label.get_text() == "70"
 
 
 def test_quick_currency_badge_selection():
@@ -56,6 +60,17 @@ def test_quick_currency_badge_selection():
     win.badges["IDR"].emit("clicked")
     assert win.target_curr == "IDR"
     assert win.result_label.get_text() == "16,200.00 IDR"
+
+
+def test_keypad_clicks():
+    win = CurrencyCalcWindow(rates=MOCK_RATES)
+    win.on_keypad_clicked("5")
+    win.on_keypad_clicked("+")
+    win.on_keypad_clicked("5")
+    assert win.entry.get_text() == "5 + 5"
+    assert win.result_label.get_text() == "10"
+    win.on_keypad_clicked("C")
+    assert win.entry.get_text() == ""
 
 
 def test_copy_to_clipboard():

@@ -131,3 +131,60 @@ def evaluate_expression(
     # 4. Convert evaluated numeric value from source currency to target currency
     final_amount = convert_currency(numeric_val, source_curr, target_curr, rates_upper)
     return final_amount, target_curr
+
+
+def evaluate_full_details(
+    expr_str: str,
+    target_curr: str = "IDR",
+    rates: dict[str, float] | None = None
+) -> dict[str, Any]:
+    """Evaluate math/currency expression and return detailed breakdown for UI displays.
+    
+    Returns dict containing:
+        - raw_val: Raw numeric math result before conversion.
+        - has_explicit_currency: True if currency symbol/code was in expression.
+        - source_curr: Source currency code or "USD".
+        - converted_val: Converted value in target currency.
+        - target_curr: Target currency code.
+    """
+    if rates is None:
+        rates = {"USD": 1.0, "IDR": 16200.0}
+
+    expr_str = expr_str.strip()
+    has_explicit_currency = False
+    rates_upper = {k.upper(): v for k, v in rates.items()}
+
+    for code in rates_upper:
+        if re.search(r'\b' + re.escape(code) + r'\b', expr_str, re.IGNORECASE):
+            has_explicit_currency = True
+            break
+
+    # First calculate raw math expression without conversion
+    clean_math_str = re.sub(r'[A-Za-z]{3}', '', expr_str).strip()
+    try:
+        if clean_math_str:
+            tree = ast.parse(clean_math_str, mode='eval')
+            raw_val = safe_eval_math(tree.body)
+        else:
+            raw_val = 0.0
+    except Exception:
+        try:
+            cleaned = re.sub(r'[^0-9.\-+*/()]', '', clean_math_str)
+            if cleaned:
+                tree = ast.parse(cleaned, mode='eval')
+                raw_val = safe_eval_math(tree.body)
+            else:
+                raw_val = 0.0
+        except Exception:
+            raw_val = 0.0
+
+    converted_val, final_target = evaluate_expression(expr_str, target_curr, rates)
+
+    return {
+        "raw_val": raw_val,
+        "has_explicit_currency": has_explicit_currency,
+        "source_curr": target_curr if not has_explicit_currency else target_curr,
+        "converted_val": converted_val,
+        "target_curr": final_target,
+    }
+
