@@ -111,9 +111,9 @@ def test_hyprland_conf_updated(tmp_path):
     )
 
     conf_text = hypr_conf.read_text()
-    assert "windowrule = float, class:^(com.cachyos.currencycalc)$" in conf_text
-    assert "windowrule = size 420 540, class:^(com.cachyos.currencycalc)$" in conf_text
-    assert "windowrule = center, class:^(com.cachyos.currencycalc)$" in conf_text
+    assert "windowrulev2 = float, class:^(com.cachyos.currencycalc)$" in conf_text
+    assert "windowrulev2 = size 420 540, class:^(com.cachyos.currencycalc)$" in conf_text
+    assert "windowrulev2 = center, class:^(com.cachyos.currencycalc)$" in conf_text
 
 
 def test_revert_script_restores_config(tmp_path):

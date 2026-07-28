@@ -84,6 +84,7 @@ exec python3 -m currency_calc.waybar_module "$@"
 BACKUP_DIR="${{1:-""}}"
 WAYBAR_DIR="${{2:-"{waybar_path}"}}"
 
+export PYTHONPATH="{src_path}:$PYTHONPATH"
 python3 -c "
 import sys, os, glob
 from pathlib import Path
@@ -141,7 +142,11 @@ fi
         "on-click": calc_exec_path,
     }
 
-    if "modules-right" in config_data and isinstance(config_data["modules-right"], list):
+    # Respect HyDE pill groups if present
+    if "group/pill#right3" in config_data and isinstance(config_data["group/pill#right3"].get("modules"), list):
+        if "custom/currency" not in config_data["group/pill#right3"]["modules"]:
+            config_data["group/pill#right3"]["modules"].append("custom/currency")
+    elif "modules-right" in config_data and isinstance(config_data["modules-right"], list):
         if "custom/currency" not in config_data["modules-right"]:
             config_data["modules-right"].append("custom/currency")
     else:
@@ -156,13 +161,13 @@ fi
         new_css = css_content + "\n\n/* Currency Calculator Waybar Module */\n#custom-currency {\n    background-color: rgba(30, 30, 46, 0.8);\n    color: #cdd6f4;\n    padding: 0 10px;\n    margin: 0 4px;\n    border-radius: 8px;\n}\n"
         style_file.write_text(new_css.lstrip())
 
-    # 7. Update Hyprland hyprland.conf
+    # 7. Update Hyprland hyprland.conf (Use windowrulev2 to prevent Hyprland parser errors)
     hypr_conf = hypr_path / "hyprland.conf"
     hypr_text = hypr_conf.read_text() if hypr_conf.exists() else ""
     rules = [
-        "windowrule = float, class:^(com.cachyos.currencycalc)$",
-        "windowrule = size 420 540, class:^(com.cachyos.currencycalc)$",
-        "windowrule = center, class:^(com.cachyos.currencycalc)$",
+        "windowrulev2 = float, class:^(com.cachyos.currencycalc)$",
+        "windowrulev2 = size 420 540, class:^(com.cachyos.currencycalc)$",
+        "windowrulev2 = center, class:^(com.cachyos.currencycalc)$",
     ]
     needed_rules = [r for r in rules if r not in hypr_text]
     if needed_rules:
