@@ -14,9 +14,7 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -25,22 +23,6 @@ use Tests\TestCase;
 class KlikQrisNativeQrisTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected function afterRefreshingDatabase(): void
-    {
-        if (! Schema::hasColumn('payments', 'provider_transaction_token')) {
-            Artisan::call('migrate', [
-                '--path' => getcwd().'/database/migrations/2026_07_28_000001_add_provider_transaction_token_to_payments.php',
-                '--realpath' => true,
-                '--force' => true,
-            ]);
-        }
-
-        $this->assertTrue(
-            Schema::hasColumn('payments', 'provider_transaction_token'),
-            'Committed migrations must expose payments.provider_transaction_token.',
-        );
-    }
 
     protected function setUp(): void
     {

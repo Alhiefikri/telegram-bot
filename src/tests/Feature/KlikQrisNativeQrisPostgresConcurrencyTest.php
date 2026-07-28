@@ -33,8 +33,8 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
             $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
         }
 
-        if (! function_exists('pcntl_fork')) {
-            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl.');
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
         }
 
         $this->guardIsolatedPostgresTestingDatabase();
@@ -68,17 +68,51 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
 
     private function guardIsolatedPostgresTestingDatabase(): void
     {
-        if (! app()->environment('testing')) {
+        if (app()->environment() !== 'testing') {
             $this->fail('Refusing to run PostgreSQL concurrency migration outside APP_ENV=testing.');
         }
 
         $connection = config('database.default');
+        $driver = (string) config("database.connections.{$connection}.driver");
+        if ($driver !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
+        }
+
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
+        }
+
+        $configuredUrl = (string) config("database.connections.{$connection}.url");
+        $environmentUrl = (string) env('DB_URL', '');
+        if ($configuredUrl !== '' || $environmentUrl !== '') {
+            $this->fail('Refusing destructive PostgreSQL concurrency setup while DB_URL is configured. Use phpunit.postgres.xml with an isolated explicit DB_DATABASE instead.');
+        }
+
         $database = (string) config("database.connections.{$connection}.database");
         $host = (string) config("database.connections.{$connection}.host");
 
-        if (! preg_match('/(^|[_-])(test|testing)([_-]|$)/i', $database)) {
-            $this->markTestSkipped("PostgreSQL concurrency check requires an isolated test database name; configured database [{$database}] on host [{$host}] was not accepted.");
+        $rejectedDatabases = ['postgres', 'template0', 'template1', 'production', 'prod', 'telegram_bot', 'telegram-bot', 'telegram_bot_prod', 'telegram-bot-prod'];
+        if (in_array(strtolower($database), $rejectedDatabases, true) || preg_match('/(^|[_-])(prod|production|live|main)([_-]|$)/i', $database)) {
+            $this->fail("Refusing destructive PostgreSQL concurrency setup against prod-like database [{$database}] on host [{$host}].");
         }
+
+        if (! $this->isStrictTestingDatabaseName($database)) {
+            $this->fail("PostgreSQL concurrency check requires an isolated test database name; configured database [{$database}] on host [{$host}] was not accepted.");
+        }
+
+        $actualDatabase = (string) DB::selectOne('select current_database() as database')->database;
+        if ($actualDatabase !== $database) {
+            $this->fail("Refusing destructive PostgreSQL concurrency setup because connected database [{$actualDatabase}] does not match configured database [{$database}].");
+        }
+
+        if (! $this->isStrictTestingDatabaseName($actualDatabase)) {
+            $this->fail("Refusing destructive PostgreSQL concurrency setup because connected database [{$actualDatabase}] is not an isolated testing database.");
+        }
+    }
+
+    private function isStrictTestingDatabaseName(string $database): bool
+    {
+        return preg_match('/(^|[_-])(test|testing)([_-]|$)/i', $database) === 1;
     }
 
     private function migrateCommittedPostgresFixtureSchema(): void
@@ -101,44 +135,144 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
             $this->fail('Unable to create concurrency test workspace.');
         }
 
-        $releaseFile = $directory.'/release';
         $children = [];
 
-        foreach ($callbacks as $index => $callback) {
-            $pid = pcntl_fork();
-            if ($pid === -1) {
-                $this->fail('Unable to fork concurrency test process.');
+        try {
+            $releaseFile = $directory.'/release';
+
+            foreach ($callbacks as $index => $callback) {
+                $pid = pcntl_fork();
+                if ($pid === -1) {
+                    $this->terminateAndReapChildren($children);
+                    $this->fail('Unable to fork concurrency test process.');
+                }
+
+                if ($pid === 0) {
+                    $this->runChildProcess($callback, $releaseFile, $directory.'/result-'.$index.'.json');
+                }
+
+                $children[$index] = $pid;
             }
 
-            if ($pid === 0) {
-                $this->runChildProcess($callback, $releaseFile, $directory.'/result-'.$index.'.json');
+            touch($releaseFile);
+
+            $statuses = $this->waitForChildren($children, 20.0);
+            $unfinished = array_diff_key($children, $statuses);
+            if ($unfinished !== []) {
+                $this->terminateAndReapChildren($unfinished);
+
+                $this->fail('PostgreSQL concurrency workers timed out and were terminated: '.implode(', ', $unfinished));
             }
 
-            $children[$index] = $pid;
+            $results = [];
+            foreach ($children as $index => $pid) {
+                $path = $directory.'/result-'.$index.'.json';
+                $result = is_file($path) ? json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR) : [
+                    'ok' => false,
+                    'class' => RuntimeException::class,
+                    'message' => 'Child process did not write a result file.',
+                ];
+                $status = $statuses[$index];
+                $result['exit_code'] = is_int($status) && pcntl_wifexited($status) ? pcntl_wexitstatus($status) : 255;
+                $results[] = $result;
+            }
+
+            return $results;
+        } finally {
+            $this->cleanupConcurrencyDirectory($directory);
+        }
+    }
+
+    /**
+     * @param  array<int, int>  $children
+     * @return array<int, int|null>
+     */
+    private function waitForChildren(array $children, float $timeoutSeconds): array
+    {
+        $statuses = [];
+        $deadline = microtime(true) + $timeoutSeconds;
+
+        while (count($statuses) < count($children) && microtime(true) < $deadline) {
+            $statuses += $this->reapAvailableChildren(array_diff_key($children, $statuses));
+
+            if (count($statuses) < count($children)) {
+                usleep(10_000);
+            }
         }
 
-        touch($releaseFile);
+        return $statuses;
+    }
 
-        $results = [];
+    /**
+     * @param  array<int, int>  $children
+     * @return array<int, int|null>
+     */
+    private function reapAvailableChildren(array $children): array
+    {
+        $statuses = [];
         foreach ($children as $index => $pid) {
             $status = 0;
-            pcntl_waitpid($pid, $status);
-            $path = $directory.'/result-'.$index.'.json';
-            $result = is_file($path) ? json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR) : [
-                'ok' => false,
-                'class' => RuntimeException::class,
-                'message' => 'Child process did not write a result file.',
-            ];
-            $result['exit_code'] = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : 255;
-            $results[] = $result;
+            $waited = pcntl_waitpid($pid, $status, WNOHANG);
+            if ($waited === $pid || $waited === -1) {
+                $statuses[$index] = $waited === $pid ? $status : null;
+            }
+        }
+
+        return $statuses;
+    }
+
+    /**
+     * @param  array<int, int>  $children
+     */
+    private function terminateAndReapChildren(array $children): void
+    {
+        if ($children === []) {
+            return;
+        }
+
+        $this->signalChildren($children, SIGTERM);
+        $statuses = $this->waitForChildren($children, 2.0);
+        $unfinished = array_diff_key($children, $statuses);
+
+        if ($unfinished === []) {
+            return;
+        }
+
+        $this->signalChildren($unfinished, SIGKILL);
+        $this->waitForChildren($unfinished, 2.0);
+    }
+
+    /**
+     * @param  array<int, int>  $children
+     */
+    private function signalChildren(array $children, int $signal): void
+    {
+        foreach ($children as $pid) {
+            if (function_exists('posix_kill')) {
+                @posix_kill($pid, $signal);
+
+                continue;
+            }
+
+            if (PHP_OS_FAMILY !== 'Windows') {
+                exec('kill -'.escapeshellarg((string) (int) $signal).' '.escapeshellarg((string) (int) $pid));
+            }
+        }
+    }
+
+    private function cleanupConcurrencyDirectory(string $directory): void
+    {
+        if (! is_dir($directory)) {
+            return;
         }
 
         foreach (glob($directory.'/*') ?: [] as $path) {
-            unlink($path);
+            if (is_file($path)) {
+                unlink($path);
+            }
         }
-        rmdir($directory);
 
-        return $results;
+        rmdir($directory);
     }
 
     private function runChildProcess(callable $callback, string $releaseFile, string $resultFile): never
