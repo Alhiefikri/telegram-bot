@@ -2,7 +2,7 @@
 
 ## Commit
 
-- SHA: 104605bfa7bee11db4e0496be24b1236989a6a66
+- SHA: ab3ab229cd74c6d0336ea5c02194288850f66d6dfa7bee11db4e0496be24b1236989a6a66
 - Message: `feat: add KlikQRIS sandbox client`
 
 ## Files changed
