@@ -1078,7 +1078,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && $request['message_id'] === 654);
     }
 
-    public function test_persisted_native_qris_create_failure_sends_retry_message_without_payment_instructions(): void
+    public function test_persisted_native_qris_create_failure_sends_hosted_fallback_payment_instructions(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
@@ -1095,6 +1095,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
         $order = Order::firstOrFail();
         $payment = $order->payments()->firstOrFail();
+        $hostedUrl = 'https://app.pakasir.test/pay/sedulur-digital/15000?order_id='.rawurlencode($payment->merchant_ref);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
         $this->assertSame(PaymentStatus::Pending, $payment->status);
         $this->assertSame('api_qris', $payment->method);
         $this->assertNull($payment->provider_payment_number);
@@ -1102,14 +1105,16 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(1, $order->payments()->count());
         $this->assertSame(1, $product->fresh()->reserved_stock);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/api/transactioncreate/qris'));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r->body(), 'QRIS belum siap')
-            && str_contains($r->body(), 'Provider belum mengirim QRIS dan total bayar final yang valid')
-            && str_contains($r->body(), 'Jangan bayar total produk sebagai total final QRIS')
-            && ! str_contains($r->body(), 'Pakasir')
-            && ! str_contains($r->body(), 'Bayar via Website')
-            && ! str_contains($r->body(), '/pay/sedulur-digital/15000')
-            && str_contains($r->body(), 'Cek Pembayaran'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r->body(), 'QRIS belum siap'));
+        $photoSends = Http::recorded(fn ($r) => str_ends_with($r->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoSends);
+        $photoBody = $photoSends->first()[0]->body();
+        $this->assertStringContainsString('Checkout QRIS dialihkan', $photoBody);
+        $this->assertStringContainsString('qr-source:'.$hostedUrl, $photoBody);
+        $this->assertStringContainsString('Bayar via Website', $photoBody);
+        $this->assertStringContainsString('app.pakasir.test\/pay\/sedulur-digital\/15000', $photoBody);
+        $this->assertStringContainsString('Cek Pembayaran', $photoBody);
     }
 
     public function test_expired_callback_answer_does_not_block_callback_business_action(): void
