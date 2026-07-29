@@ -1,7 +1,7 @@
 # Desain Ketahanan QRIS Native Pakasir dan Fallback Pembayaran
 
 **Tanggal:** 2026-07-29
-**Status:** Disetujui dalam diskusi, menunggu persetujuan dokumen tertulis
+**Status:** Disetujui untuk implementation planning
 **Ruang lingkup:** Jalur QRIS native Pakasir pada `main` dan production Store Bot, tanpa mengubah Binance Pay atau branch eksperimen KlikQRIS
 **Batas operasional:** Dokumen ini tidak mengizinkan deployment production. Deployment hanya boleh dilakukan setelah instruksi eksplisit pemilik.
 
