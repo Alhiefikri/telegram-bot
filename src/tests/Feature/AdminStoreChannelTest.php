@@ -45,7 +45,7 @@ class AdminStoreChannelTest extends TestCase
             'channel_username' => '@lhie_store',
             'channel_link' => 'https://t.me/lhie_store',
             'community_gate_enabled' => '1',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+        ])->assertRedirect('/admin?tab=telegram-channel#admin-section-store-channel');
 
         $this->assertDatabaseHas('store_channel_settings', [
             'channel_username' => null,
@@ -67,7 +67,7 @@ class AdminStoreChannelTest extends TestCase
         ]);
 
         $this->post(route('admin.store-channel.test'))
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+            ->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-test');
 
         $this->assertDatabaseHas('store_channel_settings', [
             'telegram_chat_id' => '-100123',
@@ -115,7 +115,7 @@ class AdminStoreChannelTest extends TestCase
         ]);
 
         $this->post(route('admin.store-channel.test'))
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']))
+            ->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-test')
             ->assertSessionHas('error');
 
         $sessionError = (string) session('error');
@@ -169,7 +169,7 @@ class AdminStoreChannelTest extends TestCase
 
         $this->post(route('admin.store-channel.update'), [
             'channel_username' => '@new_store',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+        ])->assertRedirect('/admin?tab=telegram-channel#admin-section-store-channel');
 
         $setting = StoreChannelSetting::first();
         $this->assertSame('@new_store', $setting->channel_username);
@@ -285,7 +285,7 @@ class AdminStoreChannelTest extends TestCase
 
         $this->post(route('admin.store-channel.fake-sales-proof'), [
             'product_id' => $selectedProduct->id,
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+        ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof');
 
         Http::assertSentCount(1);
         Http::assertSent(function (Request $request) use ($selectedProduct, $otherActiveProduct): bool {
@@ -387,7 +387,7 @@ class AdminStoreChannelTest extends TestCase
 
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
-            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+            ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof');
 
             Http::assertNothingSent();
             $this->assertSame($attributes['stock'], $product->refresh()->stock);
@@ -445,11 +445,11 @@ class AdminStoreChannelTest extends TestCase
 
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
-            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+            ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof');
 
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
-            ])->assertRedirect(route('admin.dashboard', ['tab' => 'telegram-channel']));
+            ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof');
 
             $matchingSends = Http::recorded(function (Request $request) use ($product): bool {
                 $text = (string) ($request['text'] ?? '');

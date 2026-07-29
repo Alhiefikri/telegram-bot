@@ -21,6 +21,6 @@ class AdminProductStockItemDeleteController extends Controller
 
         $stockItemManager->deleteAvailable($product, $stockItem, $user, $request->ip());
 
-        return $forms->stockItemDeleted($product->name);
+        return $forms->stockItemDeleted($product->fresh());
     }
 }

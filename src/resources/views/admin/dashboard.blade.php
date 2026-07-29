@@ -30,6 +30,7 @@
 
         <main
             class="admin-mini-shell flex min-h-screen flex-col px-3 pb-32 pt-3 sm:px-4 md:px-0 md:pb-10 md:pt-6"
+            data-return-target-highlight-class="admin-return-target-highlight"
             x-data="adminDashboard(@js($dashboardState))"
             x-on:admin-dashboard:close-modal.window="handleCloseModal($event)"
         >

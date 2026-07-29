@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\StoreChannelSetting;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
 use App\Services\StoreChannelSetupVerifier;
 use App\Services\Telegram\TelegramBotApiRedactor;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 
 class AdminStoreChannelTestController extends Controller
 {
-    public function __invoke(Request $request, StoreChannelSetupVerifier $verifier, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(Request $request, StoreChannelSetupVerifier $verifier, AuditLogger $auditLogger, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
         abort_unless((bool) $user->role?->canManagePaymentSettings(), 403);
@@ -40,7 +41,7 @@ class AdminStoreChannelTestController extends Controller
 
         $auditLogger->log('store_channel.tested', $setting, [], $result, $user, $request->ip());
 
-        $redirect = redirect()->route('admin.dashboard', ['tab' => 'telegram-channel']);
+        $redirect = $redirector->storeChannelTest();
 
         return $result['success']
             ? $redirect->with('status', 'Test Channel berhasil. Toggle tetap perlu diaktifkan manual.')

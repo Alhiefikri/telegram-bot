@@ -1,5 +1,6 @@
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = 'Tidak ada file yang dipilih';
+const RETURN_TARGET_HIGHLIGHT_MS = 1800;
 
 const emptyProductForm = () => ({
     productModalMode: 'create',
@@ -105,6 +106,37 @@ export default function adminDashboard(initialState = {}) {
         manageStockSummary: { available: 0, reserved: 0, paid: 0 },
         manageStockTruncated: false,
         manageStockAddPayload: null,
+
+        init() {
+            this.$nextTick(() => this.focusReturnTarget());
+        },
+
+        focusReturnTarget() {
+            let targetId = '';
+
+            try {
+                targetId = decodeURIComponent(window.location.hash.replace(/^#/, ''));
+            } catch (error) {
+                targetId = '';
+            }
+
+            if (! targetId) {
+                return;
+            }
+
+            const fallbackId = targetId.startsWith('sales-proof-') ? 'admin-section-sales' : null;
+            const target = document.getElementById(targetId) ?? (fallbackId ? document.getElementById(fallbackId) : null);
+            if (! target?.matches('[data-admin-return-target]')) {
+                return;
+            }
+
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            target.scrollIntoView({ block: 'center', behavior: 'auto' });
+            target.focus({ preventScroll: true });
+            target.classList.add('admin-return-target-highlight');
+
+            window.setTimeout(() => target.classList.remove('admin-return-target-highlight'), reduceMotion ? 900 : RETURN_TARGET_HIGHLIGHT_MS);
+        },
 
         stockItemCount() {
             return this.stockItems

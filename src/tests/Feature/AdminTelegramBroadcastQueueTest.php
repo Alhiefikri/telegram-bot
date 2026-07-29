@@ -31,7 +31,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
 
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
             ->post(route('admin.broadcast.store'), ['message' => 'Private launch note'])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'broadcast']))
+            ->assertRedirect('/admin?tab=broadcast#admin-section-broadcast')
             ->assertSessionHas('status', 'Broadcast #1 masuk antrean. Progres bisa dipantau di tab Broadcast.');
 
         $broadcast = TelegramBroadcast::query()->firstOrFail();

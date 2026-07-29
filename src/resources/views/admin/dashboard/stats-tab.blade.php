@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  STATS TAB (Ringkasan)                              ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-show="activeTab === 'stats'" class="mt-4 space-y-4">
+            <div id="admin-section-stats" data-admin-return-target tabindex="-1" x-show="activeTab === 'stats'" class="mt-4 space-y-4">
 
                 {{-- Link Toko section --}}
                 <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="store-link-section overflow-hidden rounded-[1.5rem] text-neo-ink" aria-label="Link toko">
@@ -89,7 +89,7 @@
                 </section>
 
                 {{-- Payment control (merged from sidebar) --}}
-                <x-admin-dashboard.card as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Mode pembayaran">
+                <x-admin-dashboard.card id="admin-payment-settings" data-admin-return-target tabindex="-1" as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Mode pembayaran">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Mode pembayaran</p>
@@ -223,7 +223,7 @@
                                 Simpan batas waktu pembayaran
                             </x-admin-dashboard.button>
                         </form>
-                        <form method="POST" action="{{ $paymentControl['support_update_url'] }}" class="mt-4 space-y-3 border-t-[2px] border-neo-ink/15 pt-4" aria-label="Support WhatsApp">
+                        <form id="admin-support-settings" data-admin-return-target tabindex="-1" method="POST" action="{{ $paymentControl['support_update_url'] }}" class="mt-4 space-y-3 border-t-[2px] border-neo-ink/15 pt-4" aria-label="Support WhatsApp">
                             @csrf
                             <div>
                                 <h3 class="font-display text-sm font-black uppercase tracking-wider text-neo-ink">Support WhatsApp</h3>

@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PRODUK TAB (Katalog)                               ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-cloak x-show="activeTab === 'produk'" class="mt-4 space-y-4">
+            <div id="admin-section-products" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'produk'" class="mt-4 space-y-4">
 
                 <div class="flex items-end justify-between gap-3">
                     <div>
@@ -27,7 +27,7 @@
                 </x-admin-dashboard.notice>
 
                 @if ($canManageProducts)
-                <x-admin-dashboard.card as="form" method="POST" action="{{ route('admin.categories.store') }}" tone="yellow" padding="compact" shadow="sm" class="rounded-[1rem]">
+                <x-admin-dashboard.card id="admin-category-create" data-admin-return-target tabindex="-1" as="form" method="POST" action="{{ route('admin.categories.store') }}" tone="yellow" padding="compact" shadow="sm" class="rounded-[1rem]">
                     @csrf
                     <div class="flex items-center justify-between gap-3">
                         <div>

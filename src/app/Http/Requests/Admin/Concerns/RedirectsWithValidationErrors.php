@@ -10,7 +10,10 @@ trait RedirectsWithValidationErrors
 {
     protected function failedValidation(Validator $validator): void
     {
-        throw new ValidationException($validator, $this->validationErrorRedirect($validator));
+        $exception = new ValidationException($validator);
+        $exception->response = $this->validationErrorRedirect($validator);
+
+        throw $exception;
     }
 
     abstract protected function validationErrorRedirect(Validator $validator): RedirectResponse;

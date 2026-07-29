@@ -30,6 +30,6 @@ class AdminProductStockController extends Controller
         )->onQueue('notifications')->afterCommit();
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, ['queued' => true]);
 
-        return $forms->stockAdded($product->name, $itemCount);
+        return $forms->stockAdded($product->fresh(), $itemCount);
     }
 }

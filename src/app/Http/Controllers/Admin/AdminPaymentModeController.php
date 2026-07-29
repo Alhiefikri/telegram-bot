@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdatePaymentModeRequest;
 use App\Models\ManualPaymentSetting;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 
 class AdminPaymentModeController extends Controller
 {
-    public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger, PakasirProviderReadiness $pakasirReadiness): RedirectResponse
+    public function __invoke(UpdatePaymentModeRequest $request, AuditLogger $auditLogger, PakasirProviderReadiness $pakasirReadiness, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
@@ -97,8 +98,7 @@ class AdminPaymentModeController extends Controller
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru akan memakai /payment dan approval admin.',
         };
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'stats'])
+        return $redirector->paymentSettings()
             ->with('status', $label);
     }
 }

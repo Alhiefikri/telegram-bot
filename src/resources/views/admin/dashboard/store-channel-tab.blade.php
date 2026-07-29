@@ -1,4 +1,4 @@
-            <div x-show="activeTab === 'telegram-channel'" class="mt-4 space-y-4">
+            <div id="admin-section-store-channel" data-admin-return-target tabindex="-1" x-show="activeTab === 'telegram-channel'" class="mt-4 space-y-4">
                 <x-admin-dashboard.card as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Telegram Channel">
                     <div class="flex items-start justify-between gap-3">
                         <div>
@@ -35,7 +35,7 @@
                         @endif
                     </form>
                     @if($storeChannel['can_manage'])
-                        <form method="POST" action="{{ $storeChannel['test_url'] }}" class="mt-3">
+                        <form id="admin-store-channel-test" data-admin-return-target tabindex="-1" method="POST" action="{{ $storeChannel['test_url'] }}" class="mt-3">
                             @csrf
                             <x-admin-dashboard.button variant="purple" class="w-full" type="submit">Test Channel</x-admin-dashboard.button>
                         </form>
@@ -43,7 +43,7 @@
                 </x-admin-dashboard.card>
 
                 @php($fakeSalesProof = $storeChannel['fake_sales_proof'])
-                <x-admin-dashboard.card as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Info pembelian fake">
+                <x-admin-dashboard.card id="admin-store-channel-fake-sales-proof" data-admin-return-target tabindex="-1" as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Info pembelian fake">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Fake Sales Proof</p>

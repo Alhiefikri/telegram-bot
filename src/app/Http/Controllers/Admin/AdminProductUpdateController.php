@@ -79,6 +79,6 @@ class AdminProductUpdateController extends Controller
                 ->afterCommit();
         }
 
-        return $forms->productUpdated($product->fresh()->name);
+        return $forms->productUpdated($product->fresh());
     }
 }

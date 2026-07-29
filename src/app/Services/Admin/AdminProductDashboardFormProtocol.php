@@ -21,6 +21,8 @@ class AdminProductDashboardFormProtocol
 
     private const CATEGORY_CREATE_BAG = 'categoryCreate';
 
+    public function __construct(private readonly AdminDashboardRedirector $redirector) {}
+
     public function productCreateValidationErrors(Validator $validator): RedirectResponse
     {
         return $this->productTabRedirect()
@@ -30,8 +32,7 @@ class AdminProductDashboardFormProtocol
 
     public function categoryCreateValidationErrors(Request $request, Validator $validator): RedirectResponse
     {
-        return redirect()
-            ->back()
+        return $this->productTabRedirect()
             ->withErrors($validator, self::CATEGORY_CREATE_BAG)
             ->withInput($request->only(['category_name', 'category_description']));
     }
@@ -39,8 +40,19 @@ class AdminProductDashboardFormProtocol
     public function productUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
     {
         return $this->productTabRedirect()
-            ->withErrors($validator, self::PRODUCT_UPDATE_BAG)
-            ->withInput($request->except(['_token', '_method']) + ['product_id' => $product->id]);
+            ->withErrors($validator->errors()->messages(), self::PRODUCT_UPDATE_BAG)
+            ->withInput([
+                'name' => $request->input('name'),
+                'price_amount' => $request->input('price_amount'),
+                'usdt_price_amount' => $request->input('usdt_price_amount'),
+                'category_id' => $request->input('category_id'),
+                'description' => $request->input('description'),
+                'delivery_note' => $request->input('delivery_note'),
+                'usage_guide_title' => $request->input('usage_guide_title'),
+                'usage_guide_url' => $request->input('usage_guide_url'),
+                'is_active' => $request->input('is_active'),
+                'product_id' => $product->id,
+            ]);
     }
 
     /**
@@ -55,45 +67,44 @@ class AdminProductDashboardFormProtocol
 
     public function stockItemUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
     {
-        return redirect()
-            ->back()
+        return $this->productTabRedirect()
             ->withErrors($validator, self::STOCK_ITEM_UPDATE_BAG)
             ->withInput(['stock_item_product_id' => $product->id]);
     }
 
-    public function productCreated(string $productName): RedirectResponse
+    public function productCreated(Product $product): RedirectResponse
     {
-        return $this->productTabRedirect()
-            ->with('status', "Produk {$productName} berhasil dibuat. Tambahkan stok saat item sudah siap.");
+        return $this->redirector->product($product)
+            ->with('status', "Produk {$product->name} berhasil dibuat. Tambahkan stok saat item sudah siap.");
     }
 
-    public function productUpdated(string $productName): RedirectResponse
+    public function productUpdated(Product $product): RedirectResponse
     {
-        return $this->productTabRedirect()
-            ->with('status', "Produk {$productName} berhasil diperbarui.");
+        return $this->redirector->product($product)
+            ->with('status', "Produk {$product->name} berhasil diperbarui.");
     }
 
-    public function stockAdded(string $productName, int $itemCount): RedirectResponse
+    public function stockAdded(Product $product, int $itemCount): RedirectResponse
     {
-        return $this->productTabRedirect()
-            ->with('status', "Stok {$productName} bertambah {$itemCount} item.");
+        return $this->redirector->product($product)
+            ->with('status', "Stok {$product->name} bertambah {$itemCount} item.");
     }
 
-    public function stockItemUpdated(string $productName): RedirectResponse
+    public function stockItemUpdated(Product $product): RedirectResponse
     {
-        return $this->productTabRedirect()
-            ->with('status', "Stok {$productName} diperbarui.");
+        return $this->redirector->product($product)
+            ->with('status', "Stok {$product->name} diperbarui.");
     }
 
-    public function stockItemDeleted(string $productName): RedirectResponse
+    public function stockItemDeleted(Product $product): RedirectResponse
     {
-        return $this->productTabRedirect()
-            ->with('status', "Satu stok {$productName} dihapus.");
+        return $this->redirector->product($product)
+            ->with('status', "Satu stok {$product->name} dihapus.");
     }
 
     public function categoryCreated(string $categoryName): RedirectResponse
     {
-        return $this->productTabRedirect()
+        return $this->redirector->categoryCreate()
             ->with('status', "Kategori {$categoryName} berhasil dibuat.");
     }
 

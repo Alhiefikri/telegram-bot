@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PENJUALAN TAB (Pesanan)                            ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-cloak x-show="activeTab === 'penjualan'" class="mt-4 space-y-4">
+            <div id="admin-section-sales" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'penjualan'" class="mt-4 space-y-4">
 
                 <div>
                     <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">🛒 Penjualan Saya</h2>
@@ -21,6 +21,9 @@
                 <div class="space-y-3">
                     @forelse ($orders as $order)
                         <x-admin-dashboard.card
+                            id="sales-proof-{{ $order['id'] }}"
+                            data-admin-return-target
+                            tabindex="-1"
                             as="article"
                             padding="compact"
                             shadow="sm"

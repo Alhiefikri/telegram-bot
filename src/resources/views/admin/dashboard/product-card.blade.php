@@ -1,4 +1,4 @@
-                        <x-admin-dashboard.card as="article" padding="compact" shadow="sm" class="min-w-0 rounded-[1.125rem]">
+                        <x-admin-dashboard.card id="product-{{ $product['id'] }}" data-admin-return-target tabindex="-1" as="article" padding="compact" shadow="sm" class="min-w-0 rounded-[1.125rem]">
                             <div
                                 class="contents"
                                 x-data="{

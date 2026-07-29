@@ -204,7 +204,7 @@ class AdminCatalogPolicyAndStockAuditTest extends TestCase
             'stock' => 99,
             'reserved_stock' => 50,
             'is_active' => true,
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+        ])->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::query()->where('name', 'A')->firstOrFail();
         $this->assertSame(0, $product->stock);
@@ -219,7 +219,7 @@ class AdminCatalogPolicyAndStockAuditTest extends TestCase
             'stock' => 1,
             'reserved_stock' => 1,
             'is_active' => '0',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+        ])->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $product->refresh();
         $this->assertSame('C', $product->name);
@@ -269,7 +269,7 @@ class AdminCatalogPolicyAndStockAuditTest extends TestCase
             'description' => $product->description,
             'price_amount' => 2500,
             'is_active' => '0',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+        ])->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $audit = AuditLog::query()->where('action', 'product.updated')->firstOrFail();
 

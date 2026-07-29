@@ -51,6 +51,6 @@ class AdminProductCreateController extends Controller
         $result = $notifications->notifyProductCreated($product);
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_create', $startedAt, $result);
 
-        return $forms->productCreated($product->name);
+        return $forms->productCreated($product);
     }
 }

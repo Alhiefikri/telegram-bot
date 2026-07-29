@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  BROADCAST TAB (hidden from bottom nav)             ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div x-cloak x-show="activeTab === 'broadcast'" class="mt-4 space-y-4">
+            <div id="admin-section-broadcast" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'broadcast'" class="mt-4 space-y-4">
 
                 <div>
                     <h2 class="font-display text-lg font-black uppercase tracking-[0.18em] text-neo-ink">📢 Siaran</h2>
