@@ -55,6 +55,22 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_sandbox_simulator_success_callback_triggers_authoritative_verification(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, ['status' => 'SUCCESS']))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNotNull(PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Http::assertSentCount(1);
+    }
+
     public function test_paid_callback_with_pending_authoritative_status_logs_unprocessed_event_without_fulfillment(): void
     {
         Queue::fake([SendTelegramReceipt::class]);

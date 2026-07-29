@@ -6,7 +6,7 @@ use UnexpectedValueException;
 
 final readonly class KlikQrisCallback
 {
-    private const STATUSES = ['PENDING', 'PAID', 'EXPIRED'];
+    private const STATUSES = ['PENDING', 'PAID', 'SUCCESS', 'EXPIRED'];
 
     /** @param array<mixed> $sanitizedPayload */
     private function __construct(
@@ -54,7 +54,7 @@ final readonly class KlikQrisCallback
 
     public function isPaidTrigger(): bool
     {
-        return $this->status === 'PAID';
+        return in_array($this->status, ['PAID', 'SUCCESS'], true);
     }
 
     /** @return array<mixed> */

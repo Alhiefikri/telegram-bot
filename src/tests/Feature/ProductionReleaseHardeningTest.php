@@ -775,6 +775,16 @@ SH);
         $this->assertStringContainsString('max-size: "10m"', $compose);
     }
 
+    public function test_docker_compose_forwards_explicit_non_production_runtime_opt_in(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+
+        $this->assertStringContainsString(
+            'APP_ALLOW_NON_PRODUCTION_DOCKER: ${APP_ALLOW_NON_PRODUCTION_DOCKER:-false}',
+            $compose,
+        );
+    }
+
     public function test_docker_compose_forwards_binance_auto_verification_configuration(): void
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));

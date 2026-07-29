@@ -74,13 +74,13 @@ class TelegramCheckoutIntents
         $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
     }
 
-    public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): void
+    public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');
         $transaction = $this->klikQris->ensureCreated($payment);
         $payment->refresh();
 
-        $this->sendPaymentInstruction(
+        return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->klikQris(
                 $order,
@@ -188,7 +188,7 @@ class TelegramCheckoutIntents
         );
     }
 
-    private function sendPaymentInstruction(string $chatId, TelegramPaymentInstruction $instruction, array $timingContext = []): void
+    private function sendPaymentInstruction(string $chatId, TelegramPaymentInstruction $instruction, array $timingContext = []): array
     {
         $send = fn () => $this->bot->sendPhoto(
             $chatId,
@@ -199,12 +199,10 @@ class TelegramCheckoutIntents
         );
 
         if ($timingContext === []) {
-            $send();
-
-            return;
+            return $send();
         }
 
-        DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
+        return DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
     }
 
     public function pakasirPaymentMethod(): string

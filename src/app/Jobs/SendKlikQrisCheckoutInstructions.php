@@ -58,11 +58,15 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
                 throw new \RuntimeException('KlikQRIS payment is missing for order '.$order->id.'.');
             }
 
-            $checkoutIntents->sendKlikQrisPaymentInstructions(
+            $response = $checkoutIntents->sendKlikQrisPaymentInstructions(
                 (string) $order->customer->telegram_id,
                 $order,
                 $payment,
             );
+            $messageId = data_get($response, 'result.message_id');
+            if (! is_numeric($messageId)) {
+                throw new \RuntimeException('Telegram KlikQRIS checkout instruction did not return a message ID.');
+            }
         } catch (\Throwable $e) {
             $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
 
@@ -72,6 +76,11 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
         $order->forceFill([
             'manual_checkout_customer_notified_at' => now(),
             'manual_checkout_customer_notification_started_at' => null,
+            'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
+            'manual_checkout_customer_notification_message_id' => (int) $messageId,
+            'manual_checkout_customer_notification_deleted_at' => null,
+            'manual_checkout_customer_notification_deletion_started_at' => null,
+            'manual_checkout_customer_notification_deletion_token' => null,
         ])->save();
     }
 

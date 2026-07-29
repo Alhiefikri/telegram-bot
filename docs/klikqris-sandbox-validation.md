@@ -54,9 +54,11 @@ Before any local Docker refresh, confirm:
 
 If any check is uncertain, stop.
 
-## 5. Cloudflare Tunnel callback URL pattern
+## 5. Temporary tunnel callback URL pattern
 
-Use a temporary non-production Cloudflare Tunnel URL for sandbox callbacks.
+Use a temporary non-production HTTPS tunnel URL for sandbox callbacks. The
+initial local validation uses ngrok forwarding to the Docker web port `8000`.
+Cloudflare Tunnel remains an acceptable alternative.
 
 Expected callback URL pattern:
 

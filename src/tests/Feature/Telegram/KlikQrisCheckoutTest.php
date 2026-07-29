@@ -143,7 +143,10 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('base64', strtolower($caption));
         $this->assertStringContainsString('order:INV-KLIK-600', $request->body());
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $request->body());
-        $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+        $freshOrder = $order->fresh();
+        $this->assertNotNull($freshOrder->manual_checkout_customer_notified_at);
+        $this->assertSame('12345', $freshOrder->manual_checkout_customer_notification_chat_id);
+        $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
     }
 
     public function test_klikqris_job_can_send_initial_base64_only_qris_without_persisting_or_leaking_base64(): void
@@ -226,7 +229,8 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $successfulIntents = $this->mock(TelegramCheckoutIntents::class);
         $successfulIntents->shouldReceive('sendKlikQrisPaymentInstructions')
             ->once()
-            ->with('12345', Mockery::type(Order::class), Mockery::on(fn (Payment $argument): bool => $argument->is($payment)));
+            ->with('12345', Mockery::type(Order::class), Mockery::on(fn (Payment $argument): bool => $argument->is($payment)))
+            ->andReturn(['ok' => true, 'result' => ['message_id' => 123456]]);
         $job->handle($successfulIntents);
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertSame(1, $order->payments()->where('provider', 'klikqris')->count());
@@ -295,6 +299,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             ->shouldReceive('transactionDetail')
             ->never();
         $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654321]]),
             'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-PENDING' => Http::sequence()
                 ->push(['data' => [
                     'order_id' => 'INV-KLIK-PENDING',
@@ -345,6 +350,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         Http::assertSent(function (Request $request): bool {
             return str_contains($request->url(), '/qris/status/INV-KLIK-PENDING');
         });
+        $freshOrder = $order->fresh();
+        $this->assertSame('12345', $freshOrder->buyer_order_detail_message_chat_id);
+        $this->assertSame(654321, $freshOrder->buyer_order_detail_message_id);
     }
 
     public function test_expired_klikqris_order_notification_offers_fresh_qris_checkout_button(): void

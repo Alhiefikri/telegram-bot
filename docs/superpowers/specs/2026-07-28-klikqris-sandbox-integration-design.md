@@ -31,8 +31,10 @@ Runtime pengujian menggunakan:
 - LhieStore Testing Bot dan token Telegram testing.
 - Database lokal/testing yang terpisah.
 - API key dan merchant ID KlikQRIS sandbox.
-- URL publik sementara menuju aplikasi lokal untuk callback, misalnya Cloudflare Tunnel.
-- Callback URL sandbox khusus, misalnya `https://<tunnel>/webhooks/klikqris/sandbox`.
+- URL publik sementara menuju aplikasi lokal untuk callback. Validasi awal memakai
+  ngrok yang sudah tersedia pada host dan meneruskan HTTPS publik ke port web
+  Docker lokal `8000`; Cloudflare Tunnel tetap dapat dipakai sebagai alternatif.
+- Callback URL sandbox khusus: `https://<tunnel>/api/webhook/klikqris/sandbox`.
 
 Nilai credential tidak boleh dimasukkan ke Git, fixture, dokumentasi, log, payload audit, atau UI admin. Konfigurasi memakai nama environment khusus KlikQRIS seperti `KLIKQRIS_SANDBOX_API_KEY`, `KLIKQRIS_SANDBOX_MERCHANT_ID`, dan pengaturan timeout. Fase sandbox tidak menyediakan konfigurasi endpoint atau credential produksi.
 

@@ -67,6 +67,7 @@ class KlikQrisTransactionTest extends TestCase
     {
         return [
             'documented sandbox storage png' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png', true],
+            'provider sandbox sample png' => ['https://klikqris.com/storage/sandbox/sandbox_sample.png', true],
             'query secret rejected' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png?token=secret-query', false],
             'fragment secret rejected' => ['https://klikqris.com/storage/sandbox/qris_STEST-123.png#secret-fragment', false],
             'nested sandbox storage path rejected' => ['https://klikqris.com/storage/sandbox/merchant/qris_STEST-123.png', false],
@@ -127,6 +128,24 @@ class KlikQrisTransactionTest extends TestCase
         $this->assertArrayNotHasKey('Authorization', $sanitized['data']['nested']);
         $this->assertArrayNotHasKey('access_token', $sanitized['data']['nested']);
         $this->assertArrayNotHasKey('client_secret', $sanitized['data']['nested']);
+    }
+
+    public function test_naive_provider_timestamps_are_interpreted_as_asia_jakarta(): void
+    {
+        $originalTimezone = date_default_timezone_get();
+        date_default_timezone_set('Asia/Makassar');
+
+        try {
+            $transaction = KlikQrisTransaction::fromPayload($this->transactionPayload([
+                'expired_at' => '2026-07-29 14:22:32',
+                'paid_at' => '2026-07-29 14:10:00',
+            ]));
+        } finally {
+            date_default_timezone_set($originalTimezone);
+        }
+
+        $this->assertTrue($transaction->expiresAt()->equalTo(CarbonImmutable::parse('2026-07-29T07:22:32+00:00')));
+        $this->assertTrue($transaction->paidAt()->equalTo(CarbonImmutable::parse('2026-07-29T07:10:00+00:00')));
     }
 
     public function test_payload_sanitizer_removes_merchant_credential_key_variants_recursively(): void

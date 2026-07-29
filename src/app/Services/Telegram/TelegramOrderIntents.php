@@ -106,13 +106,25 @@ class TelegramOrderIntents
         $lines[] = $this->orderInstruction($customer, $order, $payment);
 
         $chunks = $this->messageChunker->fromLines($lines);
+        $lastResponse = null;
         foreach ($chunks as $index => $chunk) {
-            $this->bot->sendMessage(
+            $lastResponse = $this->bot->sendMessage(
                 $chatId,
                 $chunk,
                 [],
                 $this->credentialOptions($chunk),
             );
+        }
+
+        $messageId = data_get($lastResponse, 'result.message_id');
+        if ($payment?->provider === 'klikqris' && $paymentStatus === PaymentStatus::Pending && is_numeric($messageId)) {
+            Order::query()->whereKey($order->id)->update([
+                'buyer_order_detail_message_chat_id' => $chatId,
+                'buyer_order_detail_message_id' => (int) $messageId,
+                'buyer_order_detail_message_deleted_at' => null,
+                'buyer_order_detail_message_deletion_started_at' => null,
+                'buyer_order_detail_message_deletion_token' => null,
+            ]);
         }
     }
 

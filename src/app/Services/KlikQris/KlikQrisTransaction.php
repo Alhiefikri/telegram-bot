@@ -130,7 +130,7 @@ final readonly class KlikQrisTransaction
         $decodedPath = rawurldecode($path);
 
         return $path === $decodedPath
-            && preg_match('/^\/storage\/sandbox\/qris_[A-Za-z0-9._~-]+\.png$/', $path) === 1
+            && preg_match('/^\/storage\/sandbox\/(?:qris_[A-Za-z0-9._~-]+|sandbox_sample)\.png$/', $path) === 1
             && ! str_contains($decodedPath, '/../')
             && ! str_contains($decodedPath, '/./');
     }
@@ -310,7 +310,7 @@ final readonly class KlikQrisTransaction
         }
 
         try {
-            return CarbonImmutable::parse($string);
+            return CarbonImmutable::parse($string, 'Asia/Jakarta');
         } catch (\Throwable) {
             throw new UnexpectedValueException('KlikQRIS timestamp is invalid.');
         }

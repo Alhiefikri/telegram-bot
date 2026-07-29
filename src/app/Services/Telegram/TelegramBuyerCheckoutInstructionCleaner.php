@@ -15,86 +15,174 @@ class TelegramBuyerCheckoutInstructionCleaner
 
     public function deleteBinanceCheckoutInstruction(Order $order): void
     {
+        $this->deleteTarget($order, 'manual_checkout_customer_notification', false);
+    }
+
+    public function deleteTrackedMessages(Order $order): void
+    {
+        $current = $order->fresh(['payments']);
+        if (! $current
+            || ! in_array($current->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)
+            || ($current->order_status === OrderStatus::Completed && $current->telegram_receipt_sent_at === null)) {
+            return;
+        }
+
+        $this->deleteOrderDetailMessage($current);
+        $this->deleteTarget($current, 'manual_checkout_customer_notification', false);
+    }
+
+    private function deleteOrderDetailMessage(Order $order): void
+    {
         $token = (string) Str::uuid();
-        $target = $this->claimDeletion($order, $token);
+        $target = DB::transaction(function () use ($order, $token): ?Order {
+            $target = Order::query()->whereKey($order->id)->lockForUpdate()->first();
+            if (! $target
+                || ! $target->buyer_order_detail_message_chat_id
+                || ! $target->buyer_order_detail_message_id
+                || $target->buyer_order_detail_message_deleted_at !== null
+                || $this->hasActiveDeletionClaim($target->buyer_order_detail_message_deletion_started_at)) {
+                return null;
+            }
+
+            $target->forceFill([
+                'buyer_order_detail_message_deletion_started_at' => now(),
+                'buyer_order_detail_message_deletion_token' => $token,
+            ])->save();
+
+            return $target;
+        }, 5);
+        if ($target === null) {
+            return;
+        }
+
+        try {
+            $this->bot->deleteMessage($target->buyer_order_detail_message_chat_id, $target->buyer_order_detail_message_id);
+        } catch (RequestException $e) {
+            if (! $this->isAlreadyDeletedTelegramMessage($e)) {
+                Order::query()
+                    ->whereKey($target->id)
+                    ->where('buyer_order_detail_message_id', $target->buyer_order_detail_message_id)
+                    ->where('buyer_order_detail_message_deletion_token', $token)
+                    ->update([
+                        'buyer_order_detail_message_deletion_started_at' => null,
+                        'buyer_order_detail_message_deletion_token' => null,
+                    ]);
+
+                throw $e;
+            }
+        }
+
+        Order::query()
+            ->whereKey($target->id)
+            ->where('buyer_order_detail_message_id', $target->buyer_order_detail_message_id)
+            ->where('buyer_order_detail_message_deletion_token', $token)
+            ->update([
+                'buyer_order_detail_message_deleted_at' => now(),
+                'buyer_order_detail_message_deletion_started_at' => null,
+                'buyer_order_detail_message_deletion_token' => null,
+            ]);
+    }
+
+    private function deleteTarget(Order $order, string $prefix, bool $requireReceipt): void
+    {
+        $token = (string) Str::uuid();
+        $target = $this->claimDeletion($order, $prefix, $token, $requireReceipt);
         if ($target === null) {
             return;
         }
 
         try {
             $this->bot->deleteMessage(
-                $target->manual_checkout_customer_notification_chat_id,
-                $target->manual_checkout_customer_notification_message_id,
+                $target->{$prefix.'_chat_id'},
+                $target->{$prefix.'_message_id'},
             );
         } catch (RequestException $e) {
             if (! $this->isAlreadyDeletedTelegramMessage($e)) {
-                $this->releaseDeletionClaim($target, $token);
+                $this->releaseDeletionClaim($target, $prefix, $token);
 
                 throw $e;
             }
         }
 
-        $this->markDeleted($target, $token);
+        $this->markDeleted($target, $prefix, $token);
     }
 
-    private function claimDeletion(Order $order, string $token): ?Order
+    private function claimDeletion(Order $order, string $prefix, string $token, bool $requireReceipt): ?Order
     {
-        return DB::transaction(function () use ($order, $token): ?Order {
+        return DB::transaction(function () use ($order, $prefix, $token, $requireReceipt): ?Order {
+            $chatColumn = $prefix.'_chat_id';
+            $messageColumn = $prefix.'_message_id';
+            $deletedColumn = $prefix.'_deleted_at';
+            $startedColumn = $prefix.'_deletion_started_at';
+            $tokenColumn = $prefix.'_deletion_token';
             $target = Order::query()
                 ->whereKey($order->id)
                 ->lockForUpdate()
                 ->first([
                     'id',
                     'order_status',
-                    'manual_checkout_customer_notification_chat_id',
-                    'manual_checkout_customer_notification_message_id',
-                    'manual_checkout_customer_notification_deleted_at',
-                    'manual_checkout_customer_notification_deletion_started_at',
+                    'telegram_receipt_sent_at',
+                    $chatColumn,
+                    $messageColumn,
+                    $deletedColumn,
+                    $startedColumn,
                 ]);
 
             if (! $target
                 || ! in_array($target->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)
-                || ! $target->manual_checkout_customer_notification_chat_id
-                || ! $target->manual_checkout_customer_notification_message_id
-                || $target->manual_checkout_customer_notification_deleted_at !== null
-                || $this->hasActiveDeletionClaim($target->manual_checkout_customer_notification_deletion_started_at)
-                || ! Payment::query()->where('order_id', $target->id)->where('method', 'BINANCE_PAY_ID')->exists()) {
+                || ($requireReceipt && $target->order_status === OrderStatus::Completed && $target->telegram_receipt_sent_at === null)
+                || ! $target->{$chatColumn}
+                || ! $target->{$messageColumn}
+                || $target->{$deletedColumn} !== null
+                || $this->hasActiveDeletionClaim($target->{$startedColumn})
+                || ($prefix === 'manual_checkout_customer_notification' && ! Payment::query()
+                    ->where('order_id', $target->id)
+                    ->where(fn ($query) => $query->where('method', 'BINANCE_PAY_ID')->orWhere('provider', 'klikqris'))
+                    ->exists())) {
                 return null;
             }
 
             $target->forceFill([
-                'manual_checkout_customer_notification_deletion_started_at' => now(),
-                'manual_checkout_customer_notification_deletion_token' => $token,
+                $startedColumn => now(),
+                $tokenColumn => $token,
             ])->save();
 
             return $target;
         }, 5);
     }
 
-    private function markDeleted(Order $target, string $token): void
+    private function markDeleted(Order $target, string $prefix, string $token): void
     {
+        $messageColumn = $prefix.'_message_id';
+        $deletedColumn = $prefix.'_deleted_at';
+        $startedColumn = $prefix.'_deletion_started_at';
+        $tokenColumn = $prefix.'_deletion_token';
         Order::query()
             ->whereKey($target->id)
-            ->where('manual_checkout_customer_notification_message_id', $target->manual_checkout_customer_notification_message_id)
-            ->where('manual_checkout_customer_notification_deletion_token', $token)
-            ->whereNull('manual_checkout_customer_notification_deleted_at')
+            ->where($messageColumn, $target->{$messageColumn})
+            ->where($tokenColumn, $token)
+            ->whereNull($deletedColumn)
             ->update([
-                'manual_checkout_customer_notification_deleted_at' => now(),
-                'manual_checkout_customer_notification_deletion_started_at' => null,
-                'manual_checkout_customer_notification_deletion_token' => null,
+                $deletedColumn => now(),
+                $startedColumn => null,
+                $tokenColumn => null,
             ]);
     }
 
-    private function releaseDeletionClaim(Order $target, string $token): void
+    private function releaseDeletionClaim(Order $target, string $prefix, string $token): void
     {
+        $messageColumn = $prefix.'_message_id';
+        $deletedColumn = $prefix.'_deleted_at';
+        $startedColumn = $prefix.'_deletion_started_at';
+        $tokenColumn = $prefix.'_deletion_token';
         Order::query()
             ->whereKey($target->id)
-            ->where('manual_checkout_customer_notification_message_id', $target->manual_checkout_customer_notification_message_id)
-            ->where('manual_checkout_customer_notification_deletion_token', $token)
-            ->whereNull('manual_checkout_customer_notification_deleted_at')
+            ->where($messageColumn, $target->{$messageColumn})
+            ->where($tokenColumn, $token)
+            ->whereNull($deletedColumn)
             ->update([
-                'manual_checkout_customer_notification_deletion_started_at' => null,
-                'manual_checkout_customer_notification_deletion_token' => null,
+                $startedColumn => null,
+                $tokenColumn => null,
             ]);
     }
 
@@ -110,9 +198,9 @@ class TelegramBuyerCheckoutInstructionCleaner
             return false;
         }
 
-        return str_contains(
-            Str::lower((string) data_get($e->response->json(), 'description')),
-            'message to delete not found',
-        );
+        $description = Str::lower((string) data_get($e->response->json(), 'description'));
+
+        return str_contains($description, 'message to delete not found')
+            || str_contains($description, "message can't be deleted");
     }
 }

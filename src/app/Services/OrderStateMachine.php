@@ -86,7 +86,6 @@ class OrderStateMachine implements OrderLifecycle
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
 
                 SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
-                DeleteBuyerBinanceCheckoutInstruction::dispatch($lockedOrder->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
 
                 $completed = $lockedOrder->fresh(['payments']);
 
