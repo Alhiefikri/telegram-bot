@@ -309,7 +309,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         InventoryMovement::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale, 'quantity' => -1]);
         SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
 
-        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect(route('admin.dashboard', ['tab' => 'penjualan']));
+        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect('/admin?tab=penjualan#sales-proof-'.$order->id);
 
         $post = $order->salesProofPost()->firstOrFail();
         $this->assertSame(SalesProofPost::STATUS_SENT, $post->status);
@@ -342,7 +342,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
         SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
 
-        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect(route('admin.dashboard', ['tab' => 'penjualan']));
+        $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect('/admin?tab=penjualan#sales-proof-'.$order->id);
 
         Http::assertNothingSent();
         $post = $order->salesProofPost()->firstOrFail();

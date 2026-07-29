@@ -42,7 +42,7 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('name="pakasir_checkout_flow" value="api_qris"', false);
 
         $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'id' => $setting->id,
@@ -81,7 +81,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->post(route('admin.payment-mode.update'), [
             'payment_mode' => 'pakasir',
             'pakasir_checkout_flow' => 'api_qris',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'id' => $setting->id,
@@ -132,7 +132,7 @@ class AdminDashboardPaymentModeTest extends TestCase
                 'pakasir_checkout_flow' => 'api_qris',
                 'binance_pay_enabled' => '1',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings')
             ->assertSessionDoesntHaveErrors(['pakasir_checkout_flow'], null, 'paymentMode');
 
         $this->assertDatabaseHas('manual_payment_settings', [
@@ -161,7 +161,7 @@ class AdminDashboardPaymentModeTest extends TestCase
             'payment_mode' => 'manual',
             'qris_payment_ttl_minutes' => 7,
             'binance_payment_ttl_minutes' => 25,
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'id' => $setting->id,
@@ -191,7 +191,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->post(route('admin.support-settings.update'), [
             'whatsapp_support_number' => '0812-3456-7890',
             'whatsapp_support_url' => '',
-        ])->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+        ])->assertRedirect('/admin?tab=stats#admin-support-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'id' => $setting->id,
@@ -294,7 +294,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->assertSame(0, ManualPaymentSetting::query()->count());
 
         $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']));
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'payment_mode' => 'manual',

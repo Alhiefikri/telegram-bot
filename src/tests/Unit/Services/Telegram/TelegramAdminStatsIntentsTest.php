@@ -130,7 +130,8 @@ class TelegramAdminStatsIntentsTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
         config()->set('app.timezone', 'Asia/Jakarta');
         config()->set('services.telegram.token', 'bot-token');
-        config()->set('app.url', 'https://admin.example.test');
+        config()->set('app.url', 'https://admin.example.com');
+        config()->set('services.telegram.mini_app_url', 'https://admin.example.com/admin');
 
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
@@ -527,7 +528,8 @@ class TelegramAdminStatsIntentsTest extends TestCase
     {
         Carbon::setTestNow('2026-07-08 22:00:00');
         config()->set('services.telegram.token', 'bot-token');
-        config()->set('app.url', 'https://admin.example.test');
+        config()->set('app.url', 'https://admin.example.com');
+        config()->set('services.telegram.mini_app_url', 'https://admin.example.com/admin');
 
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),

@@ -24,6 +24,6 @@ class AdminProductStockItemUpdateController extends Controller
             $request->ip(),
         );
 
-        return $forms->stockItemUpdated($product->name);
+        return $forms->stockItemUpdated($product->fresh());
     }
 }

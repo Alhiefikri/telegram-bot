@@ -218,7 +218,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->post(route('admin.products.stock.store', $product), [
                 'stock_items' => "akun-1@example.test|pass1\n\nakun-2@example.test|pass2\nakun-3@example.test|pass3",
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id)
             ->assertSessionHas('status', 'Stok Canva Pro bertambah 3 item.');
 
         $product->refresh();
@@ -274,7 +274,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->post(route('admin.products.stock.store', $product), [
                 'stock_items' => 'slow-telegram@example.test|pass',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $durationMs = (hrtime(true) - $startedAt) / 1_000_000;
 
@@ -304,13 +304,13 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->post(route('admin.products.stock.store', $product), [
                 'stock_items' => 'first-ready@example.test|pass',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $this->actingAs($admin)
             ->post(route('admin.products.stock.store', $product), [
                 'stock_items' => 'second-ready@example.test|pass',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $product->refresh();
 
@@ -414,7 +414,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->patch(route('admin.products.stock-items.update', [$product, $stockItem]), [
                 'secret' => 'new@example.test|pass',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $this->assertSame('new@example.test|pass', $stockItem->fresh()->secret);
         $this->assertSame(2, $product->fresh()->stock);
@@ -436,7 +436,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->actingAs($admin)
             ->from('/admin?tab=produk')
             ->delete(route('admin.products.stock-items.destroy', [$product, $stockItem]))
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id)
             ->assertSessionHas('status', 'Satu stok '.$product->name.' dihapus.');
 
         $this->assertDatabaseMissing('product_stock_items', ['id' => $stockItem->id]);

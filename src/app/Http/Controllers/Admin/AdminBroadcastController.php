@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreBroadcastRequest;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Support\AdminTelegramDogfoodTiming;
 use App\Support\DogfoodTiming;
@@ -11,7 +12,7 @@ use Illuminate\Http\RedirectResponse;
 
 class AdminBroadcastController extends Controller
 {
-    public function __invoke(StoreBroadcastRequest $request, TelegramBroadcastService $broadcast): RedirectResponse
+    public function __invoke(StoreBroadcastRequest $request, TelegramBroadcastService $broadcast, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
 
@@ -22,8 +23,7 @@ class AdminBroadcastController extends Controller
             ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
             : "Broadcast #{$result['broadcast_id']} masuk antrean. Progres bisa dipantau di tab Broadcast.";
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'broadcast'])
+        return $redirector->broadcast()
             ->with('status', $status);
     }
 }

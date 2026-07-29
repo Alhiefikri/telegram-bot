@@ -5,13 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateStoreChannelRequest;
 use App\Models\StoreChannelSetting;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 
 class AdminStoreChannelController extends Controller
 {
-    public function __invoke(UpdateStoreChannelRequest $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdateStoreChannelRequest $request, AuditLogger $auditLogger, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -50,6 +51,6 @@ class AdminStoreChannelController extends Controller
 
         $auditLogger->log('store_channel.updated', $setting, $old, $setting->only(['channel_username', 'channel_link', 'community_gate_enabled', 'sales_proof_enabled']), $user, $request->ip());
 
-        return redirect()->route('admin.dashboard', ['tab' => 'telegram-channel'])->with('status', 'Pengaturan Telegram Channel disimpan. Jalankan Test Channel untuk validasi akses bot.');
+        return $redirector->storeChannel()->with('status', 'Pengaturan Telegram Channel disimpan. Jalankan Test Channel untuk validasi akses bot.');
     }
 }

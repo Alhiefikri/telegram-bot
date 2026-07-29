@@ -73,7 +73,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'usage_guide_title' => 'Panduan penggunaan Canva Pro',
                 'usage_guide_url' => 'https://docs.example.test/canva/getting-started',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#product-1')
             ->assertSessionHas('status', 'Produk Canva Pro 1 Bulan berhasil dibuat. Tambahkan stok saat item sudah siap.');
 
         $this->assertDatabaseHas('products', [
@@ -126,7 +126,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'description' => 'Akses desain premium.',
                 'image' => UploadedFile::fake()->image('cover.png', 2400, 1000),
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::where('name', 'Figma Pro 1 Bulan')->firstOrFail();
 
@@ -169,7 +169,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'is_active' => '0',
                 'image' => UploadedFile::fake()->image('replacement.jpg', 900, 1200),
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $product->refresh();
 
@@ -226,7 +226,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'description' => 'Produk tanpa fitur tambahan.',
                 'delivery_note' => '',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::where('name', 'Kosong Fitur')->firstOrFail();
 
@@ -263,7 +263,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'usage_guide_url' => '/netflix/cara-pakai',
                 'is_active' => '0',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $product->refresh();
         $this->assertSame('Netflix Premium', $product->name);
@@ -284,7 +284,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->actingAs($admin)
             ->delete(route('admin.products.destroy', $product))
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#admin-section-products');
 
         $this->assertSoftDeleted('products', ['id' => $product->id]);
     }
@@ -397,7 +397,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.products.visibility.update', $product), ['is_active' => '0'])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id)
             ->assertSessionHas('status', 'Produk Netflix Premium dipause.');
 
         $product->refresh();
@@ -416,7 +416,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.products.visibility.update', $product), ['is_active' => '1'])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id)
             ->assertSessionHas('status', 'Produk Netflix Premium ditampilkan.');
 
         $this->assertTrue($product->fresh()->is_active);
@@ -439,7 +439,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'category_name' => 'Akun Premium',
                 'category_description' => 'Akun siap jual',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#admin-category-create')
             ->assertSessionHas('status', 'Kategori Akun Premium berhasil dibuat.');
 
         $this->assertDatabaseHas('categories', [
@@ -461,7 +461,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->post(route('admin.categories.store'), [
                 'category_name' => '!!!',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#admin-category-create');
 
         $this->assertDatabaseHas('categories', ['slug' => 'kategori']);
     }
@@ -502,9 +502,8 @@ class AdminDashboardProductFormsTest extends TestCase
                 'name' => '',
                 'price_amount' => 'broken',
                 'description' => '',
-                'product_id' => (string) $product->id,
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk')
             ->assertSessionHasErrors(['name', 'price_amount', 'description'], null, 'productUpdate');
 
         $product->refresh();
@@ -520,7 +519,6 @@ class AdminDashboardProductFormsTest extends TestCase
                 'name' => '',
                 'price_amount' => 'broken',
                 'description' => '',
-                'product_id' => (string) $product->id,
             ])
             ->assertOk()
             ->assertSee('\u0022productModalOpen\u0022:true', false)
@@ -537,7 +535,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->actingAs($admin)
             ->from('/admin?tab=produk')
             ->delete(route('admin.products.destroy', $product))
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertRedirect('/admin?tab=produk#admin-section-products')
             ->assertSessionHas('status', 'Produk Delete Me Product diarsipkan dari dashboard.');
 
         $this->assertSoftDeleted('products', ['id' => $product->id]);

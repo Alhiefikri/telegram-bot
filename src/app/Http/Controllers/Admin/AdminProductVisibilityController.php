@@ -5,12 +5,13 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductVisibilityRequest;
 use App\Models\Product;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 
 class AdminProductVisibilityController extends Controller
 {
-    public function __invoke(UpdateProductVisibilityRequest $request, Product $product, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdateProductVisibilityRequest $request, Product $product, AuditLogger $auditLogger, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -28,8 +29,7 @@ class AdminProductVisibilityController extends Controller
             $request->ip(),
         );
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'produk'])
+        return $redirector->product($product)
             ->with('status', $product->is_active ? "Produk {$product->name} ditampilkan." : "Produk {$product->name} dipause.");
     }
 }

@@ -115,7 +115,7 @@ class ProductPriceChangeNotificationTest extends TestCase
                 'description' => $product->description,
                 'is_active' => '1',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $event = ProductPriceChangeEvent::firstOrFail();
         $this->assertSame(50000, $event->old_price_amount);
@@ -343,7 +343,7 @@ class ProductPriceChangeNotificationTest extends TestCase
                     'description' => $product->description,
                     'is_active' => $product->is_active ? '1' : '0',
                 ])
-                ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+                ->assertRedirect('/admin?tab=produk#product-'.$product->id);
         }
 
         $this->assertSame(0, ProductPriceChangeEvent::count());

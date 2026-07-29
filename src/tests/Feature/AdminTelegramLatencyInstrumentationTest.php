@@ -31,7 +31,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
             ->post(route('admin.broadcast.store'), [
                 'message' => 'Sensitive broadcast body',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'broadcast']))
+            ->assertRedirect('/admin?tab=broadcast#admin-section-broadcast')
             ->assertSessionHas('status', 'Broadcast #1 masuk antrean. Progres bisa dipantau di tab Broadcast.');
 
         $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.broadcast'
@@ -65,7 +65,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
                 'price_amount' => '75000',
                 'description' => 'Private product details',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::query()->where('name', 'Instrumented Product')->firstOrFail();
 
@@ -73,7 +73,7 @@ class AdminTelegramLatencyInstrumentationTest extends TestCase
             ->post(route('admin.products.stock.store', $product), [
                 'stock_items' => "secret-1@example.test|pass\nsecret-2@example.test|pass",
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']));
+            ->assertRedirect('/admin?tab=produk#product-1');
 
         $this->assertDogfoodLog($logs, 'dogfood.telegram.admin_request_finished', fn (array $context): bool => $context['action'] === 'admin.product_create'
             && $context['recipient_count'] === 0

@@ -5,13 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateSupportSettingsRequest;
 use App\Models\ManualPaymentSetting;
+use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 
 class AdminSupportSettingsController extends Controller
 {
-    public function __invoke(UpdateSupportSettingsRequest $request, AuditLogger $auditLogger): RedirectResponse
+    public function __invoke(UpdateSupportSettingsRequest $request, AuditLogger $auditLogger, AdminDashboardRedirector $redirector): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
@@ -60,8 +61,7 @@ class AdminSupportSettingsController extends Controller
             $request->ip(),
         );
 
-        return redirect()
-            ->route('admin.dashboard', ['tab' => 'stats'])
+        return $redirector->supportSettings()
             ->with('status', 'Support WhatsApp diperbarui.');
     }
 
