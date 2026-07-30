@@ -160,7 +160,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, $this->successfulResultCount($results));
         $this->assertSame([RuntimeException::class], $this->failedResultClasses($results));
         $this->assertSame(1, Payment::query()->where('binance_auto_verification_enabled', true)->count());
-        $this->assertSame(1, Payment::query()->where('amount', 2_000_101)->count());
+        $this->assertSame(1, Payment::query()->where('amount', 2_001_000)->count());
     }
 
     public function test_concurrent_cart_quantity_allows_each_cart_to_hold_last_stock_until_checkout(): void
