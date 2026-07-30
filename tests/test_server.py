@@ -132,3 +132,18 @@ def test_api_delete_history_not_found(client):
     response = client.delete("/api/history/99999")
     assert response.status_code == 404
     assert response.json()["detail"] == "Proxy record not found"
+
+
+def test_static_files_served(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "CamouProxy" in resp.text
+
+    css_resp = client.get("/style.css")
+    assert css_resp.status_code == 200
+    assert "--bg-dark" in css_resp.text
+
+    js_resp = client.get("/app.js")
+    assert js_resp.status_code == 200
+    assert "DOMContentLoaded" in js_resp.text
+

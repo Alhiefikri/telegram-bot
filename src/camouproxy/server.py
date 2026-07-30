@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import os
@@ -74,3 +75,9 @@ def api_delete_history(proxy_id: int) -> Dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="Proxy record not found")
     return {"status": "success", "message": f"Deleted proxy record {proxy_id}"}
+
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
