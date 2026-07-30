@@ -8,7 +8,7 @@ use RuntimeException;
 
 class BinanceUniquePaymentAmount
 {
-    private const MAX_ATTEMPTS = 25;
+    private const MICRO_PER_MILLI_USDT = 1_000;
 
     public function __construct(private readonly BinancePayClient $client) {}
 
@@ -18,9 +18,9 @@ class BinanceUniquePaymentAmount
     }
 
     /**
-     * Add a small random micro-USDT offset so every active Binance order has a
-     * distinct payable amount. The offset alone identifies the order during
-     * automatic verification, so two pending payments must never share it.
+     * Add a randomized mill-USDT offset so every active Binance order has a
+     * distinct, easy-to-type payable amount. The offset identifies the order
+     * during automatic verification, so pending payments never share it.
      * Without API credentials there is no automatic verification, so the base
      * amount is kept as-is for the manual screenshot flow.
      */
@@ -31,9 +31,12 @@ class BinanceUniquePaymentAmount
         }
 
         [$minOffset, $maxOffset] = $this->offsetRange();
+        $base = (int) (ceil($baseAmountMicro / self::MICRO_PER_MILLI_USDT) * self::MICRO_PER_MILLI_USDT);
+        $offsets = range($minOffset, $maxOffset, self::MICRO_PER_MILLI_USDT);
+        shuffle($offsets);
 
-        for ($attempt = 0; $attempt < self::MAX_ATTEMPTS; $attempt++) {
-            $candidate = $baseAmountMicro + random_int($minOffset, $maxOffset);
+        foreach ($offsets as $offset) {
+            $candidate = $base + $offset;
 
             $taken = Payment::query()
                 ->where('method', 'BINANCE_PAY_ID')
@@ -52,10 +55,16 @@ class BinanceUniquePaymentAmount
     /** @return array{0: int, 1: int} */
     private function offsetRange(): array
     {
-        $min = (int) config('services.binance.unique_amount_min_offset_micro', 101);
-        $max = (int) config('services.binance.unique_amount_max_offset_micro', 9999);
+        $min = (int) config('services.binance.unique_amount_min_offset_micro', 1_000);
+        $max = (int) config('services.binance.unique_amount_max_offset_micro', 999_000);
 
-        $min = max(1, $min);
+        if ($min === 101 && $max === 9_999) {
+            $min = 1_000;
+            $max = 999_000;
+        }
+
+        $min = max(self::MICRO_PER_MILLI_USDT, (int) ceil($min / self::MICRO_PER_MILLI_USDT) * self::MICRO_PER_MILLI_USDT);
+        $max = (int) floor($max / self::MICRO_PER_MILLI_USDT) * self::MICRO_PER_MILLI_USDT;
         $max = max($min, $max);
 
         return [$min, $max];

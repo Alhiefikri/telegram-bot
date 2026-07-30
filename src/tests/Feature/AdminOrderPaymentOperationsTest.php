@@ -231,6 +231,108 @@ class AdminOrderPaymentOperationsTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'order.manual_completed', 'subject_id' => (string) $order->id]);
     }
 
+    public function test_admin_dashboard_can_approve_a_pending_binance_payment_for_manual_delivery(): void
+    {
+        Queue::fake();
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'currency' => 'USDT',
+            'amount' => 5_714_000,
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => ['amount' => '5.7', 'currency' => 'USDT', 'transactionId' => 'P_MISMATCH'],
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.orders.complete-manual', $order))
+            ->assertRedirect(route('admin.orders.show', $order));
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $admin->id, 'action' => 'order.manual_completed', 'subject_id' => (string) $order->id]);
+    }
+
+    public function test_admin_dashboard_can_reject_a_pending_binance_payment_and_release_stock(): void
+    {
+        Queue::fake();
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'currency' => 'USDT',
+            'amount' => 5_714_000,
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => ['amount' => '5.7', 'currency' => 'USDT', 'transactionId' => 'P_MISMATCH'],
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.orders.reject-manual', $order))
+            ->assertRedirect(route('admin.orders.show', $order));
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Failed, $order->fresh()->payment_status);
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $admin->id, 'action' => 'order.manual_rejected', 'subject_id' => (string) $order->id]);
+    }
+
+    public function test_admin_dashboard_shows_binance_mismatch_evidence_and_resolution_actions(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'currency' => 'USDT',
+            'amount' => 5_714_000,
+            'status' => PaymentStatus::Pending,
+            'provider_payload' => [
+                'amount' => '5.7',
+                'currency' => 'USDT',
+                'orderId' => '445064386362580992',
+                'transactionId' => 'P_386362580992',
+                'transactionTime' => now()->getTimestampMs(),
+            ],
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Tagihan')
+            ->assertSee('5.714 USDT')
+            ->assertSee('5.7 USDT')
+            ->assertSee('P_386362580992')
+            ->assertSee('Setujui pembayaran & kirim stok')
+            ->assertSee('Tolak pembayaran & lepas stok');
+    }
+
+    public function test_admin_cannot_resolve_a_binance_order_without_mismatch_evidence(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'currency' => 'USDT',
+            'amount' => 5_714_000,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->actingAs($admin)
+            ->from(route('admin.orders.show', $order))
+            ->post(route('admin.orders.complete-manual', $order))
+            ->assertRedirect(route('admin.orders.show', $order))
+            ->assertSessionHasErrors(['order' => 'Pembayaran Binance ini belum memiliki bukti mismatch untuk direview.']);
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+    }
+
     public function test_manual_reconciliation_fetches_pakasir_detail_processes_and_audits(): void
     {
         Queue::fake();

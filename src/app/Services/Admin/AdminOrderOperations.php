@@ -37,6 +37,18 @@ class AdminOrderOperations
             && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Pending);
     }
 
+    public function hasPendingBinanceMismatch(Order $order): bool
+    {
+        $order->loadMissing('payments');
+        $payment = $order->payments->first(fn ($payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID');
+        $payload = is_array($payment?->provider_payload) ? $payment->provider_payload : [];
+
+        return $payment?->status === PaymentStatus::Pending
+            && filled($payload['transactionId'] ?? null)
+            && filled($payload['amount'] ?? null)
+            && filled($payload['currency'] ?? null);
+    }
+
     public function cancelPendingOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
         try {

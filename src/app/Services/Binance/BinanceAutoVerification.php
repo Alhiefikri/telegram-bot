@@ -75,6 +75,8 @@ class BinanceAutoVerification
         }
 
         if (! $this->transactionMatchesPayment($transaction, $payment)) {
+            $this->recordMismatch($payment, $transaction);
+
             return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $transaction);
         }
 
@@ -104,6 +106,8 @@ class BinanceAutoVerification
                 && $transaction->amountMicro() === (int) $payment->amount);
 
             if ($mismatch !== null) {
+                $this->recordMismatch($payment, $mismatch);
+
                 return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $mismatch);
             }
 
@@ -222,6 +226,14 @@ class BinanceAutoVerification
     private function clockSkewMs(): int
     {
         return max(0, (int) config('services.binance.verify_clock_skew_seconds', 120)) * 1000;
+    }
+
+    private function recordMismatch(Payment $payment, BinancePayTransaction $transaction): void
+    {
+        Payment::query()
+            ->whereKey($payment->id)
+            ->where('status', PaymentStatus::Pending->value)
+            ->update(['provider_payload' => $transaction->sanitizedPayload()]);
     }
 
     private function isUniqueViolation(QueryException $exception): bool

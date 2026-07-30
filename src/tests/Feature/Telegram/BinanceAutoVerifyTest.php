@@ -74,10 +74,46 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
 
         foreach ([$first, $second] as [, $payment]) {
             $this->assertGreaterThan(self::BASE_USDT_MICRO, $payment->amount);
-            $this->assertLessThanOrEqual(self::BASE_USDT_MICRO + 9999, $payment->amount);
+            $this->assertLessThanOrEqual(self::BASE_USDT_MICRO + 999_000, $payment->amount);
         }
 
         $this->assertNotSame($first[1]->amount, $second[1]->amount);
+    }
+
+    public function test_binance_checkout_allocates_unique_amounts_with_three_decimal_places(): void
+    {
+        $this->enableBinancePay();
+
+        [$firstOrder, $firstPayment] = $this->createBinanceOrder(telegramId: 12345);
+        [$secondOrder, $secondPayment] = $this->createBinanceOrder(telegramId: 54321);
+
+        foreach ([$firstPayment, $secondPayment] as $payment) {
+            $this->assertSame(0, $payment->amount % 1_000);
+            $this->assertGreaterThanOrEqual(self::BASE_USDT_MICRO + 1_000, $payment->amount);
+            $this->assertLessThanOrEqual(self::BASE_USDT_MICRO + 999_000, $payment->amount);
+        }
+
+        $this->assertNotSame($firstOrder->id, $secondOrder->id);
+        $this->assertNotSame($firstPayment->amount, $secondPayment->amount);
+    }
+
+    public function test_legacy_micro_offset_environment_still_allows_many_three_decimal_amounts(): void
+    {
+        config()->set('services.binance.unique_amount_min_offset_micro', 101);
+        config()->set('services.binance.unique_amount_max_offset_micro', 9999);
+        $this->enableBinancePay();
+
+        $amounts = [];
+        foreach (range(1, 10) as $index) {
+            [, $payment] = $this->createBinanceOrder(telegramId: 12_000 + $index);
+            $amounts[] = $payment->amount;
+        }
+
+        $this->assertCount(10, array_unique($amounts));
+        foreach ($amounts as $amount) {
+            $this->assertSame(0, $amount % 1_000);
+            $this->assertLessThanOrEqual(self::BASE_USDT_MICRO + 999_000, $amount);
+        }
     }
 
     public function test_binance_checkout_keeps_exact_amount_without_api_credentials(): void
@@ -426,6 +462,26 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '999'
             && str_contains((string) ($request['text'] ?? ''), $order->invoice_number));
         $this->assertCount(1, $adminNotice);
+    }
+
+    public function test_order_id_fallback_records_sanitized_mismatch_evidence_for_manual_review(): void
+    {
+        $this->enableBinancePay();
+        [$order] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction('445064386362580992', '0.1', now()->getTimestampMs()),
+            ])),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(343, 'binance-orderid', 'binance:orderid:'.$order->id))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(344, '445064386362580992'))->assertOk();
+
+        $payload = $order->payments()->sole()->fresh()->provider_payload;
+        $this->assertSame('0.1', $payload['amount']);
+        $this->assertSame('USDT', $payload['currency']);
+        $this->assertSame('P_386362580992', $payload['transactionId']);
+        $this->assertSame(PaymentStatus::Pending, $order->payments()->sole()->fresh()->status);
     }
 
     public function test_order_id_fallback_rejects_non_numeric_input_and_unknown_order_ids(): void

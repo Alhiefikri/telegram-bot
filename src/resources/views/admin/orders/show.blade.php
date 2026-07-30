@@ -61,7 +61,38 @@
                 </x-admin-dashboard.notice>
             @endif
 
-            @if ($canCancelRelease)
+            @if ($binanceReview)
+                <x-admin-dashboard.notice tone="warning" class="mt-5 rounded-xl text-sm font-bold">
+                    <p class="font-black">Perlu review pembayaran Binance</p>
+                    <dl class="mt-3 grid gap-2 sm:grid-cols-2">
+                        <div><dt class="text-brand-muted">Tagihan</dt><dd>{{ $binanceReview['expectedAmount'] }} USDT</dd></div>
+                        <div><dt class="text-brand-muted">Diterima</dt><dd>{{ $binanceReview['receivedAmount'] }} {{ $binanceReview['currency'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Binance Order ID</dt><dd class="break-all">{{ $binanceReview['orderId'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Transaction ID</dt><dd class="break-all">{{ $binanceReview['transactionId'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Waktu transaksi</dt><dd>{{ $binanceReview['receivedAt'] }}</dd></div>
+                    </dl>
+                </x-admin-dashboard.notice>
+            @endif
+
+            @if ($canCompleteManual || $canRejectManual)
+                <div class="mt-5 flex flex-wrap gap-3">
+                    @if ($canCompleteManual)
+                        <form method="POST" action="{{ route('admin.orders.complete-manual', $order) }}" onsubmit="return confirm('Setujui pembayaran ini dan kirim stok ke buyer? Pastikan transaksi sudah dicek.');">
+                            @csrf
+                            <x-admin-dashboard.button type="submit" variant="primary">Setujui pembayaran &amp; kirim stok</x-admin-dashboard.button>
+                        </form>
+                    @endif
+
+                    @if ($canRejectManual)
+                        <form method="POST" action="{{ route('admin.orders.reject-manual', $order) }}" onsubmit="return confirm('Tolak pembayaran ini dan lepas stok? Aksi ini tidak bisa dibatalkan.');">
+                            @csrf
+                            <x-admin-dashboard.button type="submit" variant="warning">Tolak pembayaran &amp; lepas stok</x-admin-dashboard.button>
+                        </form>
+                    @endif
+                </div>
+            @endif
+
+            @if ($canCancelRelease && ! $canRejectManual)
                 <form method="POST" action="{{ route('admin.orders.cancel-release', $order) }}" class="mt-5" onsubmit="return confirm('Batalkan order dan lepas stok?')">
                     @csrf
                     <x-admin-dashboard.button type="submit" variant="warning">Batalkan & lepas stok</x-admin-dashboard.button>

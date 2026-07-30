@@ -498,8 +498,8 @@ class StorefrontShopCheckoutTest extends TestCase
         config()->set('services.binance.pay_id', '987654321');
         config()->set('services.binance.api_key', 'read-only-key');
         config()->set('services.binance.api_secret', 'read-only-secret');
-        config()->set('services.binance.unique_amount_min_offset_micro', 321);
-        config()->set('services.binance.unique_amount_max_offset_micro', 321);
+        config()->set('services.binance.unique_amount_min_offset_micro', 1_000);
+        config()->set('services.binance.unique_amount_max_offset_micro', 1_000);
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
@@ -520,12 +520,12 @@ class StorefrontShopCheckoutTest extends TestCase
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
         $this->assertTrue($payment->binance_auto_verification_enabled);
-        $this->assertSame(3_000_321, $payment->amount);
+        $this->assertSame(3_001_000, $payment->amount);
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('⚠️ IMPORTANT')
-            ->assertSee('Send exactly 3.000321 USDT, including every decimal digit.')
+            ->assertSee('Send exactly 3.001 USDT, including every decimal digit.')
             ->assertSee('Do not round or change the amount.')
             ->assertSee("tap “I've Paid”", false)
             ->assertDontSee('/payment '.$order->invoice_number);

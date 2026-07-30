@@ -7,6 +7,8 @@ use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
+use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
+use App\Http\Controllers\Admin\AdminOrderManualRejectController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
@@ -100,6 +102,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
 
             Route::prefix('orders')->name('orders.')->group(function (): void {
                 Route::get('{order}', AdminOrderDetailController::class)->name('show');
+                Route::post('{order}/complete-manual', AdminOrderManualCompleteController::class)->name('complete-manual');
+                Route::post('{order}/reject-manual', AdminOrderManualRejectController::class)->name('reject-manual');
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
             });
