@@ -66,5 +66,38 @@
                     @endforelse
                 </div>
 
+                @if ($productsPagination['lastPage'] > 1)
+                    <nav aria-label="Halaman produk" class="flex flex-col items-center gap-2 rounded-[1rem] border-2 border-neo-ink bg-white/70 px-3 py-3 shadow-[3px_3px_0_#111827] sm:flex-row sm:justify-between">
+                        <p class="text-xs font-black uppercase text-neo-ink/70">
+                            Halaman {{ $productsPagination['currentPage'] }} dari {{ $productsPagination['lastPage'] }}
+                        </p>
+                        <div class="flex flex-wrap items-center justify-center gap-2">
+                            @if ($productsPagination['previousUrl'])
+                                <a href="{{ $productsPagination['previousUrl'] }}" class="rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink">← Sebelumnya</a>
+                            @else
+                                <span class="rounded-lg border-2 border-neo-ink/20 bg-white/40 px-3 py-2 text-xs font-black uppercase text-neo-ink/35">← Sebelumnya</span>
+                            @endif
+
+                            @foreach ($productsPagination['pages'] as $page)
+                                <a
+                                    href="{{ $page['url'] }}"
+                                    @if ($page['current']) aria-current="page" @endif
+                                    @class([
+                                        'min-w-10 rounded-lg border-2 border-neo-ink px-3 py-2 text-center text-xs font-black',
+                                        'bg-neo-yellow text-neo-ink' => $page['current'],
+                                        'bg-white text-neo-ink' => ! $page['current'],
+                                    ])
+                                >{{ $page['number'] }}</a>
+                            @endforeach
+
+                            @if ($productsPagination['nextUrl'])
+                                <a href="{{ $productsPagination['nextUrl'] }}" class="rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink">Berikutnya →</a>
+                            @else
+                                <span class="rounded-lg border-2 border-neo-ink/20 bg-white/40 px-3 py-2 text-xs font-black uppercase text-neo-ink/35">Berikutnya →</span>
+                            @endif
+                        </div>
+                    </nav>
+                @endif
+
                 @include('admin.dashboard.stock-modals')
             </div>

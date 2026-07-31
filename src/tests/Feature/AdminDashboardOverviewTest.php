@@ -76,6 +76,43 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertDontSee('fi-sidebar', false);
     }
 
+    public function test_product_pagination_keeps_older_sold_out_and_paused_products_manageable(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $oldest = Product::factory()->create([
+            'name' => 'Produk Lama Stok Kosong',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => false,
+            'created_at' => now()->subDays(30),
+        ]);
+
+        Product::factory()->count(20)->sequence(
+            fn ($sequence) => [
+                'name' => 'Produk Baru '.($sequence->index + 1),
+                'created_at' => now()->subMinutes(20 - $sequence->index),
+            ],
+        )->create();
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Produk Baru 20')
+            ->assertDontSee($oldest->name)
+            ->assertSee('Halaman 1 dari 2')
+            ->assertSee('products_page=2', false);
+
+        $this->get('/admin?tab=produk&products_page=2')
+            ->assertOk()
+            ->assertSee($oldest->name)
+            ->assertSee('○ Tidak tampil')
+            ->assertSee(route('admin.products.update', $oldest), false)
+            ->assertSee('Halaman 2 dari 2')
+            ->assertSee('products_page=1', false);
+    }
+
     public function test_cutover_removes_filament_runtime_surface(): void
     {
         $composer = file_get_contents(base_path('composer.json'));

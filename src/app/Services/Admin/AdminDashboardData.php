@@ -34,7 +34,7 @@ final class AdminDashboardData
      *     salesTab: array<string, mixed>
      * }
      */
-    public function forAdmin(User $user, ?string $requestedTab = null, ?string $salesFilter = null): array
+    public function forAdmin(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1): array
     {
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
@@ -46,7 +46,7 @@ final class AdminDashboardData
             'metrics' => $metrics,
             'navigation' => $this->navigation($requestedTab),
             'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
-            'productsTab' => $this->productsData->forProducts($canManageProducts),
+            'productsTab' => $this->productsData->forProducts($canManageProducts, $productsPage),
             'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),

@@ -20,6 +20,7 @@ class AdminDashboardController extends Controller
             $user,
             (string) $request->query('tab', 'stats'),
             (string) $request->query('sales_filter', 'all'),
+            max(1, (int) $request->query('products_page', 1)),
         );
         $viewData['dashboardState'] = $dashboardState->build(
             $viewData['productsTab'],

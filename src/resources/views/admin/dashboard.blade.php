@@ -21,6 +21,7 @@
             $paymentControl = $statsTab['paymentControl'];
             $canManageProducts = $productsTab['canManage'];
             $products = $productsTab['products'];
+            $productsPagination = $productsTab['pagination'];
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
