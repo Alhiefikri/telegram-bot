@@ -4,7 +4,8 @@
                                 x-data="{
                                     editPayload: @js($product['edit_payload']),
                                     stockPayload: @js($product['stock_payload']),
-                                    shareUrl: @js($product['share_url'])
+                                    shareUrl: @js($product['share_url']),
+                                    moreActionsOpen: false
                                 }"
                             >
                             @if ($product['image_url'])
@@ -58,64 +59,102 @@
 
                             @if ($canManageProducts)
                             {{-- Action buttons: in-page only --}}
-                            <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                <x-admin-dashboard.button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    x-on:click="openProductEditModal(editPayload)"
-                                >
-                                    ✏️ Ubah
-                                </x-admin-dashboard.button>
-                                <x-admin-dashboard.button
-                                    type="button"
-                                    variant="primary"
-                                    size="sm"
-                                    x-on:click="openStockModal(stockPayload)"
-                                >
-                                    ➕ Stok
-                                </x-admin-dashboard.button>
-                                <x-admin-dashboard.button
-                                    type="button"
-                                    variant="warning"
-                                    size="sm"
-                                    x-on:click="openManageStockModal(editPayload)"
-                                >
-                                    📦 Kelola
-                                </x-admin-dashboard.button>
-                                <x-admin-dashboard.button
-                                    type="button"
-                                    variant="purple"
-                                    size="sm"
-                                    x-on:click="copyProductShareLink(shareUrl)"
-                                >
-                                    🔗 Share
-                                </x-admin-dashboard.button>
-                                <form method="POST" action="{{ $product['visibility_url'] }}">
-                                    @csrf
-                                    @method('PATCH')
-                                    <input type="hidden" name="is_active" value="{{ $product['is_active'] ? 0 : 1 }}">
+                            <div class="mt-4 space-y-2" data-product-actions>
+                                <div data-product-primary-action>
                                     <x-admin-dashboard.button
-                                        type="submit"
+                                        type="button"
+                                        variant="primary"
+                                        size="sm"
+                                        class="w-full"
+                                        x-on:click="openStockModal(stockPayload)"
+                                    >
+                                        ➕ Stok
+                                    </x-admin-dashboard.button>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2" data-product-secondary-actions>
+                                    <x-admin-dashboard.button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        class="w-full"
+                                        x-on:click="openProductEditModal(editPayload)"
+                                    >
+                                        ✏️ Ubah
+                                    </x-admin-dashboard.button>
+                                    <x-admin-dashboard.button
+                                        type="button"
                                         variant="warning"
                                         size="sm"
                                         class="w-full"
+                                        x-on:click="openManageStockModal(editPayload)"
                                     >
-                                        {{ $product['visibility_action_label'] }}
+                                        📦 Kelola
                                     </x-admin-dashboard.button>
-                                </form>
-                                <form method="POST" action="{{ $product['delete_url'] }}" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">
-                                    @csrf
-                                    @method('DELETE')
+                                </div>
+
+                                <x-admin-dashboard.button
+                                    type="button"
+                                    variant="neutral"
+                                    size="sm"
+                                    class="w-full"
+                                    data-product-more-trigger
+                                    id="product-more-actions-trigger-{{ $product['id'] }}"
+                                    aria-controls="product-more-actions-{{ $product['id'] }}"
+                                    aria-expanded="false"
+                                    x-bind:aria-expanded="moreActionsOpen.toString()"
+                                    x-on:click="moreActionsOpen = ! moreActionsOpen"
+                                    x-on:keydown.escape.prevent.stop="moreActionsOpen = false; $nextTick(() => $el.focus())"
+                                >
+                                    <span>Aksi lainnya</span>
+                                    <span aria-hidden="true" x-text="moreActionsOpen ? '−' : '+'"></span>
+                                </x-admin-dashboard.button>
+
+                                <div
+                                    x-cloak
+                                    x-show="moreActionsOpen"
+                                    id="product-more-actions-{{ $product['id'] }}"
+                                    role="region"
+                                    aria-labelledby="product-more-actions-trigger-{{ $product['id'] }}"
+                                    class="grid grid-cols-1 gap-2 sm:grid-cols-3"
+                                    data-product-more-panel
+                                    x-on:keydown.escape.prevent.stop="moreActionsOpen = false; $nextTick(() => document.getElementById('product-more-actions-trigger-{{ $product['id'] }}')?.focus())"
+                                >
                                     <x-admin-dashboard.button
-                                        type="submit"
-                                        variant="destructive"
+                                        type="button"
+                                        variant="purple"
                                         size="sm"
                                         class="w-full"
+                                        x-on:click="copyProductShareLink(shareUrl)"
                                     >
-                                        🗑️ Hapus
+                                        🔗 Bagikan
                                     </x-admin-dashboard.button>
-                                </form>
+                                    <form method="POST" action="{{ $product['visibility_url'] }}" class="min-w-0">
+                                        @csrf
+                                        @method('PATCH')
+                                        <input type="hidden" name="is_active" value="{{ $product['is_active'] ? 0 : 1 }}">
+                                        <x-admin-dashboard.button
+                                            type="submit"
+                                            variant="warning"
+                                            size="sm"
+                                            class="w-full"
+                                        >
+                                            {{ $product['visibility_action_label'] }}
+                                        </x-admin-dashboard.button>
+                                    </form>
+                                    <form method="POST" action="{{ $product['delete_url'] }}" class="min-w-0" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">
+                                        @csrf
+                                        @method('DELETE')
+                                        <x-admin-dashboard.button
+                                            type="submit"
+                                            variant="destructive"
+                                            size="sm"
+                                            class="w-full"
+                                        >
+                                            🗃️ Arsipkan
+                                        </x-admin-dashboard.button>
+                                    </form>
+                                </div>
                             </div>
                             @else
                                 <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">
