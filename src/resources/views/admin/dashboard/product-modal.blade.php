@@ -5,6 +5,7 @@
             <x-admin-dashboard.modal-backdrop show="productModalOpen" close="closeProductModal()">
                 <x-admin-dashboard.modal-shell
                     id="product-modal"
+                    show="productModalOpen"
                     title="Tambah produk"
                     title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
                     description="Nama, harga, kategori, deskripsi, dan gambar WebP otomatis."

@@ -1,6 +1,14 @@
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = 'Tidak ada file yang dipilih';
 const RETURN_TARGET_HIGHLIGHT_MS = 1800;
+const MODAL_FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 const emptyProductForm = () => ({
     productModalMode: 'create',
@@ -106,9 +114,24 @@ export default function adminDashboard(initialState = {}) {
         manageStockSummary: { available: 0, reserved: 0, paid: 0 },
         manageStockTruncated: false,
         manageStockAddPayload: null,
+        productModalOpener: null,
+        stockModalOpener: null,
+        manageStockModalOpener: null,
 
         init() {
-            this.$nextTick(() => this.focusReturnTarget());
+            this.$nextTick(() => {
+                if (this.productModalOpen) {
+                    this.$refs.productName?.focus();
+                    return;
+                }
+
+                if (this.stockModalOpen) {
+                    this.$refs.stockItems?.focus();
+                    return;
+                }
+
+                this.focusReturnTarget();
+            });
         },
 
         focusReturnTarget() {
@@ -155,7 +178,51 @@ export default function adminDashboard(initialState = {}) {
                 .filter((group) => group.items.length > 0);
         },
 
+        modalFocusableElements(dialog) {
+            return Array.from(dialog?.querySelectorAll(MODAL_FOCUSABLE_SELECTOR) ?? [])
+                .filter((element) => element.getClientRects().length > 0 && element.getAttribute('aria-hidden') !== 'true');
+        },
+
+        trapModalFocus(event) {
+            const focusable = this.modalFocusableElements(event.currentTarget);
+            const first = focusable[0];
+            const last = focusable.at(-1);
+
+            if (! first || ! last) {
+                event.preventDefault();
+                event.currentTarget.focus();
+                return;
+            }
+
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (! event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        },
+
+        keepModalFocus(event, modalId) {
+            const dialog = document.getElementById(modalId);
+
+            if (! dialog || dialog.getClientRects().length === 0 || dialog.contains(event.target)) {
+                return;
+            }
+
+            (this.modalFocusableElements(dialog)[0] ?? dialog).focus();
+        },
+
+        restoreModalFocus(opener) {
+            this.$nextTick(() => {
+                if (opener?.isConnected) {
+                    opener.focus();
+                }
+            });
+        },
+
         openProductForm() {
+            this.productModalOpener = document.activeElement;
             Object.assign(this, {
                 activeTab: 'produk',
                 productFormAction: initialState.productStoreUrl ?? '',
@@ -167,6 +234,7 @@ export default function adminDashboard(initialState = {}) {
         },
 
         openProductEditModal(product) {
+            this.productModalOpener = document.activeElement;
             Object.assign(this, {
                 activeTab: 'produk',
                 productModalMode: 'edit',
@@ -192,8 +260,11 @@ export default function adminDashboard(initialState = {}) {
         },
 
         closeProductModal() {
+            const opener = this.productModalOpener;
             this.productFormSubmitting = false;
             this.productModalOpen = false;
+            this.productModalOpener = null;
+            this.restoreModalFocus(opener);
         },
 
         submitProductForm(event) {
@@ -206,6 +277,7 @@ export default function adminDashboard(initialState = {}) {
         },
 
         openManageStockModal(product) {
+            this.manageStockModalOpener = document.activeElement;
             Object.assign(this, {
                 activeTab: 'produk',
                 manageStockProductName: product.name,
@@ -222,13 +294,20 @@ export default function adminDashboard(initialState = {}) {
                 },
                 manageStockModalOpen: true,
             });
+            this.$nextTick(() => this.modalFocusableElements(document.getElementById('manage-stock-modal'))[0]?.focus());
         },
 
-        closeManageStockModal() {
+        closeManageStockModal(restoreFocus = true) {
+            const opener = this.manageStockModalOpener;
             this.manageStockModalOpen = false;
             this.manageStockItems = [];
             this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
             this.manageStockAddPayload = null;
+            this.manageStockModalOpener = null;
+
+            if (restoreFocus) {
+                this.restoreModalFocus(opener);
+            }
         },
 
         openStockModalFromManage() {
@@ -237,11 +316,13 @@ export default function adminDashboard(initialState = {}) {
             }
 
             const product = this.manageStockAddPayload;
-            this.closeManageStockModal();
-            this.openStockModal(product);
+            const opener = this.manageStockModalOpener;
+            this.closeManageStockModal(false);
+            this.openStockModal(product, opener);
         },
 
-        openStockModal(product) {
+        openStockModal(product, opener = document.activeElement) {
+            this.stockModalOpener = opener;
             Object.assign(this, {
                 activeTab: 'produk',
                 stockFormAction: product.stockUrl,
@@ -256,9 +337,12 @@ export default function adminDashboard(initialState = {}) {
         },
 
         closeStockModal() {
+            const opener = this.stockModalOpener;
             this.stockFormSubmitting = false;
             this.stockModalOpen = false;
             this.stockItems = '';
+            this.stockModalOpener = null;
+            this.restoreModalFocus(opener);
         },
 
         submitStockForm(event) {

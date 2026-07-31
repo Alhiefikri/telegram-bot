@@ -5,6 +5,7 @@
                 <x-admin-dashboard.modal-backdrop show="stockModalOpen" close="closeStockModal()">
                     <x-admin-dashboard.modal-shell
                         id="stock-modal"
+                        show="stockModalOpen"
                         title="Tambah stok"
                         description="1 baris = 1 item"
                         class="w-full max-w-md bg-[#7BD10A]"
@@ -49,6 +50,7 @@
                 <x-admin-dashboard.modal-backdrop show="manageStockModalOpen" close="closeManageStockModal()">
                     <x-admin-dashboard.modal-shell
                         id="manage-stock-modal"
+                        show="manageStockModalOpen"
                         title="Kelola stok"
                         description="Ready dikelompokkan paling atas, paid paling bawah."
                         class="max-h-[92vh] w-full max-w-xl overflow-y-auto bg-[#fee648] p-3 sm:p-4"
