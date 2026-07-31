@@ -452,6 +452,73 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectPrimaryActionsAtLeast44px(page);
 });
 
+test('traps keyboard focus in the product modal and restores its opener', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    const opener = page.getByRole('button', { name: /Tambah Produk/i });
+    await opener.click();
+
+    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
+    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
+    const submitButton = dialog.getByRole('button', { name: /Submit produk/i });
+    await expect(dialog.locator('#product-name')).toBeFocused();
+
+    await closeButton.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(submitButton).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+
+    await opener.click();
+    await dialog.getByRole('button', { name: 'Tutup modal' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
+test('traps keyboard focus in the stock modal and restores its opener', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
+    const opener = productCard.getByRole('button', { name: /Stok/i });
+    await opener.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Tambah Stok' });
+    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
+    const submitButton = dialog.getByRole('button', { name: /Simpan/i });
+    await expect(dialog.locator('#stock-items')).toBeFocused();
+
+    await closeButton.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(submitButton).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
+test('focuses the relevant product field when server validation reopens the modal', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+
+    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
+    await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+        dialog.locator('form').evaluate((form) => form.submit()),
+    ]);
+
+    await expect(page.getByRole('dialog', { name: /Tambah produk/i })).toBeVisible();
+    await expect(page.locator('#product-name')).toBeFocused();
+});
+
 for (const navClickCase of [
     {
         name: 'desktop/tablet navigation',

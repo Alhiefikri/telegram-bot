@@ -1,5 +1,6 @@
 @props([
     'id' => 'admin-dashboard-modal',
+    'show',
     'title',
     'titleExpression' => null,
     'description' => null,
@@ -11,9 +12,12 @@
 @endphp
 
 <div
+    id="{{ $id }}"
     role="dialog"
     aria-modal="true"
     aria-labelledby="{{ $titleId }}"
+    x-on:keydown.tab="trapModalFocus($event)"
+    x-on:focusin.window="if ({{ $show }}) keepModalFocus($event, '{{ $id }}')"
     {{ $attributes->class([
         'relative rounded-[0.65rem] border-[4px] border-neo-ink bg-white p-4 text-neo-ink shadow-[7px_7px_0_0_#050505] sm:p-5',
     ]) }}
