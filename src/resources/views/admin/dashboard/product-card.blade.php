@@ -60,15 +60,16 @@
                             @if ($canManageProducts)
                             {{-- Action buttons: in-page only --}}
                             <div class="mt-4 space-y-2" data-product-actions>
-                                <div data-product-primary-action>
+                                <div class="flex" data-product-primary-action>
                                     <x-admin-dashboard.button
                                         type="button"
                                         variant="primary"
                                         size="sm"
                                         class="w-full"
+                                        aria-label="Stok"
                                         x-on:click="openStockModal(stockPayload)"
                                     >
-                                        ➕ Stok
+                                        <span aria-hidden="true">➕</span> Stok
                                     </x-admin-dashboard.button>
                                 </div>
 
@@ -78,18 +79,20 @@
                                         variant="secondary"
                                         size="sm"
                                         class="w-full"
+                                        aria-label="Ubah"
                                         x-on:click="openProductEditModal(editPayload)"
                                     >
-                                        ✏️ Ubah
+                                        <span aria-hidden="true">✏️</span> Ubah
                                     </x-admin-dashboard.button>
                                     <x-admin-dashboard.button
                                         type="button"
                                         variant="warning"
                                         size="sm"
                                         class="w-full"
+                                        aria-label="Kelola"
                                         x-on:click="openManageStockModal(editPayload)"
                                     >
-                                        📦 Kelola
+                                        <span aria-hidden="true">📦</span> Kelola
                                     </x-admin-dashboard.button>
                                 </div>
 
@@ -125,9 +128,10 @@
                                         variant="purple"
                                         size="sm"
                                         class="w-full"
+                                        aria-label="Bagikan"
                                         x-on:click="copyProductShareLink(shareUrl)"
                                     >
-                                        🔗 Bagikan
+                                        <span aria-hidden="true">🔗</span> Bagikan
                                     </x-admin-dashboard.button>
                                     <form method="POST" action="{{ $product['visibility_url'] }}" class="min-w-0">
                                         @csrf
@@ -150,8 +154,9 @@
                                             variant="destructive"
                                             size="sm"
                                             class="w-full"
+                                            aria-label="Arsipkan"
                                         >
-                                            🗃️ Arsipkan
+                                            <span aria-hidden="true">🗃️</span> Arsipkan
                                         </x-admin-dashboard.button>
                                     </form>
                                 </div>
