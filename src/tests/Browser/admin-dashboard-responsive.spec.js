@@ -669,7 +669,9 @@ async function expectOneColumn(firstLocator, secondLocator) {
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
-    expect(Math.abs(first.x - second.x)).toBeLessThanOrEqual(2);
+    const firstCenterX = first.x + first.width / 2;
+    const secondCenterX = second.x + second.width / 2;
+    expect(Math.abs(firstCenterX - secondCenterX)).toBeLessThanOrEqual(2);
 
     const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
     expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
