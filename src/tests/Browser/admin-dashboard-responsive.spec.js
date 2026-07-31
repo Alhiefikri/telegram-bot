@@ -393,7 +393,33 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
     await submitProductFromMiniAppModal(page);
 
-    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
+    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' }).first();
+    const productActions = productCard.locator('[data-product-actions]').first();
+    const primaryAction = productActions.locator('[data-product-primary-action]').first();
+    const secondaryActions = productActions.locator('[data-product-secondary-actions]').first();
+    const moreTrigger = productActions.locator('[data-product-more-trigger]').first();
+    const morePanel = productActions.locator('[data-product-more-panel]').first();
+
+    await expect(primaryAction.getByRole('button', { name: 'Stok', exact: true })).toBeVisible();
+    await expect(secondaryActions.getByRole('button', { name: 'Ubah', exact: true })).toBeVisible();
+    await expect(secondaryActions.getByRole('button', { name: 'Kelola', exact: true })).toBeVisible();
+    await expect(productActions.getByRole('button', { name: 'Bagikan', exact: true })).toBeHidden();
+    await expect(productActions.getByRole('button', { name: /Pause|Aktifkan/ })).toBeHidden();
+    await expect(productActions.getByRole('button', { name: 'Arsipkan', exact: true })).toBeHidden();
+    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    await expectBefore(primaryAction, secondaryActions);
+    await expectBefore(secondaryActions, moreTrigger);
+    await expectStrictTouchTargetsAtLeast44px(productActions);
+
+    await moreTrigger.click();
+    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'true');
+    await expect(morePanel).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: /Pause|Aktifkan/ })).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: 'Arsipkan', exact: true })).toBeVisible();
+    await expectStrictTouchTargetsAtLeast44px(productActions);
+
     await productCard.getByRole('button', { name: 'Kelola' }).click();
 
     const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
@@ -643,15 +669,19 @@ async function expectOneColumn(firstLocator, secondLocator) {
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
-    expect(Math.abs(first.x - second.x)).toBeLessThanOrEqual(2);
+    const firstCenterX = first.x + first.width / 2;
+    const secondCenterX = second.x + second.width / 2;
+    expect(Math.abs(firstCenterX - secondCenterX)).toBeLessThanOrEqual(2);
 
     const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
     expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
 }
 
 async function expectBefore(firstLocator, secondLocator) {
-    const first = await firstLocator.first().boundingBox();
-    const second = await secondLocator.first().boundingBox();
+    const [first, second] = await Promise.all([
+        firstLocator.first().boundingBox(),
+        secondLocator.first().boundingBox(),
+    ]);
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
@@ -679,11 +709,37 @@ async function expectPrimaryActionsAtLeast44px(page) {
     expect(tooSmall, `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
 }
 
+async function expectStrictTouchTargetsAtLeast44px(locator) {
+    const tooSmall = await locator.locator('button, a[href]').evaluateAll((elements) => elements
+        .filter((element) => {
+            const style = window.getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+        })
+        .map((element) => {
+            const rect = element.getBoundingClientRect();
+
+            return {
+                label: (element.textContent || element.getAttribute('aria-label') || element.tagName).trim(),
+                width: rect.width,
+                height: rect.height,
+            };
+        })
+        .filter(({ width, height }) => width < 44 || height < 44));
+
+    expect(tooSmall, `touch targets below 44x44 CSS px: ${JSON.stringify(tooSmall)}`).toEqual([]);
+}
+
 async function expectTouchTargetAtLeast44px(locator) {
     const box = await locator.boundingBox();
 
     expect(box).not.toBeNull();
-    expect(Math.ceil(box.height)).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {
