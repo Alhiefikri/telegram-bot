@@ -45,6 +45,20 @@
                     type="button"
                     variant="neutral"
                     size="sm"
+                    x-on:click="activeTab = 'broadcast'"
+                    class="py-3"
+                    x-bind:class="activeTab === 'broadcast' ? 'bottom-nav-active' : ''"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M11 5 6 9H3v6h3l5 4V5Zm4.5 4.5a4 4 0 0 1 0 5m2.5-8a8 8 0 0 1 0 10" />
+                    </svg>
+                    <span class="text-[11px] font-black uppercase tracking-wide">Siaran</span>
+                </x-admin-dashboard.button>
+
+                <x-admin-dashboard.button
+                    type="button"
+                    variant="neutral"
+                    size="sm"
                     x-on:click="activeTab = 'telegram-channel'"
                     class="py-3"
                     x-bind:class="activeTab === 'telegram-channel' ? 'bottom-nav-active' : ''"

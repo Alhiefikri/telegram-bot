@@ -300,6 +300,21 @@ class AdminDashboardAccessTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_broadcast_tab_is_rendered_with_desktop_and_mobile_navigation_controls(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->get('/admin?tab=broadcast')
+            ->assertOk()
+            ->assertSee('\\u0022activeTab\\u0022:\\u0022broadcast\\u0022', false)
+            ->assertSee('id="admin-section-broadcast"', false)
+            ->assertSee('id="broadcast-message"', false)
+            ->assertSee('Status Siaran')
+            ->assertSeeInOrder(['Navigasi desktop', 'Siaran'])
+            ->assertSeeInOrder(['Navigasi dashboard', 'Siaran']);
+    }
+
     public function test_production_csrf_middleware_rejects_admin_mutation_without_token(): void
     {
         $middleware = new class($this->app, app(Encrypter::class)) extends PreventRequestForgery

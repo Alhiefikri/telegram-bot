@@ -446,6 +446,31 @@ for (const navClickCase of [
     });
 }
 
+for (const broadcastDirectCase of [
+    {
+        name: 'desktop',
+        viewport: { width: 1024, height: 900 },
+        navigationName: 'Navigasi desktop',
+    },
+    {
+        name: 'Telegram mini app',
+        viewport: { width: 375, height: 900 },
+        navigationName: 'Navigasi dashboard',
+    },
+]) {
+    test(`opens Siaran directly with matching active navigation on ${broadcastDirectCase.name}`, async ({ page }) => {
+        await page.setViewportSize(broadcastDirectCase.viewport);
+        await login(page);
+        await page.goto(`${baseUrl}/admin?tab=broadcast`);
+
+        await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+
+        const nav = page.getByRole('navigation', { name: broadcastDirectCase.navigationName });
+        await expect(nav.getByRole('button', { name: 'Siaran', exact: true })).toHaveClass(/bottom-nav-active/);
+    });
+}
+
 async function expectClickedDashboardControlsToWork(page, navigationName) {
     const nav = page.getByRole('navigation', { name: navigationName });
     await expect(nav).toBeVisible();
@@ -461,6 +486,12 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
     await nav.getByRole('button', { name: 'Channel', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Telegram Channel' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Setup Store Channel' })).toBeVisible();
+
+    const broadcastButton = nav.getByRole('button', { name: 'Siaran', exact: true });
+    await broadcastButton.click();
+    await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+    await expect(broadcastButton).toHaveClass(/bottom-nav-active/);
 
     await nav.getByRole('button', { name: 'Tambah', exact: true }).click();
     const productModal = page.getByRole('dialog', { name: /Tambah produk/i });

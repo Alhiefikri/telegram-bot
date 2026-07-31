@@ -45,6 +45,19 @@
                         <span class="text-[10px] font-bold text-current">Pesanan</span>
                     </button>
 
+                    {{-- Siaran --}}
+                    <button
+                        type="button"
+                        x-on:click="activeTab = 'broadcast'"
+                        class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
+                        :class="activeTab === 'broadcast' ? 'bottom-nav-active' : ''"
+                    >
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M11 5 6 9H3v6h3l5 4V5Zm4.5 4.5a4 4 0 0 1 0 5m2.5-8a8 8 0 0 1 0 10" />
+                        </svg>
+                        <span class="text-[10px] font-bold text-current">Siaran</span>
+                    </button>
+
                     {{-- Telegram Channel --}}
                     <button
                         type="button"
