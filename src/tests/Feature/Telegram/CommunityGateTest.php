@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramCommunityGatePrompt;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Tests\Support\TelegramBotTestSupport;
@@ -174,6 +175,35 @@ class CommunityGateTest extends TelegramBotTestSupport
             && $r['message_id'] === $firstPromptMessageId);
     }
 
+    public function test_concurrent_blocked_update_does_not_emit_a_second_prompt_while_refresh_lock_is_held(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeGateHttp('left');
+        $lock = Cache::lock('telegram:community-gate-prompt:'.$customer->id, 30);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->postTelegramWebhook($this->messageUpdate(7, '/katalog'))->assertOk();
+
+            $this->assertSame(0, TelegramCommunityGatePrompt::count());
+            $this->assertSame(0, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        } finally {
+            $lock->release();
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(8, '/katalog'))->assertOk();
+
+        $this->assertSame(1, TelegramCommunityGatePrompt::count());
+        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+    }
+
     public function test_existing_customer_start_is_blocked_before_welcome_when_not_a_member(): void
     {
         StoreChannelSetting::create([
@@ -214,6 +244,28 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains((string) ($r['text'] ?? ''), 'selamat datang di LHIE STORE'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
+    }
+
+    public function test_existing_non_member_product_deep_link_is_blocked_before_product_content(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $product = Product::factory()->create(['is_active' => true, 'name' => 'Netflix Premium', 'stock' => 5, 'reserved_stock' => 0]);
+        $this->fakeGateHttp('left');
+
+        $this->postTelegramWebhook($this->messageUpdate(9, '/start product_'.$product->id))->assertOk();
+
+        $this->assertSame($customer->id, TelegramCommunityGatePrompt::query()->sole()->customer_id);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Netflix Premium'));
     }
 
     public function test_invalid_validated_channel_setup_fails_closed_with_retry_guidance(): void
@@ -338,6 +390,8 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains($r['text'] ?? '', 'selamat datang di LHIE STORE'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'Menu utama'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && $r['callback_query_id'] === 'verify');
     }
 
     public function test_delete_prompt_failure_does_not_block_successful_verification(): void
