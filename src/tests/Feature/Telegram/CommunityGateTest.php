@@ -9,6 +9,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramCommunityGatePrompt;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\Support\TelegramBotTestSupport;
 
 class CommunityGateTest extends TelegramBotTestSupport
@@ -95,7 +96,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
-    public function test_non_member_is_blocked_from_store_flow_and_prompt_is_reused(): void
+    public function test_non_member_is_blocked_and_receives_a_fresh_prompt_for_each_store_action(): void
     {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
@@ -105,21 +106,114 @@ class CommunityGateTest extends TelegramBotTestSupport
             'last_test_success' => true,
         ]);
         $product = Product::factory()->create(['is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
-        $this->fakeGateHttp('left');
+        $nextMessageId = 700;
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => function (Request $request) use (&$nextMessageId) {
+            if (str_ends_with($request->url(), '/getChatMember')) {
+                return Http::response(['ok' => true, 'result' => ['status' => 'left']]);
+            }
+            if (str_ends_with($request->url(), '/sendMessage')) {
+                return Http::response(['ok' => true, 'result' => ['message_id' => ++$nextMessageId]]);
+            }
+
+            return Http::response(['ok' => true]);
+        }]);
 
         $this->postTelegramWebhook($this->messageUpdate(1, '/katalog'))->assertOk();
+        $firstPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
         $this->postTelegramWebhook($this->callbackUpdate(2, 'cb-buy', 'buy:'.$product->id))->assertOk();
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, CartItem::count());
-        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/getChatMember')
             && $r['chat_id'] === '-100123'
             && $r['user_id'] === 12345);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
+            && $r['chat_id'] === '12345'
+            && $r['message_id'] === $firstPromptMessageId);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data()), 'Gabung kanal')
             && str_contains(json_encode($r->data()), 'Saya sudah bergabung')
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
+    }
+
+    public function test_prompt_delete_failure_still_sends_and_stores_a_fresh_prompt(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        $nextMessageId = 800;
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => function (Request $request) use (&$nextMessageId) {
+            if (str_ends_with($request->url(), '/getChatMember')) {
+                return Http::response(['ok' => true, 'result' => ['status' => 'left']]);
+            }
+            if (str_ends_with($request->url(), '/deleteMessage')) {
+                return Http::response(['ok' => false, 'description' => 'Bad Request: message cannot be deleted'], 400);
+            }
+            if (str_ends_with($request->url(), '/sendMessage')) {
+                return Http::response(['ok' => true, 'result' => ['message_id' => ++$nextMessageId]]);
+            }
+
+            return Http::response(['ok' => true]);
+        }]);
+
+        $this->postTelegramWebhook($this->messageUpdate(3, '/katalog'))->assertOk();
+        $firstPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
+        $this->postTelegramWebhook($this->messageUpdate(4, '/katalog'))->assertOk();
+
+        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
+            && $r['message_id'] === $firstPromptMessageId);
+    }
+
+    public function test_existing_customer_start_is_blocked_before_welcome_when_not_a_member(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeGateHttp('left');
+
+        $this->postTelegramWebhook($this->messageUpdate(5, '/start'))->assertOk();
+
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'selamat datang di LHIE STORE'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
+    }
+
+    public function test_existing_customer_start_keeps_welcome_flow_when_already_a_member(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeGateHttp('member');
+
+        $this->postTelegramWebhook($this->messageUpdate(6, '/start'))->assertOk();
+
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'selamat datang di LHIE STORE'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
     }
 
     public function test_invalid_validated_channel_setup_fails_closed_with_retry_guidance(): void
@@ -181,10 +275,20 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        config()->set('services.telegram.token', 'sensitive-bot-token');
+        $warnings = [];
+        Log::shouldReceive('warning')->once()->withArgs(function (string $event, array $context) use (&$warnings) {
+            $warnings[] = [$event, $context];
+
+            return true;
+        });
         Http::preventStrayRequests();
         Http::fake(['https://api.telegram.org/*' => function (Request $request) {
             if (str_ends_with($request->url(), '/getChatMember')) {
-                return Http::response(['ok' => false, 'description' => 'Bad Request: chat not found'], 400);
+                return Http::response([
+                    'ok' => false,
+                    'description' => 'Bad Request via https://api.telegram.org/botsensitive-bot-token/getChatMember: chat not found',
+                ], 400);
             }
 
             return Http::response(['ok' => true, 'result' => ['message_id' => 77]]);
@@ -194,6 +298,12 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, $this->sentCount('/sendMessage', 'Produk'));
+        $this->assertCount(1, $warnings);
+        $this->assertSame('telegram.community_gate_membership_check_failed', $warnings[0][0]);
+        $this->assertArrayHasKey('exception', $warnings[0][1]);
+        $this->assertArrayHasKey('error', $warnings[0][1]);
+        $this->assertStringNotContainsString('sensitive-bot-token', $warnings[0][1]['error']);
+        $this->assertArrayNotHasKey('telegram_user_id', $warnings[0][1]);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'belum bisa dicek')
             && str_contains($r['text'] ?? '', 'Gabung kanal dulu ya')

@@ -44,11 +44,10 @@ class TelegramMessageRouter
 
                 return;
             }
+            if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+                return;
+            }
             if (($productId = $this->startProductId($text)) !== null) {
-                if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-                    return;
-                }
-
                 $product = Product::publicVisible()->whereKey($productId)->first();
                 if ($product) {
                     $this->catalog->sendStockChoices($customer, $chatId, $product, $product->availableStock());
