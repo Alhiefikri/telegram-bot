@@ -97,12 +97,15 @@ class AdminDashboardOverviewTest extends TestCase
             ],
         )->create();
 
-        $this->get('/admin?tab=produk')
+        $this->get('/admin?tab=produk&sales_filter=waiting&source=telegram')
             ->assertOk()
             ->assertSee('Produk Baru 20')
             ->assertDontSee($oldest->name)
             ->assertSee('Halaman 1 dari 2')
-            ->assertSee('products_page=2', false);
+            ->assertSee('products_page=2', false)
+            ->assertSee('tab=produk', false)
+            ->assertSee('sales_filter=waiting', false)
+            ->assertSee('source=telegram', false);
 
         $this->get('/admin?tab=produk&products_page=2')
             ->assertOk()
