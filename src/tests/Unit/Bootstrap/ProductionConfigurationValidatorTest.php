@@ -54,6 +54,9 @@ class ProductionConfigurationValidatorTest extends TestCase
             'missing Telegram webhook secret' => ['services.telegram.webhook_secret', '', 'TELEGRAM_WEBHOOK_SECRET must be configured in production.'],
             'debug enabled' => ['app.debug', true, 'APP_DEBUG must be false in production.'],
             'insecure Pakasir URL' => ['services.pakasir.base_url', 'http://pakasir.example.test', 'PAKASIR_BASE_URL must use HTTPS in production.'],
+            'unsupported Pakasir QRIS fee payer' => ['services.pakasir.qris_fee.payer', 'buyer', 'PAKASIR_QRIS_FEE_PAYER must be customer or merchant.'],
+            'nonpositive Pakasir QRIS threshold' => ['services.pakasir.qris_fee.threshold', 0, 'PAKASIR_QRIS_FEE_THRESHOLD must be a positive integer.'],
+            'negative Pakasir QRIS low rate' => ['services.pakasir.qris_fee.low_bps', -1, 'Pakasir QRIS fee configuration values must be non-negative integers.'],
             'Binance API key without secret' => ['services.binance.api_key', 'binance-key', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'Binance API secret without key' => ['services.binance.api_secret', 'binance-secret', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'insecure application URL' => ['app.url', 'http://store.example.test', 'APP_URL must use HTTPS in production.'],
@@ -77,7 +80,17 @@ class ProductionConfigurationValidatorTest extends TestCase
                     'token' => 'telegram-token',
                     'webhook_secret' => 'telegram-secret',
                 ],
-                'pakasir' => ['base_url' => 'https://pakasir.example.test'],
+                'pakasir' => [
+                    'base_url' => 'https://pakasir.example.test',
+                    'qris_fee' => [
+                        'payer' => 'customer',
+                        'threshold' => 105_000,
+                        'low_bps' => 70,
+                        'low_fixed' => 310,
+                        'high_bps' => 100,
+                        'high_fixed' => 0,
+                    ],
+                ],
                 'binance' => [
                     'api_key' => '',
                     'api_secret' => '',

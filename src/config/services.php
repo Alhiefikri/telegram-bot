@@ -75,6 +75,15 @@ return [
         'status_refresh_lock_lease_seconds' => (int) env('PAKASIR_STATUS_REFRESH_LOCK_LEASE_SECONDS', 15),
         'status_refresh_single_flight_window_seconds' => (int) env('PAKASIR_STATUS_REFRESH_SINGLE_FLIGHT_WINDOW_SECONDS', 5),
         'status_refresh_in_progress_retry_after_seconds' => (int) env('PAKASIR_STATUS_REFRESH_IN_PROGRESS_RETRY_AFTER_SECONDS', 3),
+        'qris_fee' => [
+            // Official Pakasir pricing published 2026-07-21.
+            'payer' => env('PAKASIR_QRIS_FEE_PAYER', 'customer'),
+            'threshold' => (int) env('PAKASIR_QRIS_FEE_THRESHOLD', 105000),
+            'low_bps' => (int) env('PAKASIR_QRIS_FEE_LOW_BPS', 70),
+            'low_fixed' => (int) env('PAKASIR_QRIS_FEE_LOW_FIXED', 310),
+            'high_bps' => (int) env('PAKASIR_QRIS_FEE_HIGH_BPS', 100),
+            'high_fixed' => (int) env('PAKASIR_QRIS_FEE_HIGH_FIXED', 0),
+        ],
     ],
 
     'storefront' => [
