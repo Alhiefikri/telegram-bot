@@ -57,6 +57,7 @@ class ProductionConfigurationValidatorTest extends TestCase
             'unsupported Pakasir QRIS fee payer' => ['services.pakasir.qris_fee.payer', 'buyer', 'PAKASIR_QRIS_FEE_PAYER must be customer or merchant.'],
             'nonpositive Pakasir QRIS threshold' => ['services.pakasir.qris_fee.threshold', 0, 'PAKASIR_QRIS_FEE_THRESHOLD must be a positive integer.'],
             'negative Pakasir QRIS low rate' => ['services.pakasir.qris_fee.low_bps', -1, 'Pakasir QRIS fee configuration values must be non-negative integers.'],
+            'excessive Pakasir QRIS rate' => ['services.pakasir.qris_fee.high_bps', 10_001, 'Pakasir QRIS fee configuration exceeds production safety limits.'],
             'Binance API key without secret' => ['services.binance.api_key', 'binance-key', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'Binance API secret without key' => ['services.binance.api_secret', 'binance-secret', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'nonpositive Binance canary age' => ['services.binance.canary_max_age_hours', 0, 'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS must be a positive integer.'],

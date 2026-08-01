@@ -48,7 +48,7 @@ class PakasirNativeQrisService
                     $transaction = $this->pakasir->createQrisTransaction($payment);
                     $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
                 } catch (\Throwable $exception) {
-                    $this->markCreationOutcomeUnknown($payment, $exception);
+                    $this->markCreationFailure($payment, $exception);
 
                     throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.', 0, $exception);
                 }
@@ -134,14 +134,15 @@ class PakasirNativeQrisService
         $payment->refresh();
     }
 
-    private function markCreationOutcomeUnknown(Payment $payment, \Throwable $exception): void
+    private function markCreationFailure(Payment $payment, \Throwable $exception): void
     {
+        $integrityFailure = $exception instanceof \UnexpectedValueException;
         Payment::query()
             ->whereKey($payment->id)
             ->whereNull('provider_payment_number_hash')
             ->update([
-                'provider_create_state' => 'outcome_unknown',
-                'provider_create_last_error' => substr($exception::class, 0, 500),
+                'provider_create_state' => $integrityFailure ? 'financial_integrity_failed' : 'outcome_unknown',
+                'provider_create_last_error' => substr($integrityFailure ? $exception->getMessage() : $exception::class, 0, 500),
             ]);
     }
 
@@ -152,7 +153,7 @@ class PakasirNativeQrisService
             $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
             $this->persistCreatedTransaction($payment, $transaction);
         } catch (\Throwable $exception) {
-            $this->markCreationOutcomeUnknown($payment, $exception);
+            $this->markCreationFailure($payment, $exception);
         }
     }
 

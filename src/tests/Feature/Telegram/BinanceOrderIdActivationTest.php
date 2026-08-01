@@ -74,6 +74,10 @@ class BinanceOrderIdActivationTest extends TestCase
         $fresh = $setting->fresh();
         $this->assertSame('order_id', $fresh->binance_verification_mode);
         $this->assertNotNull($fresh->binance_order_id_compatibility_ready_at);
+        $this->artisan('ops:health', ['--binance-canary' => true])
+            ->expectsOutputToContain('Binance Order ID global readiness: ready')
+            ->expectsOutputToContain('Binance Order ID recent admin canary: ok')
+            ->assertSuccessful();
     }
 
     public function test_readiness_command_refuses_activation_without_persisted_canary_evidence(): void
@@ -90,6 +94,10 @@ class BinanceOrderIdActivationTest extends TestCase
 
         $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
         $this->assertNull($setting->fresh()->binance_order_id_compatibility_ready_at);
+        $this->artisan('ops:health', ['--binance-canary' => true])
+            ->expectsOutputToContain('Binance Order ID global readiness: compatibility')
+            ->expectsOutputToContain('Binance Order ID recent admin canary: missing or stale')
+            ->assertFailed();
     }
 
     public function test_activation_rollback_clears_readiness_marker_before_a_future_reactivation(): void

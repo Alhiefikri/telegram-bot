@@ -25,6 +25,9 @@ final readonly class PakasirQrisFeePolicy
                 throw new UnexpectedValueException('Pakasir QRIS fee configuration values must be non-negative integers.');
             }
         }
+        if ($this->lowBps > 10_000 || $this->highBps > 10_000 || $this->lowFixed > 10_000 || $this->highFixed > 10_000) {
+            throw new UnexpectedValueException('Pakasir QRIS fee configuration exceeds production safety limits.');
+        }
     }
 
     public static function fromConfig(): self

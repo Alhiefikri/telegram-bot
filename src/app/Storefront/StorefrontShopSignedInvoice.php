@@ -187,7 +187,7 @@ class StorefrontShopSignedInvoice
             ];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return [
                 'is_payable' => false,
                 'state' => 'failed',

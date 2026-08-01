@@ -18,6 +18,12 @@ final class BinanceOrderIdCanaryEvidence
             throw new RuntimeException('Binance admin canary verification is not configured safely.');
         }
 
+        $receiverType = filled(config('services.binance.pay_id')) ? 'pay_id' : 'uid';
+        $receiverValue = trim((string) (config('services.binance.pay_id') ?: config('services.binance.pay_uid')));
+        if ($receiverValue === '') {
+            throw new RuntimeException('Binance admin canary verification is not configured safely.');
+        }
+
         $payment = Payment::query()
             ->with('order.customer')
             ->where('method', 'BINANCE_PAY_ID')
@@ -27,8 +33,8 @@ final class BinanceOrderIdCanaryEvidence
             ->whereNotNull('binance_order_id')
             ->whereNotNull('binance_order_id_submitted_at')
             ->whereNotNull('provider_reference')
-            ->whereNotNull('binance_receiver_type')
-            ->whereNotNull('binance_receiver_value')
+            ->where('binance_receiver_type', $receiverType)
+            ->where('binance_receiver_value', $receiverValue)
             ->where('paid_at', '>=', now()->subHours($maxAgeHours))
             ->whereHas('order.customer', fn ($query) => $query->where('telegram_id', $adminId))
             ->latest('paid_at')

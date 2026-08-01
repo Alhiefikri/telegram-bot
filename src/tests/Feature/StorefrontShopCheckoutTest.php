@@ -772,7 +772,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $payment = $order->payments->sole();
 
         $first->assertRedirect();
-        $this->assertSame('outcome_unknown', $payment->provider_create_state);
+        $this->assertSame('financial_integrity_failed', $payment->provider_create_state);
         $this->assertNull($payment->provider_total_payment);
         $this->assertNull($payment->provider_payment_number);
 

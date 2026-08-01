@@ -253,7 +253,7 @@ class StorefrontShopPaymentStatusRefresh
             return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
         }
 

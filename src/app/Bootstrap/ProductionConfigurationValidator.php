@@ -53,6 +53,9 @@ class ProductionConfigurationValidator
             if (! is_int($value) || $value < 0) {
                 throw new RuntimeException('Pakasir QRIS fee configuration values must be non-negative integers.');
             }
+            if ($value > 10_000) {
+                throw new RuntimeException('Pakasir QRIS fee configuration exceeds production safety limits.');
+            }
         }
 
         $binanceBaseUrl = (string) $this->config->get('services.binance.base_url', '');
