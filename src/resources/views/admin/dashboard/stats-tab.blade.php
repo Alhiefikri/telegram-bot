@@ -170,7 +170,7 @@
                         <p class="mt-2 text-[11px] font-semibold text-brand-muted">
                             Mode aktif dipilih di dashboard. Environment hanya dipakai untuk kredensial dan endpoint provider.
                         </p>
-                        <form method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3">
+                        <form id="admin-binance-enabled-setting" method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3">
                             @csrf
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
                             @if ($paymentControl['requested_mode'] === 'pakasir')
@@ -181,6 +181,33 @@
                                 {{ $paymentControl['binance_pay_enabled'] ? 'Binance Pay USDT: Aktif' : 'Aktifkan Binance Pay USDT' }}
                             </x-admin-dashboard.button>
                         </form>
+                        <div class="mt-4 border-t-2 border-neo-ink/15 pt-4">
+                            <h3 class="font-display text-sm font-black uppercase tracking-wider text-neo-ink">Verifikasi Binance</h3>
+                            <p class="mt-1 text-[11px] font-semibold text-brand-muted">{{ $paymentControl['binance_order_id_guard_message'] }}</p>
+                            @error('binance_verification_mode', 'paymentMode')
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+                            <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                                @foreach (['amount_unique' => 'Amount unik (legacy)', 'order_id' => 'Order ID'] as $binanceMode => $binanceModeLabel)
+                                    <form method="POST" action="{{ $paymentControl['update_url'] }}">
+                                        @csrf
+                                        <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
+                                        @if ($paymentControl['requested_mode'] === 'pakasir')
+                                            <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
+                                        @endif
+                                        <input type="hidden" name="binance_verification_mode" value="{{ $binanceMode }}">
+                                        <x-admin-dashboard.button
+                                            type="submit"
+                                            :variant="$paymentControl['binance_verification_mode'] === $binanceMode ? 'primary' : 'neutral'"
+                                            size="sm"
+                                            class="w-full text-[11px]"
+                                        >
+                                            {{ $binanceModeLabel }}
+                                        </x-admin-dashboard.button>
+                                    </form>
+                                @endforeach
+                            </div>
+                        </div>
                         <form method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3 space-y-3" aria-label="Batas waktu pembayaran">
                             @csrf
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
