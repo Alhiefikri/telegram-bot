@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
@@ -135,6 +136,7 @@ class TelegramPaymentInstructionRenderer
         $order->loadMissing('orderItems');
         $payableAmount = $transaction->totalPayment() ?? $payment->amount;
         $expiry = $this->earliestDate($transaction->expiresAt(), $payment->provider_expires_at, $payment->expired_at, $order->expires_at);
+        $customerPaysFee = PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer';
 
         $lines = array_merge($this->pakasirOrderHeaderLines($order, $locale), [
             ($locale === 'en' ? '💰 Product total: ' : '💰 Total produk: ').$this->formatRupiah($order->total_amount),
@@ -142,6 +144,9 @@ class TelegramPaymentInstructionRenderer
                 ? ($locale === 'en' ? 'Not available yet' : 'Belum tersedia')
                 : $this->formatRupiah($transaction->fee())),
             ($locale === 'en' ? '💳 Total QRIS payment: ' : '💳 Total bayar QRIS: ').$this->formatRupiah($payableAmount),
+            $locale === 'en'
+                ? ($customerPaysFee ? 'ℹ️ The QRIS fee is paid by the customer and is included in the total above.' : 'ℹ️ The QRIS fee is covered by the store; the customer pays only the product total.')
+                : ($customerPaysFee ? 'ℹ️ Biaya QRIS dibayar pelanggan dan sudah termasuk dalam total di atas.' : 'ℹ️ Biaya QRIS ditanggung toko; pelanggan hanya membayar total produk.'),
         ]);
 
         if ($expiry) {
