@@ -81,7 +81,7 @@ class PakasirClient implements PakasirProviderAdapter
         }
 
         $transaction = PakasirQrisTransaction::fromPayload($response);
-        $transaction->assertMatches($payment, $project);
+        $transaction->assertMatches($payment, $project, PakasirQrisFeePolicy::fromConfig());
 
         return $transaction;
     }

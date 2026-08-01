@@ -39,6 +39,11 @@ final readonly class PakasirQrisFeePolicy
         );
     }
 
+    public static function officialCustomer(): self
+    {
+        return new self('customer', 105_000, 70, 310, 100, 0);
+    }
+
     /** @return list<int> */
     public function allowedFees(int $amount): array
     {

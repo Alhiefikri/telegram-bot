@@ -45,11 +45,11 @@ class ProductionConfigurationValidator
         if (! in_array($pakasirFeePayer, ['customer', 'merchant'], true)) {
             throw new RuntimeException('PAKASIR_QRIS_FEE_PAYER must be customer or merchant.');
         }
-        if ((int) $this->config->get('services.pakasir.qris_fee.threshold', 0) <= 0) {
+        if ((int) $this->config->get('services.pakasir.qris_fee.threshold', 105_000) <= 0) {
             throw new RuntimeException('PAKASIR_QRIS_FEE_THRESHOLD must be a positive integer.');
         }
-        foreach (['low_bps', 'low_fixed', 'high_bps', 'high_fixed'] as $key) {
-            $value = $this->config->get('services.pakasir.qris_fee.'.$key);
+        foreach (['low_bps' => 70, 'low_fixed' => 310, 'high_bps' => 100, 'high_fixed' => 0] as $key => $default) {
+            $value = $this->config->get('services.pakasir.qris_fee.'.$key, $default);
             if (! is_int($value) || $value < 0) {
                 throw new RuntimeException('Pakasir QRIS fee configuration values must be non-negative integers.');
             }

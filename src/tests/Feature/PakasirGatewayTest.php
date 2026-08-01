@@ -25,6 +25,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Tests\Support\QrisTestPayload;
 use Tests\TestCase;
 
 class PakasirGatewayTest extends TestCase
@@ -170,14 +171,14 @@ class PakasirGatewayTest extends TestCase
 
     public function test_creates_qris_transaction_posts_to_pakasir_without_mutating_local_payment_state(): void
     {
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
         Http::fake(fn ($request) => Http::response([
             'payment' => [
                 'project' => 'warung-ai',
                 'order_id' => $request['order_id'],
                 'amount' => 10000,
-                'fee' => 103,
-                'total_payment' => 10103,
+                'fee' => 380,
+                'total_payment' => 10380,
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
                 'expired_at' => '2026-07-04T16:30:00Z',
@@ -192,8 +193,8 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame('warung-ai', $transaction->project());
         $this->assertSame($payment->merchant_ref, $transaction->orderId());
         $this->assertSame(10000, $transaction->amount());
-        $this->assertSame(103, $transaction->fee());
-        $this->assertSame(10103, $transaction->totalPayment());
+        $this->assertSame(380, $transaction->fee());
+        $this->assertSame(10380, $transaction->totalPayment());
         $this->assertSame('qris', $transaction->paymentMethod());
         $this->assertSame($paymentNumber, $transaction->paymentNumber());
         $this->assertSame('2026-07-04T16:30:00+00:00', $transaction->expiresAt()?->utc()->toAtomString());
@@ -263,7 +264,7 @@ class PakasirGatewayTest extends TestCase
     public function test_native_qris_service_persists_sanitized_native_fields_from_provider_response(): void
     {
         Http::fake();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.WWW0118SECRETQRSTRING';
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
         $providerSecretValues = [
             'provider-top-level-api-key',
             'provider-nested-x-api-key',
@@ -278,8 +279,8 @@ class PakasirGatewayTest extends TestCase
                 'project' => 'warung-ai',
                 'order_id' => $payment->merchant_ref,
                 'amount' => 10000,
-                'fee' => 103,
-                'total_payment' => 10103,
+                'fee' => 380,
+                'total_payment' => 10380,
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
                 'expired_at' => '2026-07-04T16:30:00Z',
@@ -323,8 +324,8 @@ class PakasirGatewayTest extends TestCase
 
         $this->assertSame($paymentNumber, $transaction->paymentNumber());
         $payment->refresh();
-        $this->assertSame(103, $payment->provider_fee);
-        $this->assertSame(10103, $payment->provider_total_payment);
+        $this->assertSame(380, $payment->provider_fee);
+        $this->assertSame(10380, $payment->provider_total_payment);
         $this->assertSame('qris', $payment->provider_payment_method);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
         $this->assertSame(hash('sha256', $paymentNumber), $payment->provider_payment_number_hash);
@@ -369,14 +370,14 @@ class PakasirGatewayTest extends TestCase
     public function test_native_qris_provider_expiry_tightens_local_order_expiry(): void
     {
         $providerExpiry = now()->addMinutes(15)->startOfSecond();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.EXPIRY';
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
         Http::fake(fn ($request) => Http::response([
             'payment' => [
                 'project' => 'warung-ai',
                 'order_id' => $request['order_id'],
                 'amount' => $request['amount'],
-                'fee' => 103,
-                'total_payment' => $request['amount'] + 103,
+                'fee' => 380,
+                'total_payment' => $request['amount'] + 380,
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
                 'expired_at' => $providerExpiry->utc()->toAtomString(),
@@ -393,15 +394,15 @@ class PakasirGatewayTest extends TestCase
 
     public function test_native_qris_service_returns_persisted_transaction_without_duplicate_provider_create(): void
     {
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.IDEMPOTENT92';
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
         Http::fake([
             'https://app.pakasir.com/api/transactioncreate/qris' => fn ($request) => Http::response([
                 'payment' => [
                     'project' => 'warung-ai',
                     'order_id' => $request['order_id'],
                     'amount' => $request['amount'],
-                    'fee' => 103,
-                    'total_payment' => $request['amount'] + 103,
+                    'fee' => 380,
+                    'total_payment' => $request['amount'] + 380,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
@@ -435,14 +436,14 @@ class PakasirGatewayTest extends TestCase
         ];
 
         foreach ($cases as $case => $mutate) {
-            $paymentNumber = '00020101021226610016ID.CO.QRIS.'.$case;
+            $paymentNumber = QrisTestPayload::forAmount(10_380);
             Http::fake(fn ($request) => Http::response([
                 'payment' => $mutate([
                     'project' => 'warung-ai',
                     'order_id' => $request['order_id'],
                     'amount' => $request['amount'],
-                    'fee' => 103,
-                    'total_payment' => $request['amount'] + 103,
+                    'fee' => 380,
+                    'total_payment' => $request['amount'] + 380,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',

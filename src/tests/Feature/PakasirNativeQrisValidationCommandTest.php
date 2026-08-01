@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\QrisTestPayload;
 use Tests\TestCase;
 
 class PakasirNativeQrisValidationCommandTest extends TestCase
@@ -40,7 +41,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
         $this->configureNativePakasir();
 
         $payment = $this->pendingPakasirPayment(30103, 'INV-STAGE-QRIS-1');
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.STAGING92';
+        $paymentNumber = QrisTestPayload::forAmount(30_624);
         $apiKey = 'pakasir-secret';
         $providerSecret = 'provider-secret-for-report';
 
@@ -50,8 +51,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'project' => 'staging-store',
                     'order_id' => $request['order_id'],
                     'amount' => $request['amount'],
-                    'fee' => 103,
-                    'total_payment' => $request['amount'] + 103,
+                    'fee' => 521,
+                    'total_payment' => $request['amount'] + 521,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
@@ -69,8 +70,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'project' => 'staging-store',
                     'order_id' => 'INV-STAGE-QRIS-1',
                     'amount' => 30103,
-                    'fee' => 103,
-                    'total_payment' => 30206,
+                    'fee' => 521,
+                    'total_payment' => 30624,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
@@ -163,8 +164,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 
         $payment = $this->pendingPakasirPayment(15000, 'INV-STAGE-DUPLICATE-1');
         $paymentNumbers = [
-            '00020101021226610016ID.CO.QRIS.FIRST92',
-            '00020101021226610016ID.CO.QRIS.SECOND92',
+            QrisTestPayload::forAmount(15_415, 'FIRST'),
+            QrisTestPayload::forAmount(15_415, 'SECOND'),
         ];
         $createCalls = 0;
 
@@ -178,8 +179,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                         'project' => 'staging-store',
                         'order_id' => $request['order_id'],
                         'amount' => $request['amount'],
-                        'fee' => 100,
-                        'total_payment' => $request['amount'] + 100,
+                        'fee' => 415,
+                        'total_payment' => $request['amount'] + 415,
                         'payment_method' => 'qris',
                         'payment_number' => $paymentNumber,
                         'expired_at' => '2026-07-04T16:30:00Z',
@@ -191,8 +192,8 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'project' => 'staging-store',
                     'order_id' => 'INV-STAGE-DUPLICATE-1',
                     'amount' => 15000,
-                    'fee' => 100,
-                    'total_payment' => 15100,
+                    'fee' => 415,
+                    'total_payment' => 15415,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumbers[0],
                     'expired_at' => '2026-07-04T16:30:00Z',

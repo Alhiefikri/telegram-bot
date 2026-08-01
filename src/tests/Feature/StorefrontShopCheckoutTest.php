@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Support\QrisTestPayload;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
@@ -359,7 +360,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'stock' => 4,
             ],
         );
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.SHOPCHECKOUTNATIVE99';
+        $paymentNumber = QrisTestPayload::forAmount(30_520);
 
         [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
@@ -393,8 +394,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'provider' => 'pakasir',
             'method' => PakasirCheckoutFlow::API_QRIS,
             'amount' => 30000,
-            'provider_fee' => 103,
-            'provider_total_payment' => 30103,
+            'provider_fee' => 520,
+            'provider_total_payment' => 30520,
             'provider_payment_method' => 'qris',
         ]);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
@@ -410,7 +411,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->get($location)
             ->assertOk()
             ->assertSee('Total bayar QRIS')
-            ->assertSee('Rp30.103')
+            ->assertSee('Rp30.520')
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Data akun aman sampai pembayaran masuk')
             ->assertDontSee('first-account@example.test|first-secret', false)
@@ -771,9 +772,9 @@ class StorefrontShopCheckoutTest extends TestCase
         $payment = $order->payments->sole();
 
         $first->assertRedirect();
-        $this->assertSame('provider_total_pending', $payment->provider_create_state);
+        $this->assertSame('outcome_unknown', $payment->provider_create_state);
         $this->assertNull($payment->provider_total_payment);
-        $this->assertSame($paymentNumber, $payment->provider_payment_number);
+        $this->assertNull($payment->provider_payment_number);
 
         $this->providerTransactionDetailFails();
         $second = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
@@ -789,10 +790,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Total produk')
             ->assertSee('Rp15.000')
-            ->assertSee('Total bayar QRIS')
-            ->assertSee('Menunggu provider')
-            ->assertSee('Provider belum memberi nominal')
-            ->assertSee('Coba ambil total QRIS')
+            ->assertSee('Gagal membuat QRIS')
             ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false);
     }
 

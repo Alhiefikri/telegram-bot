@@ -17,7 +17,7 @@ trait StorefrontCheckoutScenarios
         int $quantity,
         string $buyerName,
         string $paymentNumber,
-        int $fee = 103,
+        ?int $fee = null,
         ?string $supportContactChannel = null,
         ?string $supportContactValue = null,
     ): array {

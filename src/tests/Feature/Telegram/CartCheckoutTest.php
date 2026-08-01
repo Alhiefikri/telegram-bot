@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\QrisTestPayload;
 use Tests\Support\TelegramBotTestSupport;
 
 class CartCheckoutTest extends TelegramBotTestSupport
@@ -200,15 +201,15 @@ class CartCheckoutTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
         $this->bindInspectableQrRenderer();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.DIRECT92';
+        $paymentNumber = QrisTestPayload::forAmount(15_415);
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
                 'payment' => [
                     'project' => 'sedulur-digital',
                     'order_id' => $request['order_id'],
                     'amount' => $request['amount'],
-                    'fee' => 103,
-                    'total_payment' => $request['amount'] + 103,
+                    'fee' => 415,
+                    'total_payment' => $request['amount'] + 415,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
@@ -945,15 +946,15 @@ class CartCheckoutTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
         $this->bindInspectableQrRenderer();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.NATIVE92';
+        $paymentNumber = QrisTestPayload::forAmount(30_520);
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
                 'payment' => [
                     'project' => 'sedulur-digital',
                     'order_id' => $request['order_id'],
                     'amount' => $request['amount'],
-                    'fee' => 103,
-                    'total_payment' => $request['amount'] + 103,
+                    'fee' => 520,
+                    'total_payment' => $request['amount'] + 520,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
                     'expired_at' => '2026-07-04T16:30:00Z',
@@ -975,8 +976,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'provider' => 'pakasir',
             'method' => 'api_qris',
             'amount' => 30000,
-            'provider_fee' => 103,
-            'provider_total_payment' => 30103,
+            'provider_fee' => 520,
+            'provider_total_payment' => 30520,
             'provider_payment_method' => 'qris',
             'provider_payment_number_hash' => hash('sha256', $paymentNumber),
         ]);
@@ -994,8 +995,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('qr-source:'.$paymentNumber, $photoBody);
         $this->assertStringNotContainsString('qr-source:'.$hostedUrl, $photoBody);
         $this->assertStringContainsString('Total produk: Rp30.000', $photoBody);
-        $this->assertStringContainsString('Biaya QRIS: Rp103', $photoBody);
-        $this->assertStringContainsString('Total bayar QRIS: Rp30.103', $photoBody);
+        $this->assertStringContainsString('Biaya QRIS: Rp520', $photoBody);
+        $this->assertStringContainsString('Total bayar QRIS: Rp30.520', $photoBody);
         $this->assertStringContainsString('Batas bayar QRIS:', $photoBody);
         $this->assertStringContainsString('Tidak perlu buka browser', $photoBody);
         $this->assertStringContainsString('Bayar via Website', $photoBody);

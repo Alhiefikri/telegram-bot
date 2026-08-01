@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\QrisTestPayload;
 use Tests\Support\StorefrontSignedInvoiceScenarios;
 use Tests\TestCase;
 
@@ -35,7 +36,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
     {
         $this->pakasirConfigIsReady();
         $this->qrisRendererReturnsDeterministicPng();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.ISSUE121NATIVE99';
+        $paymentNumber = QrisTestPayload::forAmount(121_200);
         $secret = 'buyer-account@example.test|NeverBeforePaid';
         [$order, $payment] = $this->pendingNativeQrisOrder(
             totalAmount: 120000,
@@ -54,14 +55,14 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Total produk')
             ->assertSee('Rp120.000')
             ->assertSee('Biaya QRIS')
-            ->assertSee('Rp1.500')
+            ->assertSee('Rp1.200')
             ->assertSee('Total bayar QRIS')
-            ->assertSee('Rp121.500')
+            ->assertSee('Rp121.200')
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Pembayaran QRIS')
             ->assertSeeInOrder([
                 'Total bayar QRIS',
-                'Rp121.500',
+                'Rp121.200',
                 'Batas bayar',
                 $expectedQrDataUri,
                 'Cek status pembayaran',
@@ -870,8 +871,8 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertJsonPath('message', 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.');
 
         $payment->refresh();
-        $this->assertSame(450, $payment->provider_fee);
-        $this->assertSame(52450, $payment->provider_total_payment);
+        $this->assertSame(674, $payment->provider_fee);
+        $this->assertSame(52674, $payment->provider_total_payment);
         $this->assertSame('created', $payment->provider_create_state);
         $this->assertSame(1, Payment::where('order_id', $order->id)->count());
         $this->assertSame(1, Order::count());

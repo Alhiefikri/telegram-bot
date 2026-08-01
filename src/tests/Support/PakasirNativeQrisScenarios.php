@@ -77,8 +77,10 @@ trait PakasirNativeQrisScenarios
         });
     }
 
-    protected function providerQrisCreateSucceedsWithProviderTotal(int $amount, string $paymentNumber, int $fee = 103): void
+    protected function providerQrisCreateSucceedsWithProviderTotal(int $amount, string $paymentNumber, ?int $fee = null): string
     {
+        $fee = QrisTestPayload::officialFee($amount);
+        $paymentNumber = QrisTestPayload::forAmount($amount + $fee);
         Http::preventStrayRequests();
         Http::fake([
             'https://app.pakasir.test/api/transactioncreate/qris' => function (HttpRequest $request) use ($amount, $paymentNumber, $fee) {
@@ -100,6 +102,8 @@ trait PakasirNativeQrisScenarios
                 ], 200);
             },
         ]);
+
+        return $paymentNumber;
     }
 
     protected function providerQrisCreateSucceedsWithoutProviderTotal(int $amount, string $paymentNumber): void
@@ -125,9 +129,11 @@ trait PakasirNativeQrisScenarios
         ]);
     }
 
-    protected function providerTransactionDetailReturnsQrisTotal(Payment $payment, string $paymentNumber, int $fee = 103, ?int $amount = null): void
+    protected function providerTransactionDetailReturnsQrisTotal(Payment $payment, string $paymentNumber, ?int $fee = null, ?int $amount = null): string
     {
         $amount ??= $payment->amount;
+        $fee = QrisTestPayload::officialFee($amount);
+        $paymentNumber = QrisTestPayload::forAmount($amount + $fee);
 
         Http::preventStrayRequests();
         Http::fake([
@@ -145,6 +151,8 @@ trait PakasirNativeQrisScenarios
                 ],
             ], 200),
         ]);
+
+        return $paymentNumber;
     }
 
     protected function providerQrisCreateFails(array $payload = ['message' => 'upstream unavailable'], int $status = 500): void
