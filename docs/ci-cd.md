@@ -156,18 +156,11 @@ The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be abl
 
 ### Binance Pay Order ID activation
 
-The first release is compatibility-only: it applies the additive schema and keeps normal buyer checkout traffic on the configured legacy mode. The Telegram account identified by `TELEGRAM_ADMIN_USER_ID` is the only pre-activation canary: its Binance checkout uses the exact catalog amount and displays **I've Paid / Saya Sudah Bayar** plus the Order ID prompt. API credentials and a Pay ID/UID must be configured or even the admin remains on the legacy path.
+Normal buyers remain on **Amount unik (legacy)** until a real admin canary proves the Order ID path. The Telegram account identified by `TELEGRAM_ADMIN_USER_ID` is the only pre-activation canary: its Binance checkout uses the exact catalog amount and displays **I've Paid / Saya Sudah Bayar** plus the Order ID prompt. API credentials and a Pay ID/UID must be configured or even the admin remains on the legacy path.
 
-From that admin account, create a fresh Binance checkout, pay the exact displayed amount, tap **I've Paid / Saya Sudah Bayar**, copy the transfer Order ID from Binance Pay Order Details, and submit it to the bot. Confirm that automatic verification completes the order and delivers stock. The activation command searches the database for this successful admin payment within `BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS` (24 hours by default); a flag without that evidence is rejected.
+From that admin account, create a fresh Binance checkout, pay the exact displayed amount, tap **I've Paid / Saya Sudah Bayar**, copy the transfer Order ID from Binance Pay Order Details, and submit it to the bot. Confirm that automatic verification completes the order and delivers stock.
 
-After that canary passes and the external smoke gate is green, activate Order ID mode in the same protected production workflow:
-
-```bash
-gh workflow run deploy-production.yml --ref main -f mark_binance_order_id_ready=true
-gh run watch
-```
-
-The workflow runs `php artisan binance:mark-order-id-ready --confirm-canary` only after the candidate is healthy. The command is idempotent and refuses to contract the legacy amount index when pending legacy amounts would collide. If activation fails, the release remains on the compatibility mode; resolve the pending legacy payments and rerun the guarded workflow. Never run the command through an ad-hoc SSH session or switch the `.env` mode alone.
+After the canary succeeds, open **Admin → Mode pembayaran → Verifikasi Binance** and choose **Order ID**. The dashboard refuses activation unless recent successful canary evidence exists, provider credentials and receiver identity are configured, and pending legacy amounts are safe. Choose **Amount unik (legacy)** in the same dashboard for an immediate rollback affecting new checkouts only. Environment variables store provider credentials; they do not select checkout mode.
 
 ## Migration compatibility and approval policy
 

@@ -32,16 +32,9 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
             return 'order_id';
         }
 
-        if (in_array($setting, ['amount_unique', 'order_id'], true)) {
-            return $ready ? (string) $setting : 'amount_unique';
-        }
-
-        $configured = config('services.binance.verification_mode');
-        if ($configured === 'order_id' && ! $ready) {
-            return 'amount_unique';
-        }
-
-        return in_array($configured, ['amount_unique', 'order_id'], true) ? (string) $configured : 'amount_unique';
+        return in_array($setting, ['amount_unique', 'order_id'], true) && $ready
+            ? (string) $setting
+            : 'amount_unique';
     }
 
     private function isAdminCanary(?Cart $cart): bool

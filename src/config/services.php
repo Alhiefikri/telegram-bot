@@ -6,7 +6,6 @@ return [
         'pay_uid' => env('BINANCE_PAY_UID'),
         'api_key' => env('BINANCE_API_KEY'),
         'api_secret' => env('BINANCE_API_SECRET'),
-        'verification_mode' => env('BINANCE_VERIFICATION_MODE', 'amount_unique'),
         'canary_max_age_hours' => (int) env('BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS', 24),
         'base_url' => env('BINANCE_API_BASE_URL', 'https://api.binance.com'),
         'http_timeout_seconds' => (float) env('BINANCE_HTTP_TIMEOUT_SECONDS', 10),

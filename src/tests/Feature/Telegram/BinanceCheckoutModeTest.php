@@ -180,4 +180,9 @@ class BinanceCheckoutModeTest extends TestCase
 
         $this->assertSame('order_id', $payment->binance_verification_mode);
     }
+
+    public function test_binance_verification_mode_has_no_environment_configuration_contract(): void
+    {
+        $this->assertNull(config('services.binance.verification_mode'));
+    }
 }
