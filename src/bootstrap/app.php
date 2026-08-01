@@ -45,9 +45,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'trim',
             explode(',', (string) env('TRUSTED_HOSTS', ''))
         )));
-
         if ($trustedHosts !== []) {
-            $middleware->trustHosts(at: fn () => $trustedHosts);
+            $middleware->trustHosts(at: fn () => RedirectToCanonicalHost::trustedHosts(
+                $trustedHosts,
+                (string) config('app.url'),
+            ));
         }
     })
     ->withExceptions(function (Exceptions $exceptions): void {

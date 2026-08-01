@@ -143,7 +143,7 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
     await page.goto(`${baseUrl}${invoiceFixtures.pendingStatusRefresh.showUrl}`, { waitUntil: 'domcontentloaded' });
 
     const statusCard = page.locator('[data-shop-payment-status]');
-    await expect(statusCard.getByText('Cek status pembayaran', { exact: true }).first()).toBeVisible();
+    await expect(statusCard.getByText('Sedang membuat QRIS', { exact: true }).first()).toBeVisible();
 
     runArtisan(['tinker', '--execute', `
         $order = App\\Models\\Order::findOrFail('${invoiceFixtures.pendingStatusRefresh.orderId}');
@@ -154,11 +154,11 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
         App\\Models\\Payment::where('order_id', $order->id)->update(['status' => App\\Enums\\PaymentStatus::Failed]);
     `]);
 
-    await statusCard.getByRole('button', { name: 'Cek status pembayaran' }).click();
+    await statusCard.getByRole('button', { name: 'Coba cek QRIS' }).click();
     await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Status pembayaran final');
     await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
     await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
-    await expect(statusCard.getByRole('button', { name: 'Cek status pembayaran' })).toBeHidden();
+    await expect(statusCard.getByRole('button', { name: 'Coba cek QRIS' })).toBeHidden();
     await expect(statusCard.getByRole('link', { name: 'Belanja lagi' })).toBeVisible();
     await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
     await expectNoDocumentOverflow(page);

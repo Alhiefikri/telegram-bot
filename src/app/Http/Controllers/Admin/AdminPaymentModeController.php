@@ -19,13 +19,14 @@ class AdminPaymentModeController extends Controller
     {
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
+        $binanceOnly = ($validated['update_scope'] ?? null) === 'binance_verification';
         $mode = (string) $validated['payment_mode'];
         $checkoutFlow = $mode === 'pakasir'
             ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
             : null;
 
         try {
-            [$setting, $oldValues] = DB::transaction(function () use ($mode, $checkoutFlow, $validated, $binanceModes): array {
+            [$setting, $oldValues] = DB::transaction(function () use (&$mode, $checkoutFlow, $validated, $binanceModes, $binanceOnly): array {
             $setting = ManualPaymentSetting::query()
                 ->where('is_active', true)
                 ->oldest('id')
@@ -57,21 +58,25 @@ class AdminPaymentModeController extends Controller
                     'binance_verification_mode' => 'amount_unique',
                 ];
 
-            $setting->payment_mode = $mode;
-            if ($checkoutFlow !== null) {
-                $setting->pakasir_checkout_flow = $checkoutFlow;
-            } elseif (! $setting->exists || blank($setting->pakasir_checkout_flow)) {
-                $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
-            }
-            $setting->is_active = true;
-            if (array_key_exists('binance_pay_enabled', $validated)) {
-                $setting->binance_pay_enabled = (bool) $validated['binance_pay_enabled'];
-            }
-            if (array_key_exists('qris_payment_ttl_minutes', $validated)) {
-                $setting->qris_payment_ttl_minutes = $validated['qris_payment_ttl_minutes'];
-            }
-            if (array_key_exists('binance_payment_ttl_minutes', $validated)) {
-                $setting->binance_payment_ttl_minutes = $validated['binance_payment_ttl_minutes'];
+            if ($binanceOnly) {
+                $mode = (string) ($setting->payment_mode ?: 'manual');
+            } else {
+                $setting->payment_mode = $mode;
+                if ($checkoutFlow !== null) {
+                    $setting->pakasir_checkout_flow = $checkoutFlow;
+                } elseif (! $setting->exists || blank($setting->pakasir_checkout_flow)) {
+                    $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
+                }
+                $setting->is_active = true;
+                if (array_key_exists('binance_pay_enabled', $validated)) {
+                    $setting->binance_pay_enabled = (bool) $validated['binance_pay_enabled'];
+                }
+                if (array_key_exists('qris_payment_ttl_minutes', $validated)) {
+                    $setting->qris_payment_ttl_minutes = $validated['qris_payment_ttl_minutes'];
+                }
+                if (array_key_exists('binance_payment_ttl_minutes', $validated)) {
+                    $setting->binance_payment_ttl_minutes = $validated['binance_payment_ttl_minutes'];
+                }
             }
             if (array_key_exists('binance_verification_mode', $validated)) {
                 $setting = $binanceModes->change($setting, (string) $validated['binance_verification_mode']);

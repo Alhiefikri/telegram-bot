@@ -49,7 +49,11 @@ class BinanceOrderIdSchemaTest extends TestCase
                 'binance_verification_mode',
                 'binance_receiver_type',
                 'binance_receiver_value',
+                'binance_order_id',
+                'binance_order_id_attempts',
                 'binance_order_id_submission_version',
+                'binance_order_id_submitted_at',
+                'binance_verification_grace_until',
                 'binance_verification_status',
                 'binance_last_verified_at',
             ]);
@@ -68,7 +72,11 @@ class BinanceOrderIdSchemaTest extends TestCase
             'binance_verification_mode',
             'binance_receiver_type',
             'binance_receiver_value',
+            'binance_order_id',
+            'binance_order_id_attempts',
             'binance_order_id_submission_version',
+            'binance_order_id_submitted_at',
+            'binance_verification_grace_until',
             'binance_verification_status',
             'binance_last_verified_at',
         ]));

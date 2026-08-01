@@ -28,6 +28,7 @@ class UpdatePaymentModeRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'update_scope' => ['sometimes', 'string', Rule::in(['binance_verification'])],
             'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir'])],
             'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === 'pakasir'), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
             'binance_pay_enabled' => ['sometimes', 'boolean'],
@@ -64,6 +65,10 @@ class UpdatePaymentModeRequest extends FormRequest
     {
         return [
             function (ValidationValidator $validator): void {
+                if ($this->input('update_scope') === 'binance_verification') {
+                    return;
+                }
+
                 if ($this->input('payment_mode') !== 'pakasir') {
                     return;
                 }

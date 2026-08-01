@@ -39,6 +39,18 @@ return new class extends Migration
         if (! Schema::hasColumn('payments', 'binance_receiver_value')) {
             Schema::table('payments', fn (Blueprint $table) => $table->string('binance_receiver_value', 128)->nullable());
         }
+        if (! Schema::hasColumn('payments', 'binance_order_id')) {
+            Schema::table('payments', fn (Blueprint $table) => $table->string('binance_order_id')->nullable());
+        }
+        if (! Schema::hasColumn('payments', 'binance_order_id_attempts')) {
+            Schema::table('payments', fn (Blueprint $table) => $table->unsignedTinyInteger('binance_order_id_attempts')->default(0));
+        }
+        if (! Schema::hasColumn('payments', 'binance_order_id_submitted_at')) {
+            Schema::table('payments', fn (Blueprint $table) => $table->timestamp('binance_order_id_submitted_at')->nullable());
+        }
+        if (! Schema::hasColumn('payments', 'binance_verification_grace_until')) {
+            Schema::table('payments', fn (Blueprint $table) => $table->timestamp('binance_verification_grace_until')->nullable());
+        }
         if (! Schema::hasColumn('payments', 'binance_order_id_submission_version')) {
             Schema::table('payments', fn (Blueprint $table) => $table->unsignedBigInteger('binance_order_id_submission_version')->default(0));
         }

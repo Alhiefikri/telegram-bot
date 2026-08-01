@@ -230,6 +230,32 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
     }
 
+    public function test_order_id_rollback_does_not_depend_on_pakasir_readiness(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.pakasir.slug', null);
+        config()->set('services.pakasir.api_key', null);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+            'is_active' => true,
+        ]);
+
+        $this->post(route('admin.payment-mode.update'), [
+            'update_scope' => 'binance_verification',
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_verification_mode' => 'amount_unique',
+        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
+
+        $setting->refresh();
+        $this->assertSame('amount_unique', $setting->binance_verification_mode);
+        $this->assertSame('pakasir', $setting->payment_mode);
+        $this->assertSame('api_qris', $setting->pakasir_checkout_flow);
+    }
+
     public function test_owner_can_update_payment_deadlines_from_dashboard(): void
     {
         $this->actingAs(User::factory()->create([

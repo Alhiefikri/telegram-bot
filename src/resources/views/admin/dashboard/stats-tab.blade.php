@@ -191,6 +191,7 @@
                                 @foreach (['amount_unique' => 'Amount unik (legacy)', 'order_id' => 'Order ID'] as $binanceMode => $binanceModeLabel)
                                     <form method="POST" action="{{ $paymentControl['update_url'] }}">
                                         @csrf
+                                        <input type="hidden" name="update_scope" value="binance_verification">
                                         <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
                                         @if ($paymentControl['requested_mode'] === 'pakasir')
                                             <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">

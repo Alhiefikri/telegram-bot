@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\RedirectToCanonicalHost;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -22,6 +23,16 @@ class FoundationInfrastructureTest extends TestCase
             ->assertRedirect('https://lhiestore.web.id/shop?search=ai');
 
         $this->get('https://lhiestore.web.id/up')->assertOk();
+    }
+
+    public function test_trusted_hosts_allow_the_canonical_www_alias_before_redirecting_it(): void
+    {
+        $hosts = RedirectToCanonicalHost::trustedHosts(
+            ['^lhiestore\\.web\\.id$'],
+            'https://lhiestore.web.id',
+        );
+
+        $this->assertContains('^www\\.lhiestore\\.web\\.id$', $hosts);
     }
 
     public function test_queue_database_connection_is_configured(): void
