@@ -134,7 +134,7 @@ class OrderCheckoutService
             ? $paymentIntent->verificationMode()
             : null;
 
-        return $mode === 'amount_unique'
+        return $paymentIntent->method() === 'BINANCE_PAY_ID' && $mode === 'amount_unique'
             ? $this->uniqueBinanceAmount->allocate($amount)
             : $amount;
     }

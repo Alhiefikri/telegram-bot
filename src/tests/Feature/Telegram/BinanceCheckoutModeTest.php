@@ -10,12 +10,43 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class BinanceCheckoutModeTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_configured_binance_unique_amount_never_changes_a_pakasir_qris_payment(): void
+    {
+        config()->set('services.binance.api_key', 'key');
+        config()->set('services.binance.api_secret', 'secret');
+        config()->set('services.binance.unique_amount_min_offset_micro', 153_000);
+        config()->set('services.binance.unique_amount_max_offset_micro', 153_000);
+        config()->set('services.pakasir.slug', 'lhie-test');
+        config()->set('services.pakasir.api_key', 'pakasir-key');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
+            'is_active' => true,
+        ]);
+
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'price_amount' => 37_000,
+        ]);
+        $cart = Cart::factory()->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id]);
+
+        $order = app(OrderCheckoutService::class)
+            ->checkout($cart, CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS));
+
+        $this->assertSame(37_000, $order->total_amount);
+        $this->assertSame(37_000, $order->payments()->sole()->amount);
+    }
 
     public function test_configured_admin_canary_uses_order_id_before_global_readiness(): void
     {
