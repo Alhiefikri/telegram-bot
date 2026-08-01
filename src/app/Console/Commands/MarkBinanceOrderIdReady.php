@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\ManualPaymentSetting;
 use App\Services\Binance\BinanceOrderIdActivation;
+use App\Services\Binance\BinanceOrderIdCanaryEvidence;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -13,7 +14,7 @@ class MarkBinanceOrderIdReady extends Command
 
     protected $description = 'Record the Binance Order ID compatibility readiness marker after the live canary passes.';
 
-    public function handle(BinanceOrderIdActivation $activation): int
+    public function handle(BinanceOrderIdActivation $activation, BinanceOrderIdCanaryEvidence $evidence): int
     {
         if (! $this->option('confirm-canary')) {
             $this->error('Refusing to mark readiness without --confirm-canary.');
@@ -36,6 +37,14 @@ class MarkBinanceOrderIdReady extends Command
         $setting = ManualPaymentSetting::query()->where('is_active', true)->oldest('id')->first();
         if (! $setting) {
             $this->error('No active manual payment settings row exists.');
+
+            return self::FAILURE;
+        }
+
+        try {
+            $evidence->assertSuccessfulRecentAdminCanary();
+        } catch (\RuntimeException $exception) {
+            $this->error($exception->getMessage());
 
             return self::FAILURE;
         }
