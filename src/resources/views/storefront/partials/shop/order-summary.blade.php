@@ -17,7 +17,7 @@
             </div>
             <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2.5">
                 <dt class="text-[var(--sf-muted)]">Status pembayaran</dt>
-                <dd class="break-words text-right font-black text-[var(--sf-ink)]">{{ $payment?->status?->value ?? $order->payment_status?->value ?? '-' }}</dd>
+                <dd class="break-words text-right font-black text-[var(--sf-ink)]">{{ $effectivePaymentStatus }}</dd>
             </div>
         </dl>
     </div>

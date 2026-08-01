@@ -21,6 +21,7 @@ class StorefrontShopSignedInvoice
         private readonly ProductUsageGuide $usageGuides,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -130,6 +131,10 @@ class StorefrontShopSignedInvoice
     {
         $projection = $this->orders->project($order, $payment);
 
+        if ($projection->isTerminal) {
+            return $this->terminalCopy->message($projection, $payment);
+        }
+
         if (strtolower((string) $payment?->provider) === 'manual' && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
             && $payment?->binance_verification_mode === 'order_id') {
             return match (true) {
@@ -143,13 +148,7 @@ class StorefrontShopSignedInvoice
             };
         }
 
-        return match (true) {
-            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
-            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
-            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
-            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
-        };
+        return $this->terminalCopy->message($projection, $payment);
     }
 
     /**

@@ -101,4 +101,33 @@ class StorefrontBinanceOrderIdTest extends TestCase
 
         Http::assertNothingSent();
     }
+
+    public function test_cancelled_binance_invoice_has_terminal_status_and_method_specific_copy(): void
+    {
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Cancelled,
+            'payment_status' => PaymentStatus::Pending,
+            'expires_at' => now()->addMinutes(20),
+        ]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'currency' => 'USDT',
+            'amount' => 5_000_000,
+            'status' => PaymentStatus::Pending,
+            'binance_verification_mode' => 'amount_unique',
+            'expired_at' => now()->addMinutes(20),
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('cancelled')
+            ->assertSee('Jangan kirim USDT')
+            ->assertDontSee('Jangan bayar QRIS');
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('status', 'terminal')
+            ->assertJsonPath('message', 'Order dibatalkan. Jangan kirim USDT untuk invoice ini; buat checkout Binance baru jika masih ingin membeli.');
+    }
 }

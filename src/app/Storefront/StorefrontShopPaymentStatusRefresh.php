@@ -21,6 +21,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontShopPaymentRefreshCoordinator $coordinator,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     public function execute(Order $order): StorefrontShopSignedStatusRefreshResult
@@ -197,9 +198,11 @@ class StorefrontShopPaymentStatusRefresh
 
     private function binanceStatusMessage(Payment $payment, OrderLifecycleProjection $projection): string
     {
+        if ($projection->isTerminal || $projection->isPaid) {
+            return $this->terminalCopy->message($projection, $payment);
+        }
+
         return match (true) {
-            $projection->isPaid => 'Binance Pay payment verified. The invoice will reload to show your delivery.',
-            $projection->isTerminal => 'This Binance Pay invoice is no longer active. Do not send another payment.',
             $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Order ID received. We are checking your Binance payment securely.',
             $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
             $payment->binance_verification_status === 'mismatch' => 'The payment needs a manual review. Please contact support with your invoice number.',
@@ -229,15 +232,7 @@ class StorefrontShopPaymentStatusRefresh
 
     private function statusMessage(Order $order, ?Payment $payment): string
     {
-        $projection = $this->orders->project($order, $payment);
-
-        return match (true) {
-            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
-            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
-            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
-            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
-        };
+        return $this->terminalCopy->message($this->orders->project($order, $payment), $payment);
     }
 
     /**

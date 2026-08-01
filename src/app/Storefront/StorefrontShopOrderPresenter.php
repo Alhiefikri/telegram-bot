@@ -11,6 +11,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontShopSignedInvoice $signedInvoices,
         private readonly StorefrontSupport $support,
         private readonly StorefrontUrl $urls,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     /**
@@ -42,6 +43,7 @@ class StorefrontShopOrderPresenter
             'isPaid' => $invoice->isPaid(),
             'isPendingPayment' => $invoice->isPendingPayment(),
             'isTerminal' => $invoice->isTerminal(),
+            'effectivePaymentStatus' => $this->terminalCopy->effectivePaymentStatus($invoice->order, $invoice->payment),
             'statusMessage' => $invoice->statusMessage,
             'payableAmount' => $invoice->payableAmount,
             'payableAmountFromProvider' => $invoice->payableAmountFromProvider,
