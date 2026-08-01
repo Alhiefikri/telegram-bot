@@ -13,6 +13,17 @@ class FoundationInfrastructureTest extends TestCase
         $this->get('/up')->assertOk();
     }
 
+    public function test_alternate_public_host_redirects_to_configured_canonical_host_with_path_and_query(): void
+    {
+        config()->set('app.url', 'https://lhiestore.web.id');
+
+        $this->get('https://www.lhiestore.web.id/shop?search=ai')
+            ->assertStatus(308)
+            ->assertRedirect('https://lhiestore.web.id/shop?search=ai');
+
+        $this->get('https://lhiestore.web.id/up')->assertOk();
+    }
+
     public function test_queue_database_connection_is_configured(): void
     {
         $this->assertSame('database', config('queue.connections.database.driver'));
