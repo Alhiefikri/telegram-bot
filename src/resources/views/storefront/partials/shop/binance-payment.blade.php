@@ -48,7 +48,7 @@
         @if ($payment->binance_auto_verification_enabled)
             <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
                 <p class="font-black text-[var(--sf-ink)]">After paying, return to Telegram and tap “I've Paid”.</p>
-                <p class="mt-2">Verification is automatic. Your product will be delivered after the transfer is confirmed.</p>
+                <p class="mt-2">Copy the Order ID from Binance Pay → Order Details and send it to the bot. Verification is automatic after the Order ID is received.</p>
             </div>
         @else
             <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">

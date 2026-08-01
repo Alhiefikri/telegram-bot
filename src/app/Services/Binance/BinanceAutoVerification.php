@@ -5,6 +5,7 @@ namespace App\Services\Binance;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
@@ -25,36 +26,19 @@ class BinanceAutoVerification
     }
 
     /**
-     * Look for an incoming Binance Pay transfer that exactly matches the
-     * payment's unique amount, then complete the order when one is found.
-     */
-    public function verifyPayment(Payment $payment): BinanceVerificationResult
-    {
-        $guard = $this->guard($payment);
-        if ($guard !== null) {
-            return $guard;
-        }
-
-        try {
-            $transactions = $this->fetchTransactionsSince($payment);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError);
-        }
-
-        return $this->matchAndConfirm($payment, $transactions);
-    }
-
-    /**
-     * Fallback path: the buyer pasted the Binance order id from their own
-     * payment receipt. The transaction still has to match the invoice exactly.
+     * Verify the buyer-submitted Binance Order ID. The transaction still has
+     * to match the invoice exactly.
      */
     public function verifyPaymentByProviderOrderId(Payment $payment, string $binanceOrderId): BinanceVerificationResult
     {
         $guard = $this->guard($payment);
         if ($guard !== null) {
             return $guard;
+        }
+
+        $binanceOrderId = trim($binanceOrderId);
+        if ($binanceOrderId === '' || $payment->binance_order_id !== $binanceOrderId) {
+            return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
         }
 
         try {
@@ -75,12 +59,21 @@ class BinanceAutoVerification
         }
 
         if (! $this->transactionMatchesPayment($transaction, $payment)) {
-            $this->recordMismatch($payment, $transaction);
+            if (! $this->recordMismatch($payment, $transaction)) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::StaleSubmission, $transaction);
+            }
 
             return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $transaction);
         }
 
-        return $this->confirm($payment, $transaction);
+        $result = $this->confirm($payment, $transaction);
+        if ($result->outcome === BinanceVerificationOutcome::TransactionAlreadyUsed) {
+            if (! $this->recordMismatch($payment, $transaction)) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::StaleSubmission, $transaction);
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -91,43 +84,42 @@ class BinanceAutoVerification
      */
     public function matchAndConfirm(Payment $payment, array $rawTransactions): BinanceVerificationResult
     {
+        $guard = $this->guard($payment);
+        if ($guard !== null) {
+            return $guard;
+        }
+
         $transactions = collect($rawTransactions)
             ->map(fn (array $payload): ?BinancePayTransaction => BinancePayTransaction::fromPayload($payload))
             ->filter()
             ->values();
 
-        $candidates = $transactions
-            ->filter(fn (BinancePayTransaction $transaction): bool => $this->transactionMatchesPayment($transaction, $payment))
-            ->sortBy(fn (BinancePayTransaction $transaction): int => $transaction->transactionTimeMs())
-            ->values();
-
-        if ($candidates->isEmpty()) {
-            $mismatch = $transactions->first(fn (BinancePayTransaction $transaction): bool => $transaction->isIncomingTo(trim((string) config('services.binance.pay_id')))
-                && $transaction->amountMicro() === (int) $payment->amount);
-
-            if ($mismatch !== null) {
-                $this->recordMismatch($payment, $mismatch);
-
-                return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $mismatch);
-            }
-
+        $orderId = trim((string) $payment->binance_order_id);
+        if ($orderId === '') {
             return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
         }
 
-        $alreadyUsed = null;
-        foreach ($candidates as $transaction) {
-            $result = $this->confirm($payment, $transaction);
-
-            if ($result->outcome === BinanceVerificationOutcome::TransactionAlreadyUsed) {
-                $alreadyUsed = $result;
-
-                continue;
-            }
-
-            return $result;
+        $transaction = $transactions->first(fn (BinancePayTransaction $transaction): bool => $transaction->orderId() === $orderId);
+        if ($transaction === null) {
+            return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
         }
 
-        return $alreadyUsed;
+        if (! $this->transactionMatchesPayment($transaction, $payment)) {
+            if (! $this->recordMismatch($payment, $transaction)) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::StaleSubmission, $transaction);
+            }
+
+            return BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch, $transaction);
+        }
+
+        $result = $this->confirm($payment, $transaction);
+        if ($result->outcome === BinanceVerificationOutcome::TransactionAlreadyUsed) {
+            if (! $this->recordMismatch($payment, $transaction)) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::StaleSubmission, $transaction);
+            }
+        }
+
+        return $result;
     }
 
     private function guard(Payment $payment): ?BinanceVerificationResult
@@ -142,11 +134,19 @@ class BinanceAutoVerification
 
         $payment->refresh();
 
+        if (! $payment->binance_auto_verification_enabled) {
+            return BinanceVerificationResult::of(BinanceVerificationOutcome::NotConfigured);
+        }
+
         if ($payment->status === PaymentStatus::Paid) {
             return BinanceVerificationResult::of(BinanceVerificationOutcome::AlreadyPaid);
         }
 
         if ($payment->status !== PaymentStatus::Pending) {
+            return BinanceVerificationResult::of(BinanceVerificationOutcome::OrderNotPending);
+        }
+
+        if ($payment->binance_verification_grace_until !== null && $payment->binance_verification_grace_until->isPast()) {
             return BinanceVerificationResult::of(BinanceVerificationOutcome::OrderNotPending);
         }
 
@@ -173,7 +173,8 @@ class BinanceAutoVerification
     {
         try {
             $outcome = DB::transaction(function () use ($payment, $transaction): BinanceVerificationOutcome {
-                $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+                $lockedOrder = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
+                $locked = $lockedOrder->payments()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
 
                 if ($locked->status === PaymentStatus::Paid) {
                     return BinanceVerificationOutcome::AlreadyPaid;
@@ -181,6 +182,14 @@ class BinanceAutoVerification
 
                 if ($locked->status !== PaymentStatus::Pending) {
                     return BinanceVerificationOutcome::OrderNotPending;
+                }
+
+                if (! $locked->binance_auto_verification_enabled
+                    || $locked->binance_order_id !== $payment->binance_order_id
+                    || $locked->binance_order_id !== $transaction->orderId()
+                    || ($locked->binance_verification_grace_until !== null && $locked->binance_verification_grace_until->isPast())
+                    || ! $this->transactionMatchesPayment($transaction, $locked)) {
+                    return BinanceVerificationOutcome::StaleSubmission;
                 }
 
                 // The unique index on payments.provider_reference is the
@@ -191,7 +200,7 @@ class BinanceAutoVerification
                     'provider_payload' => $transaction->sanitizedPayload(),
                 ]);
 
-                $this->orders->applyManualCompletion($locked->order()->firstOrFail());
+                $this->orders->applyManualCompletion($lockedOrder);
 
                 $receivedAt = now();
                 PaymentEvent::create([
@@ -228,12 +237,16 @@ class BinanceAutoVerification
         return max(0, (int) config('services.binance.verify_clock_skew_seconds', 120)) * 1000;
     }
 
-    private function recordMismatch(Payment $payment, BinancePayTransaction $transaction): void
+    private function recordMismatch(Payment $payment, BinancePayTransaction $transaction): bool
     {
-        Payment::query()
+        return Payment::query()
             ->whereKey($payment->id)
             ->where('status', PaymentStatus::Pending->value)
-            ->update(['provider_payload' => $transaction->sanitizedPayload()]);
+            ->where('binance_order_id', (string) $payment->binance_order_id)
+            ->update([
+                'provider_payload' => $transaction->sanitizedPayload(),
+                'binance_verification_grace_until' => now(),
+            ]) === 1;
     }
 
     private function isUniqueViolation(QueryException $exception): bool

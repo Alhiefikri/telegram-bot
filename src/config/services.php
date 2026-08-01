@@ -13,8 +13,6 @@ return [
         'history_retry_delay_ms' => (int) env('BINANCE_HISTORY_RETRY_DELAY_MS', 250),
         'history_cache_seconds' => (int) env('BINANCE_HISTORY_CACHE_SECONDS', 20),
         'history_lock_seconds' => (int) env('BINANCE_HISTORY_LOCK_SECONDS', 15),
-        'unique_amount_min_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MIN_OFFSET_MICRO', 1000),
-        'unique_amount_max_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MAX_OFFSET_MICRO', 999000),
         'verify_clock_skew_seconds' => (int) env('BINANCE_VERIFY_CLOCK_SKEW_SECONDS', 0),
         'verify_rate_limit_attempts' => (int) env('BINANCE_VERIFY_RATE_LIMIT_ATTEMPTS', 5),
         'verify_rate_limit_decay_seconds' => (int) env('BINANCE_VERIFY_RATE_LIMIT_DECAY_SECONDS', 300),

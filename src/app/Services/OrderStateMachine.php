@@ -190,6 +190,19 @@ class OrderStateMachine implements OrderLifecycle
 
     public function applyPendingExpiry(Order $order): OrderLifecycleResult
     {
+        $order->loadMissing('payments');
+        if ($order->payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
+            && $payment->method === 'BINANCE_PAY_ID'
+            && $payment->binance_auto_verification_enabled
+            && $payment->status === PaymentStatus::Pending
+            && $payment->binance_verification_grace_until?->isFuture())) {
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $order->payments->first(),
+                newlyApplied: false,
+            );
+        }
+
         return $this->releasePendingByOrderId($order->id, OrderStatus::Expired, PaymentStatus::Expired, true);
     }
 
@@ -354,6 +367,18 @@ class OrderStateMachine implements OrderLifecycle
         }
 
         if ($mustBeDue && $order->expires_at && $order->expires_at->isFuture()) {
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $payments->first(),
+                newlyApplied: false,
+            );
+        }
+
+        if ($mustBeDue && $payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
+            && $payment->method === 'BINANCE_PAY_ID'
+            && $payment->binance_auto_verification_enabled
+            && $payment->status === PaymentStatus::Pending
+            && $payment->binance_verification_grace_until?->isFuture())) {
             return new OrderLifecycleResult(
                 order: null,
                 payment: $payments->first(),

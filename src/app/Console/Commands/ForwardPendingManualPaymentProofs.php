@@ -21,7 +21,13 @@ class ForwardPendingManualPaymentProofs extends Command
 
         Payment::query()
             ->where('provider', 'manual')
-            ->where('status', PaymentStatus::Pending)
+            ->where(function ($query): void {
+                $query
+                    ->where('status', PaymentStatus::Pending)
+                    ->orWhere(fn ($late) => $late
+                        ->where('method', 'BINANCE_PAY_ID')
+                        ->whereIn('status', [PaymentStatus::Expired, PaymentStatus::Failed]));
+            })
             ->whereNotNull('payment_proof_file_id')
             ->whereNotNull('payment_proof_submitted_at')
             ->whereNull('payment_proof_forwarded_at')

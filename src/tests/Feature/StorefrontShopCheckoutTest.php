@@ -492,14 +492,12 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('data-copy-status', false);
     }
 
-    public function test_binance_auto_verification_checkout_highlights_the_exact_unique_amount(): void
+    public function test_binance_auto_verification_checkout_highlights_the_exact_product_amount(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
         config()->set('services.binance.pay_id', '987654321');
         config()->set('services.binance.api_key', 'read-only-key');
         config()->set('services.binance.api_secret', 'read-only-secret');
-        config()->set('services.binance.unique_amount_min_offset_micro', 1_000);
-        config()->set('services.binance.unique_amount_max_offset_micro', 1_000);
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
@@ -520,14 +518,15 @@ class StorefrontShopCheckoutTest extends TestCase
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
         $this->assertTrue($payment->binance_auto_verification_enabled);
-        $this->assertSame(3_001_000, $payment->amount);
+        $this->assertSame(3_000_000, $payment->amount);
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('⚠️ IMPORTANT')
-            ->assertSee('Send exactly 3.001 USDT, including every decimal digit.')
+            ->assertSee('Send exactly 3 USDT, including every decimal digit.')
             ->assertSee('Do not round or change the amount.')
             ->assertSee("tap “I've Paid”", false)
+            ->assertSee('Order ID from Binance Pay')
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 

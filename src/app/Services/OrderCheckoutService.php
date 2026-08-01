@@ -10,7 +10,7 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Services\Binance\BinanceUniquePaymentAmount;
+use App\Services\Binance\BinancePayClient;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use Carbon\CarbonInterface;
@@ -23,7 +23,7 @@ class OrderCheckoutService
         private readonly InvoiceNumberGenerator $numbers,
         private readonly InventoryLedger $inventory,
         private readonly ProductCredentialAllocator $credentials,
-        private readonly BinanceUniquePaymentAmount $binanceAmounts,
+        private readonly BinancePayClient $binance,
     ) {}
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
@@ -79,7 +79,7 @@ class OrderCheckoutService
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
-        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binanceAmounts->enabled(), 'amount' => $this->paymentAmountFor($paymentIntent, $items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
+        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binance->configured(), 'amount' => $this->paymentAmountFor($paymentIntent, $items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
@@ -95,15 +95,7 @@ class OrderCheckoutService
 
     private function paymentAmountFor(CheckoutPaymentIntent $paymentIntent, $items, $products): int
     {
-        $amount = $paymentIntent->paymentAmount($items, $products);
-
-        // Binance Pay verification identifies orders by their exact amount, so
-        // every active Binance payment gets a unique micro-USDT offset.
-        if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
-            return $this->binanceAmounts->allocate($amount);
-        }
-
-        return $amount;
+        return $paymentIntent->paymentAmount($items, $products);
     }
 
     private function isUniqueViolation(QueryException $e): bool

@@ -12,4 +12,5 @@ enum BinanceVerificationOutcome: string
     case OrderNotPending = 'order_not_pending';
     case NotConfigured = 'not_configured';
     case ProviderError = 'provider_error';
+    case StaleSubmission = 'stale_submission';
 }

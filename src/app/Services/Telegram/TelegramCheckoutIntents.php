@@ -6,7 +6,6 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -24,7 +23,6 @@ class TelegramCheckoutIntents
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
-        private BinanceAutoVerification $binanceVerification,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -80,9 +78,9 @@ class TelegramCheckoutIntents
 
     public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
     {
-        // With API credentials configured, payments are verified automatically;
-        // otherwise they are confirmed from a photo sent with /payment.
-        $autoVerify = $this->binanceVerification->enabled();
+        // The payment snapshots whether API verification was enabled at checkout;
+        // changing credentials later must not change this order's flow.
+        $autoVerify = (bool) $payment->binance_auto_verification_enabled;
         $payId = (string) config('services.binance.pay_id');
         $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer), $autoVerify);
         $amount = $this->formatUsdt($payment->amount);

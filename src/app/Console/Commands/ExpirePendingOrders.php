@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOrderExpiredNotifier;
@@ -20,11 +21,19 @@ class ExpirePendingOrders extends Command
         $processed = 0;
         $skipped = 0;
         $failed = 0;
+        $expiredThisRun = [];
 
         Order::where('order_status', OrderStatus::PendingPayment)
             ->whereNotNull('expires_at')
             ->where('expires_at', '<=', now())
-            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed): void {
+            ->whereDoesntHave('payments', fn ($query) => $query
+                ->where('provider', 'manual')
+                ->where('method', 'BINANCE_PAY_ID')
+                ->where('status', PaymentStatus::Pending->value)
+                ->where('binance_auto_verification_enabled', true)
+                ->whereNotNull('binance_verification_grace_until')
+                ->where('binance_verification_grace_until', '>', now()))
+            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed, &$expiredThisRun): void {
                 foreach ($chunk as $order) {
                     try {
                         $result = $orders->applyPendingExpiry($order);
@@ -34,12 +43,38 @@ class ExpirePendingOrders extends Command
                             continue;
                         }
 
+                        $expiredThisRun[] = (string) $result->order->id;
                         $notifier->send($result->order);
                         $processed++;
                     } catch (Throwable $e) {
                         report($e);
                         $failed++;
                         $this->error("Failed expiring order {$order->id}: {$e->getMessage()}");
+                    }
+                }
+            });
+
+        $cutoff = now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)));
+        Order::query()
+            ->where('order_status', OrderStatus::Expired)
+            ->when($expiredThisRun !== [], fn ($query) => $query->whereNotIn('id', $expiredThisRun))
+            ->whereNull('telegram_expired_order_notified_at')
+            ->where(function ($query) use ($cutoff): void {
+                $query->whereNull('telegram_expired_order_notification_started_at')
+                    ->orWhere('telegram_expired_order_notification_started_at', '<=', $cutoff);
+            })
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($notifier, &$processed, &$failed): void {
+                foreach ($chunk as $order) {
+                    try {
+                        $notifier->send($order);
+                        if ($order->fresh()->telegram_expired_order_notified_at !== null) {
+                            $processed++;
+                        }
+                    } catch (Throwable $e) {
+                        report($e);
+                        $failed++;
+                        $this->error("Failed notifying expired order {$order->id}: {$e->getMessage()}");
                     }
                 }
             });

@@ -138,6 +138,79 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
     }
 
+    public function test_expired_binance_payment_screenshot_is_forwarded_without_reviving_the_order(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+        $order->update([
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+            'expires_at' => now()->subMinute(),
+        ]);
+        $payment->update([
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Expired,
+            'expired_at' => now()->subMinute(),
+            'binance_auto_verification_enabled' => true,
+            'binance_order_id' => '445011487581044799',
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(208, $order->invoice_number, ['username' => 'late-buyer']))->assertOk();
+
+        $payment->refresh();
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->status);
+        $this->assertNotNull($payment->payment_proof_submitted_at);
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(1, $adminPhotos);
+        $this->assertStringContainsString('late', strtolower((string) ($adminPhotos->first()[0]['caption'] ?? '')));
+        $this->assertArrayNotHasKey('reply_markup', $adminPhotos->first()[0]);
+    }
+
+    public function test_pending_auto_binance_payment_rejects_screenshot_bypass(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'auto-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addMinutes(10)]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addMinutes(10),
+            'binance_auto_verification_enabled' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(209, $order->invoice_number, ['username' => 'auto-buyer']))->assertOk();
+
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertTrue($order->fresh()->expires_at->isFuture());
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(0, $adminPhotos);
+        $buyerMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'Order ID'));
+        $this->assertCount(1, $buyerMessage);
+    }
+
     public function test_binance_payment_photo_is_forwarded_when_payment_command_is_sent_after_the_photo(): void
     {
         $this->fakeTelegramHttp();
