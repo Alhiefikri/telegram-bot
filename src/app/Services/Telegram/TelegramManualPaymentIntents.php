@@ -91,7 +91,11 @@ class TelegramManualPaymentIntents
                 return ['status' => 'expired'];
             }
 
-            if ($isPendingOrder && $payment->method === 'BINANCE_PAY_ID' && $payment->binance_auto_verification_enabled) {
+            if ($isPendingOrder
+                && $payment->method === 'BINANCE_PAY_ID'
+                && $payment->binance_auto_verification_enabled
+                && $payment->binance_verification_mode === 'order_id'
+                && ($payment->binance_verification_grace_until === null || $payment->binance_verification_grace_until->isFuture())) {
                 return ['status' => 'order_id_required'];
             }
 

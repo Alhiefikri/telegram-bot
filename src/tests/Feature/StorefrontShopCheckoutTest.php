@@ -63,6 +63,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains('storefront.signed', $statusRoute->middleware());
         $this->assertContains('throttle:pakasir-status-refresh', $statusRoute->middleware());
 
+        $orderIdRoute = $this->assertRouteContract('storefront.shop.orders.binance-order-id', 'POST', 'shop/orders/{order}/binance-order-id');
+        $this->assertContains('storefront.signed', $orderIdRoute->middleware());
+        $this->assertContains('throttle:storefront-binance-order-id', $orderIdRoute->middleware());
+
         $order = Order::factory()->create();
         $showUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
         $statusUrl = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
@@ -293,6 +297,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         config()->set('services.binance.pay_id', '987654321');
         $this->availableProduct([
@@ -451,6 +457,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         $product = $this->availableProduct([
             'name' => 'International Checkout Product',
@@ -498,10 +506,13 @@ class StorefrontShopCheckoutTest extends TestCase
         config()->set('services.binance.pay_id', '987654321');
         config()->set('services.binance.api_key', 'read-only-key');
         config()->set('services.binance.api_secret', 'read-only-secret');
+        config()->set('services.binance.verification_mode', 'order_id');
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         $product = $this->availableProduct([
             'usdt_price_amount' => 3_000_000,
@@ -525,8 +536,8 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('⚠️ IMPORTANT')
             ->assertSee('Send exactly 3 USDT, including every decimal digit.')
             ->assertSee('Do not round or change the amount.')
-            ->assertSee("tap “I've Paid”", false)
-            ->assertSee('Order ID from Binance Pay')
+            ->assertSee('After paying, submit your Binance Pay Order ID.', false)
+            ->assertSee('Open the completed payment in Binance Pay, view Order Details, and copy the Order ID exactly.', false)
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 

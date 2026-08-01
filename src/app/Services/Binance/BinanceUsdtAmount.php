@@ -27,7 +27,20 @@ class BinanceUsdtAmount
             $fraction = substr($fraction, 0, 6);
         }
 
-        $micro = ((int) $whole) * 1_000_000 + (int) str_pad($fraction, 6, '0');
+        $whole = ltrim($whole, '0') ?: '0';
+        $maxWhole = (string) intdiv(PHP_INT_MAX, 1_000_000);
+        if (strlen($whole) > strlen($maxWhole)
+            || (strlen($whole) === strlen($maxWhole) && strcmp($whole, $maxWhole) > 0)) {
+            return null;
+        }
+
+        $wholeMicro = (int) $whole * 1_000_000;
+        $fractionMicro = (int) str_pad($fraction, 6, '0');
+        if ($wholeMicro > PHP_INT_MAX - $fractionMicro) {
+            return null;
+        }
+
+        $micro = $wholeMicro + $fractionMicro;
 
         return $sign === '-' ? -$micro : $micro;
     }

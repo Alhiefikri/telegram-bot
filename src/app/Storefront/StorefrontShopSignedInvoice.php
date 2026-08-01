@@ -39,6 +39,7 @@ class StorefrontShopSignedInvoice
             payment: $payment,
             state: $state,
             statusUrl: $this->invoiceUrls->status($order),
+            binanceOrderIdUrl: $this->invoiceUrls->binanceOrderId($order),
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
             canCancel: $this->canCancel($order, $projection),
@@ -128,6 +129,19 @@ class StorefrontShopSignedInvoice
     public function statusMessage(Order $order, ?Payment $payment): string
     {
         $projection = $this->orders->project($order, $payment);
+
+        if (strtolower((string) $payment?->provider) === 'manual' && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
+            && $payment?->binance_verification_mode === 'order_id') {
+            return match (true) {
+                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
+                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
+                $payment->binance_verification_status === 'provider_error' && $payment->binance_verification_grace_until?->isFuture() => 'Binance verification is temporarily delayed. We will keep checking securely.',
+                $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Your Binance Pay Order ID is being checked securely.',
+                $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
+                in_array($payment->binance_verification_status, ['provider_error', 'checking', 'not_found'], true) => 'Automatic verification has closed. Please contact support with your payment proof.',
+                default => 'Submit your Binance Pay Order ID after completing the payment.',
+            };
+        }
 
         return match (true) {
             $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',

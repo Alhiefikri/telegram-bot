@@ -45,8 +45,8 @@ class AdminOrderDetailController extends Controller
                 'expectedAmount' => rtrim(rtrim(number_format((int) $binancePayment->amount / 1_000_000, 6, '.', ''), '0'), '.'),
                 'receivedAmount' => (string) $payload['amount'],
                 'currency' => (string) $payload['currency'],
-                'orderId' => (string) ($payload['orderId'] ?? '-'),
-                'transactionId' => (string) $payload['transactionId'],
+                'orderId' => $this->maskIdentifier((string) ($payload['orderId'] ?? '-')),
+                'transactionId' => $this->maskIdentifier((string) $payload['transactionId']),
                 'receivedAt' => is_numeric($payload['transactionTime'] ?? null)
                     ? now()->setTimestamp((int) floor((int) $payload['transactionTime'] / 1_000))->timezone((string) config('app.timezone'))->format('d M Y H:i')
                     : '-',
@@ -72,6 +72,20 @@ class AdminOrderDetailController extends Controller
                 'ip_address' => $log->ip_address,
             ])
             ->all();
+    }
+
+    private function maskIdentifier(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-') {
+            return '-';
+        }
+
+        if (str_contains($value, '•')) {
+            return $value;
+        }
+
+        return strlen($value) <= 8 ? str_repeat('•', strlen($value)) : substr($value, 0, 4).'••••'.substr($value, -4);
     }
 
     private function auditActionLabel(string $action): string

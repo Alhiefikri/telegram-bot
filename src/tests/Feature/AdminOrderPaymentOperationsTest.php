@@ -305,7 +305,8 @@ class AdminOrderPaymentOperationsTest extends TestCase
             ->assertSee('Tagihan')
             ->assertSee('5.714 USDT')
             ->assertSee('5.7 USDT')
-            ->assertSee('P_386362580992')
+            ->assertSee('P_38••••0992')
+            ->assertDontSee('P_386362580992')
             ->assertSee('Setujui pembayaran & kirim stok')
             ->assertSee('Tolak pembayaran & lepas stok');
     }

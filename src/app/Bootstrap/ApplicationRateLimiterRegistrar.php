@@ -63,7 +63,12 @@ class ApplicationRateLimiterRegistrar
                 ], 429, $headers);
             };
 
-            return Limit::perMinute($limit)->by('pakasir:status-refresh:'.$identity)->response($rateLimitedResponse);
+            $source = $request->ip() ?: 'unknown';
+
+            return [
+                Limit::perMinute($limit)->by('pakasir:status-refresh:order:'.$identity)->response($rateLimitedResponse),
+                Limit::perMinute($limit)->by('pakasir:status-refresh:source:'.$source)->response($rateLimitedResponse),
+            ];
         });
 
         $this->rateLimiter->for('storefront-checkout', function (Request $request) {
@@ -82,6 +87,20 @@ class ApplicationRateLimiterRegistrar
             return [
                 Limit::perMinute($limit)->by('storefront:checkout:source:'.$source)->response($rateLimitedResponse),
                 Limit::perMinute($limit)->by('storefront:checkout:session:'.$session)->response($rateLimitedResponse),
+            ];
+        });
+
+        $this->rateLimiter->for('storefront-binance-order-id', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.storefront.binance_order_id_rate_limit_per_minute', 5));
+            $source = $request->ip() ?: 'unknown';
+            $routeOrder = $request->route('order');
+            $order = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
+                ? (string) $routeOrder->getKey()
+                : 'unknown';
+
+            return [
+                Limit::perMinute($limit)->by('storefront:binance-order-id:order:'.$order),
+                Limit::perMinute($limit * 3)->by('storefront:binance-order-id:source:'.$source),
             ];
         });
 

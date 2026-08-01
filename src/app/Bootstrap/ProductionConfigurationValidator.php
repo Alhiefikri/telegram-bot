@@ -52,6 +52,13 @@ class ProductionConfigurationValidator
             throw new RuntimeException('BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.');
         }
 
+        if ((string) $this->config->get('services.binance.verification_mode') === 'order_id'
+            && $binanceApiKeyConfigured
+            && ! filled($this->config->get('services.binance.pay_id'))
+            && ! filled($this->config->get('services.binance.pay_uid'))) {
+            throw new RuntimeException('BINANCE_PAY_ID or BINANCE_PAY_UID must be configured for Order ID verification.');
+        }
+
         if (! str_starts_with((string) $this->config->get('app.url'), 'https://')) {
             throw new RuntimeException('APP_URL must use HTTPS in production.');
         }

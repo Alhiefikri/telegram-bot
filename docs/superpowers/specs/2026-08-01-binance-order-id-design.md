@@ -34,6 +34,15 @@ The Binance Pay trade-history endpoint officially guarantees `transactionId`, bu
 
 Production activation requires a controlled end-to-end Binance Pay canary using the actual buyer-visible Order ID. If the canary cannot match either provider field, transaction-mode checkout remains disabled and the manual screenshot path stays active.
 
+An Order ID is treated as a bearer proof. Binance history does not provide a
+reliable customer identity that can be bound to the Telegram/storefront buyer,
+so the design relies on signed invoice ownership, strict receiver/amount/time
+checks, per-order and per-IP submission limits, and the globally unique provider
+reference. A leaked valid Order ID can still be attempted against another
+invoice with the same amount, but it can settle only one order and any
+collision is escalated for manual review; this residual risk must be accepted
+as part of the production canary.
+
 ## Safe Rollout
 
 The change ships as separate deployable releases. They must not be collapsed into one first-time production deployment.
@@ -78,7 +87,7 @@ Each Binance payment gains or retains:
 - `provider_reference`: documented Binance `transactionId`, written only during confirmation and protected by the existing unique constraint.
 - `provider_payload`: sanitized evidence only.
 
-`manual_payment_settings` also gains `binance_order_id_compatibility_ready_at`. Release A records this marker only after its post-cutover health checks have passed. Release B refuses to contract the legacy amount index on a non-empty installation unless that marker exists, which prevents both rollout phases from being applied for the first time in a single production deployment. Fresh empty installations may apply the complete schema directly.
+`manual_payment_settings` also gains `binance_order_id_compatibility_ready_at`. The additive migration is safe to apply before the canary and leaves the legacy index/mode intact when the marker is absent. The guarded readiness command records the marker only after post-cutover health checks and a real buyer-visible canary pass, then contracts the legacy index to `amount_unique` records and activates `order_id` checkout mode. Fresh empty installations still follow the same explicit readiness gate.
 
 Indexes support:
 

@@ -59,25 +59,26 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
-    public function binancePay(Order $order, Payment $payment, string $payId, ?string $locale, bool $autoVerify = false): string
+    public function binancePay(Order $order, Payment $payment, string $payId, ?string $locale, bool $autoVerify = false, string $receiverLabel = 'BINANCE PAY ID'): string
     {
         $order->loadMissing('orderItems');
         $amount = rtrim(rtrim(number_format($payment->amount / 1_000_000, 6, '.', ''), '0'), '.');
         $items = $this->orderItemsSummary($order);
+        $receiverInstruction = $receiverLabel === 'BINANCE PAY ID' ? 'Pay ID' : 'receiver identifier';
 
         if ($autoVerify) {
             if ($locale === 'en') {
-                return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND (tap to copy):\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 BINANCE PAY ID (tap to copy):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Open Binance → Pay → Send, then scan the QR code above or use the Pay ID.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Tap ✅ I've Paid.\n4️⃣ Copy the Order ID from Binance → Pay → your transfer → Order Details and send it in this chat.\n\nVerification is automatic after your Order ID is received.";
+                return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND (tap to copy):\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 {$receiverLabel} (tap to copy):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Open Binance → Pay → Send, then scan the QR code above or use the {$receiverInstruction}.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Tap ✅ I've Paid.\n4️⃣ Copy the Order ID from Binance → Pay → your transfer → Order Details and send it in this chat.\n\nVerification is automatic after your Order ID is received.";
             }
 
-            return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 NOMINAL YANG DIKIRIM (tap untuk salin):\n{$amount} USDT\n\n⚠️ PENTING: Kirim tepat {$amount} USDT, termasuk seluruh angka desimal. Jangan membulatkan atau mengubah nominal.\n\n📥 BINANCE PAY ID (tap untuk salin):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Buka Binance → Pay → Kirim, lalu scan QR code di atas atau gunakan Pay ID.\n2️⃣ Selesaikan transfer dengan nominal persis seperti yang tertera.\n3️⃣ Tap ✅ Saya Sudah Bayar.\n4️⃣ Buka Binance → Pay → pilih transfer kamu → Order Details, lalu salin dan kirim Order ID ke chat ini.\n\nVerifikasi otomatis berjalan setelah Order ID diterima.";
+            return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 NOMINAL YANG DIKIRIM (tap untuk salin):\n{$amount} USDT\n\n⚠️ PENTING: Kirim tepat {$amount} USDT, termasuk seluruh angka desimal. Jangan membulatkan atau mengubah nominal.\n\n📥 {$receiverLabel} (tap untuk salin):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Buka Binance → Pay → Kirim, lalu scan QR code di atas atau gunakan {$receiverInstruction}.\n2️⃣ Selesaikan transfer dengan nominal persis seperti yang tertera.\n3️⃣ Tap ✅ Saya Sudah Bayar.\n4️⃣ Buka Binance → Pay → pilih transfer kamu → Order Details, lalu salin dan kirim Order ID ke chat ini.\n\nVerifikasi otomatis berjalan setelah Order ID diterima.";
         }
 
         if ($locale === 'en') {
-            return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND:\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 BINANCE PAY ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Scan the QR code or enter the Pay ID in Binance Pay.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Send the payment screenshot as a photo with the caption /payment.\n\nPayment is confirmed after the admin verifies the screenshot and exact amount.";
+            return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND:\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 {$receiverLabel}:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Scan the QR code or enter the {$receiverInstruction} in Binance Pay.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Send the payment screenshot as a photo with the caption /payment.\n\nPayment is confirmed after the admin verifies the screenshot and exact amount.";
         }
 
-        return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 NOMINAL YANG DIKIRIM:\n{$amount} USDT\n\n⚠️ PENTING: Kirim tepat {$amount} USDT, termasuk seluruh angka desimal. Jangan membulatkan atau mengubah nominal.\n\n📥 BINANCE PAY ID:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Scan QR code atau masukkan Pay ID di Binance Pay.\n2️⃣ Selesaikan transfer dengan nominal persis seperti yang tertera.\n3️⃣ Kirim screenshot pembayaran sebagai foto dengan caption /payment.\n\nPembayaran dikonfirmasi setelah admin memverifikasi screenshot dan nominal.";
+        return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 NOMINAL YANG DIKIRIM:\n{$amount} USDT\n\n⚠️ PENTING: Kirim tepat {$amount} USDT, termasuk seluruh angka desimal. Jangan membulatkan atau mengubah nominal.\n\n📥 {$receiverLabel}:\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Scan QR code atau masukkan {$receiverInstruction} di Binance Pay.\n2️⃣ Selesaikan transfer dengan nominal persis seperti yang tertera.\n3️⃣ Kirim screenshot pembayaran sebagai foto dengan caption /payment.\n\nPembayaran dikonfirmasi setelah admin memverifikasi screenshot dan nominal.";
     }
 
     public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false, string $locale = 'id'): TelegramPaymentInstruction

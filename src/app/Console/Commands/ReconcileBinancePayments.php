@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\Binance\BinanceAutoVerification;
-use App\Services\Binance\BinancePayClient;
+use App\Services\Binance\BinanceTransactionHistoryReader;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Telegram\TelegramBinanceVerificationEscalator;
 use Illuminate\Console\Command;
@@ -18,7 +18,7 @@ class ReconcileBinancePayments extends Command
     protected $description = 'Automatically confirm pending Binance Pay payments from the account trade history.';
 
     public function handle(
-        BinancePayClient $client,
+        BinanceTransactionHistoryReader $history,
         BinanceAutoVerification $verification,
         TelegramBinanceVerificationEscalator $escalator,
     ): int {
@@ -33,9 +33,19 @@ class ReconcileBinancePayments extends Command
             ->where('method', 'BINANCE_PAY_ID')
             ->where('status', PaymentStatus::Pending->value)
             ->where('binance_auto_verification_enabled', true)
-            ->whereNotNull('binance_order_id')
-            ->whereNotNull('binance_verification_grace_until')
-            ->where('binance_verification_grace_until', '>', now())
+            ->where(function ($query): void {
+                $query->where(function ($orderIdQuery): void {
+                    $orderIdQuery->where('binance_verification_mode', 'order_id')
+                        ->whereNotNull('binance_order_id')
+                        ->whereNotNull('binance_verification_grace_until')
+                        ->where('binance_verification_grace_until', '>', now());
+                })->orWhere(function ($legacyQuery): void {
+                    $legacyQuery->where('binance_verification_mode', 'amount_unique')
+                        ->where(function ($query): void {
+                            $query->whereNull('expired_at')->orWhere('expired_at', '>', now());
+                        });
+                });
+            })
             ->whereNull('provider_reference')
             ->orderBy('created_at')
             ->limit(max(1, (int) $this->option('chunk')))
@@ -49,13 +59,24 @@ class ReconcileBinancePayments extends Command
 
         try {
             $skewMs = max(0, (int) config('services.binance.verify_clock_skew_seconds', 120)) * 1000;
-            $transactions = $client->payTransactions($pending->first()->created_at->getTimestampMs() - $skewMs);
+            $historyResult = $history->read(
+                $pending->first()->created_at->getTimestampMs() - $skewMs,
+                now()->getTimestampMs(),
+            );
         } catch (Throwable $exception) {
             report($exception);
             $this->error('binance:reconcile failed: Binance Pay history could not be fetched.');
 
             return self::FAILURE;
         }
+
+        if (! $historyResult->complete) {
+            $this->warn('binance:reconcile waiting: Binance Pay history window was too large to verify safely.');
+
+            return self::SUCCESS;
+        }
+
+        $transactions = $historyResult->transactions;
 
         $confirmed = 0;
         $waiting = 0;
@@ -64,7 +85,9 @@ class ReconcileBinancePayments extends Command
 
         foreach ($pending as $payment) {
             try {
-                $result = $verification->matchAndConfirm($payment, $transactions);
+                $result = $payment->binance_verification_mode === 'amount_unique'
+                    ? $verification->verifyLegacyPaymentFromTransactions($payment, $transactions)
+                    : $verification->matchAndConfirm($payment, $transactions);
             } catch (Throwable $exception) {
                 report($exception);
                 $failed++;

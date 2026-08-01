@@ -6,7 +6,7 @@ use App\Support\PakasirCheckoutFlow;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'whatsapp_support_url', 'whatsapp_support_number', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes'])]
+#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'whatsapp_support_url', 'whatsapp_support_number', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes', 'binance_verification_mode', 'binance_order_id_compatibility_ready_at'])]
 class ManualPaymentSetting extends Model
 {
     public const DEFAULT_QRIS_PAYMENT_TTL_MINUTES = 10;
@@ -15,7 +15,11 @@ class ManualPaymentSetting extends Model
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean', 'binance_pay_enabled' => 'boolean'];
+        return [
+            'is_active' => 'boolean',
+            'binance_pay_enabled' => 'boolean',
+            'binance_order_id_compatibility_ready_at' => 'datetime',
+        ];
     }
 
     public function pakasirCheckoutFlow(): string

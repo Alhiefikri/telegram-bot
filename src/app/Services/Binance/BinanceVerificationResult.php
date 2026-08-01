@@ -7,11 +7,12 @@ final readonly class BinanceVerificationResult
     public function __construct(
         public BinanceVerificationOutcome $outcome,
         public ?BinancePayTransaction $transaction = null,
+        public bool $retryable = true,
     ) {}
 
-    public static function of(BinanceVerificationOutcome $outcome, ?BinancePayTransaction $transaction = null): self
+    public static function of(BinanceVerificationOutcome $outcome, ?BinancePayTransaction $transaction = null, bool $retryable = true): self
     {
-        return new self($outcome, $transaction);
+        return new self($outcome, $transaction, $retryable);
     }
 
     public function confirmed(): bool

@@ -24,8 +24,9 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
-use App\Services\CartService;
 use App\Services\Binance\BinanceAutoVerification;
+use App\Services\Binance\BinanceOrderIdActivation;
+use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
@@ -37,7 +38,6 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
-use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
@@ -110,7 +110,13 @@ class ProductionConcurrencyTest extends TestCase
     {
         $this->requireConcurrencyLane();
         config()->set('services.binance.pay_id', '123456789');
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
 
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'only-binance-secret']);
@@ -143,7 +149,14 @@ class ProductionConcurrencyTest extends TestCase
             'api_key' => 'read-only-key',
             'api_secret' => 'read-only-secret',
         ]);
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
+        app(BinanceOrderIdActivation::class)->activate();
 
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'first-binance-secret']);
@@ -177,7 +190,14 @@ class ProductionConcurrencyTest extends TestCase
             'history_lock_seconds' => 1,
             'verify_clock_skew_seconds' => 0,
         ]);
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
+        app(BinanceOrderIdActivation::class)->activate();
 
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'binance-race-secret']);

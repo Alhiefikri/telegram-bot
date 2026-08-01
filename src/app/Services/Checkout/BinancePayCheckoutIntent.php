@@ -22,6 +22,24 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
         return 'BINANCE_PAY_ID';
     }
 
+    public function verificationMode(): string
+    {
+        $settingRecord = ManualPaymentSetting::current();
+        $setting = $settingRecord?->binance_verification_mode;
+        $ready = $settingRecord?->binance_order_id_compatibility_ready_at !== null;
+
+        if (in_array($setting, ['amount_unique', 'order_id'], true)) {
+            return $ready ? (string) $setting : 'amount_unique';
+        }
+
+        $configured = config('services.binance.verification_mode');
+        if ($configured === 'order_id' && ! $ready) {
+            return 'amount_unique';
+        }
+
+        return in_array($configured, ['amount_unique', 'order_id'], true) ? (string) $configured : 'amount_unique';
+    }
+
     public function orderCurrency(): string
     {
         return 'IDR';
@@ -53,7 +71,8 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 
     public function assertReady(Cart $cart, Collection $items, Collection $products): void
     {
-        if (! ManualPaymentSetting::current()?->binance_pay_enabled || ! filled(config('services.binance.pay_id'))) {
+        $receiverConfigured = filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid'));
+        if (! ManualPaymentSetting::current()?->binance_pay_enabled || ! $receiverConfigured) {
             throw new InvalidCheckout('Binance Pay is not ready.');
         }
 

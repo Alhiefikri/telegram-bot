@@ -7,10 +7,12 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Binance\BinancePayClient;
+use App\Services\Binance\BinanceUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use Carbon\CarbonInterface;
@@ -24,6 +26,7 @@ class OrderCheckoutService
         private readonly InventoryLedger $inventory,
         private readonly ProductCredentialAllocator $credentials,
         private readonly BinancePayClient $binance,
+        private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
     ) {}
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
@@ -75,11 +78,42 @@ class OrderCheckoutService
 
         $products = $this->inventory->lockedCheckoutProducts($items);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
+
+        // Serialize checkout mode selection with the guarded readiness
+        // activation so mode and amount cannot straddle the index switch.
+        if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
+            ManualPaymentSetting::query()->where('is_active', true)->oldest('id')->lockForUpdate()->first();
+        }
         $paymentIntent->assertReady($lockedCart, $items, $products);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
-        Payment::create(['order_id' => $order->id, 'provider' => $paymentIntent->provider(), 'merchant_ref' => $this->numbers->merchantReference(), 'method' => $paymentIntent->method(), 'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binance->configured(), 'amount' => $this->paymentAmountFor($paymentIntent, $items, $products), 'currency' => $paymentIntent->paymentCurrency(), 'status' => PaymentStatus::Pending, 'expired_at' => $expiresAt]);
+        $paymentMode = $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
+            ? $paymentIntent->verificationMode()
+            : 'amount_unique';
+        $receiverType = null;
+        $receiverValue = null;
+        if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
+            $receiverType = filled(config('services.binance.pay_id')) ? 'pay_id' : 'uid';
+            $receiverValue = filled(config('services.binance.pay_id'))
+                ? (string) config('services.binance.pay_id')
+                : (string) config('services.binance.pay_uid');
+        }
+        Payment::create([
+            'order_id' => $order->id,
+            'provider' => $paymentIntent->provider(),
+            'merchant_ref' => $this->numbers->merchantReference(),
+            'method' => $paymentIntent->method(),
+            'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binance->configured(),
+            'binance_verification_mode' => $paymentMode,
+            'binance_receiver_type' => $receiverType,
+            'binance_receiver_value' => $receiverValue,
+            'binance_verification_status' => $paymentMode === 'order_id' ? 'awaiting_submission' : 'checking',
+            'amount' => $this->paymentAmountFor($paymentIntent, $items, $products, $paymentMode),
+            'currency' => $paymentIntent->paymentCurrency(),
+            'status' => PaymentStatus::Pending,
+            'expired_at' => $expiresAt,
+        ]);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
@@ -93,9 +127,16 @@ class OrderCheckoutService
         return $order->fresh(['orderItems', 'payments']);
     }
 
-    private function paymentAmountFor(CheckoutPaymentIntent $paymentIntent, $items, $products): int
+    private function paymentAmountFor(CheckoutPaymentIntent $paymentIntent, $items, $products, ?string $mode = null): int
     {
-        return $paymentIntent->paymentAmount($items, $products);
+        $amount = $paymentIntent->paymentAmount($items, $products);
+        $mode ??= $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
+            ? $paymentIntent->verificationMode()
+            : null;
+
+        return $mode === 'amount_unique'
+            ? $this->uniqueBinanceAmount->allocate($amount)
+            : $amount;
     }
 
     private function isUniqueViolation(QueryException $e): bool

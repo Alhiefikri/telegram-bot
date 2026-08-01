@@ -43,7 +43,7 @@
                     <div>
                         <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">
                             <h3 id="modal-title" class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct.name"></h3>
-                            <button type="button" @click="closeProductModal()" class="grid h-11 w-11 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none" aria-label="Tutup detail produk">
+                            <button type="button" @click="closeProductModal()" class="grid h-12 w-12 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none" aria-label="Tutup detail produk">
                                 <span class="text-xl leading-none" aria-hidden="true">×</span>
                             </button>
                         </div>

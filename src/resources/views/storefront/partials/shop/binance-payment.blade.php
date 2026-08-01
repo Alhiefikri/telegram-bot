@@ -29,10 +29,10 @@
             </dd>
         </div>
         <div class="flex flex-col gap-2 border-t-[3px] border-[var(--sf-border)] pt-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4" data-copy-group>
-            <dt class="text-[var(--sf-muted)]">Binance Pay ID</dt>
+            <dt class="text-[var(--sf-muted)]">{{ $binanceReceiverLabel }}</dt>
             <dd class="flex items-center gap-2 text-left sm:text-right">
                 <span class="font-black text-[var(--sf-ink)]">{{ $binancePayId }}</span>
-                <button type="button" class="neo-button h-11 min-w-11 bg-[var(--sf-surface)] px-3 text-sm font-black text-[var(--sf-ink)]" data-copy-text="{{ $binancePayId }}" data-copy-success="Binance Pay ID copied.">Copy</button>
+                <button type="button" class="neo-button h-11 min-w-11 bg-[var(--sf-surface)] px-3 text-sm font-black text-[var(--sf-ink)]" data-copy-text="{{ $binancePayId }}" data-copy-success="{{ $binanceReceiverLabel }} copied.">Copy</button>
                 <span class="sr-only" aria-live="polite" data-copy-status></span>
             </dd>
         </div>
@@ -45,10 +45,26 @@
             <p>Do not round or change the amount.</p>
         </div>
 
-        @if ($payment->binance_auto_verification_enabled)
-            <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
-                <p class="font-black text-[var(--sf-ink)]">After paying, return to Telegram and tap “I've Paid”.</p>
-                <p class="mt-2">Copy the Order ID from Binance Pay → Order Details and send it to the bot. Verification is automatic after the Order ID is received.</p>
+        @if ($payment->binance_auto_verification_enabled && $binanceVerificationMode === 'order_id' && $payment->binance_verification_status !== 'mismatch' && ! $payment->binance_verification_grace_until?->isPast())
+            <form method="POST" action="{{ $binanceOrderIdUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
+                @csrf
+                <p class="font-black text-[var(--sf-ink)]">After paying, submit your Binance Pay Order ID.</p>
+                <p class="mt-2">Open the completed payment in Binance Pay, view Order Details, and copy the Order ID exactly. Do not submit your Binance Pay ID or a screenshot here.</p>
+                <label for="binance-order-id" class="mt-4 block text-sm font-black text-[var(--sf-ink)]">Binance Pay Order ID</label>
+                <div class="mt-2 flex flex-col gap-3 sm:flex-row">
+                <input id="binance-order-id" name="binance_order_id" inputmode="text" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{8,126}[A-Za-z0-9]" required class="min-h-12 min-w-0 flex-1 rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-3 font-mono text-base text-[var(--sf-ink)]" placeholder="445011487581044736">
+                    <button type="submit" class="neo-button inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">I've Paid</button>
+                </div>
+                @error('binance_order_id')
+                    <p class="mt-2 text-sm font-black text-red-700" role="alert">{{ $message }}</p>
+                @enderror
+            </form>
+            <div class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4" data-shop-payment-status data-payment-kind="binance" data-status-url="{{ $statusUrl }}" data-redirect-url="{{ $redirectUrl }}" data-terminal="{{ $isTerminal ? 'true' : 'false' }}">
+                <p data-payment-status-title class="font-black text-[var(--sf-ink)]">{{ $binanceVerificationStatus === 'checking' ? 'Checking your payment' : 'Waiting for your Order ID' }}</p>
+                <p data-payment-status-message class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $payment->binance_verification_status === 'checking' ? 'Your Order ID is being checked securely.' : 'Submit the Order ID after completing your Binance Pay payment.' }}</p>
+                <p data-payment-status-announcement class="sr-only" aria-live="polite"></p>
+                <button type="button" data-payment-status-check class="neo-button mt-3 min-h-12 bg-[var(--sf-surface)] px-4 text-sm font-black text-[var(--sf-ink)]">Check verification status</button>
+                <div data-payment-status-followup class="hidden"></div>
             </div>
         @else
             <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
@@ -65,7 +81,7 @@
                 @csrf
                 <p class="font-black text-[var(--sf-ink)]">Have not paid yet?</p>
                 <p>Cancel the order to release the reserved stock. Do not use this option after payment.</p>
-                <button type="submit" class="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[#ffd9df] px-4 py-3 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
+                <button type="submit" class="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[#ffd9df] px-4 py-3 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">
                     Cancel order &amp; release stock
                 </button>
             </form>

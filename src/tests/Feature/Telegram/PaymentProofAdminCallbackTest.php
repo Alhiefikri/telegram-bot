@@ -196,6 +196,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'status' => PaymentStatus::Pending,
             'expired_at' => now()->addMinutes(10),
             'binance_auto_verification_enabled' => true,
+            'binance_verification_mode' => 'order_id',
         ]);
 
         $this->postTelegramWebhook($this->paymentPhotoUpdate(209, $order->invoice_number, ['username' => 'auto-buyer']))->assertOk();

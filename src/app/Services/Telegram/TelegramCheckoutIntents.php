@@ -68,7 +68,8 @@ class TelegramCheckoutIntents
 
     public function binancePayEnabled(): bool
     {
-        return (bool) ManualPaymentSetting::current()?->binance_pay_enabled && filled(config('services.binance.pay_id'));
+        return (bool) ManualPaymentSetting::current()?->binance_pay_enabled
+            && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
     }
 
     public function formatUsdt(int $amount): string
@@ -80,9 +81,13 @@ class TelegramCheckoutIntents
     {
         // The payment snapshots whether API verification was enabled at checkout;
         // changing credentials later must not change this order's flow.
-        $autoVerify = (bool) $payment->binance_auto_verification_enabled;
-        $payId = (string) config('services.binance.pay_id');
-        $text = $this->paymentInstructions->binancePay($order, $payment, $payId, $this->locale->code($customer), $autoVerify);
+        $autoVerify = (bool) $payment->binance_auto_verification_enabled
+            && $payment->binance_verification_mode === 'order_id';
+        $receiver = (string) ($payment->binance_receiver_value ?: (config('services.binance.pay_id') ?: config('services.binance.pay_uid')));
+        $receiverLabel = $payment->binance_receiver_type === 'uid'
+            ? 'BINANCE UID'
+            : ($payment->binance_receiver_type === 'pay_id' ? 'BINANCE PAY ID' : (filled(config('services.binance.pay_id')) ? 'BINANCE PAY ID' : 'BINANCE UID'));
+        $text = $this->paymentInstructions->binancePay($order, $payment, $receiver, $this->locale->code($customer), $autoVerify, $receiverLabel);
         $amount = $this->formatUsdt($payment->amount);
 
         $photoPath = public_path('binance.jpeg');
@@ -108,7 +113,7 @@ class TelegramCheckoutIntents
         ], [
             'caption_entities' => [
                 $this->codeEntityForLine($text, $amount.' USDT', $amount),
-                $this->codeEntityForLine($text, $payId, $payId),
+                $this->codeEntityForLine($text, $receiver, $receiver),
             ],
         ]);
     }

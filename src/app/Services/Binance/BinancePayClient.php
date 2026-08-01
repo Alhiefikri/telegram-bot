@@ -10,11 +10,10 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
-use UnexpectedValueException;
 
 class BinancePayClient
 {
-    private const HISTORY_CACHE_KEY = 'binance:pay-history:recent';
+    private const HISTORY_CACHE_KEY = 'binance:pay-history:v2:window';
 
     public function configured(): bool
     {
@@ -38,24 +37,29 @@ class BinancePayClient
             return $this->requestPayTransactions($startTimeMs, $endTimeMs, $limit);
         }
 
-        if (($cached = $this->cachedTransactionsCovering($startTimeMs, $endTimeMs, $limit)) !== null) {
+        $cacheKey = $this->historyCacheKey($startTimeMs, $endTimeMs, $limit);
+        if (($cached = $this->cachedTransactions($cacheKey)) !== null) {
             return $cached;
         }
 
-        $lockSeconds = max(1, (int) config('services.binance.history_lock_seconds', 15));
+        // The reader may fan a window out into several bounded requests. Keep
+        // the lease and wait window longer than that bound so a second worker
+        // coalesces behind the in-flight read instead of surfacing a synthetic
+        // lock timeout while the first worker is still querying Binance.
+        $configuredLockSeconds = max(1, (int) config('services.binance.history_lock_seconds', 90));
+        $readerBoundSeconds = max(1, (int) config('services.binance.history_max_duration_seconds', 45));
+        $httpTimeoutSeconds = max(1, (int) ceil((float) config('services.binance.http_timeout_seconds', 10)));
+        $maxAttempts = max(1, (int) config('services.binance.history_max_attempts', 3));
+        $inFlightRequestSeconds = ($httpTimeoutSeconds + 5) * $maxAttempts;
+        $lockSeconds = max($configuredLockSeconds, $readerBoundSeconds + $inFlightRequestSeconds);
 
-        return Cache::lock(self::HISTORY_CACHE_KEY.':lock', $lockSeconds)->block($lockSeconds, function () use ($startTimeMs, $endTimeMs, $limit, $cacheSeconds): array {
-            if (($cached = $this->cachedTransactionsCovering($startTimeMs, $endTimeMs, $limit)) !== null) {
+        return Cache::lock($cacheKey.':lock', $lockSeconds)->block($lockSeconds, function () use ($startTimeMs, $endTimeMs, $limit, $cacheSeconds, $cacheKey): array {
+            if (($cached = $this->cachedTransactions($cacheKey)) !== null) {
                 return $cached;
             }
 
-            $transactions = $this->requestPayTransactions($startTimeMs, $endTimeMs, $limit);
-            Cache::put(self::HISTORY_CACHE_KEY, [
-                'start_time_ms' => $startTimeMs,
-                'end_time_ms' => $endTimeMs,
-                'limit' => $limit,
-                'transactions' => $transactions,
-            ], now()->addSeconds($cacheSeconds));
+            $transactions = $this->cacheableTransactions($this->requestPayTransactions($startTimeMs, $endTimeMs, $limit));
+            Cache::put($cacheKey, $transactions, now()->addSeconds($cacheSeconds));
 
             return $transactions;
         });
@@ -80,7 +84,7 @@ class BinancePayClient
             $response = $this->timed('payTransactions', fn () => $this->http()
                 ->retry(
                     max(1, (int) config('services.binance.history_max_attempts', 3)),
-                    max(0, (int) config('services.binance.history_retry_delay_ms', 250)),
+                    fn (int $attempt, Throwable $exception): int => $this->retryDelayMs($attempt, $exception),
                     fn (Throwable $exception): bool => $this->shouldRetry($exception),
                 )
                 ->withHeaders(['X-MBX-APIKEY' => (string) config('services.binance.api_key')])
@@ -91,8 +95,14 @@ class BinancePayClient
             throw $this->providerRequestException($exception);
         }
 
-        if (! is_array($response) || (string) ($response['code'] ?? '') !== '000000' || ($response['success'] ?? false) !== true) {
-            throw new UnexpectedValueException('Binance Pay history response is not a successful payload.');
+        if (! is_array($response)) {
+            throw new BinanceProviderException('Binance Pay returned an invalid history response.', 200, false);
+        }
+
+        if ((string) ($response['code'] ?? '') !== '000000' || ($response['success'] ?? false) !== true) {
+            $code = preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($response['code'] ?? 'unknown')) ?: 'unknown';
+
+            throw new BinanceProviderException('Binance Pay rejected the history request (code '.$code.').', 200, false);
         }
 
         $data = $response['data'] ?? [];
@@ -100,32 +110,56 @@ class BinancePayClient
         return is_array($data) ? array_values(array_filter($data, 'is_array')) : [];
     }
 
-    /** @return null|list<array<string, mixed>> */
-    private function cachedTransactionsCovering(?int $startTimeMs, ?int $endTimeMs, int $limit): ?array
+    private function historyCacheKey(?int $startTimeMs, ?int $endTimeMs, int $limit): string
     {
-        $cached = Cache::get(self::HISTORY_CACHE_KEY);
-        if (! is_array($cached) || ! is_array($cached['transactions'] ?? null)) {
-            return null;
-        }
-
-        $cachedStart = $cached['start_time_ms'] ?? null;
-        $coversStart = $cachedStart === null || ($startTimeMs !== null && is_numeric($cachedStart) && (int) $cachedStart <= $startTimeMs);
-        $coversEnd = ($cached['end_time_ms'] ?? null) === $endTimeMs;
-        $coversLimit = (int) ($cached['limit'] ?? 0) >= $limit;
-
-        if (! $coversStart || ! $coversEnd || ! $coversLimit) {
-            return null;
-        }
-
-        return array_values(array_filter($cached['transactions'], 'is_array'));
+        return self::HISTORY_CACHE_KEY.':'.hash('sha256', json_encode([
+            'start_time_ms' => $startTimeMs,
+            'end_time_ms' => $endTimeMs,
+            'limit' => $limit,
+        ], JSON_THROW_ON_ERROR));
     }
 
-    private function providerRequestException(ConnectionException|RequestException $exception): RuntimeException
+    /** @param list<array<string, mixed>> $transactions */
+    private function cacheableTransactions(array $transactions): array
+    {
+        return array_values(array_filter(array_map(function (array $payload): ?array {
+            $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
+            $minimal = [
+                'orderId' => $payload['orderId'] ?? null,
+                'transactionId' => $payload['transactionId'] ?? null,
+                'orderType' => $payload['orderType'] ?? null,
+                'amount' => $payload['amount'] ?? null,
+                'currency' => $payload['currency'] ?? null,
+                'transactionTime' => $payload['transactionTime'] ?? null,
+                'receiverInfo' => [
+                    'accountId' => $receiver['accountId'] ?? null,
+                    'binanceId' => $receiver['binanceId'] ?? null,
+                ],
+            ];
+
+            if (! is_scalar($minimal['transactionId']) || trim((string) $minimal['transactionId']) === '') {
+                return null;
+            }
+
+            return $minimal;
+        }, $transactions), 'is_array'));
+    }
+
+    /** @return null|list<array<string, mixed>> */
+    private function cachedTransactions(string $cacheKey): ?array
+    {
+        $cached = Cache::get($cacheKey);
+
+        return is_array($cached) ? array_values(array_filter($cached, 'is_array')) : null;
+    }
+
+    private function providerRequestException(ConnectionException|RequestException $exception): BinanceProviderException
     {
         $status = $exception instanceof RequestException ? $exception->response?->status() : null;
         $detail = $status === null ? $exception::class : 'HTTP '.$status;
+        $retryable = $status === null || $status === 408 || $status === 429 || ($status >= 500 && $status <= 599);
 
-        return new RuntimeException('Binance Pay history request failed: '.$detail.'.');
+        return new BinanceProviderException('Binance Pay history request failed: '.$detail.'.', $status, $retryable);
     }
 
     private function shouldRetry(Throwable $exception): bool
@@ -143,6 +177,21 @@ class BinancePayClient
         return $status === 408
             || $status === 429
             || ($status !== null && $status >= 500 && $status <= 599);
+    }
+
+    private function retryDelayMs(int $attempt, Throwable $exception): int
+    {
+        if ($exception instanceof RequestException) {
+            $retryAfter = $exception->response?->header('Retry-After');
+            if (is_numeric($retryAfter)) {
+                return min(5_000, max(0, (int) $retryAfter * 1_000));
+            }
+        }
+
+        $base = max(0, (int) config('services.binance.history_retry_delay_ms', 250));
+        $exponential = min(5_000, $base * (2 ** max(0, $attempt - 1)));
+
+        return $exponential + random_int(0, min(250, max(0, $base)));
     }
 
     private function baseUrl(): string

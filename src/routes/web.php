@@ -28,6 +28,7 @@ use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
+use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
@@ -60,6 +61,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
+    Route::post('orders/{order}/binance-order-id', StorefrontShopBinanceOrderIdController::class)->middleware(['storefront.signed', 'throttle:storefront-binance-order-id'])->name('orders.binance-order-id');
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:pakasir-status-refresh'])->name('orders.status');
     Route::post('orders/{order}/cancel', StorefrontShopOrderCancelController::class)->middleware('storefront.signed')->name('orders.cancel');
 });

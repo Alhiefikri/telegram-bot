@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      mark_binance_order_id_ready:
+        description: Record the Order ID readiness marker after the real buyer-visible canary passes.
+        required: false
+        default: false
+        type: boolean
 
 
 env:
@@ -175,6 +180,18 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
             'bash -s' < scripts/deploy-production-release.sh
+
+      - name: Mark Binance Order ID compatibility ready
+        if: steps.external-smoke.outcome == 'success' && inputs.mark_binance_order_id_ready == true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            "cd '$PRODUCTION_PATH' && docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan binance:mark-order-id-ready --confirm-canary"
 
       - name: Fail release after external smoke rollback
         if: always() && steps.external-smoke.outcome == 'failure'

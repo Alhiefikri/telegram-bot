@@ -38,8 +38,9 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_BROADCAST_WORKER_PROCESSES)s', $contents);
+        $this->assertStringContainsString('--queue=%(ENV_BINANCE_VERIFICATION_QUEUE)s', $contents);
 
-        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES'] as $variable) {
+        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES', 'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES'] as $variable) {
             $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
             $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
         }

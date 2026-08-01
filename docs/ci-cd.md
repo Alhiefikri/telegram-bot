@@ -154,6 +154,19 @@ gh run watch
 
 The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be able to `git fetch origin main` and run `docker compose` from the repo root.
 
+### Binance Pay Order ID activation
+
+The first release is compatibility-only: it applies the additive schema and keeps new checkout traffic on the configured legacy mode until the live canary is proven. Do not set the readiness marker before a real buyer-visible canary has confirmed the exact amount, the displayed receiver namespace/value, the Binance Order ID, and the successful stock delivery path.
+
+After that canary passes and the external smoke gate is green, activate Order ID mode in the same protected production workflow:
+
+```bash
+gh workflow run deploy-production.yml --ref main -f mark_binance_order_id_ready=true
+gh run watch
+```
+
+The workflow runs `php artisan binance:mark-order-id-ready --confirm-canary` only after the candidate is healthy. The command is idempotent and refuses to contract the legacy amount index when pending legacy amounts would collide. If activation fails, the release remains on the compatibility mode; resolve the pending legacy payments and rerun the guarded workflow. Never run the command through an ad-hoc SSH session or switch the `.env` mode alone.
+
 ## Migration compatibility and approval policy
 
 The SQLite `PHP tests` job is the fast general regression lane. The `PostgreSQL migration and concurrency release gate` job is authoritative for production database compatibility because it uses the same database family as production, starts from an empty database, and exercises locking and process-level concurrency behavior. A deployment commit is not eligible for release unless the complete `CI` workflow, including this PostgreSQL job, succeeds for that exact SHA.

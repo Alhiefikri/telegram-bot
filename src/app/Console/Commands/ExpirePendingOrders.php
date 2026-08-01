@@ -30,6 +30,7 @@ class ExpirePendingOrders extends Command
                 ->where('provider', 'manual')
                 ->where('method', 'BINANCE_PAY_ID')
                 ->where('status', PaymentStatus::Pending->value)
+                ->where('binance_verification_mode', 'order_id')
                 ->where('binance_auto_verification_enabled', true)
                 ->whereNotNull('binance_verification_grace_until')
                 ->where('binance_verification_grace_until', '>', now()))
