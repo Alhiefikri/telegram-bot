@@ -156,7 +156,9 @@ The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be abl
 
 ### Binance Pay Order ID activation
 
-The first release is compatibility-only: it applies the additive schema and keeps new checkout traffic on the configured legacy mode until the live canary is proven. Do not set the readiness marker before a real buyer-visible canary has confirmed the exact amount, the displayed receiver namespace/value, the Binance Order ID, and the successful stock delivery path.
+The first release is compatibility-only: it applies the additive schema and keeps normal buyer checkout traffic on the configured legacy mode. The Telegram account identified by `TELEGRAM_ADMIN_USER_ID` is the only pre-activation canary: its Binance checkout uses the exact catalog amount and displays **I've Paid / Saya Sudah Bayar** plus the Order ID prompt. API credentials and a Pay ID/UID must be configured or even the admin remains on the legacy path.
+
+From that admin account, create a fresh Binance checkout, pay the exact displayed amount, tap **I've Paid / Saya Sudah Bayar**, copy the transfer Order ID from Binance Pay Order Details, and submit it to the bot. Confirm that automatic verification completes the order and delivers stock. The activation command searches the database for this successful admin payment within `BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS` (24 hours by default); a flag without that evidence is rejected.
 
 After that canary passes and the external smoke gate is green, activate Order ID mode in the same protected production workflow:
 
