@@ -11,14 +11,6 @@
     $supportContactDescribedBy = 'storefront-support-contact-help'.($supportContactHasError ? ' storefront-support-contact-error' : '');
 @endphp
 
-<style>
-    [aria-label="Kurangi jumlah"],
-    [aria-label="Tambah jumlah"] {
-        min-height: 48px;
-        min-width: 48px;
-    }
-</style>
-
 <div class="relative z-50" x-show="productModalOpen" x-cloak>
     <div x-show="productModalOpen"
          x-transition:enter="ease-out duration-300"
