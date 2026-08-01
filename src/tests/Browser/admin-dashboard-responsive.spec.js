@@ -901,6 +901,7 @@ use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\QrisTestPayload;
 
 User::query()->updateOrCreate(
     ['email' => 'test@example.com'],
@@ -1017,15 +1018,19 @@ $qrisOrder = Order::factory()->create([
     'expires_at' => now()->addMinutes(15),
 ]);
 
+$qrisFee = QrisTestPayload::officialFee(45000);
+$qrisTotal = 45000 + $qrisFee;
+$qrisPayload = QrisTestPayload::forAmount($qrisTotal, 'BROWSERPENDING');
+
 Payment::factory()->create([
     'order_id' => $qrisOrder->id,
     'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
-    'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERPENDING99',
-    'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.BROWSERPENDING99'),
-    'provider_fee' => 350,
-    'provider_total_payment' => 45350,
+    'provider_payment_number' => $qrisPayload,
+    'provider_payment_number_hash' => hash('sha256', $qrisPayload),
+    'provider_fee' => $qrisFee,
+    'provider_total_payment' => $qrisTotal,
     'amount' => 45000,
     'status' => PaymentStatus::Pending,
     'expired_at' => now()->addMinutes(15),
