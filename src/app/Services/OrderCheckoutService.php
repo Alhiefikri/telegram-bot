@@ -89,7 +89,7 @@ class OrderCheckoutService
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
         $paymentMode = $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
-            ? $paymentIntent->verificationMode()
+            ? $paymentIntent->verificationMode($lockedCart)
             : 'amount_unique';
         $receiverType = null;
         $receiverValue = null;

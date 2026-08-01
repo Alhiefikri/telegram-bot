@@ -22,11 +22,15 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
         return 'BINANCE_PAY_ID';
     }
 
-    public function verificationMode(): string
+    public function verificationMode(?Cart $cart = null): string
     {
         $settingRecord = ManualPaymentSetting::current();
         $setting = $settingRecord?->binance_verification_mode;
         $ready = $settingRecord?->binance_order_id_compatibility_ready_at !== null;
+
+        if (! $ready && $this->isAdminCanary($cart)) {
+            return 'order_id';
+        }
 
         if (in_array($setting, ['amount_unique', 'order_id'], true)) {
             return $ready ? (string) $setting : 'amount_unique';
@@ -38,6 +42,18 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
         }
 
         return in_array($configured, ['amount_unique', 'order_id'], true) ? (string) $configured : 'amount_unique';
+    }
+
+    private function isAdminCanary(?Cart $cart): bool
+    {
+        $adminId = trim((string) config('services.telegram.admin_user_id'));
+        $customerId = trim((string) $cart?->customer?->telegram_id);
+
+        return $adminId !== ''
+            && hash_equals($adminId, $customerId)
+            && filled(config('services.binance.api_key'))
+            && filled(config('services.binance.api_secret'))
+            && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
     }
 
     public function orderCurrency(): string
