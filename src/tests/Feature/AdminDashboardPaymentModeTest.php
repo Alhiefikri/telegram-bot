@@ -2,15 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Enums\UserRole;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
-use App\Models\User;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 

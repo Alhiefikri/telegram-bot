@@ -39,7 +39,6 @@ class BinanceOrderIdActivationTest extends TestCase
         $this->assertContains('payments_pending_binance_auto_amount_unique', $names);
     }
 
-
     public function test_activation_rollback_clears_readiness_marker_before_a_future_reactivation(): void
     {
         $setting = ManualPaymentSetting::create([
