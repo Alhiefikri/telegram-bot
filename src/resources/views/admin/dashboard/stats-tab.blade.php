@@ -183,7 +183,7 @@
                         </form>
                         <div class="mt-4 border-t-2 border-neo-ink/15 pt-4">
                             <h3 class="font-display text-sm font-black uppercase tracking-wider text-neo-ink">Verifikasi Binance</h3>
-                            <p class="mt-1 text-[11px] font-semibold text-brand-muted">{{ $paymentControl['binance_order_id_guard_message'] }}</p>
+                            <p class="mt-1 text-[11px] font-semibold text-brand-muted">Pilih Order ID setelah API key, secret, dan Binance Pay ID atau UID dikonfigurasi. Amount unik tetap memakai nominal berurutan.</p>
                             @error('binance_verification_mode', 'paymentMode')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror

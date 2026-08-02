@@ -30,6 +30,16 @@ class ProductionConfigurationValidatorTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function test_production_validation_ignores_removed_binance_canary_age_setting(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['binance']['canary_max_age_hours'] = 0;
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+
+        $this->addToAssertionCount(1);
+    }
+
     #[DataProvider('invalidProductionConfigurationProvider')]
     public function test_every_production_invariant_fails_closed_with_an_actionable_message(
         string $path,

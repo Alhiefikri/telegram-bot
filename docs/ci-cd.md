@@ -156,11 +156,9 @@ The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be abl
 
 ### Binance Pay Order ID activation
 
-Normal buyers remain on **Amount unik (legacy)** until a real admin canary proves the Order ID path. The Telegram account identified by `TELEGRAM_ADMIN_USER_ID` is the only pre-activation canary: its Binance checkout uses the exact catalog amount and displays **I've Paid / Saya Sudah Bayar** plus the Order ID prompt. API credentials and a Pay ID/UID must be configured or even the admin remains on the legacy path.
+Configure the Binance API key, secret, and Pay ID or UID, then the owner selects **Order ID** in **Admin → Mode pembayaran → Verifikasi Binance**. The dashboard toggle applies to new checkouts; existing payments keep their recorded verification mode.
 
-From that admin account, create a fresh Binance checkout, pay the exact displayed amount, tap **I've Paid / Saya Sudah Bayar**, copy the transfer Order ID from Binance Pay Order Details, and submit it to the bot. Confirm that automatic verification completes the order and delivers stock.
-
-After the canary succeeds, open **Admin → Mode pembayaran → Verifikasi Binance** and choose **Order ID**. The dashboard refuses activation unless recent successful canary evidence exists, provider credentials and receiver identity are configured, and pending legacy amounts are safe. Choose **Amount unik (legacy)** in the same dashboard for an immediate rollback affecting new checkouts only. Environment variables store provider credentials; they do not select checkout mode.
+For an immediate rollback affecting new checkouts, select **Amount unik (legacy)** in the same dashboard. Environment variables store provider credentials; they do not select checkout mode.
 
 ## Migration compatibility and approval policy
 

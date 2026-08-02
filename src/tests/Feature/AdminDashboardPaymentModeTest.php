@@ -162,6 +162,9 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertOk()
             ->assertSee('Amount unik (legacy)')
             ->assertSee('Order ID');
+        $this->get('/admin')->assertOk()
+            ->assertSee('Pilih Order ID setelah API key, secret, dan Binance Pay ID atau UID dikonfigurasi.')
+            ->assertDontSee('transaksi canary admin');
 
         $this->post(route('admin.payment-mode.update'), [
             'payment_mode' => 'manual',

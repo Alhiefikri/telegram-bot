@@ -161,6 +161,23 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('QUEUE_CONNECTION=database', $contents);
     }
 
+    public function test_binance_order_id_canary_configuration_is_removed_from_runtime_surfaces(): void
+    {
+        $this->assertNull(config('services.binance.canary_max_age_hours'));
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('.env.example')),
+        );
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('../.env.example')),
+        );
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('../docker-compose.yml')),
+        );
+    }
+
     public function test_phpunit_blocks_unfaked_http_requests_to_real_services(): void
     {
         $testCase = file_get_contents(base_path('tests/TestCase.php'));
