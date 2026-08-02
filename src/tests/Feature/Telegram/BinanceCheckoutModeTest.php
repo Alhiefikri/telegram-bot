@@ -18,12 +18,10 @@ class BinanceCheckoutModeTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_configured_binance_unique_amount_never_changes_a_pakasir_qris_payment(): void
+    public function test_configured_binance_credentials_never_change_a_pakasir_qris_payment(): void
     {
         config()->set('services.binance.api_key', 'key');
         config()->set('services.binance.api_secret', 'secret');
-        config()->set('services.binance.unique_amount_min_offset_micro', 153_000);
-        config()->set('services.binance.unique_amount_max_offset_micro', 153_000);
         config()->set('services.pakasir.slug', 'lhie-test');
         config()->set('services.pakasir.api_key', 'pakasir-key');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
@@ -134,9 +132,11 @@ class BinanceCheckoutModeTest extends TestCase
         $this->assertSame('awaiting_submission', $payment->binance_verification_status);
     }
 
-    public function test_checkout_keeps_release_a_amount_unique_mode_when_configured(): void
+    public function test_legacy_checkout_persists_sequential_unique_amounts(): void
     {
         config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'key');
+        config()->set('services.binance.api_secret', 'secret');
         config()->set('services.binance.verification_mode', 'amount_unique');
         ManualPaymentSetting::create([
             'binance_pay_enabled' => true,
@@ -144,17 +144,25 @@ class BinanceCheckoutModeTest extends TestCase
             'binance_verification_mode' => 'amount_unique',
         ]);
 
-        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 3_250_000]);
-        $cart = Cart::factory()->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
-        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 1_000_000]);
+        $firstCustomer = Customer::factory()->create();
+        $firstCart = Cart::factory()->for($firstCustomer)->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $firstCart->id, 'product_id' => $product->id]);
 
-        $payment = app(OrderCheckoutService::class)
-            ->checkout($cart, CheckoutPaymentIntents::binancePay())
-            ->payments()
-            ->sole();
+        $firstOrder = app(OrderCheckoutService::class)->checkout($firstCart, CheckoutPaymentIntents::binancePay());
+        $firstPayment = $firstOrder->payments()->sole();
 
-        $this->assertSame('amount_unique', $payment->binance_verification_mode);
-        $this->assertSame(3_250_000, $payment->amount);
+        $this->assertSame('BINANCE_PAY_ID', $firstPayment->method);
+        $this->assertSame('amount_unique', $firstPayment->binance_verification_mode);
+        $this->assertSame(1_000_000, $firstPayment->amount);
+
+        $secondCustomer = Customer::factory()->create();
+        $secondCart = Cart::factory()->for($secondCustomer)->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $secondCart->id, 'product_id' => $product->id]);
+
+        $secondOrder = app(OrderCheckoutService::class)->checkout($secondCart, CheckoutPaymentIntents::binancePay());
+
+        $this->assertSame(1_001_000, $secondOrder->payments()->sole()->amount);
     }
 
     public function test_checkout_accepts_a_configured_binance_uid_when_pay_id_is_not_available(): void
