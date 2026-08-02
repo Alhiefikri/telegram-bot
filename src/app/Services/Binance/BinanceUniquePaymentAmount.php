@@ -14,6 +14,7 @@ final class BinanceUniquePaymentAmount
     private const MICRO_PER_MILLI_USDT = 1_000;
 
     private const CANDIDATE_BATCH_SIZE = 1_000;
+
     public function __construct(private readonly BinancePayClient $client) {}
 
     public function allocate(int $baseAmountMicro): int
