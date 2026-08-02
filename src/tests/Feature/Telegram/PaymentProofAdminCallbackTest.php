@@ -28,6 +28,7 @@ use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
@@ -136,6 +137,39 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Cek pembayaran Binance Pay', (string) ($adminPhotos->first()[0]['caption'] ?? ''));
         $this->assertSame(PaymentStatus::Pending, $order->payments()->firstOrFail()->fresh()->status);
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
+    }
+
+    public function test_pending_manual_proof_keeps_original_deadline_and_releases_stock_after_expiry(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+
+        $startedAt = now()->startOfMinute();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+            $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+            $cart = app(CartService::class)->activeCartFor($customer);
+            app(CartService::class)->addItem($cart, $product, 1);
+            $deadline = $startedAt->copy()->addMinute();
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($deadline));
+
+            $this->postTelegramWebhook($this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+
+            $this->assertTrue($order->fresh()->expires_at->equalTo($deadline));
+            $this->assertTrue($order->payments()->sole()->fresh()->expired_at->equalTo($deadline));
+
+            Carbon::setTestNow($startedAt->copy()->addMinutes(2));
+            $this->artisan('orders:expire-pending')->assertSuccessful();
+
+            $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Expired, $order->payments()->sole()->fresh()->status);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_expired_binance_payment_screenshot_is_forwarded_without_reviving_the_order(): void

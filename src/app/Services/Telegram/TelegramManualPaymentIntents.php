@@ -99,15 +99,13 @@ class TelegramManualPaymentIntents
                 return ['status' => 'order_id_required'];
             }
 
+            // Proof is review evidence, not payment completion. Keep the
+            // original deadlines so unattended review cannot hold stock forever.
             $payment->update([
                 'payment_proof_file_id' => $photoFileId,
                 'payment_proof_submitted_at' => now(),
                 'payment_proof_admin_chat_id' => $adminTelegramChatId,
-                ...($isPendingOrder ? ['expired_at' => null] : []),
             ]);
-            if ($isPendingOrder) {
-                $lockedOrder->update(['expires_at' => null]);
-            }
 
             return [
                 'order' => $lockedOrder->fresh(['customer', 'orderItems', 'payments']),
