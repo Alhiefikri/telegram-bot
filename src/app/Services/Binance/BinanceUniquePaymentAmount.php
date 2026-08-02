@@ -29,7 +29,6 @@ final class BinanceUniquePaymentAmount
                 ->where('method', 'BINANCE_PAY_ID')
                 ->where('status', PaymentStatus::Pending->value)
                 ->where('binance_auto_verification_enabled', true)
-                ->where('binance_verification_mode', 'amount_unique')
                 ->whereBetween('amount', [$rangeStart, $rangeEnd])
                 ->orderBy('amount')
                 ->pluck('amount')

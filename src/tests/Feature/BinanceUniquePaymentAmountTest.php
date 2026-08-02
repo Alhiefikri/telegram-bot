@@ -55,7 +55,22 @@ class BinanceUniquePaymentAmountTest extends TestCase
         $this->assertSame(1_000_000, app(BinanceUniquePaymentAmount::class)->allocate(1_000_000));
     }
 
-    public function test_order_id_payment_does_not_occupy_the_base_amount(): void
+    public function test_order_id_payment_without_automatic_verification_does_not_occupy_the_base_amount(): void
+    {
+        Payment::factory()->create([
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 1_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'binance_auto_verification_enabled' => false,
+            'binance_verification_mode' => 'order_id',
+        ]);
+
+        $this->assertSame(1_000_000, app(BinanceUniquePaymentAmount::class)->allocate(1_000_000));
+    }
+
+    public function test_pending_automatic_order_id_payment_occupies_the_base_amount(): void
     {
         Payment::factory()->create([
             'provider' => 'manual',
@@ -67,7 +82,7 @@ class BinanceUniquePaymentAmountTest extends TestCase
             'binance_verification_mode' => 'order_id',
         ]);
 
-        $this->assertSame(1_000_000, app(BinanceUniquePaymentAmount::class)->allocate(1_000_000));
+        $this->assertSame(1_001_000, app(BinanceUniquePaymentAmount::class)->allocate(1_000_000));
     }
 
     public function test_non_binance_payment_does_not_occupy_the_base_amount(): void
