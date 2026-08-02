@@ -29,7 +29,7 @@
 - `src/resources/views/admin/dashboard/stats-tab.blade.php` — dashboard labels explain direct credential-gated toggle instead of canary readiness.
 - `src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php` — delete; no runtime needs canary evidence.
 - `src/app/Services/Binance/BinanceOrderIdActivation.php` and `src/tests/Feature/Telegram/BinanceOrderIdActivationTest.php` — retain only for historical migration compatibility; no dashboard or checkout path may call the class.
-- `src/app/Console/Commands/HealthCheck.php`, `src/app/Bootstrap/ProductionConfigurationValidator.php`, `src/config/services.php`, `.env.example`, `src/.env.example`, `docker-compose.yml`, `docs/ci-cd.md` — remove canary operational surface.
+- `src/tests/Feature/AdminDashboardPaymentModeTest.php`, `src/tests/Feature/Telegram/BinanceCheckoutModeTest.php`, `src/tests/Feature/FoundationInfrastructureTest.php`, and `src/tests/Unit/Bootstrap/ProductionConfigurationValidatorTest.php` — replace canary contract coverage with direct-toggle tests.
 
 ### Task 1: Direct Dashboard Mode Policy and Checkout Selection
 
@@ -174,6 +174,7 @@ git commit -m "refactor: remove Binance Order ID canary gate"
 - Modify: `docker-compose.yml`
 - Modify: `docs/ci-cd.md:157-163`
 - Modify: `src/tests/Feature/FoundationInfrastructureTest.php`
+- Modify: `src/tests/Unit/Bootstrap/ProductionConfigurationValidatorTest.php`
 
 **Interfaces:**
 - Consumes: direct dashboard toggle from Task 1 and canary-free metadata from Task 2.
@@ -183,14 +184,14 @@ git commit -m "refactor: remove Binance Order ID canary gate"
 
 Update dashboard feature assertions to require direct-copy text such as `Pilih Order ID setelah kredensial Binance dikonfigurasi.` and assert the obsolete `transaksi canary admin` text is absent.
 
-In infrastructure tests, assert `services.binance.canary_max_age_hours` is absent and production validation no longer depends on that setting. Assert root env examples, application env example, and Compose source no longer contain `BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS`.
+In infrastructure and validator tests, assert `services.binance.canary_max_age_hours` is absent and production validation no longer depends on that setting. Assert root env examples, application env example, and Compose source no longer contain `BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS`.
 
 - [ ] **Step 2: Run tests to verify current canary copy/config fails**
 
 Run:
 
 ```bash
-cd src && php artisan test tests/Feature/AdminDashboardPaymentModeTest.php tests/Feature/FoundationInfrastructureTest.php
+cd src && php artisan test tests/Feature/AdminDashboardPaymentModeTest.php tests/Feature/FoundationInfrastructureTest.php tests/Unit/Bootstrap/ProductionConfigurationValidatorTest.php
 ```
 
 Expected: FAIL because dashboard copy, service config, production validation, and environment templates still expose the canary contract.
@@ -220,7 +221,7 @@ Expected: PASS. Dashboard shows direct-toggle guidance, canary configuration is 
 - [ ] **Step 5: Commit operational cutover**
 
 ```bash
-git add src/resources/views/admin/dashboard/stats-tab.blade.php src/config/services.php .env.example src/.env.example docker-compose.yml docs/ci-cd.md src/tests/Feature/FoundationInfrastructureTest.php src/tests/Feature/AdminDashboardPaymentModeTest.php
+git add src/resources/views/admin/dashboard/stats-tab.blade.php src/config/services.php .env.example src/.env.example docker-compose.yml docs/ci-cd.md src/tests/Feature/FoundationInfrastructureTest.php src/tests/Unit/Bootstrap/ProductionConfigurationValidatorTest.php src/tests/Feature/AdminDashboardPaymentModeTest.php
 git commit -m "docs: remove Binance Order ID canary operations"
 ```
 
