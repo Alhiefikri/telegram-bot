@@ -51,6 +51,15 @@ class BinanceVerificationContractTest extends TestCase
         $this->assertTrue($both?->isIncomingToConfiguredReceiver('987654321', '123456789'));
     }
 
+    public function test_pay_id_receiver_accepts_the_binance_id_shape_used_by_c2c_history(): void
+    {
+        $transaction = BinancePayTransaction::fromPayload($this->payload([
+            'receiverInfo' => ['binanceId' => '987654321'],
+        ]));
+
+        $this->assertTrue($transaction?->isIncomingToConfiguredReceiver('987654321', null));
+    }
+
     /** @param array<string, mixed> $overrides */
     private function payload(array $overrides = []): array
     {

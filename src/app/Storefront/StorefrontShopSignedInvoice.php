@@ -135,6 +135,17 @@ class StorefrontShopSignedInvoice
             return $this->terminalCopy->message($projection, $payment);
         }
 
+        if (strtolower((string) $payment?->provider) === 'manual'
+            && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
+            && $payment?->binance_auto_verification_enabled
+            && $payment?->binance_verification_mode === 'amount_unique') {
+            return match (true) {
+                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
+                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
+                default => 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.',
+            };
+        }
+
         if (strtolower((string) $payment?->provider) === 'manual' && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
             && $payment?->binance_verification_mode === 'order_id') {
             return match (true) {

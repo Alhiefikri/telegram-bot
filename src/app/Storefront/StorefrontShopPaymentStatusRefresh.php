@@ -202,6 +202,12 @@ class StorefrontShopPaymentStatusRefresh
             return $this->terminalCopy->message($projection, $payment);
         }
 
+        if ($payment->binance_auto_verification_enabled && $payment->binance_verification_mode === 'amount_unique') {
+            return $payment->binance_verification_status === 'mismatch'
+                ? 'The payment needs a manual review. Please contact support with your invoice number.'
+                : 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.';
+        }
+
         return match (true) {
             $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Order ID received. We are checking your Binance payment securely.',
             $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',

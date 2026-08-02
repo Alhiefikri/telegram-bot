@@ -542,6 +542,43 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 
+    public function test_binance_amount_unique_auto_verification_does_not_route_to_screenshot_proof(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'read-only-key');
+        config()->set('services.binance.api_secret', 'read-only-secret');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'amount_unique',
+        ]);
+        $product = $this->availableProduct([
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 1,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'automatic_amount_buyer',
+            'payment_method' => 'binance_pay',
+        ]);
+
+        $order = Order::with('payments')->sole();
+        $payment = $order->payments->sole();
+        $this->assertTrue($payment->binance_auto_verification_enabled);
+        $this->assertSame('amount_unique', $payment->binance_verification_mode);
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Checking your payment automatically')
+            ->assertSee('We will check Binance history for the exact amount and receiver.')
+            ->assertDontSee('After paying, submit your Binance Pay Order ID.')
+            ->assertDontSee('/payment '.$order->invoice_number);
+    }
+
     public function test_shop_checkout_rejects_unrecognized_payment_method_before_creating_rows(): void
     {
         $product = $this->availableProduct(['stock' => 1]);

@@ -110,12 +110,17 @@ final readonly class BinancePayTransaction
             return false;
         }
 
-        $payIdMatch = filled($merchantPayId)
-            && $this->receiverAccountId !== ''
-            && hash_equals($this->receiverAccountId, trim($merchantPayId));
-        $uidMatch = filled($merchantUid)
+        $payId = trim((string) $merchantPayId);
+        $uid = trim((string) $merchantUid);
+        $payIdMatch = filled($payId)
+            && (($this->receiverAccountId !== ''
+                && hash_equals($this->receiverAccountId, $payId))
+                || ($this->receiverAccountId === ''
+                    && $this->receiverBinanceId !== ''
+                    && hash_equals($this->receiverBinanceId, $payId)));
+        $uidMatch = filled($uid)
             && $this->receiverBinanceId !== ''
-            && hash_equals($this->receiverBinanceId, trim($merchantUid));
+            && hash_equals($this->receiverBinanceId, $uid);
 
         return $payIdMatch || $uidMatch;
     }

@@ -82,7 +82,7 @@ class TelegramCheckoutIntents
         // The payment snapshots whether API verification was enabled at checkout;
         // changing credentials later must not change this order's flow.
         $autoVerify = (bool) $payment->binance_auto_verification_enabled
-            && $payment->binance_verification_mode === 'order_id';
+            && in_array($payment->binance_verification_mode, ['amount_unique', 'order_id'], true);
         $receiver = (string) ($payment->binance_receiver_value ?: (config('services.binance.pay_id') ?: config('services.binance.pay_uid')));
         $receiverLabel = $payment->binance_receiver_type === 'uid'
             ? 'BINANCE UID'
@@ -97,7 +97,7 @@ class TelegramCheckoutIntents
         }
 
         $keyboard = [];
-        if ($autoVerify) {
+        if ($autoVerify && $payment->binance_verification_mode === 'order_id') {
             $keyboard[] = [[
                 'text' => $this->locale->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
                 'callback_data' => 'binance:verify:'.$order->id,

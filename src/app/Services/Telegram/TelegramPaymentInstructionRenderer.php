@@ -67,6 +67,14 @@ class TelegramPaymentInstructionRenderer
         $items = $this->orderItemsSummary($order);
         $receiverInstruction = $receiverLabel === 'BINANCE PAY ID' ? 'Pay ID' : 'receiver identifier';
 
+        if ($autoVerify && $payment->binance_verification_mode === 'amount_unique') {
+            if ($locale === 'en') {
+                return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND (tap to copy):\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 {$receiverLabel} (tap to copy):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Open Binance → Pay → Send, then scan the QR code above or use the {$receiverInstruction}.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Wait while the system checks Binance history automatically using the exact amount and receiver.\n\nYour product will be delivered automatically when the transfer matches. Do not send a screenshot while this order is active.";
+            }
+
+            return "💎 CHECKOUT USDT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Pesanan: {$order->invoice_number}\n📦 {$items}\n\n💵 NOMINAL YANG DIKIRIM (tap untuk salin):\n{$amount} USDT\n\n⚠️ PENTING: Kirim tepat {$amount} USDT, termasuk seluruh angka desimal. Jangan membulatkan atau mengubah nominal.\n\n📥 {$receiverLabel} (tap untuk salin):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nCARA BAYAR:\n1️⃣ Buka Binance → Pay → Kirim, lalu scan QR code di atas atau gunakan {$receiverInstruction}.\n2️⃣ Selesaikan transfer dengan nominal persis seperti yang tertera.\n3️⃣ Tunggu sistem mengecek riwayat Binance otomatis berdasarkan nominal dan receiver yang sama.\n\nProduk akan dikirim otomatis jika transfer cocok. Jangan kirim screenshot selama order ini masih aktif.";
+        }
+
         if ($autoVerify) {
             if ($locale === 'en') {
                 return "💎 USDT CHECKOUT (Binance Pay)\n━━━━━━━━━━━━━━━━━━━━\n\n🎫 Order: {$order->invoice_number}\n📦 {$items}\n\n💵 AMOUNT TO SEND (tap to copy):\n{$amount} USDT\n\n⚠️ IMPORTANT: Send exactly {$amount} USDT, including every decimal digit. Do not round or change the amount.\n\n📥 {$receiverLabel} (tap to copy):\n{$payId}\n\n━━━━━━━━━━━━━━━━━━━━\nHOW TO PAY:\n1️⃣ Open Binance → Pay → Send, then scan the QR code above or use the {$receiverInstruction}.\n2️⃣ Complete the transfer using the exact amount shown.\n3️⃣ Tap ✅ I've Paid.\n4️⃣ Copy the Order ID from Binance → Pay → your transfer → Order Details and send it in this chat.\n\nVerification is automatic after your Order ID is received.";

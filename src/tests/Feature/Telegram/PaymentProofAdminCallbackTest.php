@@ -246,6 +246,38 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertCount(1, $buyerMessage);
     }
 
+    public function test_pending_auto_amount_unique_payment_rejects_screenshot_bypass(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'auto-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addMinutes(10)]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_001_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addMinutes(10),
+            'binance_auto_verification_enabled' => true,
+            'binance_verification_mode' => 'amount_unique',
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(210, $order->invoice_number, ['username' => 'auto-buyer']))->assertOk();
+
+        $stored = $payment->fresh();
+        $this->assertNull($stored->payment_proof_submitted_at);
+        $this->assertSame(PaymentStatus::Pending, $stored->status);
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(0, $adminPhotos);
+        $buyerMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'automatic'));
+        $this->assertCount(1, $buyerMessage);
+    }
+
     public function test_binance_payment_photo_is_forwarded_when_payment_command_is_sent_after_the_photo(): void
     {
         $this->fakeTelegramHttp();

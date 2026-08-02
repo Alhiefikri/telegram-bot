@@ -91,12 +91,17 @@ class TelegramManualPaymentIntents
                 return ['status' => 'expired'];
             }
 
-            if ($isPendingOrder
+            $automaticBinance = $isPendingOrder
                 && $payment->method === 'BINANCE_PAY_ID'
                 && $payment->binance_auto_verification_enabled
-                && $payment->binance_verification_mode === 'order_id'
-                && ($payment->binance_verification_grace_until === null || $payment->binance_verification_grace_until->isFuture())) {
-                return ['status' => 'order_id_required'];
+                && in_array($payment->binance_verification_mode, ['amount_unique', 'order_id'], true);
+            if ($automaticBinance
+                && ($payment->binance_verification_mode === 'amount_unique'
+                    || $payment->binance_verification_grace_until === null
+                    || $payment->binance_verification_grace_until->isFuture())) {
+                return ['status' => $payment->binance_verification_mode === 'order_id'
+                    ? 'order_id_required'
+                    : 'automatic_verification_required'];
             }
 
             // Proof is review evidence, not payment completion. Keep the
@@ -130,6 +135,16 @@ class TelegramManualPaymentIntents
                 $customer,
                 'Pembayaran Binance ini memakai verifikasi Order ID. Klik tombol “Saya Sudah Bayar” pada instruksi checkout lalu kirim Binance Order ID. Screenshot hanya dipakai sebagai fallback setelah order expired.',
                 'This Binance payment requires Order ID verification. Tap “I\'ve Paid” in the checkout instructions and send the Binance Order ID. A screenshot is only used as a fallback after the order expires.',
+            ));
+
+            return;
+        }
+
+        if ($claim['status'] === 'automatic_verification_required') {
+            $this->bot->sendMessage($chatId, $this->locale->text(
+                $customer,
+                'Pembayaran Binance ini memakai nominal unik dan sedang diverifikasi otomatis. Pastikan nominal yang dikirim sama persis dengan instruksi checkout. Screenshot tidak diperlukan selama order masih aktif; sistem akan mengirim produk jika transfer cocok.',
+                'This Binance payment uses a unique amount and is being verified automatically. Make sure the amount you send exactly matches the checkout instructions. A screenshot is not needed while the order is active; the product will be sent when the transfer matches.',
             ));
 
             return;

@@ -14,6 +14,8 @@ class StorefrontProductPresenter
 
     private ?bool $binanceOrderIdAvailable = null;
 
+    private ?bool $binanceAutomaticVerificationAvailable = null;
+
     public function __construct(private readonly StorefrontSupport $support) {}
 
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
@@ -115,7 +117,9 @@ class StorefrontProductPresenter
                 label: 'Binance Pay · '.rtrim(rtrim(number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
                 description: $this->binanceOrderIdAvailable()
                     ? 'Bayar nominal USDT persis. Setelah transfer, kirim Binance Pay Order ID untuk verifikasi otomatis.'
-                    : 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.',
+                    : ($this->binanceAutomaticVerificationAvailable()
+                        ? 'Bayar nominal USDT persis. Sistem akan memeriksa transfer Binance secara otomatis.'
+                        : 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.'),
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,
@@ -130,7 +134,11 @@ class StorefrontProductPresenter
     {
         if ($this->binancePayEnabled === null) {
             $setting = ManualPaymentSetting::current();
-            $this->binanceOrderIdAvailable = $setting?->binance_verification_mode === 'order_id';
+            $mode = $setting?->binance_verification_mode;
+            $this->binanceOrderIdAvailable = $mode === 'order_id';
+            $this->binanceAutomaticVerificationAvailable = in_array($mode, ['amount_unique', 'order_id'], true)
+                && filled(config('services.binance.api_key'))
+                && filled(config('services.binance.api_secret'));
             $this->binancePayEnabled = (bool) $setting?->binance_pay_enabled
                 && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
         }
@@ -141,6 +149,11 @@ class StorefrontProductPresenter
     private function binanceOrderIdAvailable(): bool
     {
         return $this->binanceOrderIdAvailable ?? false;
+    }
+
+    private function binanceAutomaticVerificationAvailable(): bool
+    {
+        return $this->binanceAutomaticVerificationAvailable ?? false;
     }
 
     /**
