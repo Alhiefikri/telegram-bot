@@ -24,29 +24,9 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 
     public function verificationMode(?Cart $cart = null): string
     {
-        $settingRecord = ManualPaymentSetting::current();
-        $setting = $settingRecord?->binance_verification_mode;
-        $ready = $settingRecord?->binance_order_id_compatibility_ready_at !== null;
+        $mode = ManualPaymentSetting::current()?->binance_verification_mode;
 
-        if (! $ready && $this->isAdminCanary($cart)) {
-            return 'order_id';
-        }
-
-        return in_array($setting, ['amount_unique', 'order_id'], true) && $ready
-            ? (string) $setting
-            : 'amount_unique';
-    }
-
-    private function isAdminCanary(?Cart $cart): bool
-    {
-        $adminId = trim((string) config('services.telegram.admin_user_id'));
-        $customerId = trim((string) $cart?->customer?->telegram_id);
-
-        return $adminId !== ''
-            && hash_equals($adminId, $customerId)
-            && filled(config('services.binance.api_key'))
-            && filled(config('services.binance.api_secret'))
-            && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
+        return in_array($mode, ['amount_unique', 'order_id'], true) ? $mode : 'amount_unique';
     }
 
     public function orderCurrency(): string

@@ -46,44 +46,15 @@ class BinanceCheckoutModeTest extends TestCase
         $this->assertSame(37_000, $order->payments()->sole()->amount);
     }
 
-    public function test_configured_admin_canary_uses_order_id_before_global_readiness(): void
+    public function test_non_admin_order_id_checkout_does_not_require_readiness_marker(): void
     {
-        config()->set('services.telegram.admin_user_id', '777');
         config()->set('services.binance.pay_id', '987654321');
         config()->set('services.binance.api_key', 'key');
         config()->set('services.binance.api_secret', 'secret');
         ManualPaymentSetting::create([
             'binance_pay_enabled' => true,
             'is_active' => true,
-            'binance_verification_mode' => 'amount_unique',
-            'binance_order_id_compatibility_ready_at' => null,
-        ]);
-
-        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 3_250_000]);
-        $admin = Customer::factory()->create(['telegram_id' => 777]);
-        $cart = Cart::factory()->for($admin)->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
-        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id]);
-
-        $payment = app(OrderCheckoutService::class)
-            ->checkout($cart, CheckoutPaymentIntents::binancePay())
-            ->payments()
-            ->sole();
-
-        $this->assertSame('order_id', $payment->binance_verification_mode);
-        $this->assertSame(3_250_000, $payment->amount);
-        $this->assertSame('awaiting_submission', $payment->binance_verification_status);
-    }
-
-    public function test_non_admin_stays_on_unique_amount_before_global_readiness(): void
-    {
-        config()->set('services.telegram.admin_user_id', '777');
-        config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.binance.api_key', 'key');
-        config()->set('services.binance.api_secret', 'secret');
-        ManualPaymentSetting::create([
-            'binance_pay_enabled' => true,
-            'is_active' => true,
-            'binance_verification_mode' => 'amount_unique',
+            'binance_verification_mode' => 'order_id',
             'binance_order_id_compatibility_ready_at' => null,
         ]);
 
@@ -97,38 +68,8 @@ class BinanceCheckoutModeTest extends TestCase
             ->payments()
             ->sole();
 
-        $this->assertSame('amount_unique', $payment->binance_verification_mode);
-        $this->assertSame('checking', $payment->binance_verification_status);
-    }
-
-    public function test_checkout_persists_order_id_mode_and_exact_usdt_amount_when_activated(): void
-    {
-        config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.binance.api_key', 'key');
-        config()->set('services.binance.api_secret', 'secret');
-        config()->set('services.binance.verification_mode', 'order_id');
-        ManualPaymentSetting::create([
-            'binance_pay_enabled' => true,
-            'is_active' => true,
-            'binance_verification_mode' => 'order_id',
-            'binance_order_id_compatibility_ready_at' => now(),
-        ]);
-
-        $product = Product::factory()->create([
-            'stock' => 2,
-            'reserved_stock' => 0,
-            'price_amount' => 50_000,
-            'usdt_price_amount' => 3_250_000,
-        ]);
-        $cart = Cart::factory()->create(['status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
-        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
-
-        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay());
-        $payment = $order->payments()->sole();
-
         $this->assertSame('order_id', $payment->binance_verification_mode);
         $this->assertSame(3_250_000, $payment->amount);
-        $this->assertSame(0, $payment->binance_order_id_submission_version);
         $this->assertSame('awaiting_submission', $payment->binance_verification_status);
     }
 

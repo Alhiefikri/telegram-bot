@@ -2,14 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
-use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
-use App\Models\Order;
-use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -149,37 +144,18 @@ class AdminDashboardPaymentModeTest extends TestCase
         ]);
     }
 
-    public function test_owner_can_activate_order_id_from_dashboard_after_successful_canary(): void
+    public function test_owner_can_activate_order_id_from_dashboard_with_valid_credentials(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         config()->set('services.binance.api_key', 'key');
         config()->set('services.binance.api_secret', 'secret');
         config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.telegram.admin_user_id', '777');
 
         $setting = ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'binance_verification_mode' => 'amount_unique',
             'is_active' => true,
-        ]);
-        $admin = Customer::factory()->create(['telegram_id' => 777]);
-        $order = Order::factory()->for($admin)->create([
-            'order_status' => OrderStatus::Completed,
-            'payment_status' => PaymentStatus::Paid,
-        ]);
-        Payment::factory()->for($order)->create([
-            'provider' => 'manual',
-            'method' => 'BINANCE_PAY_ID',
-            'status' => PaymentStatus::Paid,
-            'paid_at' => now(),
-            'binance_verification_mode' => 'order_id',
-            'binance_order_id' => '445011487581044736',
-            'binance_order_id_submitted_at' => now()->subMinute(),
-            'binance_verification_status' => 'confirmed',
-            'provider_reference' => '445011487581044736',
-            'binance_receiver_type' => 'pay_id',
-            'binance_receiver_value' => '987654321',
         ]);
 
         $this->get('/admin')
@@ -194,16 +170,15 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSessionDoesntHaveErrors(['binance_verification_mode'], null, 'paymentMode');
 
         $this->assertSame('order_id', $setting->fresh()->binance_verification_mode);
-        $this->assertNotNull($setting->fresh()->binance_order_id_compatibility_ready_at);
+        $this->assertNull($setting->fresh()->binance_order_id_compatibility_ready_at);
     }
 
-    public function test_order_id_dashboard_activation_is_rejected_without_canary_and_legacy_mode_remains_available(): void
+    public function test_order_id_dashboard_activation_is_rejected_without_binance_api_credentials(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        config()->set('services.binance.api_key', 'key');
-        config()->set('services.binance.api_secret', 'secret');
+        config()->set('services.binance.api_key', null);
+        config()->set('services.binance.api_secret', null);
         config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.telegram.admin_user_id', '777');
         $setting = ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_verification_mode' => 'amount_unique',
@@ -218,15 +193,28 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors(['binance_verification_mode'], null, 'paymentMode');
         $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
+    }
 
-        $setting->update([
-            'binance_verification_mode' => 'order_id',
-            'binance_order_id_compatibility_ready_at' => now(),
-        ]);
-        $this->post(route('admin.payment-mode.update'), [
+    public function test_order_id_dashboard_activation_is_rejected_without_binance_pay_receiver(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.binance.api_key', 'key');
+        config()->set('services.binance.api_secret', 'secret');
+        config()->set('services.binance.pay_id', null);
+        config()->set('services.binance.pay_uid', null);
+        $setting = ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_verification_mode' => 'amount_unique',
-        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
+            'is_active' => true,
+        ]);
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'manual',
+                'binance_verification_mode' => 'order_id',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['binance_verification_mode'], null, 'paymentMode');
         $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
     }
 
