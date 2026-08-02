@@ -15,8 +15,8 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
-use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Binance\BinanceOrderIdActivation;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceUsdtAmount;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -333,11 +333,75 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             ])),
         ]);
 
-        $result = app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId($payment, '445011487581044736');
+        $result = app(BinancePaymentVerification::class)->verify($payment);
 
         $this->assertNotSame(BinanceVerificationOutcome::Confirmed, $result->outcome);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
         $this->assertNull($payment->fresh()->provider_reference);
+    }
+
+    public function test_exact_match_after_verification_grace_is_recorded_for_manual_review(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $payment->update([
+            'binance_order_id' => '445011487581044736',
+            'binance_order_id_attempts' => 1,
+            'binance_order_id_submission_version' => 1,
+            'binance_order_id_submitted_at' => now()->subMinutes(4),
+            'binance_verification_status' => 'checking',
+            'binance_verification_grace_until' => now()->subMinute(),
+        ]);
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction('445011487581044736', $this->usdtString($payment->amount), now()->getTimestampMs()),
+            ])),
+        ]);
+
+        $result = app(BinancePaymentVerification::class)->verify($payment, null, 1);
+
+        $this->assertSame(BinanceVerificationOutcome::Mismatch, $result->outcome);
+        $this->assertNotNull($result->transaction);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertNull($payment->fresh()->provider_reference);
+        $this->assertSame('mismatch', $payment->fresh()->binance_verification_status);
+        $this->assertNotNull($payment->fresh()->provider_payload);
+    }
+
+    public function test_amount_unique_duplicate_transaction_returns_an_explicit_conflict(): void
+    {
+        $this->enableBinancePay('amount_unique');
+        [, $usedPayment] = $this->createBinanceOrder(telegramId: 12345);
+        $usedPayment->update([
+            'amount' => 4_000_000,
+            'provider_reference' => 'TX_USED',
+            'status' => PaymentStatus::Paid,
+        ]);
+        [, $payment] = $this->createBinanceOrder(telegramId: 54321);
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction('', $this->usdtString($payment->amount), now()->getTimestampMs(), transactionId: 'TX_USED'),
+            ])),
+        ]);
+
+        $result = app(BinancePaymentVerification::class)->verify($payment);
+
+        $this->assertSame(BinanceVerificationOutcome::TransactionAlreadyUsed, $result->outcome);
+        $this->assertNull($payment->fresh()->provider_reference);
+    }
+
+    public function test_not_configured_amount_unique_result_is_persisted_as_non_retryable_state(): void
+    {
+        $this->enableBinancePay('amount_unique');
+        [, $payment] = $this->createBinanceOrder();
+        config()->set('services.binance.api_key', null);
+        config()->set('services.binance.api_secret', null);
+
+        $result = app(BinancePaymentVerification::class)->verify($payment);
+        app(BinancePaymentVerification::class)->recordOutcome($payment, $result);
+
+        $this->assertSame(BinanceVerificationOutcome::NotConfigured, $result->outcome);
+        $this->assertSame('not_configured', $payment->fresh()->binance_verification_status);
     }
 
     public function test_uid_receiver_is_checked_against_binance_pay_uid_not_pay_id(): void
@@ -483,7 +547,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             ])),
         ]);
 
-        $result = app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId($payment, '445011487581044736', 1);
+        $result = app(BinancePaymentVerification::class)->verify($payment, null, 1);
 
         $this->assertSame(BinanceVerificationOutcome::StaleSubmission, $result->outcome);
         $fresh = $payment->fresh();
@@ -959,6 +1023,36 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertCount(1, $adminNotice);
     }
 
+    public function test_reconcile_command_reviews_order_id_match_after_verification_grace(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $payment->update([
+            'binance_order_id' => '445088888888888890',
+            'binance_order_id_attempts' => 1,
+            'binance_order_id_submitted_at' => now()->subMinutes(4),
+            'binance_verification_status' => 'checking',
+            'binance_verification_grace_until' => now()->subMinute(),
+        ]);
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445088888888888890',
+                    $this->usdtString($payment->amount),
+                    now()->getTimestampMs(),
+                ),
+            ])),
+        ]);
+
+        $this->artisan('binance:reconcile')
+            ->expectsOutputToContain('flagged=1')
+            ->assertExitCode(0);
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame('mismatch', $payment->fresh()->binance_verification_status);
+        $this->assertNotNull($payment->fresh()->provider_payload);
+    }
+
     public function test_reconcile_command_is_a_safe_noop_without_credentials_or_pending_payments(): void
     {
         config()->set('services.binance.api_key', null);
@@ -1081,7 +1175,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             },
         ]);
 
-        $result = app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId($payment, '445099999999999994');
+        $result = app(BinancePaymentVerification::class)->verify($payment);
 
         $this->assertSame(BinanceVerificationOutcome::StaleSubmission, $result->outcome);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
@@ -1114,7 +1208,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             },
         ]);
 
-        $result = app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId($payment, '445099999999999998');
+        $result = app(BinancePaymentVerification::class)->verify($payment);
 
         $this->assertSame(BinanceVerificationOutcome::StaleSubmission, $result->outcome);
         $this->assertNull($payment->fresh()->provider_payload);
@@ -1141,7 +1235,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         ]);
         $this->fakeTelegramHttp();
 
-        $result = app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId($payment, '445099999999999996');
+        $result = app(BinancePaymentVerification::class)->verify($payment);
 
         $this->assertSame(BinanceVerificationOutcome::NotConfigured, $result->outcome);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
@@ -1227,12 +1321,12 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         string $currency = 'USDT',
         ?string $receiverPayId = '987654321',
         ?string $receiverBinanceId = null,
+        ?string $transactionId = null,
     ): array {
         return [
             'uid' => 1251268604,
             'orderId' => $orderId,
-            'transactionId' => 'P_'.substr($orderId, -12),
-            'orderType' => 'C2C',
+            'transactionId' => $transactionId ?? 'P_'.substr($orderId, -12),
             'amount' => $amount,
             'currency' => $currency,
             'transactionTime' => $transactionTimeMs,

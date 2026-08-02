@@ -6,6 +6,9 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Services\Binance\BinancePaymentVerification;
+use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
@@ -22,6 +25,7 @@ class StorefrontShopSignedInvoice
         private readonly OrderLifecycle $orders,
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
+        private readonly BinancePaymentVerification $verification,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -30,6 +34,7 @@ class StorefrontShopSignedInvoice
 
         $payment = $this->latestPayment($order);
         $projection = $this->orders->project($order, $payment);
+        $verificationStatus = $this->binanceVerificationStatus($payment);
         $state = $this->state($projection);
         $redirectUrl = $this->redirectUrl($order);
         $qrisReadiness = $this->qrisReadiness($projection, $payment);
@@ -60,7 +65,8 @@ class StorefrontShopSignedInvoice
             accountCopyText: $this->accountCopyText($accountGroups),
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
             manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
-            statusMessage: $this->statusMessage($order, $payment),
+            statusMessage: $this->statusMessage($order, $payment, $verificationStatus),
+            binanceVerificationStatus: $verificationStatus,
         );
     }
 
@@ -70,6 +76,16 @@ class StorefrontShopSignedInvoice
         return $order->payments()
             ->latest('created_at')
             ->first();
+    }
+
+    private function binanceVerificationStatus(?Payment $payment): ?BinanceVerificationStatus
+    {
+        if (strtolower((string) $payment?->provider) !== 'manual'
+            || strtoupper((string) $payment?->method) !== 'BINANCE_PAY_ID') {
+            return null;
+        }
+
+        return $this->verification->status($payment);
     }
 
     private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState
@@ -83,19 +99,6 @@ class StorefrontShopSignedInvoice
         }
 
         return StorefrontShopSignedInvoiceState::Terminal;
-    }
-
-    private function shouldRefreshFromProvider(OrderLifecycleProjection $projection, Payment $payment): bool
-    {
-        return $this->hasPayableNativeQris($payment)
-            && $projection->isPendingPayment;
-    }
-
-    private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
-    {
-        return $this->isPakasirPayment($payment)
-            && $projection->isPendingPayment
-            && ! $this->hasPayableNativeQris($payment);
     }
 
     private function canCancel(Order $order, OrderLifecycleProjection $projection): bool
@@ -127,7 +130,7 @@ class StorefrontShopSignedInvoice
         return $this->hostedPaymentUrls->for($payment);
     }
 
-    public function statusMessage(Order $order, ?Payment $payment): string
+    public function statusMessage(Order $order, ?Payment $payment, ?BinanceVerificationStatus $verificationStatus = null): string
     {
         $projection = $this->orders->project($order, $payment);
 
@@ -135,31 +138,11 @@ class StorefrontShopSignedInvoice
             return $this->terminalCopy->message($projection, $payment);
         }
 
-        if (strtolower((string) $payment?->provider) === 'manual'
-            && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
-            && $payment?->binance_auto_verification_enabled
-            && $payment?->binance_verification_mode === 'amount_unique') {
-            return match (true) {
-                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
-                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
-                default => 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.',
-            };
+        $verificationStatus ??= $this->binanceVerificationStatus($payment);
+        if ($verificationStatus === null) {
+            return $this->terminalCopy->message($projection, $payment);
         }
-
-        if (strtolower((string) $payment?->provider) === 'manual' && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
-            && $payment?->binance_verification_mode === 'order_id') {
-            return match (true) {
-                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
-                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
-                $payment->binance_verification_status === 'provider_error' && $payment->binance_verification_grace_until?->isFuture() => 'Binance verification is temporarily delayed. We will keep checking securely.',
-                $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Your Binance Pay Order ID is being checked securely.',
-                $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
-                in_array($payment->binance_verification_status, ['provider_error', 'checking', 'not_found'], true) => 'Automatic verification has closed. Please contact support with your payment proof.',
-                default => 'Submit your Binance Pay Order ID after completing the payment.',
-            };
-        }
-
-        return $this->terminalCopy->message($projection, $payment);
+        return $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus);
     }
 
     /**

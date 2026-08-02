@@ -24,8 +24,8 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
-use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Binance\BinanceOrderIdActivation;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -230,8 +230,8 @@ class ProductionConcurrencyTest extends TestCase
         ]);
 
         $results = $this->runConcurrently([
-            fn () => app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId(Payment::findOrFail($payment->id), $providerOrderId)->outcome->value,
-            fn () => app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId(Payment::findOrFail($payment->id), $providerOrderId)->outcome->value,
+            fn () => app(BinancePaymentVerification::class)->verify(Payment::findOrFail($payment->id), null, 0)->outcome->value,
+            fn () => app(BinancePaymentVerification::class)->verify(Payment::findOrFail($payment->id), null, 0)->outcome->value,
         ]);
 
         $outcomes = array_map(fn (array $result): mixed => $result['value'] ?? null, $results);

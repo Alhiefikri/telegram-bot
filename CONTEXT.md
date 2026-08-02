@@ -43,3 +43,7 @@ _Avoid_: In-stock item
 **Unavailable Product**:
 A product that remains visible in the catalog but cannot currently be bought because it has no available stock.
 _Avoid_: Hidden product, deleted product
+
+**Binance Payment Verification**:
+The process of checking a Binance Pay transfer against a pending payment before the order is completed, using the expected amount, currency, configured receiver, and, when required, the Binance Order ID. It can confirm the payment, leave it awaiting more evidence, or send it for manual review.
+_Avoid_: Binance payment proof (that means screenshot evidence)
