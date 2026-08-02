@@ -4,60 +4,43 @@ namespace App\Services\Binance;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
-use RuntimeException;
 
-class BinanceUniquePaymentAmount
+/**
+ * Compatibility allocator for the pre-activation amount_unique mode.
+ * Order ID payments never use this path and always keep the catalog amount.
+ */
+final class BinanceUniquePaymentAmount
 {
-    private const MAX_ATTEMPTS = 25;
+    private const MICRO_PER_MILLI_USDT = 1_000;
+
+    private const CANDIDATE_BATCH_SIZE = 1_000;
 
     public function __construct(private readonly BinancePayClient $client) {}
 
-    public function enabled(): bool
-    {
-        return $this->client->configured();
-    }
-
-    /**
-     * Add a small random micro-USDT offset so every active Binance order has a
-     * distinct payable amount. The offset alone identifies the order during
-     * automatic verification, so two pending payments must never share it.
-     * Without API credentials there is no automatic verification, so the base
-     * amount is kept as-is for the manual screenshot flow.
-     */
     public function allocate(int $baseAmountMicro): int
     {
-        if (! $this->enabled()) {
+        if (! $this->client->configured()) {
             return $baseAmountMicro;
         }
 
-        [$minOffset, $maxOffset] = $this->offsetRange();
-
-        for ($attempt = 0; $attempt < self::MAX_ATTEMPTS; $attempt++) {
-            $candidate = $baseAmountMicro + random_int($minOffset, $maxOffset);
-
-            $taken = Payment::query()
+        for ($rangeStart = $baseAmountMicro; ; $rangeStart += self::CANDIDATE_BATCH_SIZE * self::MICRO_PER_MILLI_USDT) {
+            $rangeEnd = $rangeStart + ((self::CANDIDATE_BATCH_SIZE - 1) * self::MICRO_PER_MILLI_USDT);
+            $occupied = Payment::query()
+                ->where('provider', 'manual')
                 ->where('method', 'BINANCE_PAY_ID')
                 ->where('status', PaymentStatus::Pending->value)
-                ->where('amount', $candidate)
-                ->exists();
+                ->where('binance_auto_verification_enabled', true)
+                ->whereBetween('amount', [$rangeStart, $rangeEnd])
+                ->orderBy('amount')
+                ->pluck('amount')
+                ->mapWithKeys(fn (int $amount): array => [$amount => true])
+                ->all();
 
-            if (! $taken) {
-                return $candidate;
+            for ($candidate = $rangeStart; $candidate <= $rangeEnd; $candidate += self::MICRO_PER_MILLI_USDT) {
+                if (! isset($occupied[$candidate])) {
+                    return $candidate;
+                }
             }
         }
-
-        throw new RuntimeException('Unable to allocate a unique Binance payment amount.');
-    }
-
-    /** @return array{0: int, 1: int} */
-    private function offsetRange(): array
-    {
-        $min = (int) config('services.binance.unique_amount_min_offset_micro', 101);
-        $max = (int) config('services.binance.unique_amount_max_offset_micro', 9999);
-
-        $min = max(1, $min);
-        $max = max($min, $max);
-
-        return [$min, $max];
     }
 }

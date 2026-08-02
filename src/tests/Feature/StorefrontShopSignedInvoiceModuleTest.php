@@ -41,8 +41,8 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->qrisRendererReturnsDeterministicPng();
         [$order, $latestPayment] = $this->pendingNativeQrisOrder(
             totalAmount: 120000,
-            providerFee: 1500,
-            providerTotalPayment: 121500,
+            providerFee: 1200,
+            providerTotalPayment: 121200,
             paymentNumber: '00020101021226610016ID.CO.QRIS.MODULEPENDING99',
         );
         Payment::factory()->create([
@@ -60,7 +60,7 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
         $this->assertSame(StorefrontShopSignedInvoiceState::Pending, $invoice->state);
         $this->assertTrue($invoice->isPendingPayment());
         $this->assertFalse($invoice->isPaid());
-        $this->assertSame(121500, $invoice->payableAmount);
+        $this->assertSame(121200, $invoice->payableAmount);
         $this->assertTrue($invoice->payableAmountFromProvider);
         $this->assertSame('data:image/png;base64,'.base64_encode('png-for:'.$latestPayment->provider_payment_number), $invoice->qrisImageDataUri);
         $this->assertSame('https://app.pakasir.test/pay/lhie-test/120000?order_id='.$latestPayment->merchant_ref.'&redirect=https%3A%2F%2Flhie.test%2Fshop%2Fpakasir-return', $invoice->hostedPaymentUrl);

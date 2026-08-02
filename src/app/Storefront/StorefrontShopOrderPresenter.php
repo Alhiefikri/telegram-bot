@@ -11,6 +11,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontShopSignedInvoice $signedInvoices,
         private readonly StorefrontSupport $support,
         private readonly StorefrontUrl $urls,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     /**
@@ -35,12 +36,14 @@ class StorefrontShopOrderPresenter
             'supportDestination' => $this->storefront->supportDestination(),
             'supportContext' => $this->support->order($invoice->order),
             'statusUrl' => $invoice->statusUrl,
+            'binanceOrderIdUrl' => $invoice->binanceOrderIdUrl,
             'redirectUrl' => $invoice->redirectUrl,
             'cancelUrl' => $invoice->cancelUrl,
             'canCancel' => $invoice->canCancel,
             'isPaid' => $invoice->isPaid(),
             'isPendingPayment' => $invoice->isPendingPayment(),
             'isTerminal' => $invoice->isTerminal(),
+            'effectivePaymentStatus' => $this->terminalCopy->effectivePaymentStatus($invoice->order, $invoice->payment),
             'statusMessage' => $invoice->statusMessage,
             'payableAmount' => $invoice->payableAmount,
             'payableAmountFromProvider' => $invoice->payableAmountFromProvider,
@@ -53,7 +56,12 @@ class StorefrontShopOrderPresenter
             'qrisImageSource' => $invoice->qrisImageSource,
             'payableAmountDisplay' => $invoice->payableAmountDisplay,
             'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
-            'binancePayId' => (string) config('services.binance.pay_id'),
+            'binanceVerificationMode' => (string) ($invoice->payment?->binance_verification_mode ?? 'amount_unique'),
+            'binanceVerificationStatus' => (string) ($invoice->payment?->binance_verification_status ?? 'awaiting_submission'),
+            'binanceReceiverLabel' => $invoice->payment?->binance_receiver_type === 'uid'
+                ? 'Binance UID'
+                : ($invoice->payment?->binance_receiver_type === 'pay_id' ? 'Binance Pay ID' : (filled(config('services.binance.pay_id')) ? 'Binance Pay ID' : 'Binance UID')),
+            'binancePayId' => (string) ($invoice->payment?->binance_receiver_value ?: (config('services.binance.pay_id') ?: config('services.binance.pay_uid'))),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
             'usageGuides' => $invoice->usageGuides,

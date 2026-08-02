@@ -9,6 +9,31 @@ use UnexpectedValueException;
 
 class PakasirQrisTransactionTest extends TestCase
 {
+    public function test_it_rejects_the_reported_inconsistent_fee_and_total_regression(): void
+    {
+        $payment = new Payment([
+            'merchant_ref' => 'INV-UNIT-QRIS-BAD-TOTAL',
+            'amount' => 20000,
+        ]);
+        $transaction = PakasirQrisTransaction::fromPayload([
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => 'INV-UNIT-QRIS-BAD-TOTAL',
+                'amount' => 20000,
+                'fee' => 2660,
+                'total_payment' => 268660,
+                'payment_method' => 'qris',
+                'payment_number' => '00020101021253033605409268660.005802ID6304D63B',
+            ],
+        ]);
+
+        $this->assertFalse($transaction->hasValidFinalAmount());
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Pakasir QRIS fee mismatch.');
+        $transaction->assertMatches($payment, 'warung-ai');
+    }
+
     public function test_it_reads_native_qris_response_and_sanitizes_sensitive_provider_fields(): void
     {
         $paymentNumber = '00020101021226610016ID.CO.QRIS.UNIT-QRIS-1';

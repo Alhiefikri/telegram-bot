@@ -11,6 +11,7 @@ use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use Tests\Support\QrisTestPayload;
 use Tests\TestCase;
 
 class KlikQrisProviderReadinessTest extends TestCase
@@ -221,10 +222,11 @@ class KlikQrisProviderReadinessTest extends TestCase
         $payment = Payment::factory()->make([
             'provider' => 'pakasir',
             'provider_payment_method' => 'qris',
-            'provider_payment_number' => '00020101021226610016COM.NOBUBANK.WWW...',
-            'provider_payment_number_hash' => hash('sha256', '00020101021226610016COM.NOBUBANK.WWW...'),
-            'amount' => 10000,
-            'provider_total_payment' => 10025,
+            'provider_payment_number' => QrisTestPayload::forAmount(10_380),
+            'provider_payment_number_hash' => hash('sha256', QrisTestPayload::forAmount(10_380)),
+            'provider_fee' => 380,
+            'amount' => 10_000,
+            'provider_total_payment' => 10_380,
             'status' => PaymentStatus::Pending,
         ]);
 

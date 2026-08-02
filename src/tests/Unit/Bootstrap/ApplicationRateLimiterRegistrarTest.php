@@ -35,6 +35,7 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
             'telegram',
             'pakasir-webhook',
             'pakasir-status-refresh',
+            'storefront-binance-order-id',
             'storefront-checkout',
             'storefront-order-access',
             'customer-login-link',
@@ -84,10 +85,35 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
             }
         });
 
-        $limit = $this->limit('pakasir-status-refresh', $request);
+        $limits = $this->limits('pakasir-status-refresh', $request);
 
-        $this->assertLimit($limit, 4, 60, 'pakasir:status-refresh:456');
-        $this->assertIsCallable($limit->responseCallback);
+        $this->assertCount(2, $limits);
+        $this->assertLimit($limits[0], 4, 60, 'pakasir:status-refresh:order:456');
+        $this->assertLimit($limits[1], 4, 60, 'pakasir:status-refresh:source:127.0.0.1');
+        $this->assertIsCallable($limits[0]->responseCallback);
+
+    }
+
+    public function test_binance_order_id_policy_has_order_and_ip_buckets(): void
+    {
+        $request = Request::create('/', 'POST', [], [], [], ['REMOTE_ADDR' => '203.0.113.31']);
+        $request->setRouteResolver(fn () => new class
+        {
+            public function parameter(string $name): object
+            {
+                return new class
+                {
+                    public function getKey(): int
+                    {
+                        return 789;
+                    }
+                };
+            }
+        });
+
+        $limits = $this->limits('storefront-binance-order-id', $request);
+        $this->assertLimit($limits[0], 5, 60, 'storefront:binance-order-id:order:789');
+        $this->assertLimit($limits[1], 15, 60, 'storefront:binance-order-id:source:203.0.113.31');
     }
 
     public function test_storefront_checkout_policy_preserves_source_and_session_buckets(): void

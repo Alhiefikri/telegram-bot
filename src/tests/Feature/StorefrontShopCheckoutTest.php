@@ -31,6 +31,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Support\QrisTestPayload;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
@@ -64,6 +65,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains('storefront.signed', $statusRoute->middleware());
         $this->assertContains('throttle:automatic-payment-status-refresh', $statusRoute->middleware());
         $this->assertNotNull(app(RateLimiter::class)->limiter('pakasir-status-refresh'));
+
+        $orderIdRoute = $this->assertRouteContract('storefront.shop.orders.binance-order-id', 'POST', 'shop/orders/{order}/binance-order-id');
+        $this->assertContains('storefront.signed', $orderIdRoute->middleware());
+        $this->assertContains('throttle:storefront-binance-order-id', $orderIdRoute->middleware());
 
         $order = Order::factory()->create();
         $showUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
@@ -295,6 +300,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         config()->set('services.binance.pay_id', '987654321');
         $this->availableProduct([
@@ -355,7 +362,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'stock' => 4,
             ],
         );
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.SHOPCHECKOUTNATIVE99';
+        $paymentNumber = QrisTestPayload::forAmount(30_520);
 
         [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
             product: $product,
@@ -389,8 +396,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'provider' => 'pakasir',
             'method' => PakasirCheckoutFlow::API_QRIS,
             'amount' => 30000,
-            'provider_fee' => 103,
-            'provider_total_payment' => 30103,
+            'provider_fee' => 520,
+            'provider_total_payment' => 30520,
             'provider_payment_method' => 'qris',
         ]);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
@@ -406,7 +413,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->get($location)
             ->assertOk()
             ->assertSee('Total bayar QRIS')
-            ->assertSee('Rp30.103')
+            ->assertSee('Rp30.520')
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Data akun aman sampai pembayaran masuk')
             ->assertDontSee('first-account@example.test|first-secret', false)
@@ -453,6 +460,8 @@ class StorefrontShopCheckoutTest extends TestCase
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         $product = $this->availableProduct([
             'name' => 'International Checkout Product',
@@ -494,18 +503,19 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('data-copy-status', false);
     }
 
-    public function test_binance_auto_verification_checkout_highlights_the_exact_unique_amount(): void
+    public function test_binance_auto_verification_checkout_highlights_the_exact_product_amount(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
         config()->set('services.binance.pay_id', '987654321');
         config()->set('services.binance.api_key', 'read-only-key');
         config()->set('services.binance.api_secret', 'read-only-secret');
-        config()->set('services.binance.unique_amount_min_offset_micro', 321);
-        config()->set('services.binance.unique_amount_max_offset_micro', 321);
+        config()->set('services.binance.verification_mode', 'order_id');
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
         ]);
         $product = $this->availableProduct([
             'usdt_price_amount' => 3_000_000,
@@ -522,14 +532,52 @@ class StorefrontShopCheckoutTest extends TestCase
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
         $this->assertTrue($payment->binance_auto_verification_enabled);
-        $this->assertSame(3_000_321, $payment->amount);
+        $this->assertSame(3_000_000, $payment->amount);
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('⚠️ IMPORTANT')
-            ->assertSee('Send exactly 3.000321 USDT, including every decimal digit.')
+            ->assertSee('Send exactly 3 USDT, including every decimal digit.')
             ->assertSee('Do not round or change the amount.')
-            ->assertSee("tap “I've Paid”", false)
+            ->assertSee('After paying, submit your Binance Pay Order ID.', false)
+            ->assertSee('Open the completed payment in Binance Pay, view Order Details, and copy the Order ID exactly.', false)
+            ->assertDontSee('/payment '.$order->invoice_number);
+    }
+
+    public function test_binance_amount_unique_auto_verification_does_not_route_to_screenshot_proof(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'read-only-key');
+        config()->set('services.binance.api_secret', 'read-only-secret');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'amount_unique',
+        ]);
+        $product = $this->availableProduct([
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 1,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'automatic_amount_buyer',
+            'payment_method' => 'binance_pay',
+        ]);
+
+        $order = Order::with('payments')->sole();
+        $payment = $order->payments->sole();
+        $this->assertTrue($payment->binance_auto_verification_enabled);
+        $this->assertSame('amount_unique', $payment->binance_verification_mode);
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Checking your payment automatically')
+            ->assertSee('We will check Binance history for the exact amount and receiver.')
+            ->assertDontSee('After paying, submit your Binance Pay Order ID.')
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 
@@ -763,9 +811,9 @@ class StorefrontShopCheckoutTest extends TestCase
         $payment = $order->payments->sole();
 
         $first->assertRedirect();
-        $this->assertSame('provider_total_pending', $payment->provider_create_state);
+        $this->assertSame('financial_integrity_failed', $payment->provider_create_state);
         $this->assertNull($payment->provider_total_payment);
-        $this->assertSame($paymentNumber, $payment->provider_payment_number);
+        $this->assertNull($payment->provider_payment_number);
 
         $this->providerTransactionDetailFails();
         $second = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
@@ -781,10 +829,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Total produk')
             ->assertSee('Rp15.000')
-            ->assertSee('Total bayar QRIS')
-            ->assertSee('Menunggu provider')
-            ->assertSee('Provider belum memberi nominal')
-            ->assertSee('Coba ambil total QRIS')
+            ->assertSee('Gagal membuat QRIS')
             ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false);
     }
 

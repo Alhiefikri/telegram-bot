@@ -3,6 +3,7 @@
 return [
     'binance' => [
         'pay_id' => env('BINANCE_PAY_ID'),
+        'pay_uid' => env('BINANCE_PAY_UID'),
         'api_key' => env('BINANCE_API_KEY'),
         'api_secret' => env('BINANCE_API_SECRET'),
         'base_url' => env('BINANCE_API_BASE_URL', 'https://api.binance.com'),
@@ -12,12 +13,14 @@ return [
         'history_max_attempts' => (int) env('BINANCE_HISTORY_MAX_ATTEMPTS', 3),
         'history_retry_delay_ms' => (int) env('BINANCE_HISTORY_RETRY_DELAY_MS', 250),
         'history_cache_seconds' => (int) env('BINANCE_HISTORY_CACHE_SECONDS', 20),
-        'history_lock_seconds' => (int) env('BINANCE_HISTORY_LOCK_SECONDS', 15),
-        'unique_amount_min_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MIN_OFFSET_MICRO', 101),
-        'unique_amount_max_offset_micro' => (int) env('BINANCE_UNIQUE_AMOUNT_MAX_OFFSET_MICRO', 9999),
+        'history_lock_seconds' => (int) env('BINANCE_HISTORY_LOCK_SECONDS', 90),
+        'history_max_pages' => (int) env('BINANCE_HISTORY_MAX_PAGES', 8),
+        'history_max_window_splits' => (int) env('BINANCE_HISTORY_MAX_WINDOW_SPLITS', 8),
+        'history_max_duration_seconds' => (int) env('BINANCE_HISTORY_MAX_DURATION_SECONDS', 45),
         'verify_clock_skew_seconds' => (int) env('BINANCE_VERIFY_CLOCK_SKEW_SECONDS', 0),
         'verify_rate_limit_attempts' => (int) env('BINANCE_VERIFY_RATE_LIMIT_ATTEMPTS', 5),
         'verify_rate_limit_decay_seconds' => (int) env('BINANCE_VERIFY_RATE_LIMIT_DECAY_SECONDS', 300),
+        'verification_queue' => env('BINANCE_VERIFICATION_QUEUE', 'binance-verification'),
     ],
 
     /*
@@ -69,6 +72,15 @@ return [
         'status_refresh_lock_lease_seconds' => (int) env('PAKASIR_STATUS_REFRESH_LOCK_LEASE_SECONDS', 15),
         'status_refresh_single_flight_window_seconds' => (int) env('PAKASIR_STATUS_REFRESH_SINGLE_FLIGHT_WINDOW_SECONDS', 5),
         'status_refresh_in_progress_retry_after_seconds' => (int) env('PAKASIR_STATUS_REFRESH_IN_PROGRESS_RETRY_AFTER_SECONDS', 3),
+        'qris_fee' => [
+            // Official Pakasir pricing published 2026-07-21.
+            'payer' => env('PAKASIR_QRIS_FEE_PAYER', 'customer'),
+            'threshold' => (int) env('PAKASIR_QRIS_FEE_THRESHOLD', 105000),
+            'low_bps' => (int) env('PAKASIR_QRIS_FEE_LOW_BPS', 70),
+            'low_fixed' => (int) env('PAKASIR_QRIS_FEE_LOW_FIXED', 310),
+            'high_bps' => (int) env('PAKASIR_QRIS_FEE_HIGH_BPS', 100),
+            'high_fixed' => (int) env('PAKASIR_QRIS_FEE_HIGH_FIXED', 0),
+        ],
     ],
 
     'klikqris' => [
@@ -88,6 +100,7 @@ return [
 
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
+        'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),
         'telegram_reservation_floor' => (int) env('STOREFRONT_TELEGRAM_RESERVATION_FLOOR', 1),
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
         'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),

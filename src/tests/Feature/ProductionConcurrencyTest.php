@@ -24,6 +24,8 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\Binance\BinanceAutoVerification;
+use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -36,7 +38,6 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
-use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
@@ -109,7 +110,13 @@ class ProductionConcurrencyTest extends TestCase
     {
         $this->requireConcurrencyLane();
         config()->set('services.binance.pay_id', '123456789');
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
 
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'only-binance-secret']);
@@ -134,17 +141,22 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertManagedInventoryInvariants($product);
     }
 
-    public function test_concurrent_binance_auto_verification_checkout_never_commits_duplicate_amounts(): void
+    public function test_concurrent_binance_auto_verification_checkout_allows_same_exact_amount(): void
     {
         $this->requireConcurrencyLane();
         config()->set('services.binance', [
             'pay_id' => '123456789',
             'api_key' => 'read-only-key',
             'api_secret' => 'read-only-secret',
-            'unique_amount_min_offset_micro' => 101,
-            'unique_amount_max_offset_micro' => 101,
         ]);
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
+        app(BinanceOrderIdActivation::class)->activate();
 
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'first-binance-secret']);
@@ -157,10 +169,78 @@ class ProductionConcurrencyTest extends TestCase
             fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), CheckoutPaymentIntents::binancePay())->id,
         ]);
 
-        $this->assertSame(1, $this->successfulResultCount($results));
-        $this->assertSame([RuntimeException::class], $this->failedResultClasses($results));
-        $this->assertSame(1, Payment::query()->where('binance_auto_verification_enabled', true)->count());
-        $this->assertSame(1, Payment::query()->where('amount', 2_000_101)->count());
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $this->assertSame(2, Payment::query()->where('binance_auto_verification_enabled', true)->count());
+        $this->assertSame(2, Payment::query()->where('amount', 2_000_000)->count());
+    }
+
+    public function test_concurrent_binance_verification_claims_one_transaction_once(): void
+    {
+        $this->requireConcurrencyLane();
+        config()->set('services.telegram.token', '');
+        config()->set('services.binance', [
+            'pay_id' => '123456789',
+            'api_key' => 'read-only-key',
+            'api_secret' => 'read-only-secret',
+            'base_url' => 'https://api.binance.test',
+            'history_max_attempts' => 1,
+            'history_retry_delay_ms' => 0,
+            'history_cache_seconds' => 0,
+            'history_lock_seconds' => 1,
+            'verify_clock_skew_seconds' => 0,
+        ]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+        ]);
+        app(BinanceOrderIdActivation::class)->activate();
+
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 2_000_000]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'binance-race-secret']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay());
+        $payment = $order->payments()->sole();
+        $providerOrderId = '445077777777777777';
+        $payment->update([
+            'binance_order_id' => $providerOrderId,
+            'binance_order_id_attempts' => 1,
+            'binance_order_id_submitted_at' => now(),
+            'binance_verification_grace_until' => now()->addMinutes(3),
+        ]);
+        Http::fake([
+            'https://api.binance.test/*' => Http::response([
+                'code' => '000000',
+                'message' => 'success',
+                'success' => true,
+                'data' => [[
+                    'orderId' => $providerOrderId,
+                    'transactionId' => 'P_777777777777',
+                    'amount' => '2',
+                    'currency' => 'USDT',
+                    'transactionTime' => now()->getTimestampMs(),
+                    'receiverInfo' => ['accountId' => '123456789'],
+                ]],
+            ]),
+        ]);
+
+        $results = $this->runConcurrently([
+            fn () => app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId(Payment::findOrFail($payment->id), $providerOrderId)->outcome->value,
+            fn () => app(BinanceAutoVerification::class)->verifyPaymentByProviderOrderId(Payment::findOrFail($payment->id), $providerOrderId)->outcome->value,
+        ]);
+
+        $outcomes = array_map(fn (array $result): mixed => $result['value'] ?? null, $results);
+        sort($outcomes);
+        $this->assertSame(['already_paid', 'confirmed'], $outcomes);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(1, PaymentEvent::where('provider', 'binance')->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
     }
 
     public function test_concurrent_cart_quantity_allows_each_cart_to_hold_last_stock_until_checkout(): void

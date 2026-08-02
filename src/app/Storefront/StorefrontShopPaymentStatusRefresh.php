@@ -27,11 +27,33 @@ class StorefrontShopPaymentStatusRefresh
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontShopPaymentRefreshCoordinator $coordinator,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     public function execute(Order $order): StorefrontShopSignedStatusRefreshResult
     {
         $payment = $this->latestPayment($order);
+
+        if ($this->isBinancePayment($payment)) {
+            $order->refresh();
+            $payment->refresh();
+            $projection = $this->orders->project($order, $payment);
+
+            return StorefrontShopSignedStatusRefreshResult::refreshed(
+                paymentStatus: $payment->status,
+                orderStatus: $order->order_status,
+                isPaid: $projection->isPaid,
+                isTerminal: $this->state($projection) === StorefrontShopSignedInvoiceState::Terminal
+                    || ($payment->binance_verification_mode === 'order_id'
+                        && $payment->binance_verification_grace_until !== null
+                        && ! $payment->binance_verification_grace_until->isFuture()
+                        && ! $projection->isPaid),
+                qrisReady: false,
+                shouldReload: $projection->isPaid,
+                redirectUrl: $this->invoiceUrls->show($order),
+                message: $this->binanceStatusMessage($payment, $projection),
+            );
+        }
 
         if (! $this->isAutomaticQrisPayment($payment)) {
             return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
@@ -184,6 +206,34 @@ class StorefrontShopPaymentStatusRefresh
         return strtolower((string) $payment?->provider) === 'klikqris';
     }
 
+    private function isBinancePayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === 'manual'
+            && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID';
+    }
+
+    private function binanceStatusMessage(Payment $payment, OrderLifecycleProjection $projection): string
+    {
+        if ($projection->isTerminal || $projection->isPaid) {
+            return $this->terminalCopy->message($projection, $payment);
+        }
+
+        if ($payment->binance_auto_verification_enabled && $payment->binance_verification_mode === 'amount_unique') {
+            return $payment->binance_verification_status === 'mismatch'
+                ? 'The payment needs a manual review. Please contact support with your invoice number.'
+                : 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.';
+        }
+
+        return match (true) {
+            $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Order ID received. We are checking your Binance payment securely.',
+            $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
+            $payment->binance_verification_status === 'mismatch' => 'The payment needs a manual review. Please contact support with your invoice number.',
+            $payment->binance_verification_status === 'provider_error' && $payment->binance_verification_grace_until?->isFuture() => 'Your Order ID was received. Verification is temporarily delayed; we will keep checking securely.',
+            in_array($payment->binance_verification_status, ['checking', 'not_found', 'provider_error'], true) => 'Automatic verification has closed. Please contact support with your payment proof.',
+            default => 'Submit your Binance Pay Order ID after completing the payment.',
+        };
+    }
+
     private function hasPayableNativeQris(?Payment $payment): bool
     {
         return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
@@ -226,15 +276,7 @@ class StorefrontShopPaymentStatusRefresh
 
     private function statusMessage(Order $order, ?Payment $payment): string
     {
-        $projection = $this->orders->project($order, $payment);
-
-        return match (true) {
-            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
-            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
-            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
-            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
-        };
+        return $this->terminalCopy->message($this->orders->project($order, $payment), $payment);
     }
 
     /**
@@ -250,7 +292,7 @@ class StorefrontShopPaymentStatusRefresh
             return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
         }
 

@@ -24,7 +24,8 @@ class TelegramManualPaymentIntents
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
     {
-        $order = $this->manualPaymentOrderForCustomer($customer, $invoice);
+        $order = $this->manualPaymentOrderForCustomer($customer, $invoice)
+            ?? $this->expiredBinancePaymentOrderForCustomer($customer, $invoice);
         if (! $order) {
             $this->bot->sendMessage($chatId, $invoice === ''
                 ? $this->locale->text(
@@ -65,13 +66,19 @@ class TelegramManualPaymentIntents
 
         $claim = DB::transaction(function () use ($order, $photoFileId, $adminTelegramChatId): ?array {
             $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($lockedOrder->order_status !== OrderStatus::PendingPayment || $lockedOrder->payment_status !== PaymentStatus::Pending) {
+            $isPendingOrder = $lockedOrder->order_status === OrderStatus::PendingPayment
+                && $lockedOrder->payment_status === PaymentStatus::Pending;
+            $isLateBinanceOrder = $lockedOrder->order_status === OrderStatus::Expired
+                && $lockedOrder->payment_status === PaymentStatus::Expired;
+            if (! $isPendingOrder && ! $isLateBinanceOrder) {
                 return null;
             }
 
             $payment = $lockedOrder->payments()
                 ->where('provider', 'manual')
-                ->where('status', PaymentStatus::Pending)
+                ->when($isLateBinanceOrder, fn ($query) => $query
+                    ->where('method', 'BINANCE_PAY_ID')
+                    ->where('status', PaymentStatus::Expired), fn ($query) => $query->where('status', PaymentStatus::Pending))
                 ->whereNull('payment_proof_submitted_at')
                 ->lockForUpdate()
                 ->first();
@@ -79,17 +86,37 @@ class TelegramManualPaymentIntents
                 return null;
             }
 
+            $deadline = $payment->expired_at ?? $lockedOrder->expires_at;
+            if ($isPendingOrder && $deadline !== null && ! $deadline->isFuture()) {
+                return ['status' => 'expired'];
+            }
+
+            $automaticBinance = $isPendingOrder
+                && $payment->method === 'BINANCE_PAY_ID'
+                && $payment->binance_auto_verification_enabled
+                && in_array($payment->binance_verification_mode, ['amount_unique', 'order_id'], true);
+            if ($automaticBinance
+                && ($payment->binance_verification_mode === 'amount_unique'
+                    || $payment->binance_verification_grace_until === null
+                    || $payment->binance_verification_grace_until->isFuture())) {
+                return ['status' => $payment->binance_verification_mode === 'order_id'
+                    ? 'order_id_required'
+                    : 'automatic_verification_required'];
+            }
+
+            // Proof is review evidence, not payment completion. Keep the
+            // original deadlines so unattended review cannot hold stock forever.
             $payment->update([
                 'payment_proof_file_id' => $photoFileId,
                 'payment_proof_submitted_at' => now(),
                 'payment_proof_admin_chat_id' => $adminTelegramChatId,
-                'expired_at' => null,
             ]);
-            $lockedOrder->update(['expires_at' => null]);
 
             return [
                 'order' => $lockedOrder->fresh(['customer', 'orderItems', 'payments']),
                 'payment' => $payment->fresh(),
+                'late' => $isLateBinanceOrder,
+                'status' => 'accepted',
             ];
         });
         if ($claim === null) {
@@ -102,6 +129,37 @@ class TelegramManualPaymentIntents
             return;
         }
         $this->forgetPendingProofPhoto($customer);
+
+        if ($claim['status'] === 'order_id_required') {
+            $this->bot->sendMessage($chatId, $this->locale->text(
+                $customer,
+                'Pembayaran Binance ini memakai verifikasi Order ID. Klik tombol “Saya Sudah Bayar” pada instruksi checkout lalu kirim Binance Order ID. Screenshot hanya dipakai sebagai fallback setelah order expired.',
+                'This Binance payment requires Order ID verification. Tap “I\'ve Paid” in the checkout instructions and send the Binance Order ID. A screenshot is only used as a fallback after the order expires.',
+            ));
+
+            return;
+        }
+
+        if ($claim['status'] === 'automatic_verification_required') {
+            $this->bot->sendMessage($chatId, $this->locale->text(
+                $customer,
+                'Pembayaran Binance ini memakai nominal unik dan sedang diverifikasi otomatis. Pastikan nominal yang dikirim sama persis dengan instruksi checkout. Screenshot tidak diperlukan selama order masih aktif; sistem akan mengirim produk jika transfer cocok.',
+                'This Binance payment uses a unique amount and is being verified automatically. Make sure the amount you send exactly matches the checkout instructions. A screenshot is not needed while the order is active; the product will be sent when the transfer matches.',
+            ));
+
+            return;
+        }
+
+        if ($claim['status'] === 'expired') {
+            $this->bot->sendMessage($chatId, $this->locale->text(
+                $customer,
+                'Batas pembayaran sudah lewat. Tunggu order diproses sebagai expired, lalu kirim screenshot dengan caption /payment '.$order->invoice_number.' untuk review admin.',
+                'The payment deadline has passed. Wait for the order to expire, then send a screenshot with the caption /payment '.$order->invoice_number.' for admin review.',
+            ));
+
+            return;
+        }
+
         $order = $claim['order'];
         $payment = $claim['payment'];
         $forwarded = false;
@@ -109,6 +167,22 @@ class TelegramManualPaymentIntents
             $forwarded = $this->forwardSubmittedManualPaymentProof($order, $payment);
         } catch (\Throwable $exception) {
             report($exception);
+        }
+
+        if ($claim['late']) {
+            $this->bot->sendMessage($chatId, $forwarded
+                ? $this->locale->text(
+                    $customer,
+                    "📸 Bukti pembayaran terlambat sudah diterima\n━━━━━━━━━━━━━━\nBukti sudah dikirim ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
+                    "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof was sent to the admin for manual review. The order has expired and stock was not reserved again.",
+                )
+                : $this->locale->text(
+                    $customer,
+                    "📸 Bukti pembayaran terlambat sudah masuk\n━━━━━━━━━━━━━━\nBukti akan diteruskan ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
+                    "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof will be forwarded to the admin for manual review. The order has expired and stock was not reserved again.",
+                ));
+
+            return;
         }
 
         $this->bot->sendMessage($chatId, $forwarded
@@ -136,7 +210,13 @@ class TelegramManualPaymentIntents
         $claimed = DB::table('payments')
             ->where('id', $payment->id)
             ->where('provider', 'manual')
-            ->where('status', PaymentStatus::Pending->value)
+            ->where(function ($query): void {
+                $query
+                    ->where('status', PaymentStatus::Pending->value)
+                    ->orWhere(fn ($late) => $late
+                        ->where('method', 'BINANCE_PAY_ID')
+                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value]));
+            })
             ->whereNotNull('payment_proof_file_id')
             ->whereNotNull('payment_proof_submitted_at')
             ->whereNull('payment_proof_forwarded_at')
@@ -168,19 +248,31 @@ class TelegramManualPaymentIntents
         foreach ($order->orderItems as $item) {
             $caption[] = '- '.$item->product_name.' x '.$item->quantity;
         }
-        $caption[] = '';
-        $caption[] = $isBinance
-            ? 'Cek pembayaran Binance Pay dan pastikan nominalnya sama persis, lalu setujui.'
-            : 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
-        $caption[] = 'Kalau belum cocok, tolak agar stok balik lagi.';
+
+        $lateEvidence = $payment->method === 'BINANCE_PAY_ID'
+            && in_array($payment->status, [PaymentStatus::Expired, PaymentStatus::Failed], true)
+            && in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+
+        if ($lateEvidence) {
+            $caption[] = '⚠️ Late Binance evidence: order sudah expired dan stok sudah dilepas.';
+            $caption[] = 'Jangan approve lewat tombol otomatis. Review/refund/fulfill manual sesuai kondisi stok.';
+        } else {
+            $caption[] = '';
+            $caption[] = $isBinance
+                ? 'Cek pembayaran Binance Pay dan pastikan nominalnya sama persis, lalu setujui.'
+                : 'Cek pembayaran QR manual dulu. Kalau pembayaran masuk dan nominal sama persis, setujui.';
+            $caption[] = 'Kalau belum cocok, tolak agar stok balik lagi.';
+        }
+
+        $replyMarkup = $lateEvidence ? [] : [
+            'inline_keyboard' => [[
+                ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
+                ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
+            ]],
+        ];
 
         try {
-            $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), [
-                'inline_keyboard' => [[
-                    ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
-                    ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
-                ]],
-            ]);
+            $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), $replyMarkup);
         } catch (\Throwable $exception) {
             DB::table('payments')
                 ->where('id', $payment->id)
@@ -304,6 +396,25 @@ class TelegramManualPaymentIntents
             ->where('payment_status', PaymentStatus::Pending)
             ->when($invoice !== '', fn ($query) => $query->where('invoice_number', $invoice))
             ->whereHas('payments', fn ($query) => $query->where('provider', 'manual')->where('status', PaymentStatus::Pending))
+            ->latest()
+            ->first();
+    }
+
+    private function expiredBinancePaymentOrderForCustomer(Customer $customer, string $invoice): ?Order
+    {
+        if ($invoice === '') {
+            return null;
+        }
+
+        return $customer->orders()
+            ->where('invoice_number', $invoice)
+            ->where('order_status', OrderStatus::Expired)
+            ->where('payment_status', PaymentStatus::Expired)
+            ->whereHas('payments', fn ($query) => $query
+                ->where('provider', 'manual')
+                ->where('method', 'BINANCE_PAY_ID')
+                ->where('status', PaymentStatus::Expired)
+                ->whereNull('payment_proof_submitted_at'))
             ->latest()
             ->first();
     }

@@ -459,6 +459,7 @@ function initShopPaymentStatus() {
     containers.forEach((container) => {
         const statusUrl = container.getAttribute('data-status-url');
         const redirectUrl = container.getAttribute('data-redirect-url');
+        const isBinance = container.getAttribute('data-payment-kind') === 'binance';
         const title = container.querySelector('[data-payment-status-title]');
         const message = container.querySelector('[data-payment-status-message]');
         const announcement = container.querySelector('[data-payment-status-announcement]');
@@ -504,7 +505,7 @@ function initShopPaymentStatus() {
             }
 
             button.disabled = true;
-            setStatus('Mengecek pembayaran', 'Tunggu sebentar, status QRIS sedang dicek.');
+            setStatus(isBinance ? 'Checking Binance Pay' : 'Mengecek pembayaran', isBinance ? 'We are checking your submitted Order ID securely.' : 'Tunggu sebentar, status QRIS sedang dicek.');
 
             try {
                 const response = await window.fetch(statusUrl, {
@@ -556,6 +557,9 @@ function initShopPaymentStatus() {
                     container.setAttribute('data-terminal', 'true');
                     button.hidden = true;
                     followup?.classList.remove('hidden');
+                    if (isBinance && data.is_terminal === true) {
+                        window.location.href = data.redirect_url || redirectUrl || window.location.href;
+                    }
                     return;
                 }
 

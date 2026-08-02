@@ -16,10 +16,11 @@ class AdminDashboardController extends Controller
     {
         $user = $request->attributes->get('adminUser');
 
-        $viewData = $dashboardData->forAdmin(
+        $viewData = $dashboardData->forActiveTab(
             $user,
             (string) $request->query('tab', 'stats'),
             (string) $request->query('sales_filter', 'all'),
+            max(1, (int) $request->query('products_page', 1)),
         );
         $viewData['dashboardState'] = $dashboardState->build(
             $viewData['productsTab'],
@@ -27,6 +28,9 @@ class AdminDashboardController extends Controller
             $viewData['navigation'],
             $request->session()->get('errors', new ViewErrorBag),
         );
+        if ($viewData['navigation']['activeTab'] === 'produk' && $request->query('product_form') === 'create') {
+            $viewData['dashboardState']['productModalOpen'] = true;
+        }
 
         return view('admin.dashboard', $viewData);
     }

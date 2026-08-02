@@ -57,11 +57,15 @@ readonly class PakasirQrisTransaction
         return $this->nullableIntField('total_payment');
     }
 
-    public function hasValidFinalAmount(): bool
+    public function hasValidFinalAmount(?PakasirQrisFeePolicy $fees = null): bool
     {
-        $totalPayment = $this->totalPayment();
+        try {
+            $this->assertFinancialIntegrity($fees ?? PakasirQrisFeePolicy::officialCustomer());
+        } catch (UnexpectedValueException) {
+            return false;
+        }
 
-        return $totalPayment !== null && $totalPayment >= $this->amount();
+        return true;
     }
 
     public function paymentMethod(): string
@@ -85,7 +89,7 @@ readonly class PakasirQrisTransaction
         return CarbonImmutable::parse($this->normalizeTimestamp($value));
     }
 
-    public function assertMatches(Payment $payment, string $project): void
+    public function assertMatches(Payment $payment, string $project, ?PakasirQrisFeePolicy $fees = null): void
     {
         if ($this->project() !== $project) {
             throw new UnexpectedValueException('Pakasir QRIS create response project mismatch.');
@@ -102,11 +106,29 @@ readonly class PakasirQrisTransaction
         if ($this->paymentMethod() !== 'qris') {
             throw new UnexpectedValueException('Pakasir QRIS create response method mismatch.');
         }
+
+        $this->assertFinancialIntegrity($fees ?? PakasirQrisFeePolicy::officialCustomer());
     }
 
     public function sanitizedPayload(): array
     {
         return PakasirPayloadSanitizer::sanitize($this->payload);
+    }
+
+    private function assertFinancialIntegrity(PakasirQrisFeePolicy $fees): void
+    {
+        $fee = $this->fee();
+        if ($fee === null) {
+            throw new UnexpectedValueException('Pakasir QRIS response is missing fee.');
+        }
+
+        $total = $this->totalPayment();
+        if ($total === null) {
+            throw new UnexpectedValueException('Pakasir QRIS response is missing total_payment.');
+        }
+
+        $fees->assertValid($this->amount(), $fee, $total);
+        QrisEmvPayload::parse($this->paymentNumber())->assertMatchesIdrAmount($total);
     }
 
     private function stringField(string $key): string

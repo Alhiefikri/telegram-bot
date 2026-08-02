@@ -12,7 +12,9 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -46,12 +48,50 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee('mobile-bottom-nav', false)
             ->assertSee('md:grid-cols-4', false)
             ->assertSee('admin-mini-shell', false)
-            ->assertSee('overflow-x-auto', false)
+            ->assertDontSee('overflow-x-auto', false)
             ->assertSee('x-data', false)
             ->assertDontSee('Escrow')
             ->assertDontSee('fi-sidebar', false);
 
         $this->assertStringNotContainsString('<aside', $response->getContent());
+    }
+
+    public function test_stats_request_skips_inactive_tab_data_queries(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        Product::factory()->create();
+        Order::factory()->create();
+
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        $this->get(route('admin.dashboard', ['tab' => 'stats']))->assertOk();
+
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'product_stock_items')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'order_items')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'telegram_broadcasts')));
+    }
+
+    public function test_product_request_skips_inactive_stats_tab_queries(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        Product::factory()->create();
+
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        $this->get(route('admin.dashboard', ['tab' => 'produk']))->assertOk();
+
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'manual_payment_settings')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'sales_proof_posts')));
     }
 
     public function test_primary_admin_entry_uses_manual_dashboard_and_no_filament_routes(): void
@@ -74,6 +114,46 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertDontSee('fi-wi-widget', false)
             ->assertDontSee('filament.widgets', false)
             ->assertDontSee('fi-sidebar', false);
+    }
+
+    public function test_product_pagination_keeps_older_sold_out_and_paused_products_manageable(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+
+        $oldest = Product::factory()->create([
+            'name' => 'Produk Lama Stok Kosong',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => false,
+            'created_at' => now()->subDays(30),
+        ]);
+
+        Product::factory()->count(20)->sequence(
+            fn ($sequence) => [
+                'name' => 'Produk Baru '.($sequence->index + 1),
+                'created_at' => now()->subMinutes(20 - $sequence->index),
+            ],
+        )->create();
+
+        $this->get('/admin?tab=produk&sales_filter=waiting&source=telegram')
+            ->assertOk()
+            ->assertSee('Produk Baru 20')
+            ->assertDontSee($oldest->name)
+            ->assertSee('Halaman 1 dari 2')
+            ->assertSee('products_page=2', false)
+            ->assertSee('tab=produk', false)
+            ->assertSee('sales_filter=waiting', false)
+            ->assertSee('source=telegram', false);
+
+        $this->get('/admin?tab=produk&products_page=2')
+            ->assertOk()
+            ->assertSee($oldest->name)
+            ->assertSee('○ Tidak tampil')
+            ->assertSee(route('admin.products.update', $oldest), false)
+            ->assertSee('Halaman 2 dari 2')
+            ->assertSee('products_page=1', false);
     }
 
     public function test_cutover_removes_filament_runtime_surface(): void

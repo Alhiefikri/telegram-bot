@@ -165,6 +165,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '⏳ Batas bayar QRIS: 04 Jul 2026 15:45 WIB',
         ]);
         $this->assertStringContainsString('QR tidak bisa discan', $instruction->caption());
+        $this->assertStringContainsString('Biaya QRIS dibayar pelanggan dan sudah termasuk dalam total di atas.', $instruction->caption());
         $this->assertStringContainsString('Bayar via Website', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', $instruction->caption());
         $this->assertStringNotContainsString('Pakasir', json_encode($instruction->replyMarkup) ?: '');
@@ -200,6 +201,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('If the QR code cannot be scanned', $instruction->caption());
         $this->assertStringContainsString('Pay via Website', $instruction->caption());
         $this->assertStringContainsString('verified automatically', $instruction->caption());
+        $this->assertStringContainsString('The QRIS fee is paid by the customer and is included in the total above.', $instruction->caption());
         $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
     }
 

@@ -29,16 +29,27 @@ final class AdminDashboardStatsData
      */
     public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink): array
     {
-        return [
+        return $this->forHeader($metrics, $storeLink) + [
             'balance' => $this->balance($metrics['read_only_balance_amount']),
-            'storeLink' => $storeLink,
             'cards' => $this->statsCards($metrics),
-            'summary' => $this->summaryCards($metrics),
-            'storeStatus' => $this->storeStatus($metrics),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
+        ];
+    }
+
+    /**
+     * @param  array<string, int>  $metrics
+     * @param  array<string, string>  $storeLink
+     * @return array<string, mixed>
+     */
+    public function forHeader(array $metrics, array $storeLink): array
+    {
+        return [
+            'storeLink' => $storeLink,
+            'summary' => $this->summaryCards($metrics),
+            'storeStatus' => $this->storeStatus($metrics),
             'actions' => [
                 'shop' => url('/#products'),
                 'share' => $storeLink['url'],
@@ -154,6 +165,9 @@ final class AdminDashboardStatsData
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'binance_pay_enabled' => (bool) $settings?->binance_pay_enabled,
+            'binance_verification_mode' => in_array($settings?->binance_verification_mode, ['amount_unique', 'order_id'], true)
+                ? $settings->binance_verification_mode
+                : 'amount_unique',
             'qris_payment_ttl_minutes' => $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
             'binance_payment_ttl_minutes' => $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES,
             'whatsapp_support_url' => $settings?->whatsapp_support_url,

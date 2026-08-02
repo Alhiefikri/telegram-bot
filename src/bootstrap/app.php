@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AuthorizeAdminAccess;
 use App\Http\Middleware\PreventAdminMiniAppCache;
+use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -21,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.no-cache' => PreventAdminMiniAppCache::class,
             'storefront.signed' => ValidateStorefrontSignedInvoice::class,
         ]);
+        $middleware->append(RedirectToCanonicalHost::class);
 
         $trustedProxies = array_values(array_filter(array_map(
             'trim',
@@ -42,9 +44,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'trim',
             explode(',', (string) env('TRUSTED_HOSTS', ''))
         )));
-
         if ($trustedHosts !== []) {
-            $middleware->trustHosts(at: fn () => $trustedHosts);
+            $middleware->trustHosts(at: fn () => RedirectToCanonicalHost::trustedHosts(
+                $trustedHosts,
+                (string) config('app.url'),
+            ));
         }
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -1,5 +1,5 @@
             {{-- ╔═════════════════════════════════════════════════════╗
-                 ║  BROADCAST TAB (hidden from bottom nav)             ║
+                 ║  BROADCAST TAB                                      ║
                  ╚═════════════════════════════════════════════════════╝ --}}
             <div id="admin-section-broadcast" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'broadcast'" class="mt-4 space-y-4">
 

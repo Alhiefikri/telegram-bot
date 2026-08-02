@@ -46,16 +46,16 @@ class PakasirNativeQrisService
 
                 try {
                     $transaction = $this->pakasir->createQrisTransaction($payment);
-                    $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+                    $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
                 } catch (\Throwable $exception) {
-                    $this->markCreationOutcomeUnknown($payment, $exception);
+                    $this->markCreationFailure($payment, $exception);
 
                     throw new \RuntimeException('QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.', 0, $exception);
                 }
 
                 $transaction = $this->persistCreatedTransaction($payment, $transaction);
 
-                if (! $transaction->hasValidFinalAmount()) {
+                if (! $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig())) {
                     throw new \RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
                 }
 
@@ -86,8 +86,8 @@ class PakasirNativeQrisService
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_payment_number' => $transaction->paymentNumber(),
                 'provider_payment_number_hash' => hash('sha256', $transaction->paymentNumber()),
-                'provider_create_state' => $transaction->hasValidFinalAmount() ? 'created' : 'provider_total_pending',
-                'provider_create_last_error' => $transaction->hasValidFinalAmount() ? null : 'missing_provider_total_payment',
+                'provider_create_state' => $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig()) ? 'created' : 'provider_total_pending',
+                'provider_create_last_error' => $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig()) ? null : 'missing_provider_total_payment',
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -134,14 +134,15 @@ class PakasirNativeQrisService
         $payment->refresh();
     }
 
-    private function markCreationOutcomeUnknown(Payment $payment, \Throwable $exception): void
+    private function markCreationFailure(Payment $payment, \Throwable $exception): void
     {
+        $integrityFailure = $exception instanceof \UnexpectedValueException;
         Payment::query()
             ->whereKey($payment->id)
             ->whereNull('provider_payment_number_hash')
             ->update([
-                'provider_create_state' => 'outcome_unknown',
-                'provider_create_last_error' => substr($exception::class, 0, 500),
+                'provider_create_state' => $integrityFailure ? 'financial_integrity_failed' : 'outcome_unknown',
+                'provider_create_last_error' => substr($integrityFailure ? $exception->getMessage() : $exception::class, 0, 500),
             ]);
     }
 
@@ -149,10 +150,10 @@ class PakasirNativeQrisService
     {
         try {
             $transaction = PakasirQrisTransaction::fromPayload($this->pakasir->transactionDetail($payment));
-            $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+            $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
             $this->persistCreatedTransaction($payment, $transaction);
         } catch (\Throwable $exception) {
-            $this->markCreationOutcomeUnknown($payment, $exception);
+            $this->markCreationFailure($payment, $exception);
         }
     }
 
@@ -179,7 +180,7 @@ class PakasirNativeQrisService
         }
 
         $transaction = PakasirQrisTransaction::fromPayload(['payment' => $providerPayment]);
-        $transaction->assertMatches($payment, (string) config('services.pakasir.slug'));
+        $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
 
         return $transaction;
     }

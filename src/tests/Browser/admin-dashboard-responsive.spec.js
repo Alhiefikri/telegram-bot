@@ -143,7 +143,7 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
     await page.goto(`${baseUrl}${invoiceFixtures.pendingStatusRefresh.showUrl}`, { waitUntil: 'domcontentloaded' });
 
     const statusCard = page.locator('[data-shop-payment-status]');
-    await expect(statusCard.getByText('Cek status pembayaran', { exact: true }).first()).toBeVisible();
+    await expect(statusCard.getByText('Sedang membuat QRIS', { exact: true }).first()).toBeVisible();
 
     runArtisan(['tinker', '--execute', `
         $order = App\\Models\\Order::findOrFail('${invoiceFixtures.pendingStatusRefresh.orderId}');
@@ -154,11 +154,11 @@ test('announces terminal QRIS status and exposes buyer next steps', async ({ pag
         App\\Models\\Payment::where('order_id', $order->id)->update(['status' => App\\Enums\\PaymentStatus::Failed]);
     `]);
 
-    await statusCard.getByRole('button', { name: 'Cek status pembayaran' }).click();
+    await statusCard.getByRole('button', { name: 'Coba cek QRIS' }).click();
     await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Status pembayaran final');
     await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
     await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
-    await expect(statusCard.getByRole('button', { name: 'Cek status pembayaran' })).toBeHidden();
+    await expect(statusCard.getByRole('button', { name: 'Coba cek QRIS' })).toBeHidden();
     await expect(statusCard.getByRole('link', { name: 'Belanja lagi' })).toBeVisible();
     await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
     await expectNoDocumentOverflow(page);
@@ -393,7 +393,33 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectNoDocumentOverflow(page);
     await submitProductFromMiniAppModal(page);
 
-    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
+    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' }).first();
+    const productActions = productCard.locator('[data-product-actions]').first();
+    const primaryAction = productActions.locator('[data-product-primary-action]').first();
+    const secondaryActions = productActions.locator('[data-product-secondary-actions]').first();
+    const moreTrigger = productActions.locator('[data-product-more-trigger]').first();
+    const morePanel = productActions.locator('[data-product-more-panel]').first();
+
+    await expect(primaryAction.getByRole('button', { name: 'Stok', exact: true })).toBeVisible();
+    await expect(secondaryActions.getByRole('button', { name: 'Ubah', exact: true })).toBeVisible();
+    await expect(secondaryActions.getByRole('button', { name: 'Kelola', exact: true })).toBeVisible();
+    await expect(productActions.getByRole('button', { name: 'Bagikan', exact: true })).toBeHidden();
+    await expect(productActions.getByRole('button', { name: /Pause|Aktifkan/ })).toBeHidden();
+    await expect(productActions.getByRole('button', { name: 'Arsipkan', exact: true })).toBeHidden();
+    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    await expectBefore(primaryAction, secondaryActions);
+    await expectBefore(secondaryActions, moreTrigger);
+    await expectStrictTouchTargetsAtLeast44px(productActions);
+
+    await moreTrigger.click();
+    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'true');
+    await expect(morePanel).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: /Pause|Aktifkan/ })).toBeVisible();
+    await expect(morePanel.getByRole('button', { name: 'Arsipkan', exact: true })).toBeVisible();
+    await expectStrictTouchTargetsAtLeast44px(productActions);
+
     await productCard.getByRole('button', { name: 'Kelola' }).click();
 
     const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
@@ -426,6 +452,73 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectPrimaryActionsAtLeast44px(page);
 });
 
+test('traps keyboard focus in the product modal and restores its opener', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    const opener = page.getByRole('button', { name: /Tambah Produk/i });
+    await opener.click();
+
+    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
+    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
+    const submitButton = dialog.getByRole('button', { name: /Submit produk/i });
+    await expect(dialog.locator('#product-name')).toBeFocused();
+
+    await closeButton.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(submitButton).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+
+    await opener.click();
+    await dialog.getByRole('button', { name: 'Tutup modal' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
+test('traps keyboard focus in the stock modal and restores its opener', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
+    const opener = productCard.getByRole('button', { name: /Stok/i });
+    await opener.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Tambah Stok' });
+    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
+    const submitButton = dialog.getByRole('button', { name: /Simpan/i });
+    await expect(dialog.locator('#stock-items')).toBeFocused();
+
+    await closeButton.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(submitButton).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeButton).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
+test('focuses the relevant product field when server validation reopens the modal', async ({ page }) => {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+
+    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
+    await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+        dialog.locator('form').evaluate((form) => form.submit()),
+    ]);
+
+    await expect(page.getByRole('dialog', { name: /Tambah produk/i })).toBeVisible();
+    await expect(page.locator('#product-name')).toBeFocused();
+});
+
 for (const navClickCase of [
     {
         name: 'desktop/tablet navigation',
@@ -446,6 +539,44 @@ for (const navClickCase of [
     });
 }
 
+test('preserves the sales filter while visiting another dashboard tab', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+
+    const nav = page.getByRole('navigation', { name: 'Navigasi desktop' });
+    await nav.getByRole('button', { name: 'Produk', exact: true }).click();
+    await page.waitForURL(`${baseUrl}/admin?tab=produk&sales_filter=waiting`);
+    await nav.getByRole('button', { name: 'Pesanan', exact: true }).click();
+
+    await expect(page).toHaveURL(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+});
+
+for (const broadcastDirectCase of [
+    {
+        name: 'desktop',
+        viewport: { width: 1024, height: 900 },
+        navigationName: 'Navigasi desktop',
+    },
+    {
+        name: 'Telegram mini app',
+        viewport: { width: 375, height: 900 },
+        navigationName: 'Navigasi dashboard',
+    },
+]) {
+    test(`opens Siaran directly with matching active navigation on ${broadcastDirectCase.name}`, async ({ page }) => {
+        await page.setViewportSize(broadcastDirectCase.viewport);
+        await login(page);
+        await page.goto(`${baseUrl}/admin?tab=broadcast`);
+
+        await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+
+        const nav = page.getByRole('navigation', { name: broadcastDirectCase.navigationName });
+        await expect(nav.getByRole('button', { name: 'Siaran', exact: true })).toHaveClass(/bottom-nav-active/);
+    });
+}
+
 async function expectClickedDashboardControlsToWork(page, navigationName) {
     const nav = page.getByRole('navigation', { name: navigationName });
     await expect(nav).toBeVisible();
@@ -461,6 +592,12 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
     await nav.getByRole('button', { name: 'Channel', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Telegram Channel' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Setup Store Channel' })).toBeVisible();
+
+    const broadcastButton = nav.getByRole('button', { name: 'Siaran', exact: true });
+    await broadcastButton.click();
+    await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+    await expect(broadcastButton).toHaveClass(/bottom-nav-active/);
 
     await nav.getByRole('button', { name: 'Tambah', exact: true }).click();
     const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
@@ -612,15 +749,19 @@ async function expectOneColumn(firstLocator, secondLocator) {
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
-    expect(Math.abs(first.x - second.x)).toBeLessThanOrEqual(2);
+    const firstCenterX = first.x + first.width / 2;
+    const secondCenterX = second.x + second.width / 2;
+    expect(Math.abs(firstCenterX - secondCenterX)).toBeLessThanOrEqual(2);
 
     const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
     expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
 }
 
 async function expectBefore(firstLocator, secondLocator) {
-    const first = await firstLocator.first().boundingBox();
-    const second = await secondLocator.first().boundingBox();
+    const [first, second] = await Promise.all([
+        firstLocator.first().boundingBox(),
+        secondLocator.first().boundingBox(),
+    ]);
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
@@ -648,11 +789,37 @@ async function expectPrimaryActionsAtLeast44px(page) {
     expect(tooSmall, `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
 }
 
+async function expectStrictTouchTargetsAtLeast44px(locator) {
+    const tooSmall = await locator.locator('button, a[href]').evaluateAll((elements) => elements
+        .filter((element) => {
+            const style = window.getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+        })
+        .map((element) => {
+            const rect = element.getBoundingClientRect();
+
+            return {
+                label: (element.textContent || element.getAttribute('aria-label') || element.tagName).trim(),
+                width: rect.width,
+                height: rect.height,
+            };
+        })
+        .filter(({ width, height }) => width < 44 || height < 44));
+
+    expect(tooSmall, `touch targets below 44x44 CSS px: ${JSON.stringify(tooSmall)}`).toEqual([]);
+}
+
 async function expectTouchTargetAtLeast44px(locator) {
     const box = await locator.boundingBox();
 
     expect(box).not.toBeNull();
-    expect(Math.ceil(box.height)).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {
@@ -747,6 +914,7 @@ use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\QrisTestPayload;
 
 User::query()->updateOrCreate(
     ['email' => 'test@example.com'],
@@ -863,15 +1031,19 @@ $qrisOrder = Order::factory()->create([
     'expires_at' => now()->addMinutes(15),
 ]);
 
+$qrisFee = QrisTestPayload::officialFee(45000);
+$qrisTotal = 45000 + $qrisFee;
+$qrisPayload = QrisTestPayload::forAmount($qrisTotal, 'BROWSERPENDING');
+
 Payment::factory()->create([
     'order_id' => $qrisOrder->id,
     'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
-    'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERPENDING99',
-    'provider_payment_number_hash' => hash('sha256', '00020101021226610016ID.CO.QRIS.BROWSERPENDING99'),
-    'provider_fee' => 350,
-    'provider_total_payment' => 45350,
+    'provider_payment_number' => $qrisPayload,
+    'provider_payment_number_hash' => hash('sha256', $qrisPayload),
+    'provider_fee' => $qrisFee,
+    'provider_total_payment' => $qrisTotal,
     'amount' => 45000,
     'status' => PaymentStatus::Pending,
     'expired_at' => now()->addMinutes(15),

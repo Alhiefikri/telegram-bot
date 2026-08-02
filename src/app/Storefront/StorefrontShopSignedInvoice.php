@@ -21,6 +21,7 @@ class StorefrontShopSignedInvoice
         private readonly ProductUsageGuide $usageGuides,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
+        private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -39,6 +40,7 @@ class StorefrontShopSignedInvoice
             payment: $payment,
             state: $state,
             statusUrl: $this->invoiceUrls->status($order),
+            binanceOrderIdUrl: $this->invoiceUrls->binanceOrderId($order),
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
             canCancel: $this->canCancel($order, $projection),
@@ -144,13 +146,35 @@ class StorefrontShopSignedInvoice
     {
         $projection = $this->orders->project($order, $payment);
 
-        return match (true) {
-            $projection->isPaid => 'Pembayaran terverifikasi. Invoice akan dibuka ulang untuk menampilkan data akun.',
-            $projection->terminalCause === 'expired' => 'Invoice QRIS sudah kedaluwarsa. Jangan bayar QRIS ini; buat order baru dari katalog.',
-            $projection->terminalCause === 'cancelled' => 'Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.',
-            $projection->terminalCause === 'provider_failed' => 'Pembayaran gagal. Jangan bayar QRIS ini; buat order baru atau hubungi admin.',
-            default => 'Pembayaran belum masuk. Jika sudah bayar, coba cek lagi beberapa saat lagi.',
-        };
+        if ($projection->isTerminal) {
+            return $this->terminalCopy->message($projection, $payment);
+        }
+
+        if (strtolower((string) $payment?->provider) === 'manual'
+            && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
+            && $payment?->binance_auto_verification_enabled
+            && $payment?->binance_verification_mode === 'amount_unique') {
+            return match (true) {
+                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
+                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
+                default => 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.',
+            };
+        }
+
+        if (strtolower((string) $payment?->provider) === 'manual' && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID'
+            && $payment?->binance_verification_mode === 'order_id') {
+            return match (true) {
+                $projection->isPaid => 'Binance Pay payment verified. Your delivery is ready below.',
+                $payment->binance_verification_status === 'mismatch' => 'This Binance payment needs a manual review. Please contact support with your invoice number.',
+                $payment->binance_verification_status === 'provider_error' && $payment->binance_verification_grace_until?->isFuture() => 'Binance verification is temporarily delayed. We will keep checking securely.',
+                $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Your Binance Pay Order ID is being checked securely.',
+                $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
+                in_array($payment->binance_verification_status, ['provider_error', 'checking', 'not_found'], true) => 'Automatic verification has closed. Please contact support with your payment proof.',
+                default => 'Submit your Binance Pay Order ID after completing the payment.',
+            };
+        }
+
+        return $this->terminalCopy->message($projection, $payment);
     }
 
     /**
@@ -188,7 +212,7 @@ class StorefrontShopSignedInvoice
             ];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending'], true)) {
+        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return [
                 'is_payable' => false,
                 'state' => 'failed',

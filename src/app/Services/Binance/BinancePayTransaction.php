@@ -66,6 +66,19 @@ final readonly class BinancePayTransaction
         return $this->transactionId;
     }
 
+    public function matchesSubmittedOrderId(string $submitted): string|false
+    {
+        if ($this->orderId !== '' && hash_equals($this->orderId, $submitted)) {
+            return 'order_id';
+        }
+
+        if ($this->transactionId !== '' && hash_equals($this->transactionId, $submitted)) {
+            return 'transaction_id_compatibility';
+        }
+
+        return false;
+    }
+
     public function amountMicro(): int
     {
         return $this->amountMicro;
@@ -88,15 +101,28 @@ final readonly class BinancePayTransaction
 
     public function isIncomingTo(string $merchantPayId): bool
     {
-        if ($this->amountMicro <= 0 || $merchantPayId === '') {
+        return $this->isIncomingToConfiguredReceiver($merchantPayId, null);
+    }
+
+    public function isIncomingToConfiguredReceiver(?string $merchantPayId, ?string $merchantUid): bool
+    {
+        if ($this->amountMicro <= 0) {
             return false;
         }
 
-        if ($this->receiverAccountId !== '') {
-            return hash_equals($this->receiverAccountId, $merchantPayId);
-        }
+        $payId = trim((string) $merchantPayId);
+        $uid = trim((string) $merchantUid);
+        $payIdMatch = filled($payId)
+            && (($this->receiverAccountId !== ''
+                && hash_equals($this->receiverAccountId, $payId))
+                || ($this->receiverAccountId === ''
+                    && $this->receiverBinanceId !== ''
+                    && hash_equals($this->receiverBinanceId, $payId)));
+        $uidMatch = filled($uid)
+            && $this->receiverBinanceId !== ''
+            && hash_equals($this->receiverBinanceId, $uid);
 
-        return $this->receiverBinanceId !== '' && hash_equals($this->receiverBinanceId, $merchantPayId);
+        return $payIdMatch || $uidMatch;
     }
 
     /** @return array<string, mixed> */
@@ -108,27 +134,40 @@ final readonly class BinancePayTransaction
     /** @return array<string, mixed> */
     private static function sanitize(array $payload): array
     {
-        $payer = is_array($payload['payerInfo'] ?? null) ? $payload['payerInfo'] : [];
         $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
 
         return array_filter([
-            'orderId' => self::stringValue($payload['orderId'] ?? null),
-            'transactionId' => self::stringValue($payload['transactionId'] ?? null),
+            'orderId' => self::maskIdentifier(self::stringValue($payload['orderId'] ?? null)),
+            'transactionId' => self::maskIdentifier(self::stringValue($payload['transactionId'] ?? null)),
             'orderType' => self::stringValue($payload['orderType'] ?? null),
             'amount' => self::stringValue($payload['amount'] ?? null),
             'currency' => self::stringValue($payload['currency'] ?? null),
             'transactionTime' => is_numeric($payload['transactionTime'] ?? null) ? (int) $payload['transactionTime'] : null,
-            'note' => self::stringValue($payload['note'] ?? null),
-            'payerName' => self::stringValue($payer['name'] ?? null),
-            'payerBinanceId' => is_numeric($payer['binanceId'] ?? null) ? (string) $payer['binanceId'] : null,
-            'receiverName' => self::stringValue($receiver['name'] ?? null),
-            'receiverBinanceId' => is_scalar($receiver['binanceId'] ?? null) ? self::stringValue($receiver['binanceId']) : null,
-            'receiverAccountId' => is_scalar($receiver['accountId'] ?? null) ? self::stringValue($receiver['accountId']) : null,
+            'receiverBinanceId' => is_scalar($receiver['binanceId'] ?? null) ? self::maskIdentifier(self::stringValue($receiver['binanceId'])) : null,
+            'receiverAccountId' => is_scalar($receiver['accountId'] ?? null) ? self::maskIdentifier(self::stringValue($receiver['accountId'])) : null,
         ], fn ($value) => $value !== null && $value !== '');
     }
 
     private static function stringValue(mixed $value): string
     {
         return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    public static function maskIdentifier(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        if (str_contains($value, '•')) {
+            return $value;
+        }
+
+        if (strlen($value) <= 8) {
+            return str_repeat('•', strlen($value));
+        }
+
+        return substr($value, 0, 4).'••••'.substr($value, -4);
     }
 }

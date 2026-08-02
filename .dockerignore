@@ -2,6 +2,7 @@
 .gitignore
 .agents/
 .claude/
+.worktrees/
 .commandcode/
 .github/
 .slim/
@@ -27,3 +28,6 @@ src/storage/
 src/storage/logs/
 src/bootstrap/cache/*.php
 src/tests/
+__pycache__/
+*.pyc
+.impeccable/

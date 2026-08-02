@@ -25,6 +25,12 @@ trait StorefrontSignedInvoiceScenarios
         ?string $secret = null,
         array $productAttributes = [],
     ): array {
+        if ($providerFee !== null && $providerTotalPayment !== null) {
+            $providerFee = QrisTestPayload::officialFee($totalAmount);
+            $providerTotalPayment = $totalAmount + $providerFee;
+            $paymentNumber = QrisTestPayload::forAmount($providerTotalPayment);
+        }
+
         $product = $this->availableProduct(array_merge([
             'name' => 'Signed Invoice Product',
             'price_amount' => $totalAmount,

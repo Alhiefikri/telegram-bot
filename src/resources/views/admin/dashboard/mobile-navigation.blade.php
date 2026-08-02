@@ -9,7 +9,7 @@
                     {{-- Ringkasan --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'stats'"
+                        x-on:click="goToTab('stats')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'stats' ? 'bottom-nav-active' : ''"
                     >
@@ -22,7 +22,7 @@
                     {{-- Produk --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'produk'"
+                        x-on:click="goToTab('produk')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'produk' ? 'bottom-nav-active' : ''"
                     >
@@ -35,7 +35,7 @@
                     {{-- Pesanan --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'penjualan'"
+                        x-on:click="goToTab('penjualan')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'penjualan' ? 'bottom-nav-active' : ''"
                     >
@@ -45,10 +45,23 @@
                         <span class="text-[10px] font-bold text-current">Pesanan</span>
                     </button>
 
+                    {{-- Siaran --}}
+                    <button
+                        type="button"
+                        x-on:click="goToTab('broadcast')"
+                        class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
+                        :class="activeTab === 'broadcast' ? 'bottom-nav-active' : ''"
+                    >
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M11 5 6 9H3v6h3l5 4V5Zm4.5 4.5a4 4 0 0 1 0 5m2.5-8a8 8 0 0 1 0 10" />
+                        </svg>
+                        <span class="text-[10px] font-bold text-current">Siaran</span>
+                    </button>
+
                     {{-- Telegram Channel --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'telegram-channel'"
+                        x-on:click="goToTab('telegram-channel')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'telegram-channel' ? 'bottom-nav-active' : ''"
                     >
@@ -62,7 +75,7 @@
                     {{-- Tambah --}}
                     <button
                         type="button"
-                        x-on:click="openProductForm()"
+                        x-on:click="goToTab('produk', true)"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="productModalOpen && productModalMode === 'create' ? 'bottom-nav-active' : ''"
                     >

@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\PaymentStatus;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\Pakasir\PakasirQrisFeePolicy;
+use App\Services\Pakasir\QrisEmvPayload;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -30,6 +32,16 @@ use Illuminate\Database\Eloquent\Model;
     'provider_create_last_error',
     'method',
     'binance_auto_verification_enabled',
+    'binance_verification_mode',
+    'binance_receiver_type',
+    'binance_receiver_value',
+    'binance_order_id',
+    'binance_order_id_attempts',
+    'binance_order_id_submission_version',
+    'binance_order_id_submitted_at',
+    'binance_verification_grace_until',
+    'binance_verification_status',
+    'binance_last_verified_at',
     'amount',
     'currency',
     'status',
@@ -47,6 +59,11 @@ class Payment extends Model
         return [
             'amount' => 'integer',
             'binance_auto_verification_enabled' => 'boolean',
+            'binance_order_id_submission_version' => 'integer',
+            'binance_order_id_attempts' => 'integer',
+            'binance_order_id_submitted_at' => 'datetime',
+            'binance_verification_grace_until' => 'datetime',
+            'binance_last_verified_at' => 'datetime',
             'provider_payload' => 'array',
             'provider_fee' => 'integer',
             'provider_total_payment' => 'integer',
@@ -88,12 +105,31 @@ class Payment extends Model
 
     public function isPayableNativePakasirQris(): bool
     {
-        return $this->status === PaymentStatus::Pending
+        $candidate = $this->status === PaymentStatus::Pending
             && $this->providerName() === 'pakasir'
             && $this->providerPaymentMethodName() === 'qris'
             && filled($this->provider_payment_number)
+            && $this->provider_fee !== null
             && $this->provider_total_payment !== null
-            && $this->provider_total_payment >= $this->amount;
+            && $this->amount > 0;
+
+        if (! $candidate) {
+            return false;
+        }
+
+        try {
+            PakasirQrisFeePolicy::fromConfig()->assertValid(
+                (int) $this->amount,
+                (int) $this->provider_fee,
+                (int) $this->provider_total_payment,
+            );
+            QrisEmvPayload::parse((string) $this->provider_payment_number)
+                ->assertMatchesIdrAmount((int) $this->provider_total_payment);
+        } catch (\UnexpectedValueException) {
+            return false;
+        }
+
+        return true;
     }
 
     public function isNativeKlikQris(): bool

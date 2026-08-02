@@ -122,7 +122,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $html = $this->get('/admin')->assertOk()->getContent();
 
         $this->assertMatchesRegularExpression(
-            '/<form[^>]*class="mt-3"[^>]*>[\s\S]*name="payment_mode" value="pakasir"[\s\S]*name="pakasir_checkout_flow" value="api_qris"[\s\S]*name="binance_pay_enabled" value="1"/',
+            '/<form[^>]*id="admin-binance-enabled-setting"[^>]*>[\s\S]*?name="payment_mode" value="pakasir"[\s\S]*?name="pakasir_checkout_flow" value="api_qris"[\s\S]*?name="binance_pay_enabled" value="1"[\s\S]*?<\/form>/',
             $html,
         );
 
@@ -142,6 +142,109 @@ class AdminDashboardPaymentModeTest extends TestCase
             'binance_pay_enabled' => true,
             'is_active' => true,
         ]);
+    }
+
+    public function test_owner_can_activate_order_id_from_dashboard_with_valid_credentials(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.binance.api_key', 'key');
+        config()->set('services.binance.api_secret', 'secret');
+        config()->set('services.binance.pay_id', '987654321');
+
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'binance_verification_mode' => 'amount_unique',
+            'is_active' => true,
+        ]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Amount unik (legacy)')
+            ->assertSee('Order ID');
+        $this->get('/admin')->assertOk()
+            ->assertSee('Pilih Order ID setelah API key, secret, dan Binance Pay ID atau UID dikonfigurasi.')
+            ->assertDontSee('transaksi canary admin');
+
+        $this->post(route('admin.payment-mode.update'), [
+            'payment_mode' => 'manual',
+            'binance_verification_mode' => 'order_id',
+        ])->assertRedirect('/admin?tab=stats#admin-payment-settings')
+            ->assertSessionDoesntHaveErrors(['binance_verification_mode'], null, 'paymentMode');
+
+        $this->assertSame('order_id', $setting->fresh()->binance_verification_mode);
+        $this->assertNull($setting->fresh()->binance_order_id_compatibility_ready_at);
+    }
+
+    public function test_order_id_dashboard_activation_is_rejected_without_binance_api_credentials(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.binance.api_key', null);
+        config()->set('services.binance.api_secret', null);
+        config()->set('services.binance.pay_id', '987654321');
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_verification_mode' => 'amount_unique',
+            'is_active' => true,
+        ]);
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'manual',
+                'binance_verification_mode' => 'order_id',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['binance_verification_mode'], null, 'paymentMode');
+        $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
+    }
+
+    public function test_order_id_dashboard_activation_is_rejected_without_binance_pay_receiver(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.binance.api_key', 'key');
+        config()->set('services.binance.api_secret', 'secret');
+        config()->set('services.binance.pay_id', null);
+        config()->set('services.binance.pay_uid', null);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_verification_mode' => 'amount_unique',
+            'is_active' => true,
+        ]);
+
+        $this->from('/admin?tab=stats')
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'manual',
+                'binance_verification_mode' => 'order_id',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['binance_verification_mode'], null, 'paymentMode');
+        $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
+    }
+
+    public function test_order_id_rollback_does_not_depend_on_pakasir_readiness(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        config()->set('services.pakasir.slug', null);
+        config()->set('services.pakasir.api_key', null);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+            'is_active' => true,
+        ]);
+
+        $this->post(route('admin.payment-mode.update'), [
+            'update_scope' => 'binance_verification',
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => 'api_qris',
+            'binance_verification_mode' => 'amount_unique',
+        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
+
+        $setting->refresh();
+        $this->assertSame('amount_unique', $setting->binance_verification_mode);
+        $this->assertSame('pakasir', $setting->payment_mode);
+        $this->assertSame('api_qris', $setting->pakasir_checkout_flow);
     }
 
     public function test_owner_can_update_payment_deadlines_from_dashboard(): void

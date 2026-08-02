@@ -29,6 +29,7 @@ use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
@@ -137,6 +138,145 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Cek pembayaran Binance Pay', (string) ($adminPhotos->first()[0]['caption'] ?? ''));
         $this->assertSame(PaymentStatus::Pending, $order->payments()->firstOrFail()->fresh()->status);
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
+    }
+
+    public function test_pending_manual_proof_keeps_original_deadline_and_releases_stock_after_expiry(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+
+        $startedAt = now()->startOfMinute();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+            $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+            $cart = app(CartService::class)->activeCartFor($customer);
+            app(CartService::class)->addItem($cart, $product, 1);
+            $deadline = $startedAt->copy()->addMinute();
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($deadline));
+
+            $this->postTelegramWebhook($this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+
+            $this->assertTrue($order->fresh()->expires_at->equalTo($deadline));
+            $this->assertTrue($order->payments()->sole()->fresh()->expired_at->equalTo($deadline));
+
+            Carbon::setTestNow($startedAt->copy()->addMinutes(2));
+            $this->artisan('orders:expire-pending')->assertSuccessful();
+
+            $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Expired, $order->payments()->sole()->fresh()->status);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_expired_binance_payment_screenshot_is_forwarded_without_reviving_the_order(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+        ]);
+        $order->update([
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+            'expires_at' => now()->subMinute(),
+        ]);
+        $payment->update([
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Expired,
+            'expired_at' => now()->subMinute(),
+            'binance_auto_verification_enabled' => true,
+            'binance_order_id' => '445011487581044799',
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(208, $order->invoice_number, ['username' => 'late-buyer']))->assertOk();
+
+        $payment->refresh();
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->status);
+        $this->assertNotNull($payment->payment_proof_submitted_at);
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(1, $adminPhotos);
+        $this->assertStringContainsString('late', strtolower((string) ($adminPhotos->first()[0]['caption'] ?? '')));
+        $this->assertArrayNotHasKey('reply_markup', $adminPhotos->first()[0]);
+    }
+
+    public function test_pending_auto_binance_payment_rejects_screenshot_bypass(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'auto-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addMinutes(10)]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_000_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addMinutes(10),
+            'binance_auto_verification_enabled' => true,
+            'binance_verification_mode' => 'order_id',
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(209, $order->invoice_number, ['username' => 'auto-buyer']))->assertOk();
+
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertTrue($order->fresh()->expires_at->isFuture());
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(0, $adminPhotos);
+        $buyerMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'Order ID'));
+        $this->assertCount(1, $buyerMessage);
+    }
+
+    public function test_pending_auto_amount_unique_payment_rejects_screenshot_bypass(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'auto-buyer', 'locale' => 'en']);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addMinutes(10)]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BINANCE_PAY_ID',
+            'amount' => 5_001_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addMinutes(10),
+            'binance_auto_verification_enabled' => true,
+            'binance_verification_mode' => 'amount_unique',
+        ]);
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(210, $order->invoice_number, ['username' => 'auto-buyer']))->assertOk();
+
+        $stored = $payment->fresh();
+        $this->assertNull($stored->payment_proof_submitted_at);
+        $this->assertSame(PaymentStatus::Pending, $stored->status);
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === '999');
+        $this->assertCount(0, $adminPhotos);
+        $buyerMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345'
+            && str_contains((string) ($request['text'] ?? ''), 'automatic'));
+        $this->assertCount(1, $buyerMessage);
     }
 
     public function test_binance_payment_photo_is_forwarded_when_payment_command_is_sent_after_the_photo(): void

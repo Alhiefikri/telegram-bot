@@ -2,6 +2,7 @@
     $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageSource ?? $qrisImageDataUri);
     $paymentDeadline = $payment?->provider_expires_at ?? $payment?->expired_at ?? $order->expires_at;
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
+    $customerPaysQrisFee = config('services.pakasir.qris_fee.payer', 'customer') === 'customer';
 @endphp
 
 <x-storefront.panel as="section" class="mt-5" aria-label="Pembayaran QRIS">
@@ -29,7 +30,7 @@
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $storefront->idr($order->total_amount) }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4">
-            <dt class="text-[var(--sf-muted)]">Biaya QRIS</dt>
+            <dt class="text-[var(--sf-muted)]">Biaya QRIS ({{ $customerPaysQrisFee ? 'dibayar pelanggan' : 'ditanggung toko' }})</dt>
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $payment?->provider_fee !== null ? $storefront->idr($payment->provider_fee) : '-' }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">

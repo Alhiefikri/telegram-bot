@@ -36,14 +36,14 @@ class TelegramBinanceVerificationEscalator
         ];
 
         if ($submittedOrderId !== null) {
-            $lines[] = '🔢 Order ID dikirim buyer: '.$submittedOrderId;
+            $lines[] = '🔢 Order ID dikirim buyer: '.$this->maskIdentifier($submittedOrderId);
         }
 
         if ($result->transaction !== null) {
             $transaction = $result->transaction;
-            $reference = $transaction->orderId() !== '' ? 'Order ID '.$transaction->orderId().' · ' : '';
+            $reference = $transaction->orderId() !== '' ? 'Order ID '.$this->maskIdentifier($transaction->orderId()).' · ' : '';
             $lines[] = '🔎 Transaksi ditemukan: '.$this->formatUsdt(abs($transaction->amountMicro())).' '.$transaction->currency()
-                .' · '.$reference.'Transaction ID '.$transaction->transactionId();
+                .' · '.$reference.'Transaction ID '.$this->maskIdentifier($transaction->transactionId());
         }
 
         $lines[] = '';
@@ -59,5 +59,19 @@ class TelegramBinanceVerificationEscalator
     private function formatUsdt(int $amountMicro): string
     {
         return rtrim(rtrim(number_format($amountMicro / 1_000_000, 6, '.', ''), '0'), '.');
+    }
+
+    private function maskIdentifier(string $value): string
+    {
+        $value = trim($value);
+        if (strlen($value) <= 8) {
+            return str_repeat('•', strlen($value));
+        }
+
+        if (str_contains($value, '•')) {
+            return $value;
+        }
+
+        return substr($value, 0, 4).'••••'.substr($value, -4);
     }
 }

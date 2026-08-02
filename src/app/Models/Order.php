@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['customer_id', 'cart_id', 'checkout_key', 'support_contact_channel', 'support_contact_value', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'expires_at', 'telegram_receipt_sent_at', 'telegram_receipt_send_started_at', 'manual_checkout_customer_notified_at', 'manual_checkout_customer_notification_started_at', 'manual_checkout_customer_notification_chat_id', 'manual_checkout_customer_notification_message_id', 'manual_checkout_customer_notification_deleted_at', 'manual_checkout_customer_notification_deletion_started_at', 'manual_checkout_customer_notification_deletion_token', 'buyer_order_detail_message_chat_id', 'buyer_order_detail_message_id', 'buyer_order_detail_message_deleted_at', 'buyer_order_detail_message_deletion_started_at', 'buyer_order_detail_message_deletion_token', 'manual_checkout_admin_notified_at', 'manual_checkout_admin_notification_started_at', 'admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', 'admin_pending_order_notification_chat_id', 'admin_pending_order_notification_message_id', 'admin_pending_order_notification_deleted_at', 'admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', 'admin_expired_order_notification_started_at', 'admin_expired_order_notified_at'])]
+#[Fillable(['customer_id', 'cart_id', 'checkout_key', 'support_contact_channel', 'support_contact_value', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'expires_at', 'telegram_expired_order_notification_started_at', 'telegram_expired_order_notified_at', 'telegram_receipt_sent_at', 'telegram_receipt_send_started_at', 'manual_checkout_customer_notified_at', 'manual_checkout_customer_notification_started_at', 'manual_checkout_customer_notification_chat_id', 'manual_checkout_customer_notification_message_id', 'manual_checkout_customer_notification_deleted_at', 'manual_checkout_customer_notification_deletion_started_at', 'manual_checkout_customer_notification_deletion_token', 'buyer_order_detail_message_chat_id', 'buyer_order_detail_message_id', 'buyer_order_detail_message_deleted_at', 'buyer_order_detail_message_deletion_started_at', 'buyer_order_detail_message_deletion_token', 'manual_checkout_admin_notified_at', 'manual_checkout_admin_notification_started_at', 'admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', 'admin_pending_order_notification_chat_id', 'admin_pending_order_notification_message_id', 'admin_pending_order_notification_deleted_at', 'admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', 'admin_expired_order_notification_started_at', 'admin_expired_order_notified_at'])]
 class Order extends Model
 {
     /** @use HasFactory<OrderFactory> */
@@ -24,6 +24,8 @@ class Order extends Model
             'support_contact_value' => 'encrypted',
             'total_amount' => 'integer',
             'expires_at' => 'datetime',
+            'telegram_expired_order_notification_started_at' => 'datetime',
+            'telegram_expired_order_notified_at' => 'datetime',
             'telegram_receipt_sent_at' => 'datetime',
             'telegram_receipt_send_started_at' => 'datetime',
             'manual_checkout_customer_notified_at' => 'datetime',

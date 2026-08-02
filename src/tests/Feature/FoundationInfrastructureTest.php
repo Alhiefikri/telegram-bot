@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\RedirectToCanonicalHost;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -11,6 +12,27 @@ class FoundationInfrastructureTest extends TestCase
     public function test_health_endpoint_returns_success(): void
     {
         $this->get('/up')->assertOk();
+    }
+
+    public function test_alternate_public_host_redirects_to_configured_canonical_host_with_path_and_query(): void
+    {
+        config()->set('app.url', 'https://lhiestore.web.id');
+
+        $this->get('https://www.lhiestore.web.id/shop?search=ai')
+            ->assertStatus(308)
+            ->assertRedirect('https://lhiestore.web.id/shop?search=ai');
+
+        $this->get('https://lhiestore.web.id/up')->assertOk();
+    }
+
+    public function test_trusted_hosts_allow_the_canonical_www_alias_before_redirecting_it(): void
+    {
+        $hosts = RedirectToCanonicalHost::trustedHosts(
+            ['^lhiestore\\.web\\.id$'],
+            'https://lhiestore.web.id',
+        );
+
+        $this->assertContains('^www\\.lhiestore\\.web\\.id$', $hosts);
     }
 
     public function test_queue_database_connection_is_configured(): void
@@ -38,8 +60,9 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_BROADCAST_WORKER_PROCESSES)s', $contents);
+        $this->assertStringContainsString('--queue=%(ENV_BINANCE_VERIFICATION_QUEUE)s', $contents);
 
-        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES'] as $variable) {
+        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES', 'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES'] as $variable) {
             $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
             $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
         }
@@ -136,6 +159,23 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('DB_CONNECTION=pgsql', $contents);
         $this->assertStringContainsString('DB_HOST=db', $contents);
         $this->assertStringContainsString('QUEUE_CONNECTION=database', $contents);
+    }
+
+    public function test_binance_order_id_canary_configuration_is_removed_from_runtime_surfaces(): void
+    {
+        $this->assertNull(config('services.binance.canary_max_age_hours'));
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('.env.example')),
+        );
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('../.env.example')),
+        );
+        $this->assertStringNotContainsString(
+            'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS',
+            file_get_contents(base_path('../docker-compose.yml')),
+        );
     }
 
     public function test_phpunit_blocks_unfaked_http_requests_to_real_services(): void

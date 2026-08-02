@@ -17,26 +17,30 @@ final class AdminDashboardProductsData
     /**
      * @return array<string, mixed>
      */
-    public function forProducts(bool $canManageProducts): array
+    public function forProducts(bool $canManageProducts, int $productsPage = 1): array
     {
+        $productPage = $this->latestProducts($canManageProducts, $productsPage);
+
         return [
             'canManage' => $canManageProducts,
             'productStoreUrl' => route('admin.products.store'),
-            'products' => $this->latestProducts($canManageProducts),
+            'products' => $productPage['products'],
+            'pagination' => $productPage['pagination'],
             'categoryOptions' => $this->categoryOptions(),
         ];
     }
 
-    private function latestProducts(bool $includeManageableStockItems): array
+    private function latestProducts(bool $includeManageableStockItems, int $productsPage): array
     {
-        $products = Product::query()
+        $paginator = Product::query()
             ->with('category:id,name')
             ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
             ->latest()
-            ->limit(5)
-            ->get();
+            ->paginate(perPage: 20, pageName: 'products_page', page: max(1, $productsPage))
+            ->withQueryString();
+        $products = $paginator->getCollection();
 
         $productIds = $products->pluck('id')->all();
         $stockItemsTable = (new ProductStockItem)->getTable();
@@ -58,7 +62,7 @@ final class AdminDashboardProductsData
             $this->loadOrderedStockItems($products);
         }
 
-        return $products
+        $productPayloads = $products
             ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems): array {
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
@@ -135,6 +139,23 @@ final class AdminDashboardProductsData
                 ];
             })
             ->all();
+
+        return [
+            'products' => $productPayloads,
+            'pagination' => [
+                'currentPage' => $paginator->currentPage(),
+                'lastPage' => $paginator->lastPage(),
+                'previousUrl' => $paginator->previousPageUrl(),
+                'nextUrl' => $paginator->nextPageUrl(),
+                'pages' => collect(range(1, $paginator->lastPage()))
+                    ->map(fn (int $page): array => [
+                        'number' => $page,
+                        'url' => $paginator->url($page),
+                        'current' => $page === $paginator->currentPage(),
+                    ])
+                    ->all(),
+            ],
+        ];
     }
 
     /** @param Collection<int, Product> $products */

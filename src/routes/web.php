@@ -7,6 +7,8 @@ use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
+use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
+use App\Http\Controllers\Admin\AdminOrderManualRejectController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
@@ -26,6 +28,7 @@ use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
+use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
@@ -58,6 +61,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
+    Route::post('orders/{order}/binance-order-id', StorefrontShopBinanceOrderIdController::class)->middleware(['storefront.signed', 'throttle:storefront-binance-order-id'])->name('orders.binance-order-id');
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:automatic-payment-status-refresh'])->name('orders.status');
     Route::post('orders/{order}/cancel', StorefrontShopOrderCancelController::class)->middleware('storefront.signed')->name('orders.cancel');
 });
@@ -100,6 +104,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
 
             Route::prefix('orders')->name('orders.')->group(function (): void {
                 Route::get('{order}', AdminOrderDetailController::class)->name('show');
+                Route::post('{order}/complete-manual', AdminOrderManualCompleteController::class)->name('complete-manual');
+                Route::post('{order}/reject-manual', AdminOrderManualRejectController::class)->name('reject-manual');
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
             });

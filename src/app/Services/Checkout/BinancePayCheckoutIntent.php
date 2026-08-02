@@ -22,6 +22,13 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
         return 'BINANCE_PAY_ID';
     }
 
+    public function verificationMode(?Cart $cart = null): string
+    {
+        $mode = ManualPaymentSetting::current()?->binance_verification_mode;
+
+        return in_array($mode, ['amount_unique', 'order_id'], true) ? $mode : 'amount_unique';
+    }
+
     public function orderCurrency(): string
     {
         return 'IDR';
@@ -53,7 +60,8 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 
     public function assertReady(Cart $cart, Collection $items, Collection $products): void
     {
-        if (! ManualPaymentSetting::current()?->binance_pay_enabled || ! filled(config('services.binance.pay_id'))) {
+        $receiverConfigured = filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid'));
+        if (! ManualPaymentSetting::current()?->binance_pay_enabled || ! $receiverConfigured) {
             throw new InvalidCheckout('Binance Pay is not ready.');
         }
 

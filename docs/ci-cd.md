@@ -154,6 +154,12 @@ gh run watch
 
 The VPS deploy step expects the remote repository at `PRODUCTION_PATH` to be able to `git fetch origin main` and run `docker compose` from the repo root.
 
+### Binance Pay Order ID activation
+
+Configure the Binance API key, secret, and Pay ID or UID, then the owner selects **Order ID** in **Admin → Mode pembayaran → Verifikasi Binance**. The dashboard toggle applies to new checkouts; existing payments keep their recorded verification mode.
+
+For an immediate rollback affecting new checkouts, select **Amount unik (legacy)** in the same dashboard. Environment variables store provider credentials; they do not select checkout mode.
+
 ## Migration compatibility and approval policy
 
 The SQLite `PHP tests` job is the fast general regression lane. The `PostgreSQL migration and concurrency release gate` job is authoritative for production database compatibility because it uses the same database family as production, starts from an empty database, and exercises locking and process-level concurrency behavior. A deployment commit is not eligible for release unless the complete `CI` workflow, including this PostgreSQL job, succeeds for that exact SHA.

@@ -169,7 +169,9 @@ class StorefrontShopCheckout
     {
         if ($paymentMethod === 'binance_pay') {
             $settings = ManualPaymentSetting::current();
-            if (! $settings?->binance_pay_enabled || ! filled(config('services.binance.pay_id')) || $product->usdt_price_amount === null) {
+            if (! $settings?->binance_pay_enabled
+                || (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid')))
+                || $product->usdt_price_amount === null) {
                 throw new InvalidCheckout('Binance Pay belum tersedia untuk produk ini.');
             }
 

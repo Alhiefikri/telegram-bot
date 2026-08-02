@@ -176,6 +176,7 @@ jobs:
             PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
             'bash -s' < scripts/deploy-production-release.sh
 
+
       - name: Fail release after external smoke rollback
         if: always() && steps.external-smoke.outcome == 'failure'
         env:

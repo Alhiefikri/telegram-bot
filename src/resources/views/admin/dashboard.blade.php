@@ -15,12 +15,13 @@
             $summary = $statsTab['summary'];
             $storeStatus = $statsTab['storeStatus'];
             $actions = $statsTab['actions'];
-            $statsCards = $statsTab['cards'];
-            $actionableStatusCounts = $statsTab['actionableStatusCounts'];
-            $earnings = $statsTab['earnings'];
-            $paymentControl = $statsTab['paymentControl'];
+            $statsCards = $statsTab['cards'] ?? [];
+            $actionableStatusCounts = $statsTab['actionableStatusCounts'] ?? [];
+            $earnings = $statsTab['earnings'] ?? [];
+            $paymentControl = $statsTab['paymentControl'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $products = $productsTab['products'];
+            $productsPagination = $productsTab['pagination'];
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
@@ -38,15 +39,18 @@
             @include('admin.dashboard.desktop-navigation')
             @include('admin.dashboard.status-flash')
 
-            {{-- ═══════════════════════════════════════════════════════
-                 TAB CONTENT AREA
-                 ═══════════════════════════════════════════════════════ --}}
-            @include('admin.dashboard.stats-tab')
-            @include('admin.dashboard.products-tab')
-            @include('admin.dashboard.sales-tab')
-            @include('admin.dashboard.product-modal')
-            @include('admin.dashboard.broadcast-tab')
-            @include('admin.dashboard.store-channel-tab')
+            @if ($navigation['activeTab'] === 'stats')
+                @include('admin.dashboard.stats-tab')
+            @elseif ($navigation['activeTab'] === 'produk')
+                @include('admin.dashboard.products-tab')
+                @include('admin.dashboard.product-modal')
+            @elseif ($navigation['activeTab'] === 'penjualan')
+                @include('admin.dashboard.sales-tab')
+            @elseif ($navigation['activeTab'] === 'broadcast')
+                @include('admin.dashboard.broadcast-tab')
+            @elseif ($navigation['activeTab'] === 'telegram-channel')
+                @include('admin.dashboard.store-channel-tab')
+            @endif
             @include('admin.dashboard.mobile-navigation')
         </main>
     </body>

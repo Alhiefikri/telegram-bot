@@ -36,7 +36,7 @@ class AdminDashboardBladeComponentsTest extends TestCase
             <x-admin-dashboard.mini-stat label="Stok" value="7" tone="cyan" class="js-mini-stat" />
             <x-admin-dashboard.tab tab-id="stats" active-tab="stats" class="js-tab">Stats</x-admin-dashboard.tab>
             <x-admin-dashboard.action-row href="/admin/products" class="js-action-row">Kelola produk</x-admin-dashboard.action-row>
-            <x-admin-dashboard.modal-shell id="confirm-modal" title="Konfirmasi" class="js-modal">Isi modal</x-admin-dashboard.modal-shell>
+            <x-admin-dashboard.modal-shell id="confirm-modal" show="modalOpen" title="Konfirmasi" class="js-modal">Isi modal</x-admin-dashboard.modal-shell>
             <x-admin-dashboard.modal-backdrop show="modalOpen" close="closeModal()" class="js-backdrop">
                 <span>Isi backdrop</span>
             </x-admin-dashboard.modal-backdrop>

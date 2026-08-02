@@ -12,6 +12,10 @@ class StorefrontProductPresenter
 {
     private ?bool $binancePayEnabled = null;
 
+    private ?bool $binanceOrderIdAvailable = null;
+
+    private ?bool $binanceAutomaticVerificationAvailable = null;
+
     public function __construct(private readonly StorefrontSupport $support) {}
 
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
@@ -111,7 +115,11 @@ class StorefrontProductPresenter
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
                 label: 'Binance Pay · '.rtrim(rtrim(number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
-                description: 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.',
+                description: $this->binanceOrderIdAvailable()
+                    ? 'Bayar nominal USDT persis. Setelah transfer, kirim Binance Pay Order ID untuk verifikasi otomatis.'
+                    : ($this->binanceAutomaticVerificationAvailable()
+                        ? 'Bayar nominal USDT persis. Sistem akan memeriksa transfer Binance secara otomatis.'
+                        : 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.'),
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,
@@ -124,8 +132,28 @@ class StorefrontProductPresenter
 
     private function binancePayEnabled(): bool
     {
-        return $this->binancePayEnabled ??= (bool) ManualPaymentSetting::current()?->binance_pay_enabled
-            && filled(config('services.binance.pay_id'));
+        if ($this->binancePayEnabled === null) {
+            $setting = ManualPaymentSetting::current();
+            $mode = $setting?->binance_verification_mode;
+            $this->binanceOrderIdAvailable = $mode === 'order_id';
+            $this->binanceAutomaticVerificationAvailable = in_array($mode, ['amount_unique', 'order_id'], true)
+                && filled(config('services.binance.api_key'))
+                && filled(config('services.binance.api_secret'));
+            $this->binancePayEnabled = (bool) $setting?->binance_pay_enabled
+                && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
+        }
+
+        return $this->binancePayEnabled;
+    }
+
+    private function binanceOrderIdAvailable(): bool
+    {
+        return $this->binanceOrderIdAvailable ?? false;
+    }
+
+    private function binanceAutomaticVerificationAvailable(): bool
+    {
+        return $this->binanceAutomaticVerificationAvailable ?? false;
     }
 
     /**

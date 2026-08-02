@@ -18,7 +18,7 @@ abstract class AdminProductFormRequest extends FormRequest
         if ($value === '') {
             return;
         }
-        if (preg_match('/^(\d+)(?:\.(\d{1,6}))?$/', $value, $m)) {
+        if (preg_match('/^(\d+)(?:\.(\d{1,3}))?$/', $value, $m)) {
             $this->merge(['usdt_price_amount' => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
         }
     }
@@ -60,7 +60,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'name.required' => 'Nama produk wajib diisi.',
             'price_amount.required' => 'Harga wajib diisi.',
             'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
-            'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 6 desimal.',
+            'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 3 desimal.',
             'description.required' => 'Deskripsi singkat wajib diisi.',
             'delivery_note.max' => 'Catatan pengiriman rahasia maksimal 2000 karakter.',
             'usage_guide_title.required_with' => 'Judul panduan wajib diisi jika URL panduan diisi.',
