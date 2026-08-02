@@ -12,12 +12,27 @@ class BinanceUniquePaymentAmountTest extends TestCase
 {
     use RefreshDatabase;
 
+    private mixed $originalBinanceApiKey;
+
+    private mixed $originalBinanceApiSecret;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->originalBinanceApiKey = config('services.binance.api_key');
+        $this->originalBinanceApiSecret = config('services.binance.api_secret');
+
         config()->set('services.binance.api_key', 'binance-key');
         config()->set('services.binance.api_secret', 'binance-secret');
+    }
+
+    protected function tearDown(): void
+    {
+        config()->set('services.binance.api_key', $this->originalBinanceApiKey);
+        config()->set('services.binance.api_secret', $this->originalBinanceApiSecret);
+
+        parent::tearDown();
     }
 
     public function test_returns_the_exact_base_amount_when_it_is_free(): void
