@@ -3,6 +3,7 @@
 use App\Services\Binance\BinanceOrderIdActivation;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -10,6 +11,10 @@ return new class extends Migration
 
     public function up(): void
     {
+        if (! Schema::hasColumn('manual_payment_settings', 'binance_order_id_compatibility_ready_at')) {
+            return;
+        }
+
         $ready = DB::table('manual_payment_settings')
             ->whereNotNull('binance_order_id_compatibility_ready_at')
             ->exists();

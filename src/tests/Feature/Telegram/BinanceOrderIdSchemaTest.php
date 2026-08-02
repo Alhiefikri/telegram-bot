@@ -31,6 +31,21 @@ class BinanceOrderIdSchemaTest extends TestCase
         $this->assertTrue(Schema::hasColumn('manual_payment_settings', 'binance_order_id_compatibility_ready_at'));
     }
 
+    public function test_activation_migration_is_a_safe_noop_before_repair_schema_exists(): void
+    {
+        Schema::table('manual_payment_settings', function ($table): void {
+            $table->dropColumn([
+                'binance_verification_mode',
+                'binance_order_id_compatibility_ready_at',
+            ]);
+        });
+
+        $migration = require database_path('migrations/2026_08_01_000003_activate_binance_order_id_mode.php');
+        $migration->up();
+
+        $this->assertFalse(Schema::hasColumn('manual_payment_settings', 'binance_order_id_compatibility_ready_at'));
+    }
+
     public function test_additive_repair_restores_schema_for_databases_that_ran_the_earlier_migration_shape(): void
     {
         $order = Order::factory()->create();
