@@ -12,7 +12,9 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -63,7 +65,7 @@ class AdminDashboardOverviewTest extends TestCase
         Order::factory()->create();
 
         $queries = [];
-        \Illuminate\Support\Facades\DB::listen(function (\Illuminate\Database\Events\QueryExecuted $query) use (&$queries): void {
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
             $queries[] = strtolower($query->sql);
         });
 
@@ -82,7 +84,7 @@ class AdminDashboardOverviewTest extends TestCase
         Product::factory()->create();
 
         $queries = [];
-        \Illuminate\Support\Facades\DB::listen(function (\Illuminate\Database\Events\QueryExecuted $query) use (&$queries): void {
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
             $queries[] = strtolower($query->sql);
         });
 
