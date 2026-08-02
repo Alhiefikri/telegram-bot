@@ -15,7 +15,7 @@
 - Existing payments retain their snapshotted mode, amount, receiver, and lifecycle after any toggle.
 - The existing partial unique index remains broad across all pending automatic Binance payments.
 - The sequential allocator must continue treating pending automatic Order ID and amount-unique payments as occupied.
-- Remove all runtime/UI/configuration/docs/test dependencies on the admin canary and readiness marker.
+- Retain `BinanceOrderIdActivation` and its migration-focused test as compatibility code for the already-shipped historical migration; remove every dashboard/checkout/runtime canary dependency instead of deleting this class.
 - Do not destructively drop the historical readiness-marker column or migrations.
 - Do not change Order ID submission, verification, retry, or delivery behavior.
 
@@ -27,9 +27,9 @@
 - `src/app/Services/Checkout/BinancePayCheckoutIntent.php` — selects the active dashboard mode without customer/admin canary branching.
 - `src/app/Services/Admin/AdminDashboardStatsData.php` and `src/app/Storefront/StorefrontProductPresenter.php` — expose selected mode without readiness-marker state/copy.
 - `src/resources/views/admin/dashboard/stats-tab.blade.php` — dashboard labels explain direct credential-gated toggle instead of canary readiness.
-- `src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php` and `src/app/Services/Binance/BinanceOrderIdActivation.php` — delete; no runtime needs canary evidence or guarded activation.
+- `src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php` — delete; no runtime needs canary evidence.
+- `src/app/Services/Binance/BinanceOrderIdActivation.php` and `src/tests/Feature/Telegram/BinanceOrderIdActivationTest.php` — retain only for historical migration compatibility; no dashboard or checkout path may call the class.
 - `src/app/Console/Commands/HealthCheck.php`, `src/app/Bootstrap/ProductionConfigurationValidator.php`, `src/config/services.php`, `.env.example`, `src/.env.example`, `docker-compose.yml`, `docs/ci-cd.md` — remove canary operational surface.
-- `src/tests/Feature/AdminDashboardPaymentModeTest.php`, `src/tests/Feature/Telegram/BinanceCheckoutModeTest.php`, `src/tests/Feature/FoundationInfrastructureTest.php` — replace canary contract coverage with direct-toggle tests.
 
 ### Task 1: Direct Dashboard Mode Policy and Checkout Selection
 
@@ -108,8 +108,7 @@ git commit -m "feat: toggle Binance Order ID without canary"
 
 **Files:**
 - Delete: `src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php`
-- Delete: `src/app/Services/Binance/BinanceOrderIdActivation.php`
-- Delete: `src/tests/Feature/Telegram/BinanceOrderIdActivationTest.php`
+- Retain: `src/app/Services/Binance/BinanceOrderIdActivation.php` and `src/tests/Feature/Telegram/BinanceOrderIdActivationTest.php` for historical migration compatibility only.
 - Modify: `src/app/Services/Admin/AdminDashboardStatsData.php:167-200`
 - Modify: `src/app/Storefront/StorefrontProductPresenter.php:132-136`
 - Modify: `src/app/Console/Commands/HealthCheck.php:5-25,79-93`
@@ -120,13 +119,13 @@ git commit -m "feat: toggle Binance Order ID without canary"
 - Consumes: current cross-mode occupancy behavior of `BinanceUniquePaymentAmount::allocate(int): int` and snapshotted payment modes.
 - Produces: no canary services or health contract; dashboard/storefront mode state directly reflects the selected setting; pending Order ID amounts continue reserving a sequential legacy slot.
 
-- [ ] **Step 1: Preserve cross-mode allocation coverage and identify obsolete canary source**
+- [ ] **Step 1: Preserve cross-mode allocation coverage and isolate historical migration compatibility**
 
 Keep the existing regression in `BinanceUniquePaymentAmountTest` that creates a pending automatic Order ID payment at `1_000_000` and asserts legacy allocation returns `1_001_000`; its credential-restoration teardown must remain intact.
 
-Replace no tests in `BinanceOrderIdActivationTest`: that file exists solely for the guarded canary activation contract and must be deleted with its source services. The direct-toggle tests from Task 1 become the authoritative activation contract.
+Keep `BinanceOrderIdActivation.php` and `BinanceOrderIdActivationTest.php` because the already-shipped historical migration imports that class. Treat these as migration compatibility coverage only; no runtime dashboard, checkout, health, or production configuration may depend on them.
 
-- [ ] **Step 2: Run safety and canary-contract tests before removal**
+- [ ] **Step 2: Run safety and historical migration tests before runtime removal**
 
 Run:
 
@@ -134,11 +133,11 @@ Run:
 cd src && php artisan test tests/Feature/BinanceUniquePaymentAmountTest.php tests/Feature/Telegram/BinanceOrderIdActivationTest.php tests/Feature/AdminDashboardPaymentModeTest.php
 ```
 
-Expected: PASS before removal. The run establishes sequential cross-mode safety and the old canary contract that Task 2 removes.
+Expected: PASS before removal. The run establishes sequential cross-mode safety, historical migration compatibility, and the old dashboard canary contract that Task 1 replaces.
 
-- [ ] **Step 3: Remove canary services and runtime dependencies**
+- [ ] **Step 3: Remove canary runtime dependencies**
 
-Delete `BinanceOrderIdCanaryEvidence.php`, `BinanceOrderIdActivation.php`, and `BinanceOrderIdActivationTest.php`. Remove `BinanceOrderIdCanaryEvidence` imports/dependency injection, the `--binance-canary` option, and canary output block from `HealthCheck`.
+Delete `BinanceOrderIdCanaryEvidence.php`. Retain `BinanceOrderIdActivation.php` and `BinanceOrderIdActivationTest.php` unchanged for the historical migration. Remove `BinanceOrderIdCanaryEvidence` imports/dependency injection, the `--binance-canary` option, and canary output block from `HealthCheck`.
 
 Remove canary-age validation from `ProductionConfigurationValidator`.
 
@@ -151,18 +150,19 @@ Do not edit `BinanceUniquePaymentAmount` occupancy filters: its broad pending au
 Run:
 
 ```bash
-cd src && php artisan test tests/Feature/BinanceUniquePaymentAmountTest.php tests/Feature/AdminDashboardPaymentModeTest.php tests/Feature/Telegram/BinanceCheckoutModeTest.php tests/Feature/Telegram/BinanceAutoVerifyTest.php
+cd src && php artisan test tests/Feature/BinanceUniquePaymentAmountTest.php tests/Feature/AdminDashboardPaymentModeTest.php tests/Feature/Telegram/BinanceCheckoutModeTest.php tests/Feature/Telegram/BinanceAutoVerifyTest.php tests/Feature/Telegram/BinanceOrderIdActivationTest.php
 ```
 
-Expected: PASS. No selected Order ID mode depends on a canary; direct mode checkout works; Amount unik remains sequential and cross-mode collision-safe; existing verification behavior remains intact.
+Expected: PASS. No selected Order ID mode depends on a canary; direct mode checkout works; Amount unik remains sequential and cross-mode collision-safe; historical migration compatibility remains covered; existing verification behavior remains intact.
 
 - [ ] **Step 5: Commit canary runtime removal**
 
 ```bash
-git add -u src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php src/app/Services/Binance/BinanceOrderIdActivation.php src/tests/Feature/Telegram/BinanceOrderIdActivationTest.php
+git add -u src/app/Services/Binance/BinanceOrderIdCanaryEvidence.php
 git add src/app/Services/Admin/AdminDashboardStatsData.php src/app/Storefront/StorefrontProductPresenter.php src/app/Console/Commands/HealthCheck.php src/app/Bootstrap/ProductionConfigurationValidator.php src/tests/Feature/BinanceUniquePaymentAmountTest.php
 git commit -m "refactor: remove Binance Order ID canary gate"
 ```
+
 
 ### Task 3: Remove Canary Configuration, Dashboard Copy, and Operations Documentation
 
