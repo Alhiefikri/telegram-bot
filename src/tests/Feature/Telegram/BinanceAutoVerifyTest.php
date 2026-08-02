@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\VerifyBinanceAmountUnique;
 use App\Jobs\VerifyBinanceOrderId;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -164,15 +165,10 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('screenshot', $body);
     }
 
-    public function test_amount_unique_auto_checkout_instructions_do_not_route_to_payment_proof(): void
+    public function test_amount_unique_auto_checkout_instructions_offer_an_ive_paid_check_instead_of_payment_proof(): void
     {
         $this->fakeTelegramHttp();
-        ManualPaymentSetting::create([
-            'binance_pay_enabled' => true,
-            'is_active' => true,
-            'admin_telegram_chat_id' => '999',
-            'binance_verification_mode' => 'amount_unique',
-        ]);
+        $this->enableBinancePay('amount_unique');
         [$order, $payment, $customer] = $this->createBinanceOrder();
 
         app(TelegramCheckoutIntents::class)->sendBinancePaymentInstructions('12345', $order, $payment, $customer);
@@ -180,8 +176,48 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $body = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto'))->first()[0]->body();
         $this->assertStringContainsString('automatically', strtolower($body));
         $this->assertStringContainsString('exact amount', strtolower($body));
+        $this->assertStringContainsString('binance:verify:'.$order->id, $body);
+        $this->assertStringContainsString("I've Paid", $body);
         $this->assertStringNotContainsString('/payment', $body);
-        $this->assertStringNotContainsString('binance:verify:', $body);
+        $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $body);
+    }
+
+    public function test_amount_unique_ive_paid_tap_queues_a_check_without_calling_binance_in_the_request(): void
+    {
+        Queue::fake([VerifyBinanceAmountUnique::class]);
+        $this->enableBinancePay('amount_unique');
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(306, 'amount-unique-check', 'binance:verify:'.$order->id))->assertOk();
+
+        Queue::assertPushed(VerifyBinanceAmountUnique::class, fn (VerifyBinanceAmountUnique $job): bool => $job->paymentId === $payment->id);
+        $binanceCalls = Http::recorded(fn ($request) => str_contains($request->url(), 'api.binance.test'));
+        $this->assertCount(0, $binanceCalls);
+        $checkMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Checking your payment'));
+        $this->assertCount(1, $checkMessage);
+    }
+
+    public function test_amount_unique_ive_paid_job_confirms_a_matching_amount_and_receiver(): void
+    {
+        $this->enableBinancePay('amount_unique');
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp([
+            'https://api.binance.test/*' => Http::response($this->binanceHistory([
+                $this->binanceTransaction(
+                    '445000000000000021',
+                    $this->usdtString($payment->amount),
+                    now()->getTimestampMs(),
+                ),
+            ])),
+        ]);
+
+        (new VerifyBinanceAmountUnique($payment->id))->handle(app(TelegramBinanceVerifyIntents::class));
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame('P_000000000021', $payment->fresh()->provider_reference);
     }
 
     public function test_old_payment_snapshot_keeps_manual_screenshot_flow_after_credentials_are_added(): void

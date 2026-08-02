@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\VerifyBinanceAmountUnique;
 use App\Jobs\VerifyBinanceOrderId;
 use App\Models\Customer;
 use App\Models\Order;
@@ -13,6 +14,7 @@ use App\Services\Binance\BinanceOrderId;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationResult;
 use App\Services\Binance\BinanceVerificationSubmissionService;
+use Throwable;
 
 class TelegramBinanceVerifyIntents
 {
@@ -31,7 +33,89 @@ class TelegramBinanceVerifyIntents
 
     public function handleVerifyTap(Customer $customer, string $chatId, string $callbackQueryId, string $orderId): void
     {
+        [, $payment] = $this->findVerifiableOrder($customer, $orderId);
+
+        if ($payment?->binance_verification_mode === 'amount_unique') {
+            $this->handleAmountUniqueTap($customer, $chatId, $callbackQueryId, $orderId);
+
+            return;
+        }
+
         $this->handleOrderIdPromptTap($customer, $chatId, $callbackQueryId, $orderId);
+    }
+
+    public function handleAmountUniqueTap(Customer $customer, string $chatId, string $callbackQueryId, string $orderId): void
+    {
+        [$order, $payment] = $this->findVerifiableOrder($customer, $orderId);
+
+        if (! $order || ! $payment) {
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->text($customer, 'Pesanan tidak ditemukan.', 'Order not found.'));
+
+            return;
+        }
+
+        if ($guardMessage = $this->amountUniqueGuardMessage($customer, $order, $payment)) {
+            $this->bot->answerCallbackQuery($callbackQueryId);
+            $this->bot->sendMessage($chatId, $guardMessage);
+
+            return;
+        }
+
+        try {
+            VerifyBinanceAmountUnique::dispatch($payment->id)
+                ->onQueue((string) config('services.binance.verification_queue', 'binance-verification'));
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->bot->answerCallbackQuery($callbackQueryId);
+            $this->respondToResult(
+                $customer,
+                $chatId,
+                $order,
+                $payment->fresh(),
+                BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError, retryable: false),
+                allowRetryButtons: false,
+            );
+
+            return;
+        }
+
+        $this->bot->answerCallbackQuery($callbackQueryId, $this->text(
+            $customer,
+            'Permintaan cek diterima. Pembayaran sedang diperiksa.',
+            'Check requested. Your payment is being verified.',
+        ));
+        $this->bot->sendMessage($chatId, $this->text(
+            $customer,
+            "🔎 Sedang mengecek pembayaran\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nSistem sedang memeriksa nominal persis dan penerima Binance. Kamu akan diberi kabar jika pembayaran cocok.",
+            "🔎 Checking your payment\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nWe are checking the exact amount and Binance receiver. You will be notified if the payment matches.",
+        ));
+    }
+
+    public function verifyAmountUnique(string $paymentId): void
+    {
+        $payment = Payment::query()->with('order.customer')->find($paymentId);
+        $order = $payment?->order;
+        $customer = $order?->customer;
+
+        if (! $payment || ! $order || ! $customer
+            || $payment->status !== PaymentStatus::Pending
+            || $order->order_status !== OrderStatus::PendingPayment
+            || $payment->binance_verification_mode !== 'amount_unique') {
+            return;
+        }
+
+        $result = $this->verification->verifyPayment($payment);
+        $this->recordAmountUniqueVerificationStatus($payment, $result->outcome);
+        $payment->refresh();
+
+        $this->respondToResult(
+            $customer,
+            (string) $customer->telegram_id,
+            $order,
+            $payment,
+            $result,
+            allowRetryButtons: true,
+        );
     }
 
     public function handleOrderIdPromptTap(Customer $customer, string $chatId, string $callbackQueryId, string $orderId): void
@@ -294,6 +378,23 @@ class TelegramBinanceVerifyIntents
                 break;
 
             case BinanceVerificationOutcome::NotFound:
+                if ($payment->binance_verification_mode === 'amount_unique') {
+                    $this->bot->sendMessage($chatId, $this->text(
+                        $customer,
+                        "🔎 Pembayaran belum ditemukan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nTransfer dengan nominal persis {$amount} USDT belum terlihat di riwayat Binance. Setelah transfer selesai, tekan tombol Saya Sudah Bayar untuk mengecek lagi.",
+                        "🔎 Payment not found yet\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nA transfer for the exact amount of {$amount} USDT is not visible in Binance history yet. After completing the transfer, tap I've Paid to check again.",
+                    ), $allowRetryButtons ? [
+                        'inline_keyboard' => [[
+                            [
+                                'text' => $this->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
+                                'callback_data' => 'binance:verify:'.$order->id,
+                            ],
+                        ]],
+                    ] : []);
+
+                    break;
+                }
+
                 if ($finalRetry) {
                     $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                     $this->bot->sendMessage($chatId, $this->text(
@@ -342,8 +443,12 @@ class TelegramBinanceVerifyIntents
             case BinanceVerificationOutcome::IncompleteWindow:
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
-                    'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
+                    $payment->binance_verification_mode === 'amount_unique'
+                        ? 'Riwayat Binance belum selesai diperiksa. Tekan Saya Sudah Bayar lagi setelah beberapa saat.'
+                        : 'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
+                    $payment->binance_verification_mode === 'amount_unique'
+                        ? "Binance history could not be checked completely yet. Tap I've Paid again in a moment."
+                        : 'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
                 ));
                 break;
 
@@ -362,8 +467,12 @@ class TelegramBinanceVerifyIntents
 
                     $this->bot->sendMessage($chatId, $this->text(
                         $customer,
-                        'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
-                        'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
+                        $payment->binance_verification_mode === 'amount_unique'
+                            ? 'Verifikasi belum selesai. Tekan Saya Sudah Bayar lagi setelah beberapa saat.'
+                            : 'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
+                        $payment->binance_verification_mode === 'amount_unique'
+                            ? "The payment check could not finish. Tap I've Paid again in a moment."
+                            : 'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
                     ));
                     break;
                 }
@@ -390,6 +499,44 @@ class TelegramBinanceVerifyIntents
             ->first(fn (Payment $payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID');
 
         return [$order, $payment];
+    }
+
+    private function amountUniqueGuardMessage(Customer $customer, Order $order, Payment $payment): ?string
+    {
+        if ($payment->status === PaymentStatus::Paid) {
+            return $this->text(
+                $customer,
+                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai ya.",
+                "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
+            );
+        }
+
+        if ($order->order_status !== OrderStatus::PendingPayment || $payment->status !== PaymentStatus::Pending) {
+            return $this->text(
+                $customer,
+                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini ya.",
+                "Order {$order->invoice_number} is no longer awaiting payment. If you already sent a transfer, please contact the admin with this invoice.",
+            );
+        }
+
+        if ($payment->binance_verification_mode !== 'amount_unique'
+            || ! $payment->binance_auto_verification_enabled) {
+            return $this->text(
+                $customer,
+                "Verifikasi otomatis tidak tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
+                "Automatic verification is not available for order {$order->invoice_number}. Send a payment screenshot as a photo with the caption /payment {$order->invoice_number} so the admin can review it.",
+            );
+        }
+
+        if ($payment->binance_verification_grace_until?->isPast()) {
+            return $this->text(
+                $customer,
+                "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
+                "Automatic verification for order {$order->invoice_number} has closed after the previous check. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} if needed.",
+            );
+        }
+
+        return null;
     }
 
     private function guardMessage(Customer $customer, Order $order, Payment $payment): ?string
@@ -521,6 +668,27 @@ class TelegramBinanceVerifyIntents
             allowRetryButtons: false,
             submittedOrderId: $candidate,
         );
+    }
+
+    private function recordAmountUniqueVerificationStatus(Payment $payment, BinanceVerificationOutcome $outcome): void
+    {
+        $status = match ($outcome) {
+            BinanceVerificationOutcome::Confirmed,
+            BinanceVerificationOutcome::AlreadyPaid => 'confirmed',
+            BinanceVerificationOutcome::NotFound => 'not_found',
+            BinanceVerificationOutcome::IncompleteWindow => 'checking',
+            BinanceVerificationOutcome::ProviderError => 'provider_error',
+            BinanceVerificationOutcome::Mismatch,
+            BinanceVerificationOutcome::TransactionAlreadyUsed => 'mismatch',
+            default => 'checking',
+        };
+
+        Payment::query()
+            ->whereKey($payment->id)
+            ->update([
+                'binance_verification_status' => $status,
+                'binance_last_verified_at' => now(),
+            ]);
     }
 
     private function recordVerificationStatus(Payment $payment, string $orderId, int $submissionVersion, BinanceVerificationOutcome $outcome): void

@@ -97,7 +97,7 @@ class TelegramCheckoutIntents
         }
 
         $keyboard = [];
-        if ($autoVerify && $payment->binance_verification_mode === 'order_id') {
+        if ($autoVerify) {
             $keyboard[] = [[
                 'text' => $this->locale->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
                 'callback_data' => 'binance:verify:'.$order->id,
