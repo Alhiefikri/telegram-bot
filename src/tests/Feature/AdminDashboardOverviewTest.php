@@ -46,12 +46,50 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee('mobile-bottom-nav', false)
             ->assertSee('md:grid-cols-4', false)
             ->assertSee('admin-mini-shell', false)
-            ->assertSee('overflow-x-auto', false)
+            ->assertDontSee('overflow-x-auto', false)
             ->assertSee('x-data', false)
             ->assertDontSee('Escrow')
             ->assertDontSee('fi-sidebar', false);
 
         $this->assertStringNotContainsString('<aside', $response->getContent());
+    }
+
+    public function test_stats_request_skips_inactive_tab_data_queries(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        Product::factory()->create();
+        Order::factory()->create();
+
+        $queries = [];
+        \Illuminate\Support\Facades\DB::listen(function (\Illuminate\Database\Events\QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        $this->get(route('admin.dashboard', ['tab' => 'stats']))->assertOk();
+
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'product_stock_items')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'order_items')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'telegram_broadcasts')));
+    }
+
+    public function test_product_request_skips_inactive_stats_tab_queries(): void
+    {
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Owner,
+        ]));
+        Product::factory()->create();
+
+        $queries = [];
+        \Illuminate\Support\Facades\DB::listen(function (\Illuminate\Database\Events\QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        $this->get(route('admin.dashboard', ['tab' => 'produk']))->assertOk();
+
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'manual_payment_settings')));
+        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'sales_proof_posts')));
     }
 
     public function test_primary_admin_entry_uses_manual_dashboard_and_no_filament_routes(): void

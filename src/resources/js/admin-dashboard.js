@@ -134,6 +134,19 @@ export default function adminDashboard(initialState = {}) {
             });
         },
 
+        goToTab(tab, openProductForm = false) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('tab', tab);
+
+            if (openProductForm) {
+                url.searchParams.set('product_form', 'create');
+            } else {
+                url.searchParams.delete('product_form');
+            }
+
+            window.location.assign(url);
+        },
+
         focusReturnTarget() {
             let targetId = '';
 

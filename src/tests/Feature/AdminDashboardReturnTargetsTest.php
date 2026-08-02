@@ -139,7 +139,7 @@ class AdminDashboardReturnTargetsTest extends TestCase
             ->assertRedirect('/admin?tab=penjualan&sales_filter=issue&sales_page=2#sales-proof-'.$order->id);
     }
 
-    public function test_dashboard_renders_stable_return_targets_for_sections_products_and_sales_proof_rows(): void
+    public function test_dashboard_renders_stable_return_targets_for_the_active_tab(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         $product = Product::factory()->create(['name' => 'Visible Return Target Product']);
@@ -151,24 +151,25 @@ class AdminDashboardReturnTargetsTest extends TestCase
             'last_error' => 'temporary failure',
         ]);
 
-        $content = $this->get('/admin?tab=penjualan')->assertOk()->getContent();
-
-        foreach ([
-            'id="admin-section-stats"',
-            'id="admin-section-products"',
-            'id="admin-section-sales"',
-            'id="admin-section-broadcast"',
-            'id="admin-section-store-channel"',
-            'id="admin-payment-settings"',
-            'id="admin-support-settings"',
-            'id="admin-category-create"',
-            'id="product-'.$product->id.'"',
-            'id="sales-proof-'.$order->id.'"',
+        $commonMarkup = [
             'data-admin-return-target',
             'admin-return-target-highlight',
             'aria-live="polite"',
-        ] as $expectedMarkup) {
-            $this->assertStringContainsString($expectedMarkup, $content);
+        ];
+        $tabMarkup = [
+            'stats' => ['id="admin-section-stats"', 'id="admin-payment-settings"', 'id="admin-support-settings"'],
+            'produk' => ['id="admin-section-products"', 'id="admin-category-create"', 'id="product-'.$product->id.'"'],
+            'penjualan' => ['id="admin-section-sales"', 'id="sales-proof-'.$order->id.'"'],
+            'broadcast' => ['id="admin-section-broadcast"'],
+            'telegram-channel' => ['id="admin-section-store-channel"'],
+        ];
+
+        foreach ($tabMarkup as $tab => $expectedMarkup) {
+            $content = $this->get('/admin?tab='.$tab)->assertOk()->getContent();
+
+            foreach (array_merge($commonMarkup, $expectedMarkup) as $markup) {
+                $this->assertStringContainsString($markup, $content);
+            }
         }
     }
 }

@@ -9,7 +9,7 @@
                     {{-- Ringkasan --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'stats'"
+                        x-on:click="goToTab('stats')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'stats' ? 'bottom-nav-active' : ''"
                     >
@@ -22,7 +22,7 @@
                     {{-- Produk --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'produk'"
+                        x-on:click="goToTab('produk')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'produk' ? 'bottom-nav-active' : ''"
                     >
@@ -35,7 +35,7 @@
                     {{-- Pesanan --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'penjualan'"
+                        x-on:click="goToTab('penjualan')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'penjualan' ? 'bottom-nav-active' : ''"
                     >
@@ -48,7 +48,7 @@
                     {{-- Siaran --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'broadcast'"
+                        x-on:click="goToTab('broadcast')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'broadcast' ? 'bottom-nav-active' : ''"
                     >
@@ -61,7 +61,7 @@
                     {{-- Telegram Channel --}}
                     <button
                         type="button"
-                        x-on:click="activeTab = 'telegram-channel'"
+                        x-on:click="goToTab('telegram-channel')"
                         class="flex flex-col items-center gap-1 rounded-2xl px-3 py-2 text-white/80 transition-all duration-200"
                         :class="activeTab === 'telegram-channel' ? 'bottom-nav-active' : ''"
                     >
@@ -75,7 +75,7 @@
                     {{-- Tambah --}}
                     <button
                         type="button"
-                        x-on:click="openProductForm()"
+                        x-on:click="goToTab('produk', true)"
                         class="flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-white/80 transition-all duration-200"
                         :class="productModalOpen && productModalMode === 'create' ? 'bottom-nav-active' : ''"
                     >

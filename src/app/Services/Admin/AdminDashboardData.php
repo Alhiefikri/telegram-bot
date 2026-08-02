@@ -53,6 +53,55 @@ final class AdminDashboardData
         ];
     }
 
+    /**
+     * Builds the request payload for one dashboard tab while retaining the
+     * lightweight header and navigation shared by every dashboard response.
+     *
+     * @return array<string, mixed>
+     */
+    public function forActiveTab(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1): array
+    {
+        $metrics = $this->metrics();
+        $statusCounts = $this->statusCounts();
+        $storeLink = $this->storeLink();
+        $navigation = $this->navigation($requestedTab);
+        $canManageProducts = (bool) $user->role?->canMutateProducts();
+
+        $data = [
+            'admin' => $this->adminIdentity($user),
+            'metrics' => $metrics,
+            'navigation' => $navigation,
+            'statsTab' => $this->statsData->forHeader($metrics, $storeLink),
+            'productsTab' => [
+                'canManage' => $canManageProducts,
+                'productStoreUrl' => route('admin.products.store'),
+                'products' => [],
+                'pagination' => [],
+                'categoryOptions' => [],
+            ],
+            'salesTab' => [
+                'orders' => [],
+                'filters' => [],
+                'statusCounts' => $statusCounts,
+                'active_filter' => 'all',
+                'pagination' => [],
+            ],
+            'broadcastTab' => ['recent' => []],
+            'storeChannelTab' => [],
+        ];
+
+        match ($navigation['activeTab']) {
+            'stats' => $data['statsTab'] = $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
+            'produk' => $data['productsTab'] = $this->productsData->forProducts($canManageProducts, $productsPage),
+            'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
+            'broadcast' => $data['broadcastTab'] = $this->broadcastTab(),
+            'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
+            default => null,
+        };
+
+        return $data;
+    }
+
     private function adminIdentity(User $user): array
     {
         return [

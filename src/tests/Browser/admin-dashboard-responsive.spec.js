@@ -539,6 +539,19 @@ for (const navClickCase of [
     });
 }
 
+test('preserves the sales filter while visiting another dashboard tab', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+
+    const nav = page.getByRole('navigation', { name: 'Navigasi desktop' });
+    await nav.getByRole('button', { name: 'Produk', exact: true }).click();
+    await page.waitForURL(`${baseUrl}/admin?tab=produk&sales_filter=waiting`);
+    await nav.getByRole('button', { name: 'Pesanan', exact: true }).click();
+
+    await expect(page).toHaveURL(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+});
+
 for (const broadcastDirectCase of [
     {
         name: 'desktop',

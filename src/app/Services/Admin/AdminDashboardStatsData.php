@@ -29,16 +29,27 @@ final class AdminDashboardStatsData
      */
     public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink): array
     {
-        return [
+        return $this->forHeader($metrics, $storeLink) + [
             'balance' => $this->balance($metrics['read_only_balance_amount']),
-            'storeLink' => $storeLink,
             'cards' => $this->statsCards($metrics),
-            'summary' => $this->summaryCards($metrics),
-            'storeStatus' => $this->storeStatus($metrics),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
+        ];
+    }
+
+    /**
+     * @param  array<string, int>  $metrics
+     * @param  array<string, string>  $storeLink
+     * @return array<string, mixed>
+     */
+    public function forHeader(array $metrics, array $storeLink): array
+    {
+        return [
+            'storeLink' => $storeLink,
+            'summary' => $this->summaryCards($metrics),
+            'storeStatus' => $this->storeStatus($metrics),
             'actions' => [
                 'shop' => url('/#products'),
                 'share' => $storeLink['url'],

@@ -3,7 +3,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="activeTab = 'stats'"
+                    x-on:click="goToTab('stats')"
                     class="py-3"
                     x-bind:class="activeTab === 'stats' ? 'bottom-nav-active' : ''"
                 >
@@ -17,7 +17,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="activeTab = 'produk'"
+                    x-on:click="goToTab('produk')"
                     class="py-3"
                     x-bind:class="activeTab === 'produk' ? 'bottom-nav-active' : ''"
                 >
@@ -31,7 +31,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="activeTab = 'penjualan'"
+                    x-on:click="goToTab('penjualan')"
                     class="py-3"
                     x-bind:class="activeTab === 'penjualan' ? 'bottom-nav-active' : ''"
                 >
@@ -45,7 +45,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="activeTab = 'broadcast'"
+                    x-on:click="goToTab('broadcast')"
                     class="py-3"
                     x-bind:class="activeTab === 'broadcast' ? 'bottom-nav-active' : ''"
                 >
@@ -59,7 +59,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="activeTab = 'telegram-channel'"
+                    x-on:click="goToTab('telegram-channel')"
                     class="py-3"
                     x-bind:class="activeTab === 'telegram-channel' ? 'bottom-nav-active' : ''"
                 >
@@ -74,7 +74,7 @@
                     type="button"
                     variant="neutral"
                     size="sm"
-                    x-on:click="openProductForm()"
+                    x-on:click="goToTab('produk', true)"
                     class="py-3"
                     x-bind:class="productModalOpen && productModalMode === 'create' ? 'bottom-nav-active' : ''"
                 >
