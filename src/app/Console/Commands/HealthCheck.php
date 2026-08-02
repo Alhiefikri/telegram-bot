@@ -2,8 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ManualPaymentSetting;
-use App\Services\Binance\BinanceOrderIdCanaryEvidence;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -17,12 +15,11 @@ class HealthCheck extends Command
         {--queue-schema}
         {--queue-depth : Report queued job count and oldest queued age for operational queues.}
         {--supervisor}
-        {--binance-canary : Report Binance Order ID global readiness and recent admin canary evidence.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
 
     protected $description = 'Check operational health for database, queue schema, supervisor-managed processes, and scheduler liveness.';
 
-    public function handle(BinanceOrderIdCanaryEvidence $binanceCanary): int
+    public function handle(): int
     {
         $healthy = true;
 
@@ -77,20 +74,6 @@ class HealthCheck extends Command
             }
         }
 
-        if ($this->option('binance-canary')) {
-            $setting = ManualPaymentSetting::current();
-            $globallyReady = $setting?->binance_verification_mode === 'order_id'
-                && $setting->binance_order_id_compatibility_ready_at !== null;
-            $this->info('Binance Order ID global readiness: '.($globallyReady ? 'ready' : 'compatibility'));
-
-            try {
-                $binanceCanary->assertSuccessfulRecentAdminCanary();
-                $this->info('Binance Order ID recent admin canary: ok');
-            } catch (\RuntimeException) {
-                $healthy = false;
-                $this->error('Binance Order ID recent admin canary: missing or stale');
-            }
-        }
 
         if ($this->option('scheduler-heartbeat') !== null) {
             $maxAgeSeconds = (int) $this->option('scheduler-heartbeat');

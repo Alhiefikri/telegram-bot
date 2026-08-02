@@ -168,8 +168,6 @@ final class AdminDashboardStatsData
             'binance_verification_mode' => in_array($settings?->binance_verification_mode, ['amount_unique', 'order_id'], true)
                 ? $settings->binance_verification_mode
                 : 'amount_unique',
-            'binance_order_id_ready' => $settings?->binance_order_id_compatibility_ready_at !== null,
-            'binance_order_id_guard_message' => $this->binanceOrderIdGuardMessage($settings),
             'qris_payment_ttl_minutes' => $settings?->qrisPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
             'binance_payment_ttl_minutes' => $settings?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES,
             'whatsapp_support_url' => $settings?->whatsapp_support_url,
@@ -184,20 +182,6 @@ final class AdminDashboardStatsData
         ];
     }
 
-    private function binanceOrderIdGuardMessage(?ManualPaymentSetting $settings): string
-    {
-        if (! filled(config('services.binance.api_key')) || ! filled(config('services.binance.api_secret'))) {
-            return 'Lengkapi Binance API key dan secret untuk mengaktifkan Order ID.';
-        }
-        if (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid'))) {
-            return 'Lengkapi Binance Pay ID atau UID untuk mengaktifkan Order ID.';
-        }
-        if ($settings?->binance_order_id_compatibility_ready_at === null) {
-            return 'Order ID memerlukan transaksi canary admin yang berhasil sebelum aktivasi global.';
-        }
-
-        return 'Order ID sudah lolos canary dan siap dipakai untuk checkout baru.';
-    }
 
     private function whatsappSupportFallbackUrl(): ?string
     {
