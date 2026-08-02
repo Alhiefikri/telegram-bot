@@ -74,7 +74,6 @@ class HealthCheck extends Command
             }
         }
 
-
         if ($this->option('scheduler-heartbeat') !== null) {
             $maxAgeSeconds = (int) $this->option('scheduler-heartbeat');
             $heartbeatPath = storage_path('framework/scheduler-heartbeat');

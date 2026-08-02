@@ -182,7 +182,6 @@ final class AdminDashboardStatsData
         ];
     }
 
-
     private function whatsappSupportFallbackUrl(): ?string
     {
         $url = trim((string) config('services.support.whatsapp_url'));

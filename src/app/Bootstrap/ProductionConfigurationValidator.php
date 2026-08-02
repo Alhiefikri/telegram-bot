@@ -69,7 +69,6 @@ class ProductionConfigurationValidator
             throw new RuntimeException('BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.');
         }
 
-
         if ((string) $this->config->get('services.binance.verification_mode') === 'order_id'
             && $binanceApiKeyConfigured
             && ! filled($this->config->get('services.binance.pay_id'))
