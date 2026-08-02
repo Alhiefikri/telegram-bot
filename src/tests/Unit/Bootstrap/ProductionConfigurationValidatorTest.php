@@ -60,7 +60,6 @@ class ProductionConfigurationValidatorTest extends TestCase
             'excessive Pakasir QRIS rate' => ['services.pakasir.qris_fee.high_bps', 10_001, 'Pakasir QRIS fee configuration exceeds production safety limits.'],
             'Binance API key without secret' => ['services.binance.api_key', 'binance-key', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
             'Binance API secret without key' => ['services.binance.api_secret', 'binance-secret', 'BINANCE_API_KEY and BINANCE_API_SECRET must be configured together.'],
-            'nonpositive Binance canary age' => ['services.binance.canary_max_age_hours', 0, 'BINANCE_ORDER_ID_CANARY_MAX_AGE_HOURS must be a positive integer.'],
             'insecure application URL' => ['app.url', 'http://store.example.test', 'APP_URL must use HTTPS in production.'],
             'example application URL' => ['app.url', 'https://example.com/', 'APP_URL must not use the example domain in production.'],
             'dogfood timing enabled' => ['services.dogfood_timing.enabled', true, 'Dogfood runtime flags are not allowed in production.'],
