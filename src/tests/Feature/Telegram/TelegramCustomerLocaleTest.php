@@ -198,7 +198,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         );
     }
 
-    public function test_payment_options_prioritize_binance_for_english_and_explain_qris_is_indonesia_only(): void
+    public function test_payment_options_prioritize_qris_and_explain_cross_border_support(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
@@ -228,10 +228,57 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
         $this->assertSame('buy:qris:'.$product->id, $idButtons[0]);
         $this->assertSame('buy:binance:'.$product->id, $idButtons[1]);
-        $this->assertSame('buy:binance:'.$product->id, $enButtons[0]);
-        $this->assertSame('buy:qris:'.$product->id, $enButtons[1]);
-        $this->assertLocalizedCopy($idPayload, ['QRIS khusus aplikasi bank dan e-wallet Indonesia'], ['QRIS is for Indonesian bank and e-wallet apps only']);
-        $this->assertLocalizedCopy($enPayload, ['QRIS is for Indonesian bank and e-wallet apps only'], ['QRIS khusus aplikasi bank dan e-wallet Indonesia']);
+        $this->assertSame('buy:qris:'.$product->id, $enButtons[0]);
+        $this->assertSame('buy:binance:'.$product->id, $enButtons[1]);
+        $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara saat ini mendukung koneksi dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
+        $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border currently supports connections with:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability still depends on the payment app/provider'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
+    }
+
+    public function test_checkout_method_prompt_explains_qris_cross_border_support_in_customer_locale(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $indonesian = Customer::factory()->create(['telegram_id' => 41081, 'locale' => 'id']);
+        $english = Customer::factory()->create(['telegram_id' => 41082, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'price_amount' => 50000,
+            'usdt_price_amount' => 3_000_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $carts = app(CartService::class);
+        $carts->addItem($carts->activeCartFor($indonesian), $product, 1);
+        $carts->addItem($carts->activeCartFor($english), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41081, 'qris-choice-id', 'checkout', ['id' => 41081], 41081))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41082, 'qris-choice-en', 'checkout', ['id' => 41082], 41082))->assertOk();
+
+        $idCheckoutPayload = $this->customerPayload('/sendMessage', 41081);
+        $enCheckoutPayload = $this->customerPayload('/sendMessage', 41082);
+        $idCheckoutButtons = collect($idCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+        $enCheckoutButtons = collect($enCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+
+        $this->assertSame('checkout:current', $idCheckoutButtons[0]);
+        $this->assertSame('checkout:binance', $idCheckoutButtons[1]);
+        $this->assertSame('checkout:current', $enCheckoutButtons[0]);
+        $this->assertSame('checkout:binance', $enCheckoutButtons[1]);
+        $this->assertLocalizedCopy(
+            $idCheckoutPayload,
+            ['Pilih metode pembayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok'],
+            ['Choose a payment method below.', '🇸🇬 Singapore'],
+        );
+        $this->assertLocalizedCopy(
+            $enCheckoutPayload,
+            ['Choose a payment method below.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China'],
+            ['Pilih metode pembayaran di bawah.', '🇸🇬 Singapura'],
+        );
     }
 
     /**

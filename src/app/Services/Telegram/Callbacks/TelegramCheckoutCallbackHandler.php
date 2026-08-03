@@ -130,11 +130,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
         $qrisButton = [['text' => '💳 QRIS', 'callback_data' => 'checkout:current']];
         $binanceButton = [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']];
-        $buttons = $context->customer->locale === 'en'
-            ? [$binanceButton, $qrisButton]
-            : [$qrisButton, $binanceButton];
+        $buttons = [$qrisButton, $binanceButton];
         $this->bot->answerCallbackQuery($context->callbackQueryId);
-        $this->bot->sendMessage($context->chatId, $this->text($context->customer, 'Pilih metode pembayaran. QRIS hanya untuk aplikasi bank dan e-wallet Indonesia:', 'Choose a payment method. QRIS is for Indonesian bank and e-wallet apps only:'), ['inline_keyboard' => $buttons]);
+        $paymentMethodMessage = $this->text($context->customer, 'Pilih metode pembayaran di bawah.', 'Choose a payment method below.')
+            ."\n\n"
+            .$this->locale->qrisCrossBorderSupport($context->customer);
+        $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons]);
     }
 
     private function checkout(TelegramCallbackContext $context, bool $binance = false, bool $answerCallback = true, ?string $checkoutKey = null): void
