@@ -66,13 +66,13 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertStringContainsString('Kabar bagus buat kamu', (string) $idRequest['text']);
         $this->assertStringContainsString('Rp35.000 → Rp30.000', (string) $idRequest['text']);
         $this->assertStringContainsString('2.5 USDT → 2.25 USDT', (string) $idRequest['text']);
-        $this->assertStringContainsString('Lebih hemat Rp5.000', (string) $idRequest['text']);
+        $this->assertStringContainsString('Lebih hemat Rp5.000 + 0.25 USDT ✨', (string) $idRequest['text']);
         $this->assertSame('🛒 Lihat Produk', $idRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
         $this->assertSame('product:'.$product->id, $idRequest['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
 
         $this->assertStringContainsString('🎉 Price Drop!', (string) $enRequest['text']);
         $this->assertStringContainsString('Rp35,000 → Rp30,000', (string) $enRequest['text']);
-        $this->assertStringContainsString('You save Rp5,000', (string) $enRequest['text']);
+        $this->assertStringContainsString('You save Rp5,000 + 0.25 USDT ✨', (string) $enRequest['text']);
         $this->assertSame('🛒 View Product', $enRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
     }
 
@@ -104,10 +104,34 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $this->assertCount(1, $storeChannelMessages);
         $this->assertSame(
-            "🎉 Price Drop!\n━━━━━━━━━━━━━━\nGood news for you 👀\n📦 CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 ✨\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
+            "🎉 Price Drop!\n━━━━━━━━━━━━━━\nGood news for you 👀\n📦 CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 + 0.2 USDT ✨\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
             $storeChannelMessages->first()[0]['text'],
         );
         $this->assertArrayNotHasKey('reply_markup', $storeChannelMessages->first()[0]);
+    }
+
+    public function test_usdt_only_decrease_shows_the_usdt_savings_without_an_idr_savings_amount(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        Customer::factory()->create(['telegram_id' => 7010, 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'USDT Discount Product']);
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 35000,
+            'new_price_amount' => 35000,
+            'old_usdt_price_amount' => 2_500_000,
+            'new_usdt_price_amount' => 2_300_000,
+        ]);
+
+        app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
+
+        $request = $this->telegramSendFor(7010);
+        $this->assertStringContainsString('🎉 Price Drop!', (string) $request['text']);
+        $this->assertStringContainsString('You save 0.2 USDT ✨', (string) $request['text']);
+        $this->assertStringNotContainsString('You save Rp', (string) $request['text']);
     }
 
     public function test_transient_store_channel_failure_is_retried_without_duplicate_successful_posts(): void
