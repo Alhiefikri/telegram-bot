@@ -35,7 +35,11 @@
             x-data="adminDashboard(@js($dashboardState))"
             x-on:admin-dashboard:close-modal.window="handleCloseModal($event)"
         >
-            @include('admin.dashboard.header')
+            @if ($navigation['activeTab'] === 'stats')
+                @include('admin.dashboard.header')
+            @else
+                @include('admin.dashboard.compact-header')
+            @endif
             @include('admin.dashboard.desktop-navigation')
             @include('admin.dashboard.status-flash')
 

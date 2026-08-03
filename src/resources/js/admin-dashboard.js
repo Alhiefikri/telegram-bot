@@ -117,6 +117,8 @@ export default function adminDashboard(initialState = {}) {
         productModalOpener: null,
         stockModalOpener: null,
         manageStockModalOpener: null,
+        moreMenuOpen: false,
+        moreMenuOpener: null,
 
         init() {
             this.$nextTick(() => {
@@ -132,6 +134,26 @@ export default function adminDashboard(initialState = {}) {
 
                 this.focusReturnTarget();
             });
+        },
+        openMoreMenu() {
+            this.moreMenuOpener = document.activeElement;
+            this.moreMenuOpen = true;
+            this.$nextTick(() => this.$refs.moreMenuFirst?.focus());
+        },
+
+        closeMoreMenu(restoreFocus = true) {
+            const opener = this.moreMenuOpener;
+            this.moreMenuOpen = false;
+            this.moreMenuOpener = null;
+
+            if (restoreFocus) {
+                this.restoreModalFocus(opener);
+            }
+        },
+
+        goToTabFromMore(tab, openProductForm = false) {
+            this.closeMoreMenu(false);
+            this.goToTab(tab, openProductForm);
         },
 
         goToTab(tab, openProductForm = false) {
