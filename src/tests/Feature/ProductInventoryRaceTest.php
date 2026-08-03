@@ -15,6 +15,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\StoreChannelSetting;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
@@ -24,6 +25,7 @@ use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -159,6 +161,151 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         $this->assertCount(1, $sendMessages);
         $this->assertNotNull(InventoryMovement::findOrFail($adjustment['movement_id'])->stock_notification_sent_at);
+    }
+
+    public function test_sold_out_channel_notification_waits_for_confirmed_payment_and_does_not_create_an_order(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $product = $this->stockedProduct(stock: 1, secrets: ['sold-out-secret']);
+        $product->forceFill(['name' => 'ChatGPT Plus Private'])->save();
+        $customer = Customer::factory()->create(['telegram_id' => 399003]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart);
+
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '-100123'
+            && str_contains((string) ($request['text'] ?? ''), 'TERJUAL HABIS'));
+        Queue::assertNotPushed(SendProductStockNotifications::class);
+
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->sole());
+
+        $sale = InventoryMovement::query()
+            ->where('order_id', $order->id)
+            ->where('type', InventoryMovementType::Sale)
+            ->sole();
+        Queue::assertPushedOn('notifications', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $sale->id);
+
+        (new SendProductStockNotifications($sale->id))->handle(app(TelegramProductNotificationService::class));
+
+        $this->assertSame(1, Order::count());
+        $this->assertSame(0, $product->fresh()->stock);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains((string) $request['text'], 'ChatGPT')
+            && str_contains((string) $request['text'], 'TERJUAL HABIS')
+            && str_contains((string) $request['text'], 'pembayaran berhasil dikonfirmasi')
+            && ! str_contains((string) $request['text'], 'invoice'));
+    }
+
+    public function test_sold_out_notification_waits_for_the_last_confirmed_payment_when_other_orders_are_reserved(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $product = $this->stockedProduct(stock: 2, secrets: ['reserved-a', 'reserved-b']);
+        $firstCustomer = Customer::factory()->create(['telegram_id' => 399004]);
+        $secondCustomer = Customer::factory()->create(['telegram_id' => 399005]);
+
+        $cartService = app(CartService::class);
+        $checkout = app(OrderCheckoutService::class);
+        $firstCart = $cartService->activeCartFor($firstCustomer);
+        $secondCart = $cartService->activeCartFor($secondCustomer);
+        $cartService->setItemQuantity($firstCart, $product, 1);
+        $cartService->setItemQuantity($secondCart, $product, 1);
+        $firstOrder = $checkout->checkout($firstCart);
+        $secondOrder = $checkout->checkout($secondCart);
+
+        app(OrderStateMachine::class)->markPaymentPaid($firstOrder->payments()->sole());
+
+        Queue::assertNotPushed(SendProductStockNotifications::class);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+
+        app(OrderStateMachine::class)->markPaymentPaid($secondOrder->payments()->sole());
+
+        Queue::assertPushedTimes(SendProductStockNotifications::class, 1);
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_duplicate_sold_out_notification_job_execution_sends_only_once(): void
+    {
+        $this->fakeTelegramHttp();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $product = $this->stockedProduct(stock: 1, secrets: ['sold-out-idempotent']);
+        $customer = Customer::factory()->create(['telegram_id' => 399006]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart);
+        app(OrderStateMachine::class)->markPaymentPaid($order->payments()->sole());
+        $sale = InventoryMovement::query()
+            ->where('order_id', $order->id)
+            ->where('type', InventoryMovementType::Sale)
+            ->sole();
+        $job = new SendProductStockNotifications($sale->id);
+
+        $job->handle(app(TelegramProductNotificationService::class));
+        $job->handle(app(TelegramProductNotificationService::class));
+
+        $sendMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage')
+                && (string) ($request[0]['chat_id'] ?? '') === '-100123'
+                && str_contains((string) ($request[0]['text'] ?? ''), 'TERJUAL HABIS'));
+
+        $this->assertCount(1, $sendMessages);
+        $this->assertNotNull($sale->fresh()->stock_notification_sent_at);
+    }
+
+    public function test_restock_channel_notification_includes_added_stock_available_stock_and_current_prices(): void
+    {
+        $this->fakeTelegramHttp();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $product->forceFill([
+            'name' => 'ChatGPT Plus Private',
+            'price_amount' => 35000,
+            'usdt_price_amount' => 1_250_000,
+        ])->save();
+        $admin = User::factory()->create();
+        $adjustment = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product->fresh(),
+            3,
+            'channel restock notification',
+            $admin,
+            '127.0.0.1',
+            ['restock-1', 'restock-2', 'restock-3'],
+        );
+
+        (new SendProductStockNotifications($adjustment['movement_id']))->handle(app(TelegramProductNotificationService::class));
+
+        $this->assertSame(0, Order::count());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains((string) $request['text'], 'ChatGPT Plus Private')
+            && str_contains((string) $request['text'], 'RESTOCK')
+            && str_contains((string) $request['text'], 'Stok masuk: +3 item')
+            && str_contains((string) $request['text'], 'Stok tersedia sekarang: 3 item')
+            && str_contains((string) $request['text'], 'Harga QRIS: Rp35.000')
+            && str_contains((string) $request['text'], 'Binance Pay: 1.25 USDT'));
     }
 
     public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void

@@ -24,7 +24,7 @@ class SendProductStockNotifications implements ShouldQueue
     {
         $movement = InventoryMovement::query()->with('product')->find($this->movementId);
 
-        if ($movement === null || $movement->type !== InventoryMovementType::Adjustment || $movement->quantity < 1) {
+        if (! $this->isNotifiableMovement($movement)) {
             return;
         }
 
@@ -51,16 +51,35 @@ class SendProductStockNotifications implements ShouldQueue
             return $locked->fresh(['product']);
         }, 5);
 
-        if (! $claimed || $claimed->product === null || $claimed->available_before !== 0) {
+        if (! $claimed || $claimed->product === null) {
             return;
         }
 
-        $notifications->notifyStockAdded($claimed->product, $claimed->quantity, $claimed->available_before);
+        if ($claimed->type === InventoryMovementType::Adjustment) {
+            $notifications->notifyStockAdded($claimed->product, $claimed->quantity, $claimed->available_before);
+        } else {
+            $notifications->notifyProductSoldOut($claimed->product);
+        }
 
         InventoryMovement::query()
             ->whereKey($claimed->id)
             ->where('stock_notification_claim_token', $token)
             ->whereNull('stock_notification_sent_at')
             ->update(['stock_notification_sent_at' => now()]);
+    }
+
+    private function isNotifiableMovement(?InventoryMovement $movement): bool
+    {
+        if ($movement === null || $movement->product === null) {
+            return false;
+        }
+
+        if ($movement->type === InventoryMovementType::Adjustment) {
+            return $movement->quantity > 0 && $movement->available_before === 0;
+        }
+
+        return $movement->type === InventoryMovementType::Sale
+            && $movement->quantity < 0
+            && $movement->became_unavailable === true;
     }
 }

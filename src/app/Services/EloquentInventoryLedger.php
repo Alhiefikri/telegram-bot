@@ -7,31 +7,24 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendProductStockNotifications;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
-use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class EloquentInventoryLedger implements InventoryLedger
 {
-    public function __construct(private readonly TelegramProductNotificationService $notifications) {}
-
     /**
      * Callers must hold the product/order locks and wrap the operation in the
      * same transaction as the related order transition.
      */
     public function reserveOrderItem(Order $order, Product $product, int $quantity): void
     {
-        $availableBefore = $product->availableStock();
         $product->increment('reserved_stock', $quantity);
         $product->refresh();
         InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => $quantity, 'notes' => 'Order reservation', 'created_at' => now()]);
-
-        if ($availableBefore > 0 && $product->availableStock() <= 0) {
-            DB::afterCommit(fn () => $this->notifications->notifyOutOfStock($product->fresh()));
-        }
     }
 
     public function assertCartProductAvailable(Product $product, int $quantity, int $cartId): void
@@ -142,11 +135,29 @@ class EloquentInventoryLedger implements InventoryLedger
             if ($product->reserved_stock < $item->quantity || $product->stock < $item->quantity) {
                 throw new InvalidOrderTransition('Reserved stock invariant violated.');
             }
+            $stockBefore = $product->stock;
             $product->forceFill([
                 'stock' => $product->stock - $item->quantity,
                 'reserved_stock' => $product->reserved_stock - $item->quantity,
             ])->save();
-            InventoryMovement::firstOrCreate(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale], ['quantity' => -$item->quantity, 'notes' => 'Order sale', 'created_at' => now()]);
+            $becameUnavailable = $product->stock <= 0
+                || ($product->isCredentialManaged()
+                    && $product->reserved_stock <= 0
+                    && $product->availableStockItemCount() <= 0);
+            $sale = InventoryMovement::firstOrCreate(
+                ['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale],
+                [
+                    'quantity' => -$item->quantity,
+                    'stock_before' => $stockBefore,
+                    'became_unavailable' => $becameUnavailable,
+                    'notes' => 'Order sale',
+                    'created_at' => now(),
+                ],
+            );
+
+            if ($sale->wasRecentlyCreated && $becameUnavailable) {
+                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue('notifications'));
+            }
         }
     }
 
