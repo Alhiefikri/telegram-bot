@@ -5,9 +5,9 @@ namespace App\Storefront;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Services\OrderLifecycleProjection;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\OrderLifecycleProjection;
 
 final class StorefrontPaymentTerminalCopy
 {

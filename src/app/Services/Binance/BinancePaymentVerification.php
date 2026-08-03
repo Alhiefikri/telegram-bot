@@ -473,7 +473,6 @@ final class BinancePaymentVerification
             return BinanceVerificationResult::of(BinanceVerificationOutcome::OrderNotPending);
         }
 
-
         return null;
     }
 

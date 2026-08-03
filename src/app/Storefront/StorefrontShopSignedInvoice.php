@@ -7,7 +7,6 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
-use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\OrderLifecycle;
@@ -142,6 +141,7 @@ class StorefrontShopSignedInvoice
         if ($verificationStatus === null) {
             return $this->terminalCopy->message($projection, $payment);
         }
+
         return $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus);
     }
 
