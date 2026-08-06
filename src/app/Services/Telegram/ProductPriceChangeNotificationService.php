@@ -6,11 +6,13 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
+use App\Models\StoreChannelSetting;
 use App\Support\Money;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Throwable;
 
 class ProductPriceChangeNotificationService
@@ -22,6 +24,8 @@ class ProductPriceChangeNotificationService
     public const BATCH_SIZE = 25;
 
     public const MAX_RECIPIENT_ATTEMPTS = 5;
+
+    public const MAX_STORE_CHANNEL_ATTEMPTS = 5;
 
     public function __construct(private readonly TelegramBotClient $bot) {}
 
@@ -58,6 +62,7 @@ class ProductPriceChangeNotificationService
         }
 
         $event = ProductPriceChangeEvent::query()->findOrFail($eventId);
+        $storeChannelOutcome = $this->sendStoreChannel($event);
         if ($event->recipients_materialized_at === null) {
             $this->ensureRecipients($event);
             $event->forceFill(['recipients_materialized_at' => now()])->save();
@@ -79,8 +84,8 @@ class ProductPriceChangeNotificationService
             ->limit(max(1, $batchSize))
             ->get();
 
-        $transientFailures = 0;
-        $terminalFailures = 0;
+        $transientFailures = $storeChannelOutcome === 'transient_failure' ? 1 : 0;
+        $terminalFailures = $storeChannelOutcome === 'terminal_failure' ? 1 : 0;
 
         foreach ($recipients as $recipient) {
             $outcome = $this->sendRecipient($event, $recipient);
@@ -92,8 +97,101 @@ class ProductPriceChangeNotificationService
             processed: $recipients->count(),
             transientFailures: $transientFailures,
             terminalFailures: $terminalFailures,
-            hasMore: $this->hasPendingRecipients($event->id),
+            hasMore: $this->hasPendingRecipients($event->id) || $this->hasPendingStoreChannel($event->id),
         );
+    }
+
+    private function sendStoreChannel(ProductPriceChangeEvent $event): string
+    {
+        $chatId = $this->storeChannelTarget();
+        if ($chatId === null) {
+            return 'skipped';
+        }
+
+        $token = (string) Str::uuid();
+        $claimed = DB::transaction(function () use ($event, $token): ?ProductPriceChangeEvent {
+            $locked = ProductPriceChangeEvent::query()
+                ->whereKey($event->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $locked || $locked->store_channel_sent_at !== null) {
+                return null;
+            }
+
+            if ($locked->store_channel_attempts >= self::MAX_STORE_CHANNEL_ATTEMPTS) {
+                return null;
+            }
+
+            if ($locked->store_channel_send_started_at !== null && $locked->store_channel_send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
+                return null;
+            }
+
+            if ($locked->store_channel_failed_at !== null && $locked->store_channel_failed_at->gt(now()->subSeconds(self::RETRY_DELAY_SECONDS))) {
+                return null;
+            }
+
+            $locked->forceFill([
+                'store_channel_send_started_at' => now(),
+                'store_channel_send_claim_token' => $token,
+                'store_channel_failed_at' => null,
+                'store_channel_last_error' => null,
+                'store_channel_attempts' => $locked->store_channel_attempts + 1,
+            ])->save();
+
+            return $locked->fresh();
+        }, 5);
+
+        if (! $claimed) {
+            return 'skipped';
+        }
+
+        try {
+            $response = $this->bot->sendMessage($chatId, $this->message($claimed, true));
+            $messageId = data_get($response, 'result.message_id');
+            if (data_get($response, 'ok') !== true || ! $messageId) {
+                throw new RuntimeException('Telegram sendMessage did not return a successful Store Channel message ID.');
+            }
+        } catch (Throwable $e) {
+            $terminal = $e instanceof RequestException && $e->response?->status() === 403;
+            ProductPriceChangeEvent::query()
+                ->whereKey($claimed->id)
+                ->where('store_channel_send_claim_token', $token)
+                ->whereNull('store_channel_sent_at')
+                ->update([
+                    'store_channel_send_started_at' => null,
+                    'store_channel_send_claim_token' => null,
+                    'store_channel_failed_at' => now(),
+                    'store_channel_last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
+                    'store_channel_attempts' => $terminal ? self::MAX_STORE_CHANNEL_ATTEMPTS : $claimed->store_channel_attempts,
+                ]);
+
+            Log::warning('telegram.product_price_change_store_channel_notification_failed', [
+                'event_id' => $event->id,
+                'attempts' => $claimed->store_channel_attempts,
+                'terminal' => $terminal,
+                'status' => $e instanceof RequestException ? $e->response?->status() : null,
+                'exception' => $e::class,
+                'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
+            ]);
+
+            return $terminal ? 'terminal_failure' : 'transient_failure';
+        }
+
+        ProductPriceChangeEvent::query()
+            ->whereKey($claimed->id)
+            ->where('store_channel_send_claim_token', $token)
+            ->whereNull('store_channel_sent_at')
+            ->update([
+                'store_channel_sent_at' => now(),
+                'store_channel_send_started_at' => null,
+                'store_channel_send_claim_token' => null,
+                'store_channel_failed_at' => null,
+                'store_channel_last_error' => null,
+                'store_channel_message_id' => (string) $messageId,
+            ]);
+
+        return 'sent';
     }
 
     private function ensureRecipients(ProductPriceChangeEvent $event): void
@@ -220,6 +318,27 @@ class ProductPriceChangeNotificationService
             ->exists();
     }
 
+    private function hasPendingStoreChannel(int $eventId): bool
+    {
+        if ($this->storeChannelTarget() === null) {
+            return false;
+        }
+
+        return ProductPriceChangeEvent::query()
+            ->whereKey($eventId)
+            ->whereNull('store_channel_sent_at')
+            ->where('store_channel_attempts', '<', self::MAX_STORE_CHANNEL_ATTEMPTS)
+            ->exists();
+    }
+
+    private function storeChannelTarget(): ?string
+    {
+        $setting = StoreChannelSetting::current();
+        $target = trim((string) ($setting->telegram_chat_id ?: $setting->channel_username));
+
+        return $target === '' ? null : $target;
+    }
+
     private function message(ProductPriceChangeEvent $event, bool $english): string
     {
         $decrease = $this->isPureDecrease($event);
@@ -247,10 +366,9 @@ class ProductPriceChangeNotificationService
         }
 
         $lines[] = '';
-        if ($decrease && $event->new_price_amount < $event->old_price_amount) {
-            $lines[] = $english
-                ? 'You save '.$this->formatIdr($event->old_price_amount - $event->new_price_amount, true).' ✨'
-                : 'Lebih hemat '.$this->formatIdr($event->old_price_amount - $event->new_price_amount, false).' ✨';
+        $savingsLine = $this->savingsLine($event, $english);
+        if ($decrease && $savingsLine !== null) {
+            $lines[] = $savingsLine;
             $lines[] = $english
                 ? 'The new price is ready for your next checkout.'
                 : 'Harga baru sudah siap untuk checkout berikutnya.';
@@ -302,6 +420,25 @@ class ProductPriceChangeNotificationService
         }
 
         return Money::usdt($event->old_usdt_price_amount).' → '.Money::usdt($event->new_usdt_price_amount);
+    }
+
+    private function savingsLine(ProductPriceChangeEvent $event, bool $english): ?string
+    {
+        $savings = [];
+        if ($event->new_price_amount < $event->old_price_amount) {
+            $savings[] = $this->formatIdr($event->old_price_amount - $event->new_price_amount, $english);
+        }
+        if ($event->old_usdt_price_amount !== null
+            && $event->new_usdt_price_amount !== null
+            && $event->new_usdt_price_amount < $event->old_usdt_price_amount) {
+            $savings[] = Money::usdt($event->old_usdt_price_amount - $event->new_usdt_price_amount);
+        }
+
+        if ($savings === []) {
+            return null;
+        }
+
+        return ($english ? 'You save ' : 'Lebih hemat ').implode(' + ', $savings).' ✨';
     }
 
     private function replyMarkup(ProductPriceChangeEvent $event, bool $english): array

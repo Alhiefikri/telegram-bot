@@ -13,6 +13,7 @@ use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
+use App\Models\StoreChannelSetting;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use Illuminate\Console\Command;
 
@@ -101,8 +102,11 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
+        $storeChannel = StoreChannelSetting::current();
+        $storeChannelConfigured = trim((string) ($storeChannel->telegram_chat_id ?: $storeChannel->channel_username)) !== '';
+
         ProductPriceChangeEvent::query()
-            ->where(function ($query) use ($cutoff): void {
+            ->where(function ($query) use ($cutoff, $storeChannelConfigured): void {
                 $query->whereNull('recipients_materialized_at')
                     ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
                         $recipients
@@ -112,6 +116,17 @@ class RecoverTelegramOutboundEffects extends Command
                                 $recipient->whereNull('send_started_at')
                                     ->orWhere('send_started_at', '<=', $cutoff);
                             });
+                    })
+                    ->when($storeChannelConfigured, function ($storeChannelQuery) use ($cutoff): void {
+                        $storeChannelQuery->orWhere(function ($storeChannelEffect) use ($cutoff): void {
+                            $storeChannelEffect
+                                ->whereNull('store_channel_sent_at')
+                                ->where('store_channel_attempts', '<', ProductPriceChangeNotificationService::MAX_STORE_CHANNEL_ATTEMPTS)
+                                ->where(function ($storeChannelClaim) use ($cutoff): void {
+                                    $storeChannelClaim->whereNull('store_channel_send_started_at')
+                                        ->orWhere('store_channel_send_started_at', '<=', $cutoff);
+                                });
+                        });
                     });
             })
             ->orderBy('id')
