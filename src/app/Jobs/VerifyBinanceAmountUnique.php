@@ -4,8 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
-use App\Services\Binance\BinanceVerificationOutcome;
-use App\Services\Binance\BinanceVerificationResult;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Telegram\TelegramBinanceVerifyIntents;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -47,13 +46,7 @@ class VerifyBinanceAmountUnique implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
-            Payment::query()
-                ->whereKey($payment->id)
-                ->where('status', PaymentStatus::Pending->value)
-                ->update([
-                    'binance_verification_status' => 'provider_error',
-                    'binance_last_verified_at' => now(),
-                ]);
+            $result = app(BinancePaymentVerification::class)->recordQueueFailure($payment);
 
             $payment->refresh();
             $order = $payment->order;
@@ -67,7 +60,7 @@ class VerifyBinanceAmountUnique implements ShouldBeUnique, ShouldQueue
                 (string) $customer->telegram_id,
                 $order,
                 $payment,
-                BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError, retryable: false),
+                $result,
                 allowRetryButtons: false,
             );
         } catch (Throwable $notificationException) {

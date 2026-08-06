@@ -233,6 +233,9 @@
             radial-gradient(circle at bottom center, rgba(22, 180, 202, 0.16), transparent 24%),
             repeating-linear-gradient(135deg, transparent, transparent 22px, rgba(5, 5, 5, 0.03) 22px, rgba(5, 5, 5, 0.03) 24px);
     }
+    .admin-dashboard-page { scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+    .admin-safe-nav { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+    .admin-safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
 
     .header-gradient { background: linear-gradient(135deg, var(--color-neo-green) 0%, var(--color-neo-yellow) 48%, var(--color-neo-cyan) 100%); }
     .desktop-header { background: linear-gradient(135deg, var(--color-neo-pink-hot) 0%, #ff7cc3 100%); }
@@ -265,9 +268,10 @@
                 radial-gradient(circle at bottom center, rgba(22, 180, 202, 0.12), transparent 24%);
         }
 
-        .desktop-tab-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+        .desktop-tab-nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.5rem; }
         .mobile-bottom-nav { display: none; }
         .admin-mini-shell { max-width: min(820px, calc(100vw - 48px)); }
+        .admin-dashboard-page { scroll-padding-bottom: 0; }
     }
 
     @media (prefers-reduced-motion: reduce) {

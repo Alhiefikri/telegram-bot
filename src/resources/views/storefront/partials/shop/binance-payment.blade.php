@@ -45,7 +45,7 @@
             <p>Do not round or change the amount.</p>
         </div>
 
-        @if ($payment->binance_auto_verification_enabled && $binanceVerificationMode === 'amount_unique' && $payment->binance_verification_status !== 'mismatch' && ! $payment->binance_verification_grace_until?->isPast())
+        @if ($binanceVerificationAutomatic && $binanceVerificationMode === 'amount_unique' && $binanceVerificationStatus !== 'mismatch' && ! $binanceVerificationClosed)
             <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" data-shop-payment-status data-payment-kind="binance" data-status-url="{{ $statusUrl }}" data-redirect-url="{{ $redirectUrl }}" data-terminal="{{ $isTerminal ? 'true' : 'false' }}">
                 <p data-payment-status-title class="font-black text-[var(--sf-ink)]">Checking your payment automatically</p>
                 <p data-payment-status-message class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">We will check Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.</p>
@@ -53,7 +53,7 @@
                 <button type="button" data-payment-status-check class="neo-button mt-3 min-h-12 bg-[var(--sf-surface)] px-4 text-sm font-black text-[var(--sf-ink)]">Check verification status</button>
                 <div data-payment-status-followup class="hidden"></div>
             </div>
-        @elseif ($payment->binance_auto_verification_enabled && $binanceVerificationMode === 'order_id' && $payment->binance_verification_status !== 'mismatch' && ! $payment->binance_verification_grace_until?->isPast())
+        @elseif ($binanceVerificationAutomatic && $binanceVerificationMode === 'order_id' && $binanceVerificationStatus !== 'mismatch' && ! $binanceVerificationClosed)
             <form method="POST" action="{{ $binanceOrderIdUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
                 @csrf
                 <p class="font-black text-[var(--sf-ink)]">After paying, submit your Binance Pay Order ID.</p>
@@ -69,7 +69,7 @@
             </form>
             <div class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4" data-shop-payment-status data-payment-kind="binance" data-status-url="{{ $statusUrl }}" data-redirect-url="{{ $redirectUrl }}" data-terminal="{{ $isTerminal ? 'true' : 'false' }}">
                 <p data-payment-status-title class="font-black text-[var(--sf-ink)]">{{ $binanceVerificationStatus === 'checking' ? 'Checking your payment' : 'Waiting for your Order ID' }}</p>
-                <p data-payment-status-message class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $payment->binance_verification_status === 'checking' ? 'Your Order ID is being checked securely.' : 'Submit the Order ID after completing your Binance Pay payment.' }}</p>
+                <p data-payment-status-message class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $binanceVerificationStatus === 'checking' ? 'Your Order ID is being checked securely.' : 'Submit the Order ID after completing your Binance Pay payment.' }}</p>
                 <p data-payment-status-announcement class="sr-only" aria-live="polite"></p>
                 <button type="button" data-payment-status-check class="neo-button mt-3 min-h-12 bg-[var(--sf-surface)] px-4 text-sm font-black text-[var(--sf-ink)]">Check verification status</button>
                 <div data-payment-status-followup class="hidden"></div>

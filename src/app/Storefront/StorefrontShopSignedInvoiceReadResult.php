@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Binance\BinanceVerificationStatus;
 
 class StorefrontShopSignedInvoiceReadResult
 {
@@ -37,6 +38,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly string $paidDeliveryType,
         public readonly string $manualFulfillmentStatus,
         public readonly string $statusMessage,
+        public readonly ?BinanceVerificationStatus $binanceVerificationStatus = null,
     ) {}
 
     public function isPaid(): bool

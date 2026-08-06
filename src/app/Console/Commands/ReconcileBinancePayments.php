@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
-use App\Services\Binance\BinanceAutoVerification;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceTransactionHistoryReader;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Telegram\TelegramBinanceVerificationEscalator;
@@ -19,7 +19,7 @@ class ReconcileBinancePayments extends Command
 
     public function handle(
         BinanceTransactionHistoryReader $history,
-        BinanceAutoVerification $verification,
+        BinancePaymentVerification $verification,
         TelegramBinanceVerificationEscalator $escalator,
     ): int {
         if (! $verification->enabled()) {
@@ -37,8 +37,7 @@ class ReconcileBinancePayments extends Command
                 $query->where(function ($orderIdQuery): void {
                     $orderIdQuery->where('binance_verification_mode', 'order_id')
                         ->whereNotNull('binance_order_id')
-                        ->whereNotNull('binance_verification_grace_until')
-                        ->where('binance_verification_grace_until', '>', now());
+                        ->whereIn('binance_verification_status', ['awaiting_submission', 'checking', 'not_found', 'provider_error']);
                 })->orWhere(function ($legacyQuery): void {
                     $legacyQuery->where('binance_verification_mode', 'amount_unique')
                         ->where(function ($query): void {
@@ -85,9 +84,7 @@ class ReconcileBinancePayments extends Command
 
         foreach ($pending as $payment) {
             try {
-                $result = $payment->binance_verification_mode === 'amount_unique'
-                    ? $verification->verifyLegacyPaymentFromTransactions($payment, $transactions)
-                    : $verification->matchAndConfirm($payment, $transactions);
+                $result = $verification->verify($payment, $transactions);
             } catch (Throwable $exception) {
                 report($exception);
                 $failed++;

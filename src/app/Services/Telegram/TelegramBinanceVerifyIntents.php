@@ -4,30 +4,27 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Jobs\VerifyBinanceAmountUnique;
-use App\Jobs\VerifyBinanceOrderId;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Services\Binance\BinanceAutoVerification;
 use App\Services\Binance\BinanceOrderId;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Binance\BinanceVerificationQueue;
 use App\Services\Binance\BinanceVerificationResult;
-use App\Services\Binance\BinanceVerificationSubmissionService;
+use App\Services\Binance\BinanceVerificationSubmissionOutcome;
 use Throwable;
 
 class TelegramBinanceVerifyIntents
 {
     private const MAX_ORDER_ID_ATTEMPTS = 3;
 
-    private const RETRY_DELAY_SECONDS = 30;
-
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
         private TelegramBinanceVerifySession $session,
-        private BinanceAutoVerification $verification,
-        private BinanceVerificationSubmissionService $submissions,
+        private BinancePaymentVerification $verification,
+        private BinanceVerificationQueue $queue,
         private TelegramBinanceVerificationEscalator $escalator,
     ) {}
 
@@ -35,7 +32,7 @@ class TelegramBinanceVerifyIntents
     {
         [, $payment] = $this->findVerifiableOrder($customer, $orderId);
 
-        if ($payment?->binance_verification_mode === 'amount_unique') {
+        if ($payment !== null && $this->verification->status($payment)->mode === 'amount_unique') {
             $this->handleAmountUniqueTap($customer, $chatId, $callbackQueryId, $orderId);
 
             return;
@@ -62,8 +59,7 @@ class TelegramBinanceVerifyIntents
         }
 
         try {
-            VerifyBinanceAmountUnique::dispatch($payment->id)
-                ->onQueue((string) config('services.binance.verification_queue', 'binance-verification'));
+            $this->queue->dispatchAmountUnique($payment);
         } catch (Throwable $exception) {
             report($exception);
             $this->bot->answerCallbackQuery($callbackQueryId);
@@ -100,14 +96,12 @@ class TelegramBinanceVerifyIntents
         if (! $payment || ! $order || ! $customer
             || $payment->status !== PaymentStatus::Pending
             || $order->order_status !== OrderStatus::PendingPayment
-            || $payment->binance_verification_mode !== 'amount_unique') {
+            || $this->verification->status($payment)->mode !== 'amount_unique') {
             return;
         }
 
-        $result = $this->verification->verifyPayment($payment);
-        $this->recordAmountUniqueVerificationStatus($payment, $result->outcome);
-        $payment->refresh();
-
+        $result = $this->verification->verify($payment);
+        $this->verification->recordOutcome($payment, $result);
         $this->respondToResult(
             $customer,
             (string) $customer->telegram_id,
@@ -198,8 +192,8 @@ class TelegramBinanceVerifyIntents
             return true;
         }
 
-        $submission = $this->submissions->submit($order->id, $candidate);
-        if ($submission['status'] === 'limit') {
+        $submission = $this->verification->submitOrderId($order->id, $candidate);
+        if ($submission->outcome === BinanceVerificationSubmissionOutcome::Limit) {
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
                 'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.' ya.',
@@ -209,7 +203,7 @@ class TelegramBinanceVerifyIntents
             return true;
         }
 
-        if ($submission['status'] === 'expired') {
+        if ($submission->outcome === BinanceVerificationSubmissionOutcome::Expired) {
             $this->session->forget($customer);
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
@@ -220,7 +214,7 @@ class TelegramBinanceVerifyIntents
             return true;
         }
 
-        if ($submission['status'] === 'grace_expired') {
+        if ($submission->outcome === BinanceVerificationSubmissionOutcome::GraceExpired) {
             $this->session->forget($customer);
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
@@ -231,7 +225,7 @@ class TelegramBinanceVerifyIntents
             return true;
         }
 
-        if ($submission['status'] === 'manual') {
+        if ($submission->outcome === BinanceVerificationSubmissionOutcome::Manual) {
             $this->session->forget($customer);
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
@@ -243,8 +237,8 @@ class TelegramBinanceVerifyIntents
         }
 
         /** @var Payment $payment */
-        $payment = $submission['payment'];
-        if ($submission['dispatch_failed'] ?? false) {
+        $payment = $submission->payment;
+        if ($submission->dispatchFailed) {
             $this->respondToResult(
                 $customer,
                 $chatId,
@@ -269,85 +263,40 @@ class TelegramBinanceVerifyIntents
         $order = $payment?->order;
         $customer = $order?->customer;
 
-        $storedOrderId = trim((string) ($payment?->binance_order_id ?? ''));
-        if ($orderId !== '' && $storedOrderId !== $orderId) {
-            return;
-        }
-        $orderId = $storedOrderId;
-
         if (! $payment || ! $order || ! $customer) {
             return;
         }
 
-        if (! $this->retryEligible($payment, $order, $orderId, $attemptNumber, $submissionVersion)) {
-            $this->notifyRetryClosedWindow($payment, $order, $customer, $orderId, $attemptNumber, $submissionVersion);
+        $storedOrderId = trim((string) $payment->binance_order_id);
+        if ($orderId !== '' && $storedOrderId !== $orderId) {
+            return;
+        }
+
+        $decision = $this->verification->retryOrderId($payment, $attemptNumber, $retryNumber, $submissionVersion);
+        if ($decision->result->outcome === BinanceVerificationOutcome::StaleSubmission) {
+            return;
+        }
+
+        if ($decision->shouldRetry()) {
+            $this->queue->dispatchOrderId($payment, $submissionVersion, $retryNumber + 1, $decision->delaySeconds);
 
             return;
         }
 
-        $result = $this->verification->verifyPaymentByProviderOrderId($payment, $orderId, $submissionVersion);
-        $this->recordVerificationStatus($payment, $orderId, $submissionVersion, $result->outcome);
-
-        if (in_array($result->outcome, [BinanceVerificationOutcome::NotConfigured, BinanceVerificationOutcome::OrderNotPending], true)
-            || ($result->outcome === BinanceVerificationOutcome::ProviderError && ! $result->retryable)) {
-            Payment::query()
-                ->whereKey($payment->id)
-                ->where('binance_order_id', $orderId)
-                ->where('binance_order_id_submission_version', $submissionVersion)
-                ->update([
-                    'binance_verification_grace_until' => now(),
-                    'binance_verification_status' => 'provider_error',
-                    'binance_last_verified_at' => now(),
-                ]);
-            $payment->refresh();
-        }
-
-        $terminalRetry = false;
-        if ((in_array($result->outcome, [BinanceVerificationOutcome::NotFound, BinanceVerificationOutcome::IncompleteWindow], true)
-            || ($result->outcome === BinanceVerificationOutcome::ProviderError && $result->retryable))) {
-            $delaySeconds = self::RETRY_DELAY_SECONDS * (2 ** max(0, $retryNumber - 1)) + random_int(0, 10);
-            $remainingGraceSeconds = $payment->binance_verification_grace_until === null
-                ? 0
-                : max(0, $payment->binance_verification_grace_until->getTimestamp() - now()->getTimestamp());
-            if ($payment->binance_verification_grace_until?->isFuture()
-                && $retryNumber < 3
-                && $delaySeconds + 5 <= $remainingGraceSeconds) {
-                VerifyBinanceOrderId::dispatch($payment->id, $orderId, $attemptNumber, $retryNumber + 1, $submissionVersion)
-                    ->delay(now()->addSeconds($delaySeconds))
-                    ->onQueue((string) config('services.binance.verification_queue', 'binance-verification'));
-
-                return;
-            }
-
-            // The final queued attempt must still tell the buyer what to do
-            // next. Previously async workers returned here, leaving the
-            // storefront/Telegram status stuck on checking forever.
-            $terminalRetry = true;
-            $terminalStatus = $result->outcome === BinanceVerificationOutcome::NotFound
-                ? 'not_found'
-                : 'provider_error';
-            Payment::query()
-                ->whereKey($payment->id)
-                ->where('binance_order_id', $orderId)
-                ->where('binance_order_id_submission_version', $submissionVersion)
-                ->update([
-                    'binance_verification_grace_until' => now(),
-                    'binance_verification_status' => $terminalStatus,
-                    'binance_last_verified_at' => now(),
-                ]);
-            $payment->refresh();
-        }
-
-        if ($result->outcome === BinanceVerificationOutcome::OrderNotPending) {
-            $payment->refresh();
-            $order->refresh();
-            if (! $this->retryEligible($payment, $order, $orderId, $attemptNumber, $submissionVersion)) {
-                return;
-            }
-        }
-
+        $payment->refresh();
+        $order->refresh();
         $this->session->forget($customer);
-        $this->respondToResult($customer, (string) $customer->telegram_id, $order, $payment, $result, allowRetryButtons: false, submittedOrderId: $orderId, finalRetry: $terminalRetry);
+        $this->respondToResult(
+            $customer,
+            (string) $customer->telegram_id,
+            $order,
+            $payment,
+            $decision->result,
+            false,
+            $storedOrderId,
+            $decision->terminal
+                && in_array($decision->result->outcome, [BinanceVerificationOutcome::NotFound, BinanceVerificationOutcome::ProviderError], true),
+        );
     }
 
     public function cancelPrompt(Customer $customer): void
@@ -358,7 +307,7 @@ class TelegramBinanceVerifyIntents
     public function respondToResult(Customer $customer, string $chatId, Order $order, Payment $payment, BinanceVerificationResult $result, bool $allowRetryButtons, ?string $submittedOrderId = null, bool $finalRetry = false): void
     {
         $amount = $this->formatUsdt((int) $payment->amount);
-
+        $verificationMode = $this->verification->status($payment)->mode;
         switch ($result->outcome) {
             case BinanceVerificationOutcome::Confirmed:
                 $this->session->forget($customer);
@@ -519,8 +468,8 @@ class TelegramBinanceVerifyIntents
             );
         }
 
-        if ($payment->binance_verification_mode !== 'amount_unique'
-            || ! $payment->binance_auto_verification_enabled) {
+        $verificationStatus = $this->verification->status($payment);
+        if ($verificationStatus->mode !== 'amount_unique' || ! $verificationStatus->automatic) {
             return $this->text(
                 $customer,
                 "Verifikasi otomatis tidak tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
@@ -528,7 +477,7 @@ class TelegramBinanceVerifyIntents
             );
         }
 
-        if ($payment->binance_verification_grace_until?->isPast()) {
+        if ($verificationStatus->closed()) {
             return $this->text(
                 $customer,
                 "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
@@ -557,7 +506,8 @@ class TelegramBinanceVerifyIntents
             );
         }
 
-        if ($payment->binance_verification_mode !== 'order_id') {
+        $verificationStatus = $this->verification->status($payment);
+        if ($verificationStatus->mode !== 'order_id') {
             return $this->text(
                 $customer,
                 "Verifikasi Order ID belum tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
@@ -565,7 +515,7 @@ class TelegramBinanceVerifyIntents
             );
         }
 
-        if ($payment->binance_verification_grace_until?->isPast()) {
+        if ($verificationStatus->closed()) {
             return $this->text(
                 $customer,
                 "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
@@ -576,63 +526,6 @@ class TelegramBinanceVerifyIntents
         return null;
     }
 
-    private function retryEligible(Payment $payment, Order $order, string $orderId, int $attemptNumber, int $submissionVersion = 0): bool
-    {
-        return $payment->status === PaymentStatus::Pending
-            && $order->order_status === OrderStatus::PendingPayment
-            && $payment->provider === 'manual'
-            && $payment->method === 'BINANCE_PAY_ID'
-            && $payment->binance_auto_verification_enabled
-            && $payment->binance_verification_mode === 'order_id'
-            && $payment->binance_order_id === $orderId
-            && (int) $payment->binance_order_id_attempts === $attemptNumber
-            && $submissionVersion > 0
-            && (int) $payment->binance_order_id_submission_version === $submissionVersion
-            && $payment->binance_verification_grace_until?->isFuture();
-    }
-
-    private function notifyRetryClosedWindow(Payment $payment, Order $order, Customer $customer, string $orderId, int $attemptNumber, int $submissionVersion): void
-    {
-        if ($payment->status !== PaymentStatus::Pending
-            || $order->order_status !== OrderStatus::PendingPayment
-            || $payment->provider !== 'manual'
-            || $payment->method !== 'BINANCE_PAY_ID'
-            || ! $payment->binance_auto_verification_enabled
-            || $payment->binance_verification_mode !== 'order_id'
-            || $payment->binance_order_id !== $orderId
-            || (int) $payment->binance_order_id_attempts !== $attemptNumber
-            || (int) $payment->binance_order_id_submission_version !== $submissionVersion
-            || $payment->binance_verification_grace_until === null
-            || $payment->binance_verification_grace_until->isFuture()
-            || ! in_array($payment->binance_verification_status, ['checking', 'not_found', 'provider_error'], true)) {
-            return;
-        }
-
-        $outcome = $payment->binance_verification_status === 'not_found'
-            ? BinanceVerificationOutcome::NotFound
-            : BinanceVerificationOutcome::ProviderError;
-        Payment::query()
-            ->whereKey($payment->id)
-            ->where('binance_order_id_submission_version', $submissionVersion)
-            ->update([
-                'binance_verification_status' => $outcome === BinanceVerificationOutcome::NotFound ? 'not_found' : 'provider_error',
-                'binance_verification_grace_until' => now(),
-                'binance_last_verified_at' => now(),
-            ]);
-        $payment->refresh();
-
-        $this->respondToResult(
-            $customer,
-            (string) $customer->telegram_id,
-            $order,
-            $payment,
-            BinanceVerificationResult::of($outcome, retryable: false),
-            allowRetryButtons: false,
-            submittedOrderId: $orderId,
-            finalRetry: $outcome === BinanceVerificationOutcome::NotFound,
-        );
-    }
-
     private function respondIfStillChecking(Customer $customer, string $chatId, Order $order, Payment $payment, string $candidate): void
     {
         $payment->refresh();
@@ -640,8 +533,13 @@ class TelegramBinanceVerifyIntents
             return;
         }
 
-        if (in_array($payment->binance_verification_status, ['checking', 'not_found', 'provider_error'], true)
-            && $payment->binance_verification_grace_until?->isFuture()) {
+        $verificationStatus = $this->verification->status($payment);
+        if ($verificationStatus->withinGrace
+            && in_array($verificationStatus->outcome, [
+                BinanceVerificationOutcome::IncompleteWindow,
+                BinanceVerificationOutcome::NotFound,
+                BinanceVerificationOutcome::ProviderError,
+            ], true)) {
             $this->respondToResult(
                 $customer,
                 $chatId,
@@ -655,7 +553,7 @@ class TelegramBinanceVerifyIntents
             return;
         }
 
-        if ($payment->binance_verification_status !== 'checking') {
+        if ($verificationStatus->outcome !== BinanceVerificationOutcome::IncompleteWindow) {
             return;
         }
 
@@ -668,48 +566,6 @@ class TelegramBinanceVerifyIntents
             allowRetryButtons: false,
             submittedOrderId: $candidate,
         );
-    }
-
-    private function recordAmountUniqueVerificationStatus(Payment $payment, BinanceVerificationOutcome $outcome): void
-    {
-        $status = match ($outcome) {
-            BinanceVerificationOutcome::Confirmed,
-            BinanceVerificationOutcome::AlreadyPaid => 'confirmed',
-            BinanceVerificationOutcome::NotFound => 'not_found',
-            BinanceVerificationOutcome::IncompleteWindow => 'checking',
-            BinanceVerificationOutcome::ProviderError => 'provider_error',
-            BinanceVerificationOutcome::Mismatch,
-            BinanceVerificationOutcome::TransactionAlreadyUsed => 'mismatch',
-            default => 'checking',
-        };
-
-        Payment::query()
-            ->whereKey($payment->id)
-            ->update([
-                'binance_verification_status' => $status,
-                'binance_last_verified_at' => now(),
-            ]);
-    }
-
-    private function recordVerificationStatus(Payment $payment, string $orderId, int $submissionVersion, BinanceVerificationOutcome $outcome): void
-    {
-        $status = match ($outcome) {
-            BinanceVerificationOutcome::Confirmed => 'confirmed',
-            BinanceVerificationOutcome::NotFound => 'not_found',
-            BinanceVerificationOutcome::IncompleteWindow => 'checking',
-            BinanceVerificationOutcome::ProviderError => 'provider_error',
-            BinanceVerificationOutcome::Mismatch => 'mismatch',
-            default => 'checking',
-        };
-
-        Payment::query()
-            ->whereKey($payment->id)
-            ->where('binance_order_id', $orderId)
-            ->when($submissionVersion > 0, fn ($query) => $query->where('binance_order_id_submission_version', $submissionVersion))
-            ->update([
-                'binance_verification_status' => $status,
-                'binance_last_verified_at' => now(),
-            ]);
     }
 
     private function formatUsdt(int $amountMicro): string

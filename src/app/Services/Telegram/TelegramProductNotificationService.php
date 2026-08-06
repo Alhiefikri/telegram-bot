@@ -4,6 +4,8 @@ namespace App\Services\Telegram;
 
 use App\Models\Customer;
 use App\Models\Product;
+use App\Models\StoreChannelSetting;
+use App\Storefront\StorefrontUrl;
 use Throwable;
 
 class TelegramProductNotificationService
@@ -12,6 +14,7 @@ class TelegramProductNotificationService
         private TelegramBroadcastService $broadcast,
         private TelegramBotClient $bot,
         private TelegramAdminAccess $adminAccess,
+        private StorefrontUrl $urls,
     ) {}
 
     public function notifyProductCreated(Product $product): array
@@ -59,6 +62,28 @@ class TelegramProductNotificationService
         if (($availableBefore !== null && $availableBefore > 0) || $availableStock < 1) {
             return $this->skippedResult();
         }
+
+        $this->sendStoreChannel(
+            implode("\n", [
+                '✨ '.$product->name.' RESTOCK — SUDAH TERSEDIA',
+                '━━━━━━━━━━━━━━',
+                'Stok baru sudah masuk dan produk siap dipesan kembali.',
+                '',
+                '📥 Stok masuk: +'.$addedQuantity.' item',
+                '📦 Stok tersedia sekarang: '.$availableStock.' item',
+                '💳 Harga QRIS: Rp'.number_format($product->price_amount, 0, ',', '.'),
+                ...($product->usdt_price_amount !== null
+                    ? ['💎 Binance Pay: '.$this->formatUsdt($product->usdt_price_amount).' USDT']
+                    : []),
+                '',
+                'Jangan sampai kehabisan lagi ya 🙌',
+            ]),
+            [
+                'inline_keyboard' => [[
+                    ['text' => '🛒 Lihat Produk', 'url' => $this->urls->telegramProductStartUrl($product)],
+                ]],
+            ],
+        );
 
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", $customer->locale === 'en' ? [
@@ -115,7 +140,33 @@ class TelegramProductNotificationService
         ];
     }
 
+    public function notifyProductSoldOut(Product $product): void
+    {
+        $this->sendStoreChannel(implode("\n", [
+            '📦 '.$product->name,
+            '🔴 TERJUAL HABIS',
+            '━━━━━━━━━━━━━━',
+            '',
+            'Stok terakhir baru saja terjual setelah pembayaran berhasil dikonfirmasi ✅',
+            '',
+            'Terima kasih atas antusiasme dan kepercayaannya 🙏',
+            'Produk ini sementara belum dapat dipesan kembali.',
+            '',
+            'Pantau channel ini untuk mendapatkan informasi stok berikutnya. Kami akan mengabari saat produk tersedia lagi.',
+        ]));
+
+        $this->notifyAdminOutOfStock($product);
+    }
+
+    /**
+     * Kept as a compatibility alias for callers that used the old internal name.
+     */
     public function notifyOutOfStock(Product $product): void
+    {
+        $this->notifyProductSoldOut($product);
+    }
+
+    private function notifyAdminOutOfStock(Product $product): void
     {
         $adminChatId = $this->adminAccess->adminChatId();
         if (blank(config('services.telegram.token')) || ! $adminChatId) {
@@ -128,12 +179,43 @@ class TelegramProductNotificationService
                 '━━━━━━━━━━━━━━',
                 '📦 '.$product->name,
                 '',
-                'Stok produk ini sekarang 0.',
+                'Stok yang tersedia untuk dibeli sekarang 0.',
                 '',
                 'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.',
             ]));
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    private function sendStoreChannel(string $text, array $replyMarkup = []): void
+    {
+        $channelChatId = $this->storeChannelChatId();
+        if (blank(config('services.telegram.token')) || $channelChatId === null) {
+            return;
+        }
+
+        try {
+            $this->bot->sendMessage($channelChatId, $text, $replyMarkup);
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function storeChannelChatId(): ?string
+    {
+        $setting = StoreChannelSetting::current();
+        if ($setting->last_test_success !== true) {
+            return null;
+        }
+
+        $chatId = trim((string) $setting->telegram_chat_id);
+
+        return $chatId === '' ? null : $chatId;
+    }
+
+    private function formatUsdt(int $amount): string
+    {
+        return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
     }
 }

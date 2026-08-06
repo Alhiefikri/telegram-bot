@@ -7,6 +7,9 @@ use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\Binance\BinancePaymentVerification;
+use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
@@ -27,6 +30,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontShopPaymentRefreshCoordinator $coordinator,
+        private readonly BinancePaymentVerification $verification,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
@@ -38,20 +42,32 @@ class StorefrontShopPaymentStatusRefresh
             $order->refresh();
             $payment->refresh();
             $projection = $this->orders->project($order, $payment);
+            $verificationStatus = $this->verification->status($payment);
+
+            if ($this->shouldVerifyBinance($projection, $verificationStatus)) {
+                $submissionVersion = $verificationStatus->mode === 'order_id'
+                    ? (int) $payment->binance_order_id_submission_version
+                    : 0;
+                $result = $this->verification->verify($payment, null, $submissionVersion);
+                $this->verification->recordOutcome($payment, $result, $submissionVersion);
+                $order->refresh();
+                $payment->refresh();
+                $projection = $this->orders->project($order, $payment);
+                $verificationStatus = $this->verification->status($payment);
+            }
 
             return StorefrontShopSignedStatusRefreshResult::refreshed(
                 paymentStatus: $payment->status,
                 orderStatus: $order->order_status,
                 isPaid: $projection->isPaid,
                 isTerminal: $this->state($projection) === StorefrontShopSignedInvoiceState::Terminal
-                    || ($payment->binance_verification_mode === 'order_id'
-                        && $payment->binance_verification_grace_until !== null
-                        && ! $payment->binance_verification_grace_until->isFuture()
+                    || ($verificationStatus->mode === 'order_id'
+                        && $verificationStatus->closed()
                         && ! $projection->isPaid),
                 qrisReady: false,
                 shouldReload: $projection->isPaid,
                 redirectUrl: $this->invoiceUrls->show($order),
-                message: $this->binanceStatusMessage($payment, $projection),
+                message: $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus),
             );
         }
 
@@ -212,26 +228,17 @@ class StorefrontShopPaymentStatusRefresh
             && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID';
     }
 
-    private function binanceStatusMessage(Payment $payment, OrderLifecycleProjection $projection): string
+    private function shouldVerifyBinance(OrderLifecycleProjection $projection, BinanceVerificationStatus $verificationStatus): bool
     {
-        if ($projection->isTerminal || $projection->isPaid) {
-            return $this->terminalCopy->message($projection, $payment);
-        }
-
-        if ($payment->binance_auto_verification_enabled && $payment->binance_verification_mode === 'amount_unique') {
-            return $payment->binance_verification_status === 'mismatch'
-                ? 'The payment needs a manual review. Please contact support with your invoice number.'
-                : 'We are checking Binance history for the exact amount and receiver. Your product will be delivered automatically when the transfer matches.';
-        }
-
-        return match (true) {
-            $payment->binance_verification_status === 'checking' && $payment->binance_verification_grace_until?->isFuture() => 'Order ID received. We are checking your Binance payment securely.',
-            $payment->binance_verification_status === 'not_found' && $payment->binance_verification_grace_until?->isFuture() => 'The payment is not visible yet. We will keep checking while the verification window is open.',
-            $payment->binance_verification_status === 'mismatch' => 'The payment needs a manual review. Please contact support with your invoice number.',
-            $payment->binance_verification_status === 'provider_error' && $payment->binance_verification_grace_until?->isFuture() => 'Your Order ID was received. Verification is temporarily delayed; we will keep checking securely.',
-            in_array($payment->binance_verification_status, ['checking', 'not_found', 'provider_error'], true) => 'Automatic verification has closed. Please contact support with your payment proof.',
-            default => 'Submit your Binance Pay Order ID after completing the payment.',
-        };
+        return $projection->isPendingPayment
+            && $verificationStatus->automatic
+            && ! $verificationStatus->closed()
+            && in_array($verificationStatus->outcome, [
+                BinanceVerificationOutcome::NotFound,
+                BinanceVerificationOutcome::IncompleteWindow,
+                BinanceVerificationOutcome::ProviderError,
+            ], true)
+            && ($verificationStatus->mode === 'amount_unique' || $verificationStatus->submitted);
     }
 
     private function hasPayableNativeQris(?Payment $payment): bool

@@ -53,9 +53,7 @@ class TelegramCatalogIntents
                     'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
                     'callback_data' => 'buy:binance:'.$product->id,
                 ]];
-                $keyboard = $this->locale->code($customer) === 'en'
-                    ? [$binanceButton, $qrisButton]
-                    : [$qrisButton, $binanceButton];
+                $keyboard = [$qrisButton, $binanceButton];
             } else {
                 $keyboard[] = $qrisButton;
             }
@@ -83,7 +81,11 @@ class TelegramCatalogIntents
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
         $lines[] = $availableStock > 0
-            ? $this->locale->text($customer, 'Pilih cara bayar di bawah. QRIS khusus aplikasi bank dan e-wallet Indonesia. Setelah pilih jumlah, checkout langsung dibuat.', 'Choose a payment method below. QRIS is for Indonesian bank and e-wallet apps only. After you choose the quantity, checkout is created immediately.')
+            ? $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
+                ."\n\n"
+                .$this->locale->qrisCrossBorderSupport($customer)
+                ."\n\n"
+                .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.')
             : $this->locale->text($customer, 'Stoknya lagi habis nih. Cek produk lain dulu ya, atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);

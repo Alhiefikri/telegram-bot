@@ -15,6 +15,10 @@ _Avoid_: Channel
 **Web Storefront**:
 The public website where customers browse the catalog, check out with QRIS, and access paid digital-account data without a Telegram dependency.
 _Avoid_: Telegram checkout
+**QRIS Cross-Border**:
+The QRIS interoperability connection between Indonesia and participating partner countries that lets supported payment apps and merchants transact across linked QR systems. Availability depends on the payment provider and participating merchant; it is not universal country coverage.
+_Avoid_: QRIS available in every country, QRIS for Indonesian apps only
+
 
 **Recovery Key**:
 A one-time-displayed customer secret paired with an invoice number to reopen paid digital-account data in the Web Storefront. Only its hash is stored with the order.
@@ -43,3 +47,7 @@ _Avoid_: In-stock item
 **Unavailable Product**:
 A product that remains visible in the catalog but cannot currently be bought because it has no available stock.
 _Avoid_: Hidden product, deleted product
+
+**Binance Payment Verification**:
+The process of checking a Binance Pay transfer against a pending payment before the order is completed, using the expected amount, currency, configured receiver, and, when required, the Binance Order ID. It can confirm the payment, leave it awaiting more evidence, or send it for manual review.
+_Avoid_: Binance payment proof (that means screenshot evidence)

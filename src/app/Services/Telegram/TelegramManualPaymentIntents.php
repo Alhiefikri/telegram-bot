@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\Binance\BinancePaymentVerification;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,7 @@ class TelegramManualPaymentIntents
         private TelegramAdminAccess $adminAccess,
         private TelegramLocale $locale,
         private TelegramSupportContact $supportContact,
+        private BinancePaymentVerification $verification,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -91,15 +93,14 @@ class TelegramManualPaymentIntents
                 return ['status' => 'expired'];
             }
 
+            $verificationStatus = $this->verification->status($payment);
             $automaticBinance = $isPendingOrder
                 && $payment->method === 'BINANCE_PAY_ID'
-                && $payment->binance_auto_verification_enabled
-                && in_array($payment->binance_verification_mode, ['amount_unique', 'order_id'], true);
+                && $verificationStatus->automatic
+                && in_array($verificationStatus->mode, ['amount_unique', 'order_id'], true);
             if ($automaticBinance
-                && ($payment->binance_verification_mode === 'amount_unique'
-                    || $payment->binance_verification_grace_until === null
-                    || $payment->binance_verification_grace_until->isFuture())) {
-                return ['status' => $payment->binance_verification_mode === 'order_id'
+                && ($verificationStatus->mode === 'amount_unique' || ! $verificationStatus->closed())) {
+                return ['status' => $verificationStatus->mode === 'order_id'
                     ? 'order_id_required'
                     : 'automatic_verification_required'];
             }

@@ -3,6 +3,8 @@
 namespace App\Storefront;
 
 use App\Models\Order;
+use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Binance\BinanceVerificationStatus;
 
 class StorefrontShopOrderPresenter
 {
@@ -56,8 +58,11 @@ class StorefrontShopOrderPresenter
             'qrisImageSource' => $invoice->qrisImageSource,
             'payableAmountDisplay' => $invoice->payableAmountDisplay,
             'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
-            'binanceVerificationMode' => (string) ($invoice->payment?->binance_verification_mode ?? 'amount_unique'),
-            'binanceVerificationStatus' => (string) ($invoice->payment?->binance_verification_status ?? 'awaiting_submission'),
+            'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
+            'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),
+            'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)
+                && $invoice->binanceVerificationStatus?->outcome !== BinanceVerificationOutcome::NotConfigured,
+            'binanceVerificationClosed' => $invoice->binanceVerificationStatus?->closed() ?? false,
             'binanceReceiverLabel' => $invoice->payment?->binance_receiver_type === 'uid'
                 ? 'Binance UID'
                 : ($invoice->payment?->binance_receiver_type === 'pay_id' ? 'Binance Pay ID' : (filled(config('services.binance.pay_id')) ? 'Binance Pay ID' : 'Binance UID')),
@@ -69,8 +74,25 @@ class StorefrontShopOrderPresenter
             'paidDeliveryType' => $invoice->paidDeliveryType,
             'manualFulfillmentStatus' => $invoice->manualFulfillmentStatus,
             'canRevealCredentials' => $canRevealCredentials,
+
             'accessKey' => $accessKey,
             'orderAccessUrl' => route('storefront.order-access.create'),
         ];
+    }
+
+    private function binanceStatus(?BinanceVerificationStatus $status): string
+    {
+        if ($status === null) {
+            return 'awaiting_submission';
+        }
+
+        return match ($status->outcome) {
+            BinanceVerificationOutcome::Confirmed,
+            BinanceVerificationOutcome::AlreadyPaid => 'confirmed',
+            BinanceVerificationOutcome::Mismatch,
+            BinanceVerificationOutcome::TransactionAlreadyUsed => 'mismatch',
+            BinanceVerificationOutcome::IncompleteWindow => 'checking',
+            default => $status->outcome->value,
+        };
     }
 }

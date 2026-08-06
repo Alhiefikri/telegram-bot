@@ -127,7 +127,7 @@ Admin patterns:
 - Mobile-first narrow shell: `.admin-mini-shell` maxes around `430px` on mobile and expands around `820px` on desktop.
 - Background uses warm yellow paper plus radial neon washes; desktop simplifies the repeating stripe texture.
 - Bottom mobile nav uses a near-black blurred pill bar; active items use yellow fill and hard black shadow.
-- Desktop tab nav switches to a four-column grid.
+- Desktop tab nav switches to a six-column grid when the shell has desktop width.
 - Filters use full-pill, 3px black borders, heavy `Space Grotesk`, uppercase labels, and compact count bubbles.
 - Header/store-link sections use strong gradients instead of quiet neutral cards.
 - Modals, notices, cards, form controls, and stat blocks should preserve hard borders, high contrast, and compact spacing.

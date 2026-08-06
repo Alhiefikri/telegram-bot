@@ -55,6 +55,15 @@ class TelegramLocale
         };
     }
 
+    public function qrisCrossBorderSupport(Customer $customer): string
+    {
+        return $this->text(
+            $customer,
+            "🌏 💳 QRIS Antarnegara saat ini mendukung koneksi dengan:\n🇮🇩 Indonesia · 🇹🇭 Thailand · 🇲🇾 Malaysia\n🇸🇬 Singapura · 🇯🇵 Jepang · 🇰🇷 Korea Selatan\n🇨🇳 Tiongkok\n📱 Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP dan merchant yang berpartisipasi.",
+            "🌏 💳 QRIS Cross-Border currently supports connections with:\n🇮🇩 Indonesia · 🇹🇭 Thailand · 🇲🇾 Malaysia\n🇸🇬 Singapore · 🇯🇵 Japan · 🇰🇷 South Korea\n🇨🇳 China\n📱 Availability still depends on the payment app/provider and participating merchant.",
+        );
+    }
+
     public function formatDate(Customer $customer, CarbonInterface $date): string
     {
         $timezone = (string) config('app.timezone');
