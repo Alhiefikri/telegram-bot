@@ -11,6 +11,7 @@ use App\Services\KlikQris\KlikQrisProviderReadiness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -58,6 +59,24 @@ class KlikQrisReconciliationTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $pakasir->fresh()->status);
         Http::assertSentCount(2);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_command_skips_payment_when_callback_holds_the_status_lock(): void
+    {
+        $payment = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-LOCKED']);
+        $lock = Cache::lock('klikqris:callback-status:'.$payment->getKey(), 30);
+        $this->assertTrue($lock->get());
+        Http::fake();
+
+        try {
+            $this->artisan('klikqris:reconcile --chunk=100')
+                ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+                ->assertExitCode(0);
+        } finally {
+            $lock->release();
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_command_can_process_locally_expired_klikqris_success_when_provider_evidence_matches(): void

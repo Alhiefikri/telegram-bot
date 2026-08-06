@@ -4,18 +4,33 @@ namespace App\Http\Controllers;
 
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use JsonException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use UnexpectedValueException;
 
 class KlikQrisSandboxWebhookController extends Controller
 {
-    public function __invoke(Request $request, KlikQrisCallbackProcessor $processor): JsonResponse
-    {
+    private const MAX_PAYLOAD_BYTES = 65_536;
+
+    private const MAX_JSON_DEPTH = 32;
+
+    public function __invoke(
+        Request $request,
+        KlikQrisProviderReadiness $readiness,
+        KlikQrisCallbackProcessor $processor,
+    ): JsonResponse {
+        if ($readiness->sandboxDisabledForEnvironment()) {
+            throw new NotFoundHttpException;
+        }
+
         $payload = $this->validatedPayload($request);
 
         try {
@@ -35,22 +50,26 @@ class KlikQrisSandboxWebhookController extends Controller
         }
 
         $content = $request->getContent();
+        if (strlen($content) > self::MAX_PAYLOAD_BYTES) {
+            throw new HttpException(413, 'KlikQRIS callback payload is too large.');
+        }
+
         if ($this->hasDuplicateTopLevelCriticalKey($content)) {
             throw new BadRequestHttpException('Invalid KlikQRIS callback request.');
         }
 
-        json_decode($content, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        try {
+            $payload = json_decode($content, true, self::MAX_JSON_DEPTH, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
             throw new BadRequestHttpException('Invalid KlikQRIS callback request.');
         }
 
-        $payload = $request->json()->all();
         if (! is_array($payload)) {
             throw new BadRequestHttpException('Invalid KlikQRIS callback request.');
         }
 
         $validator = Validator::make($payload, [
-            'order_id' => ['required', 'string'],
+            'order_id' => ['required', 'string', 'max:255'],
             'amount' => ['required'],
             'total_amount' => ['required'],
             'status' => ['required', 'string'],

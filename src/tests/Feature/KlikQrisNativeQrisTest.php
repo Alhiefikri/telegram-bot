@@ -131,6 +131,34 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame(1, $payment->fresh()->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
     }
 
+    public function test_paid_payment_reuses_persisted_qris_without_another_provider_create_request(): void
+    {
+        $expiresAt = now()->addMinutes(10);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'status' => PaymentStatus::Paid,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_transaction_token' => 'opaque-test-signature',
+            'provider_expires_at' => $expiresAt,
+            'provider_create_state' => 'created',
+        ]);
+        $payment->update([
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment->fresh(), [
+                'expired_at' => $expiresAt->toISOString(),
+            ]),
+        ]);
+
+        Http::fake();
+
+        $transaction = app(KlikQrisNativeQrisService::class)->ensureCreated($payment->fresh());
+
+        $this->assertSame($payment->merchant_ref, $transaction->orderId());
+        $this->assertSame(1016, $transaction->totalAmount());
+        Http::assertNothingSent();
+    }
+
     public function test_uncertain_create_failure_is_recovered_by_status_without_blind_second_create(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);

@@ -19,6 +19,7 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -86,6 +87,25 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_callback_acknowledges_without_status_call_when_same_payment_is_being_verified(): void
+    {
+        $payment = $this->payableKlikQrisPayment();
+        $lock = Cache::lock('klikqris:callback-status:'.$payment->getKey(), 30);
+        $this->assertTrue($lock->get());
+        Http::fake();
+
+        try {
+            $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))
+                ->assertOk()
+                ->assertExactJson(['success' => true]);
+        } finally {
+            $lock->release();
+        }
+
+        $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
+        Http::assertNothingSent();
+    }
+
     public function test_callback_amount_or_total_mismatch_is_acknowledged_without_status_call_or_fulfillment(): void
     {
         Queue::fake([SendTelegramReceipt::class]);
@@ -140,6 +160,20 @@ class KlikQrisWebhookTest extends TestCase
         $this->post('/api/webhook/klikqris/sandbox', ['order_id' => 'x'])->assertStatus(400);
         $this->call('POST', '/api/webhook/klikqris/sandbox', [], [], [], ['CONTENT_TYPE' => 'application/json'], '{bad json')->assertStatus(400);
         $this->postJson('/api/webhook/klikqris/sandbox', ['order_id' => 'x', 'amount' => 1000])->assertStatus(422);
+
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_oversized_json_is_rejected_before_event_logging_or_status_calls(): void
+    {
+        Http::fake();
+
+        $payload = $this->callbackPayload($this->payableKlikQrisPayment(), [
+            'padding' => str_repeat('x', 70_000),
+        ]);
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $payload)->assertStatus(413);
 
         $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
         Http::assertNothingSent();
@@ -300,6 +334,24 @@ class KlikQrisWebhookTest extends TestCase
 
         $this->call('POST', '/api/webhook/klikqris/sandbox', [], [], [], ['CONTENT_TYPE' => 'application/json'], $json)
             ->assertStatus(400);
+
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_production_environment_rejects_sandbox_webhook_before_persisting_or_calling_provider(): void
+    {
+        $this->app['env'] = 'production';
+        config()->set('app.env', 'production');
+        config()->set('services.klikqris.sandbox_enabled', true);
+        Http::fake();
+
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => 'unknown-production-order',
+            'amount' => 10000,
+            'total_amount' => 10016,
+            'status' => 'PENDING',
+        ])->assertNotFound();
 
         $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
         Http::assertNothingSent();

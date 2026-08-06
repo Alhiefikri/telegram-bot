@@ -173,6 +173,59 @@ class KlikQrisTransactionTest extends TestCase
         }
     }
 
+    public function test_payload_sanitizer_removes_signature_and_qris_image_key_variants_recursively(): void
+    {
+        $sanitized = KlikQrisPayloadSanitizer::sanitize([
+            'signatureValue' => 'signature-secret',
+            'qrisImage' => 'qris-image-secret',
+            'qr_base64' => 'qr-base64-secret',
+            'nested' => [
+                'payment_signature' => 'nested-signature-secret',
+                'image_base64' => 'nested-image-secret',
+                'safe' => 'kept',
+            ],
+        ]);
+
+        $json = json_encode($sanitized, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('kept', $sanitized['nested']['safe']);
+        foreach ([
+            'signature-secret',
+            'qris-image-secret',
+            'qr-base64-secret',
+            'nested-signature-secret',
+            'nested-image-secret',
+        ] as $secret) {
+            $this->assertStringNotContainsString($secret, $json);
+        }
+    }
+
+    public function test_payload_sanitizer_drops_debug_and_qris_url_secret_metadata(): void
+    {
+        $sanitized = KlikQrisPayloadSanitizer::sanitize([
+            'provider_debug' => [
+                'qris_url_with_query' => 'https://klikqris.com/storage/sandbox/qris_TEST.png?token=secret-query',
+            ],
+            'raw_payload_fragment' => '{"signature":"secret-signature"}',
+            'nested' => [
+                'qris_url_with_fragment' => 'https://klikqris.com/storage/sandbox/qris_TEST.png#secret-fragment',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_TEST.png',
+            ],
+            'safe' => 'kept',
+        ]);
+
+        $json = json_encode($sanitized, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('kept', $sanitized['safe']);
+        $this->assertSame('https://klikqris.com/storage/sandbox/qris_TEST.png', $sanitized['nested']['qris_url']);
+        $this->assertStringNotContainsString('secret-query', $json);
+        $this->assertStringNotContainsString('secret-fragment', $json);
+        $this->assertStringNotContainsString('secret-signature', $json);
+        $this->assertArrayNotHasKey('provider_debug', $sanitized);
+        $this->assertArrayNotHasKey('raw_payload_fragment', $sanitized);
+        $this->assertArrayNotHasKey('qris_url_with_fragment', $sanitized['nested']);
+    }
+
     public function test_transaction_assert_matches_payment_identity_and_total_when_present(): void
     {
         $transaction = KlikQrisTransaction::fromPayload($this->transactionPayload());

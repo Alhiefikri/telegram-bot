@@ -39,6 +39,7 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
             $order = Order::whereKey($this->orderId)->lockForUpdate()->firstOrFail();
             if ($order->manual_checkout_customer_notified_at !== null
                 || $order->order_status !== OrderStatus::PendingPayment
+                || ($order->expires_at !== null && $order->expires_at->lte(now()))
                 || $this->hasActiveClaim($order->manual_checkout_customer_notification_started_at)) {
                 return null;
             }

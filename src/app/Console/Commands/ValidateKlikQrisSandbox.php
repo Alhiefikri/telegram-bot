@@ -9,6 +9,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ValidateKlikQrisSandbox extends Command
@@ -109,9 +110,11 @@ class ValidateKlikQrisSandbox extends Command
 
     private function findPayment(string $lookup): ?Payment
     {
-        $byUuid = Payment::query()->whereKey($lookup)->first();
-        if ($byUuid !== null) {
-            return $byUuid;
+        if (Str::isUuid($lookup)) {
+            $byUuid = Payment::query()->whereKey($lookup)->first();
+            if ($byUuid !== null) {
+                return $byUuid;
+            }
         }
 
         return Payment::query()

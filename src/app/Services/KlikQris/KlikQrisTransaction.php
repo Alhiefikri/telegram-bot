@@ -2,6 +2,7 @@
 
 namespace App\Services\KlikQris;
 
+use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use Carbon\CarbonImmutable;
 use RuntimeException;
@@ -92,7 +93,7 @@ final readonly class KlikQrisTransaction
                 throw new RuntimeException('Persisted KlikQRIS transaction expiry is inconsistent.');
             }
 
-            if (! $payment->isPayableNativeKlikQris()) {
+            if ($payment->status !== PaymentStatus::Paid && ! $payment->isPayableNativeKlikQris()) {
                 throw new RuntimeException('Persisted KlikQRIS transaction is not payable.');
             }
 

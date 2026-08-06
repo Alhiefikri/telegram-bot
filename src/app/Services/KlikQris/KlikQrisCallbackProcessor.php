@@ -7,12 +7,15 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use UnexpectedValueException;
 
 class KlikQrisCallbackProcessor
 {
+    private const STATUS_LOCK_LEASE_SECONDS = 60;
+
     public function __construct(
         private readonly OrderLifecycle $orders,
         private readonly KlikQrisProviderAdapter $client,
@@ -30,8 +33,15 @@ class KlikQrisCallbackProcessor
             return $event;
         }
 
+        $statusLock = Cache::lock('klikqris:callback-status:'.$payment->getKey(), self::STATUS_LOCK_LEASE_SECONDS);
+        if (! $statusLock->get()) {
+            return $event->fresh();
+        }
+
         try {
             $transaction = $this->client->transactionStatus($payment);
+
+            return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
         } catch (RuntimeException $exception) {
             if (! $exception->getPrevious() instanceof UnexpectedValueException) {
                 throw $exception;
@@ -40,9 +50,9 @@ class KlikQrisCallbackProcessor
             report($exception);
 
             return $event->fresh();
+        } finally {
+            $statusLock->release();
         }
-
-        return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
     }
 
     public function processReconciliationForPayment(Payment $payment, KlikQrisTransaction $transaction): PaymentEvent
@@ -66,7 +76,7 @@ class KlikQrisCallbackProcessor
             $payment = $this->persistRecoveredOutcomeUnknownSuccess($payment, $transaction);
         }
 
-        if (! $this->isEligiblePayment($payment) || ! $transaction->isSuccess()) {
+        if (! $this->isProcessablePayment($payment) || ! $transaction->isSuccess()) {
             return $event->fresh();
         }
 
@@ -134,6 +144,18 @@ class KlikQrisCallbackProcessor
 
         return (int) $payment->amount === $callback->amount()->rupiah()
             && (int) $payment->provider_total_payment === $callback->totalAmount();
+    }
+
+    private function isProcessablePayment(Payment $payment): bool
+    {
+        if ($this->isEligiblePayment($payment)) {
+            return true;
+        }
+
+        return strtolower(trim((string) $payment->provider)) === 'klikqris'
+            && $payment->status === PaymentStatus::Paid
+            && strtolower(trim((string) $payment->provider_payment_method)) === 'qris'
+            && $payment->provider_total_payment !== null;
     }
 
     private function isEligiblePayment(Payment $payment): bool

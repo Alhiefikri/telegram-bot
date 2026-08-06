@@ -9,10 +9,13 @@ use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class ReconcileKlikQrisPayments extends Command
 {
+    private const STATUS_LOCK_LEASE_SECONDS = 60;
+
     private const ELIGIBLE_PAYMENT_STATUSES = [
         PaymentStatus::Pending->value,
         PaymentStatus::Expired->value,
@@ -65,18 +68,29 @@ class ReconcileKlikQrisPayments extends Command
             ->chunkById($chunk, function ($payments) use ($client, $processor, &$processed, &$skipped, &$failed): void {
                 foreach ($payments as $payment) {
                     try {
-                        $event = $processor->processReconciliationForPayment(
-                            $payment,
-                            $client->transactionStatus($payment),
-                        );
-
-                        if ($event->processed_at === null) {
+                        $statusLock = Cache::lock('klikqris:callback-status:'.$payment->getKey(), self::STATUS_LOCK_LEASE_SECONDS);
+                        if (! $statusLock->get()) {
                             $skipped++;
 
                             continue;
                         }
 
-                        $processed++;
+                        try {
+                            $event = $processor->processReconciliationForPayment(
+                                $payment,
+                                $client->transactionStatus($payment),
+                            );
+
+                            if ($event->processed_at === null) {
+                                $skipped++;
+
+                                continue;
+                            }
+
+                            $processed++;
+                        } finally {
+                            $statusLock->release();
+                        }
                     } catch (Throwable $exception) {
                         report($exception);
                         $failed++;

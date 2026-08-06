@@ -8,6 +8,7 @@ use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
@@ -57,9 +58,13 @@ class RecoverTelegramOutboundEffects extends Command
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()
-                        ? SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())
-                        : SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
+                    if ($order->payments()->where('provider', 'klikqris')->exists()) {
+                        $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } elseif ($order->payments()->where('method', 'BINANCE_PAY_ID')->exists()) {
+                        $job = SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } else {
+                        $job = SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
+                    }
                     $job->onQueue((string) $this->option('queue'));
                     $dispatched++;
                 }

@@ -3,6 +3,7 @@
 namespace App\Services\KlikQris;
 
 use App\Enums\PaymentEventType;
+use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use Illuminate\Support\Facades\Cache;
@@ -20,21 +21,21 @@ class KlikQrisNativeQrisService
     public function ensureCreated(Payment $payment): KlikQrisTransaction
     {
         $payment->refresh();
-        if ($this->hasPayablePersistedQris($payment)) {
+        if ($this->hasReusablePersistedQris($payment)) {
             return KlikQrisTransaction::fromPersistedPayment($payment);
         }
 
         return Cache::lock('klikqris:native-qris:create:'.$payment->getKey(), 30)
             ->block(10, function () use ($payment): KlikQrisTransaction {
                 $payment->refresh();
-                if ($this->hasPayablePersistedQris($payment)) {
+                if ($this->hasReusablePersistedQris($payment)) {
                     return KlikQrisTransaction::fromPersistedPayment($payment);
                 }
 
                 if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
                     $this->recoverCreationOutcome($payment);
                     $payment->refresh();
-                    if ($this->hasPayablePersistedQris($payment)) {
+                    if ($this->hasReusablePersistedQris($payment)) {
                         return KlikQrisTransaction::fromPersistedPayment($payment);
                     }
 
@@ -203,6 +204,17 @@ class KlikQrisNativeQrisService
     private function hasPersistedQrisPayload(Payment $payment): bool
     {
         return $payment->provider_payment_method === 'qris' && is_array($payment->provider_payload);
+    }
+
+    private function hasReusablePersistedQris(Payment $payment): bool
+    {
+        return $this->hasPayablePersistedQris($payment)
+            || ($payment->status === PaymentStatus::Paid
+                && $this->hasPersistedQrisPayload($payment)
+                && $payment->isNativeKlikQris()
+                && $payment->provider_total_payment !== null
+                && $payment->provider_expires_at !== null
+                && filled($payment->provider_transaction_token));
     }
 
     private function hasPayablePersistedQris(Payment $payment): bool

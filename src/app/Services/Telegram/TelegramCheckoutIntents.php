@@ -6,7 +6,6 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Services\Binance\BinanceAutoVerification;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\KlikQris\KlikQrisSandboxCheckoutSelector;
@@ -27,7 +26,6 @@ class TelegramCheckoutIntents
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
-        private BinanceAutoVerification $binanceVerification,
         private KlikQrisSandboxCheckoutSelector $klikQrisSelector,
         private KlikQrisNativeQrisService $klikQris,
         private KlikQrisQrisImage $klikQrisImages,

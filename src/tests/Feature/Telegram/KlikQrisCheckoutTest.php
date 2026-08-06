@@ -4,6 +4,7 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
@@ -77,6 +78,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
 
     public function test_klikqris_job_dedupes_confirmed_successful_send_but_keeps_at_least_once_retry_semantics(): void
     {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
         $this->fakeTelegramHttp([
             'https://klikqris.com/storage/sandbox/qris_job.png' => Http::response(self::PNG_BYTES, 200, ['Content-Type' => 'image/png']),
         ]);
@@ -86,7 +88,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             'order_status' => OrderStatus::PendingPayment,
             'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
-            'expires_at' => CarbonImmutable::parse('2026-07-28 10:24:00', 'UTC'),
+            'expires_at' => now()->addMinutes(14),
         ]);
         $payment = Payment::factory()->for($order)->create([
             'provider' => 'klikqris',
@@ -151,6 +153,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
 
     public function test_klikqris_job_can_send_initial_base64_only_qris_without_persisting_or_leaking_base64(): void
     {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
         $base64 = KlikQrisSandboxScenarios::pngDataUri('telegram-base64-only');
         $this->fakeTelegramHttp([
@@ -174,7 +177,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->for($customer)->create([
             'invoice_number' => 'INV-KLIK-B64',
             'order_status' => OrderStatus::PendingPayment,
-            'expires_at' => CarbonImmutable::parse('2026-07-28 10:24:00', 'UTC'),
+            'expires_at' => now()->addMinutes(14),
         ]);
         $payment = Payment::factory()->for($order)->create([
             'provider' => 'klikqris',
@@ -234,6 +237,47 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $job->handle($successfulIntents);
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertSame(1, $order->payments()->where('provider', 'klikqris')->count());
+    }
+
+    public function test_recovery_redispatches_stale_klikqris_checkout_claim_as_klikqris(): void
+    {
+        config()->set('services.telegram.claim_lease_seconds', 60);
+        Queue::fake();
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'manual_checkout_customer_notification_started_at' => now()->subMinutes(2),
+            'manual_checkout_customer_notified_at' => null,
+        ]);
+        Payment::factory()->for($order)->create(['provider' => 'klikqris']);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        Queue::assertPushed(
+            SendKlikQrisCheckoutInstructions::class,
+            fn (SendKlikQrisCheckoutInstructions $job): bool => $job->orderId === $order->id,
+        );
+        Queue::assertNotPushed(SendManualCheckoutNotifications::class);
+        Queue::assertNotPushed(SendBinanceCheckoutInstructions::class);
+    }
+
+    public function test_delayed_klikqris_job_does_not_create_or_send_after_local_order_deadline(): void
+    {
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'expires_at' => now()->subSecond(),
+            'manual_checkout_customer_notification_started_at' => null,
+            'manual_checkout_customer_notified_at' => null,
+        ]);
+        Payment::factory()->for($order)->create(['provider' => 'klikqris']);
+        $intents = $this->mock(TelegramCheckoutIntents::class);
+        $intents->shouldNotReceive('sendKlikQrisPaymentInstructions');
+
+        (new SendKlikQrisCheckoutInstructions($order->id))->handle($intents);
+
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
     public function test_telegram_order_detail_refreshes_klikqris_success_before_rendering_without_calling_pakasir(): void

@@ -182,6 +182,41 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_create_and_reconcile_accept_an_already_paid_persisted_payment(): void
+    {
+        $expiresAt = now()->addMinutes(10);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'status' => PaymentStatus::Paid,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_transaction_token' => 'opaque-test-signature',
+            'provider_expires_at' => $expiresAt,
+            'provider_create_state' => 'created',
+        ]);
+        $payment->update([
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment->fresh(), [
+                'expired_at' => $expiresAt->toISOString(),
+            ]),
+        ]);
+
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+
+        $code = Artisan::call('klikqris:validate-sandbox', [
+            'payment' => $payment->id,
+            '--create' => true,
+            '--reconcile' => true,
+        ]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $code, $output);
+        $this->assertStringContainsString('PASS idempotent KlikQRIS create returned stable transaction', $output);
+        $this->assertStringContainsString('PASS authoritative status processing marked paid - payment_status=paid event_processed=true.', $output);
+        $this->assertSame(1, $payment->paymentEvents()->where('event_type', PaymentEventType::Reconciliation->value)->whereNotNull('processed_at')->count());
+        Http::assertSentCount(1);
+    }
+
     public function test_actual_provider_qris_url_with_query_is_rejected_and_not_persisted_as_successful_transaction(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['merchant_ref' => 'INV-KLIKQRIS-QUERY-SECRET']);
