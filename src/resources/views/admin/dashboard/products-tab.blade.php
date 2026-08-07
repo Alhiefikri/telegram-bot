@@ -26,6 +26,22 @@
                     <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
                 </x-admin-dashboard.notice>
 
+                <div class="overflow-x-auto pb-1" aria-label="Filter produk">
+                    <div class="flex min-w-max items-center gap-2">
+                        @foreach ($productFilters as $filter)
+                            <a
+                                href="{{ $filter['url'] }}"
+                                data-products-filter="{{ $filter['key'] }}"
+                                @if ($filter['active']) aria-current="page" @endif
+                                class="filter-pill @if ($filter['active']) filter-pill-active @endif"
+                            >
+                                <span>{{ $filter['label'] }}</span>
+                                <span class="filter-pill-count">{{ $filter['count'] }}</span>
+                            </a>
+                        @endforeach
+                    </div>
+                </div>
+
                 @if ($canManageProducts)
                 <x-admin-dashboard.card id="admin-category-create" data-admin-return-target tabindex="-1" as="form" method="POST" action="{{ route('admin.categories.store') }}" tone="yellow" padding="compact" shadow="sm" class="rounded-[1rem]">
                     @csrf

@@ -27,7 +27,7 @@ final class AdminDashboardStatsData
      * @param  array<string, string>  $storeLink
      * @return array<string, mixed>
      */
-    public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink): array
+    public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink, array $operationalCounts): array
     {
         return $this->forHeader($metrics, $storeLink) + [
             'balance' => $this->balance($metrics['read_only_balance_amount']),
@@ -35,6 +35,7 @@ final class AdminDashboardStatsData
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
+            'operationalQueues' => $this->operationalQueues($statusCounts, $operationalCounts),
             'earnings' => $this->earnings(),
         ];
     }
@@ -204,6 +205,47 @@ final class AdminDashboardStatsData
         ])
             ->mapWithKeys(fn (OrderStatus $status): array => [$status->value => $statusCounts[$status->value]])
             ->all();
+    }
+
+    private function operationalQueues(array $statusCounts, array $operationalCounts): array
+    {
+        $waitingCount = collect([OrderStatus::Draft, OrderStatus::PendingPayment])
+            ->sum(fn (OrderStatus $status): int => $statusCounts[$status->value]['count'] ?? 0);
+
+        return [
+            [
+                'key' => 'processing_orders',
+                'label' => 'Pesanan diproses',
+                'count' => $statusCounts[OrderStatus::Processing->value]['count'] ?? 0,
+                'hint' => 'Selesaikan fulfillment',
+                'tone' => 'amber',
+                'url' => route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'processing']),
+            ],
+            [
+                'key' => 'payment_attention',
+                'label' => 'Pembayaran perlu perhatian',
+                'count' => $operationalCounts['payment_attention'],
+                'hint' => 'Verifikasi atau tindak lanjuti',
+                'tone' => 'rose',
+                'url' => route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'payment_attention']),
+            ],
+            [
+                'key' => 'stock_reservations',
+                'label' => 'Reservasi stok',
+                'count' => $waitingCount,
+                'hint' => 'Pantau order yang menahan stok',
+                'tone' => 'blue',
+                'url' => route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'waiting']),
+            ],
+            [
+                'key' => 'low_stock',
+                'label' => 'Stok rendah',
+                'count' => $operationalCounts['low_stock'],
+                'hint' => 'Tambah stok tersedia',
+                'tone' => 'amber',
+                'url' => route('admin.dashboard', ['tab' => 'produk', 'products_filter' => 'low_stock']),
+            ],
+        ];
     }
 
     private function earnings(): array

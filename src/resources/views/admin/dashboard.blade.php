@@ -15,13 +15,13 @@
             $summary = $statsTab['summary'];
             $storeStatus = $statsTab['storeStatus'];
             $actions = $statsTab['actions'];
-            $statsCards = $statsTab['cards'] ?? [];
-            $actionableStatusCounts = $statsTab['actionableStatusCounts'] ?? [];
+            $operationalQueues = $statsTab['operationalQueues'] ?? [];
             $earnings = $statsTab['earnings'] ?? [];
             $paymentControl = $statsTab['paymentControl'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $products = $productsTab['products'];
             $productsPagination = $productsTab['pagination'];
+            $productFilters = $productsTab['filters'];
             $categoryOptions = $productsTab['categoryOptions'];
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];

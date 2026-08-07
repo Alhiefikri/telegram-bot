@@ -34,20 +34,26 @@ final class AdminDashboardData
      *     salesTab: array<string, mixed>
      * }
      */
-    public function forAdmin(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1): array
+    public function forAdmin(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1, ?string $productsFilter = null): array
     {
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
         $storeLink = $this->storeLink();
         $canManageProducts = (bool) $user->role?->canMutateProducts();
+        $productsTab = $this->productsData->forProducts($canManageProducts, $productsPage, $productsFilter);
+        $salesTab = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter);
+        $operationalCounts = [
+            'payment_attention' => $salesTab['payment_attention_count'],
+            'low_stock' => $productsTab['low_stock_count'],
+        ];
 
         return [
             'admin' => $this->adminIdentity($user),
             'metrics' => $metrics,
             'navigation' => $this->navigation($requestedTab),
-            'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
-            'productsTab' => $this->productsData->forProducts($canManageProducts, $productsPage),
-            'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
+            'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink, $operationalCounts),
+            'productsTab' => $productsTab,
+            'salesTab' => $salesTab,
             'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),
         ];

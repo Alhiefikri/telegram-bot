@@ -359,6 +359,8 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await expect(page.getByRole('navigation', { name: 'Navigasi desktop' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeHidden();
+    await page.getByText('Pengaturan pembayaran & dukungan', { exact: true }).click();
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
@@ -571,13 +573,250 @@ test('keeps fixed navigation below channel fields and modal surfaces', async ({ 
 });
 
 
+for (const operationalQueueCase of [
+    { name: '320px mobile', viewport: { width: 320, height: 900 } },
+    { name: '390px mobile', viewport: { width: 390, height: 900 } },
+    { name: '768px tablet', viewport: { width: 768, height: 900 } },
+    { name: '1440px desktop', viewport: { width: 1440, height: 900 } },
+]) {
+    test(`prioritizes operational work and opens filtered queues on ${operationalQueueCase.name}`, async ({ page }) => {
+        await page.setViewportSize(operationalQueueCase.viewport);
+        await login(page);
+
+        const queue = page.getByRole('region', { name: 'Perlu tindakan' });
+        await expect(queue).toBeVisible();
+        await expectBefore(queue, page.getByRole('region', { name: 'Link toko' }));
+        await expectBefore(queue, page.getByRole('region', { name: 'Pendapatan 7 hari' }));
+        await expectBefore(queue, page.getByText('Pengaturan pembayaran & dukungan', { exact: true }));
+
+        await expect(queue.locator('[data-operational-queue="processing_orders"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=processing$/);
+        await expect(queue.locator('[data-operational-queue="payment_attention"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=payment_attention$/);
+        await expect(queue.locator('[data-operational-queue="stock_reservations"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=waiting$/);
+        await expect(queue.locator('[data-operational-queue="low_stock"]')).toHaveAttribute('href', /tab=produk&products_filter=low_stock$/);
+
+        await queue.locator('[data-operational-queue="payment_attention"]').click();
+        await expect(page).toHaveURL(/tab=penjualan&sales_filter=payment_attention$/);
+        await expect(page.locator('[data-sales-filter="payment_attention"]')).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByText('INV-BROWSER-QRIS')).toBeVisible();
+
+        await page.goto(`${baseUrl}/admin`);
+        await page.locator('[data-operational-queue="low_stock"]').click();
+        await expect(page).toHaveURL(/tab=produk&products_filter=low_stock$/);
+        await expect(page.locator('[data-products-filter="low_stock"]')).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByText('Browser QA Stok Rendah', { exact: true })).toBeVisible();
+        await expectNoDocumentOverflow(page);
+    });
+}
+
+test('uses a compact sticky shell header on internal admin tabs', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+
+    for (const [tab, label] of [
+        ['produk', 'Produk'],
+        ['penjualan', 'Pesanan'],
+        ['broadcast', 'Siaran'],
+        ['telegram-channel', 'Store Channel'],
+    ]) {
+        await page.goto(`${baseUrl}/admin?tab=${tab}`);
+
+        const compactHeader = page.getByRole('banner', { name: 'Navigasi section admin' });
+        await expect(page.locator('header').filter({ hasText: 'Halo,' })).toHaveCount(0);
+        await expect(compactHeader).toBeVisible();
+        await expect(compactHeader.getByRole('heading', { name: label, exact: true })).toBeVisible();
+        await expect(compactHeader).toContainText('Toko aktif');
+        await expect(compactHeader).toHaveCSS('position', 'sticky');
+        await expect(compactHeader.getByRole('link', { name: 'Buka Toko' })).toHaveCount(0);
+        await expect(compactHeader.getByRole('button', { name: 'Bagikan Toko' })).toHaveCount(0);
+
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        const headerBox = await compactHeader.boundingBox();
+        expect(headerBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+    }
+});
+
+test('keeps responsive navigation and utility actions usable', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await login(page);
+
+    const mobileNav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
+    await expect(mobileNav).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Pesanan', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Produk', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(mobileNav.getByRole('button', { name: 'Siaran', exact: true })).toHaveCount(0);
+
+    const mobileNavMetrics = await mobileNav.evaluate((element) => {
+        const buttons = [...element.querySelectorAll('button')].map((button) => {
+            const rect = button.getBoundingClientRect();
+
+            return { left: rect.left, right: rect.right };
+        });
+
+        return {
+            right: element.getBoundingClientRect().right,
+            viewportWidth: window.innerWidth,
+            buttons,
+        };
+    });
+
+    expect(mobileNavMetrics.right).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
+    expect(Math.max(...mobileNavMetrics.buttons.map((button) => button.right))).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
+
+    await mobileNav.getByRole('button', { name: 'Lainnya', exact: true }).click();
+
+    const moreSheet = page.getByRole('dialog', { name: 'Menu lainnya' });
+    await expect(moreSheet).toBeVisible();
+    await expect(moreSheet.getByRole('button', { name: 'Siaran', exact: true })).toBeVisible();
+    await expect(moreSheet.getByRole('button', { name: 'Store Channel', exact: true })).toBeVisible();
+    await expect(moreSheet.getByRole('button', { name: 'Tambah Produk', exact: true })).toBeVisible();
+    await expect(moreSheet.getByRole('button', { name: 'Siaran', exact: true })).toBeFocused();
+
+    const closeMenu = moreSheet.getByRole('button', { name: 'Tutup menu' });
+    const lastUtilityAction = moreSheet.getByRole('button', { name: 'Tambah Produk', exact: true });
+    await lastUtilityAction.focus();
+    await page.keyboard.press('Tab');
+    await expect(closeMenu).toBeFocused();
+    await closeMenu.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(lastUtilityAction).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(moreSheet).toBeHidden();
+    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeFocused();
+
+    await page.goto(`${baseUrl}/admin?tab=broadcast`);
+    const broadcastTextarea = page.locator('#broadcast-message');
+    await broadcastTextarea.scrollIntoViewIfNeeded();
+
+    const broadcastOverlap = await page.evaluate(() => {
+        const nav = document.querySelector('.mobile-bottom-nav')?.getBoundingClientRect();
+        const field = document.querySelector('#broadcast-message')?.getBoundingClientRect();
+
+        if (!nav || !field) {
+            return -1;
+        }
+
+        return Math.max(0, Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top));
+    });
+
+    expect(broadcastOverlap).toBe(0);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    const desktopNav = page.getByRole('navigation', { name: 'Navigasi desktop' });
+    const desktopButtons = desktopNav.getByRole('button');
+    const desktopBoxes = await desktopButtons.evaluateAll((buttons) => buttons.map((button) => {
+        const rect = button.getBoundingClientRect();
+
+        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
+    }));
+
+    await expect(desktopButtons).toHaveCount(6);
+    expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
+    expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+    await expect(desktopNav.getByRole('button', { name: 'Produk', exact: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test('closes the mobile utility sheet from outside click and restores its trigger', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+
+    const nav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
+    const trigger = nav.getByRole('button', { name: 'Lainnya', exact: true });
+    await trigger.click();
+
+    const sheet = page.getByRole('dialog', { name: 'Menu lainnya' });
+    await expect(sheet).toBeVisible();
+    await page.mouse.click(6, 120);
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+});
+
+for (const width of [768, 1440]) {
+    test(`keeps six desktop navigation items in one row at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await login(page);
+
+        const desktopNav = page.getByRole('navigation', { name: 'Navigasi desktop' });
+        await expect(desktopNav).toBeVisible();
+        await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
+
+        const desktopButtons = desktopNav.getByRole('button');
+        const desktopBoxes = await desktopButtons.evaluateAll((buttons) => buttons.map((button) => {
+            const rect = button.getBoundingClientRect();
+
+            return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
+        }));
+
+        await expect(desktopButtons).toHaveCount(6);
+        expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
+        expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+        await expectNoDocumentOverflow(page);
+    });
+}
+
+test('keeps fixed navigation below channel fields and modal surfaces', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+
+    const mobileNav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
+    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Pesanan', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Produk', exact: true })).toBeVisible();
+    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeVisible();
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(`${baseUrl}/admin?tab=telegram-channel`);
+
+    const channelLink = page.getByRole('textbox', { name: 'Link channel publik' });
+    await channelLink.scrollIntoViewIfNeeded();
+    const channelOverlap = await page.evaluate(() => {
+        const nav = document.querySelector('.mobile-bottom-nav')?.getBoundingClientRect();
+        const field = document.querySelector('#store-channel-link')?.getBoundingClientRect();
+
+        if (!nav || !field) {
+            return -1;
+        }
+
+        return Math.max(0, Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top));
+    });
+
+    expect(channelOverlap).toBe(0);
+
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+
+    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
+    await expect(productModal).toBeVisible();
+    await expectElementWithinViewport(page, productModal);
+    const layerMetrics = await page.evaluate(() => {
+        const nav = document.querySelector('.mobile-bottom-nav');
+        const modalBackdrop = document.querySelector('#product-modal')?.parentElement;
+
+        return {
+            navZIndex: Number.parseInt(window.getComputedStyle(nav).zIndex, 10),
+            modalZIndex: Number.parseInt(window.getComputedStyle(modalBackdrop).zIndex, 10),
+        };
+    });
+
+    expect(layerMetrics.modalZIndex).toBeGreaterThan(layerMetrics.navZIndex);
+});
+
+
 test('keeps tabs, cards, and the stock modal usable at Telegram mini app width', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
     await login(page);
 
     await expectNoDocumentOverflow(page);
     await expectBottomNavUsable(page);
-    await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
+    const configurationSummary = page.getByText('Pengaturan pembayaran & dukungan', { exact: true });
+    await configurationSummary.scrollIntoViewIfNeeded();
+    await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeHidden();
+    await configurationSummary.click();
     await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
@@ -1189,6 +1428,15 @@ Product::factory()->create([
     'is_active' => true,
 ]);
 
+Product::factory()->create([
+    'category_id' => $category->id,
+    'name' => 'Browser QA Stok Rendah',
+    'price_amount' => 30000,
+    'stock' => 3,
+    'reserved_stock' => 0,
+    'is_active' => true,
+]);
+
 $customer = Customer::factory()->create([
     'first_name' => 'Browser',
     'username' => 'browserbuyer',
@@ -1269,6 +1517,7 @@ Payment::factory()->create([
     'provider_total_payment' => $qrisTotal,
     'amount' => 45000,
     'status' => PaymentStatus::Pending,
+    'payment_proof_submitted_at' => now()->subMinute(),
     'expired_at' => now()->addMinutes(15),
 ]);
 

@@ -9,6 +9,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\PaymentReceiptReport;
 use App\Support\Money;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 final class AdminDashboardSalesData
@@ -26,13 +27,15 @@ final class AdminDashboardSalesData
     public function forSales(array $statusCounts, bool $canRetrySalesProof = false, ?string $activeFilter = null): array
     {
         $activeFilter = $this->normalizeFilter($activeFilter);
+        $paymentAttentionCount = $this->paymentAttentionCount();
         [$orders, $pagination] = $this->latestOrders($canRetrySalesProof, $activeFilter);
 
         return [
             'orders' => $orders,
-            'filters' => $this->salesFilters($statusCounts, $activeFilter),
+            'filters' => $this->salesFilters($statusCounts, $activeFilter, $paymentAttentionCount),
             'statusCounts' => $statusCounts,
             'active_filter' => $activeFilter,
+            'payment_attention_count' => $paymentAttentionCount,
             'pagination' => $pagination,
         ];
     }
@@ -51,6 +54,11 @@ final class AdminDashboardSalesData
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
             ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(fn (OrderStatus $status): string => $status->value, $statuses)))
+            ->withExists([
+                'payments as has_submitted_payment_proof' => fn (Builder $payments): Builder => $payments
+                    ->whereNotNull('payment_proof_submitted_at'),
+            ])
+            ->when($activeFilter === 'payment_attention', fn (Builder $query): Builder => $this->applyPaymentAttentionFilter($query))
             ->withCount('orderItems')
             ->latest()
             ->paginate(self::ORDERS_PER_PAGE, ['*'], 'sales_page')
@@ -110,6 +118,14 @@ final class AdminDashboardSalesData
 
     public function paymentAttention(Order $order): ?array
     {
+        if ($order->payment_status === PaymentStatus::Pending && $this->hasSubmittedPaymentProof($order)) {
+            return [
+                'label' => 'Bukti bayar masuk',
+                'message' => 'Verifikasi pembayaran atau hubungi pembeli.',
+                'tone' => 'warning',
+            ];
+        }
+
         if (! $this->isLatePaidReleasedOrder($order)) {
             return null;
         }
@@ -121,7 +137,7 @@ final class AdminDashboardSalesData
         ];
     }
 
-    private function salesFilters(array $statusCounts, string $activeFilter): array
+    private function salesFilters(array $statusCounts, string $activeFilter, int $paymentAttentionCount): array
     {
         $countFor = fn (OrderStatus ...$statuses): int => collect($statuses)
             ->sum(fn (OrderStatus $status): int => $statusCounts[$status->value]['count'] ?? 0);
@@ -152,6 +168,11 @@ final class AdminDashboardSalesData
                 'label' => 'Diproses',
                 'count' => $countFor(OrderStatus::Processing),
             ],
+            [
+                'key' => 'payment_attention',
+                'label' => 'Perlu perhatian',
+                'count' => $paymentAttentionCount,
+            ],
         ])
             ->map(fn (array $filter): array => $filter + [
                 'active' => $filter['key'] === $activeFilter,
@@ -178,9 +199,32 @@ final class AdminDashboardSalesData
     {
         $filter = (string) ($filter ?: 'all');
 
-        return in_array($filter, ['all', 'completed', 'issue', 'waiting', 'processing'], true)
+        return in_array($filter, ['all', 'completed', 'issue', 'waiting', 'processing', 'payment_attention'], true)
             ? $filter
             : 'all';
+    }
+
+    public function paymentAttentionCount(): int
+    {
+        return $this->applyPaymentAttentionFilter(Order::query())->count();
+    }
+
+    /** @param Builder<Order> $query */
+    private function applyPaymentAttentionFilter(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query
+                ->where(function (Builder $query): void {
+                    $query
+                        ->where('payment_status', PaymentStatus::Pending)
+                        ->whereHas('payments', fn (Builder $payments): Builder => $payments->whereNotNull('payment_proof_submitted_at'));
+                })
+                ->orWhere(function (Builder $query): void {
+                    $query
+                        ->whereIn('order_status', [OrderStatus::Cancelled, OrderStatus::Expired])
+                        ->where('payment_status', PaymentStatus::Paid);
+                });
+        });
     }
 
     private function pagination(LengthAwarePaginator $paginator): array
@@ -347,6 +391,21 @@ final class AdminDashboardSalesData
             OrderStatus::Cancelled, OrderStatus::Expired => 'rose',
             default => 'slate',
         };
+    }
+
+    private function hasSubmittedPaymentProof(Order $order): bool
+    {
+        if (array_key_exists('has_submitted_payment_proof', $order->getAttributes())) {
+            return (bool) $order->getAttribute('has_submitted_payment_proof');
+        }
+
+        if ($order->relationLoaded('payments')) {
+            return $order->payments->contains(
+                fn ($payment): bool => $payment->payment_proof_submitted_at !== null,
+            );
+        }
+
+        return $order->payments()->whereNotNull('payment_proof_submitted_at')->exists();
     }
 
     private function isLatePaidReleasedOrder(Order $order): bool
