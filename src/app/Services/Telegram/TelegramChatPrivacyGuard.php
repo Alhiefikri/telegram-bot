@@ -8,11 +8,11 @@ class TelegramChatPrivacyGuard
 {
     private const PRIVATE_CHAT_TYPE = 'private';
 
-    private const NON_PRIVATE_MESSAGE_PROMPT_ID = "🔒 Lanjut di chat pribadi ya\n━━━━━━━━━━━━━━\nDemi keamanan, detail order, pembayaran, dan data akun tidak dikirim ke group.\n\nBuka chat pribadi dengan bot untuk lanjut.";
+    private const NON_PRIVATE_MESSAGE_PROMPT_ID = "🔒 Lanjut di chat pribadi\nDemi keamanan, detail order, pembayaran, dan data akun tidak dikirim ke group.\n\nBuka chat pribadi dengan bot untuk lanjut.";
 
-    private const NON_PRIVATE_MESSAGE_PROMPT_EN = "🔒 Continue in a private chat\n━━━━━━━━━━━━━━\nFor security, order, payment, and account details are not sent to groups.\n\nOpen a private chat with the bot to continue.";
+    private const NON_PRIVATE_MESSAGE_PROMPT_EN = "🔒 Continue in a private chat\nFor security, order, payment, and account details are not sent to groups.\n\nOpen a private chat with the bot to continue.";
 
-    private const NON_PRIVATE_CALLBACK_PROMPT_ID = 'Demi keamanan, lanjutkan di chat pribadi dengan bot ya.';
+    private const NON_PRIVATE_CALLBACK_PROMPT_ID = 'Demi keamanan, lanjutkan di chat pribadi dengan bot.';
 
     private const NON_PRIVATE_CALLBACK_PROMPT_EN = 'For security, continue in a private chat with the bot.';
 

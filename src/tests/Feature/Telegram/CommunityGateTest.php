@@ -76,7 +76,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(504, '/katalog'))->assertOk();
         $initialPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya')
+            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu')
             && str_contains(json_encode($r->data()), 'Gabung kanal')
             && str_contains(json_encode($r->data()), 'Saya sudah bergabung'));
 
@@ -91,7 +91,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         );
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'Join the channel first')
-            && ! str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya')
+            && ! str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu')
             && str_contains(json_encode($r->data()), 'Join Channel')
             && str_contains(json_encode($r->data()), 'I Have Joined')
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
@@ -126,7 +126,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, CartItem::count());
-        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
         $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/getChatMember')
             && $r['chat_id'] === '-100123'
@@ -169,7 +169,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $firstPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
         $this->postTelegramWebhook($this->messageUpdate(4, '/katalog'))->assertOk();
 
-        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
         $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
             && $r['message_id'] === $firstPromptMessageId);
@@ -193,7 +193,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             $this->postTelegramWebhook($this->messageUpdate(7, '/katalog'))->assertOk();
 
             $this->assertSame(0, TelegramCommunityGatePrompt::count());
-            $this->assertSame(0, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+            $this->assertSame(0, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
         } finally {
             $lock->release();
         }
@@ -201,7 +201,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(8, '/katalog'))->assertOk();
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
-        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu ya'));
+        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
     }
 
     public function test_existing_customer_start_is_blocked_before_welcome_when_not_a_member(): void
@@ -219,7 +219,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(5, '/start'))->assertOk();
 
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya'));
+            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'selamat datang di LHIE STORE'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
@@ -263,7 +263,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame($customer->id, TelegramCommunityGatePrompt::query()->sole()->customer_id);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu ya'));
+            && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'Netflix Premium'));
     }
@@ -291,7 +291,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
                 && $r['chat_id'] === (string) $setup['update_id']
                 && str_contains($r['text'] ?? '', 'belum bisa dicek')
-                && str_contains($r['text'] ?? '', 'Gabung kanal dulu ya')
+                && str_contains($r['text'] ?? '', 'Gabung kanal dulu')
                 && str_contains($r['text'] ?? '', 'coba lagi')
                 && str_contains($r['text'] ?? '', 'nanti')
                 && str_contains(json_encode($r->data()), 'Saya sudah bergabung')
@@ -358,7 +358,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->assertArrayNotHasKey('telegram_user_id', $warnings[0][1]);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'belum bisa dicek')
-            && str_contains($r['text'] ?? '', 'Gabung kanal dulu ya')
+            && str_contains($r['text'] ?? '', 'Gabung kanal dulu')
             && str_contains($r['text'] ?? '', 'coba lagi')
             && str_contains($r['text'] ?? '', 'nanti')
             && str_contains(json_encode($r->data()), 'Saya sudah bergabung')
@@ -432,7 +432,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Gabung kanal dulu ya'));
+            && str_contains($r['text'] ?? '', 'Gabung kanal dulu'));
     }
 
     private function fakeGateHttp(string $status, bool $isMember = false): void

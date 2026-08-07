@@ -142,7 +142,7 @@ class TelegramMenuIntents
             $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => $adminContactUrl]]]];
         }
 
-        $this->bot->sendMessage($chatId, $this->locale->text($customer, "💬 Support\n━━━━━━━━━━━━━━\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", "💬 Support\n━━━━━━━━━━━━━━\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help."), $replyMarkup);
+        $this->bot->sendMessage($chatId, $this->locale->text($customer, "💬 Support\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", "💬 Support\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help."), $replyMarkup);
     }
 
     public function sendAccountSummary(Customer $customer, string $chatId): void
@@ -151,7 +151,6 @@ class TelegramMenuIntents
         $latestOrder = $customer->orders()->latest()->first();
         $lines = [
             $this->locale->text($customer, '👤 Akun Saya', '👤 My Account'),
-            '━━━━━━━━━━━━━━',
             $this->locale->text($customer, 'Nama: ', 'Name: ').($customer->first_name ?: '-'),
             'Username: @'.($customer->username ?: '-'),
             $this->locale->text($customer, 'Total pesanan: ', 'Total orders: ').$ordersCount,

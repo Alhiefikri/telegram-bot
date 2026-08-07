@@ -123,7 +123,7 @@ class TelegramCommunityGate
 
             $message = $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
-                '🔒 Gabung kanal dulu ya'."\n━━━━━━━━━━━━━━\n".'Biar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu bergabung dengan kanal Store Channel dulu.'."\n\n".'Kalau sudah bergabung tapi status kamu belum bisa dicek, tekan tombol “Saya sudah bergabung” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
+                '🔒 Gabung kanal dulu'."\n━━━━━━━━━━━━━━\n".'Agar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu bergabung dengan kanal Store Channel dulu.'."\n\n".'Kalau sudah bergabung tapi status kamu belum bisa dicek, tekan tombol “Saya sudah bergabung” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
                 '🔒 Join the channel first'."\n━━━━━━━━━━━━━━\n".'Before you can continue shopping, please join the Store Channel. Then press “I Have Joined” to verify.',
             ), [
                 'inline_keyboard' => $keyboard,

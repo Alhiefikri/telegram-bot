@@ -334,7 +334,7 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && $request['callback_query_id'] === 'group-stats'
-            && $request['text'] === 'Demi keamanan, lanjutkan di chat pribadi dengan bot ya.');
+            && $request['text'] === 'Demi keamanan, lanjutkan di chat pribadi dengan bot.');
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), '📊 Pertumbuhan Store'));
     }

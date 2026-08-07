@@ -40,7 +40,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
         if ($this->communityGate->verify($context->customer, $context->chatId)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
         } else {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Kamu belum terdeteksi join channel nih.', 'You have not joined the channel yet.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Kamu belum terdeteksi join channel.', 'You have not joined the channel yet.'));
         }
 
         return true;
