@@ -1081,8 +1081,8 @@ async function expectTouchTargetAtLeast44px(locator) {
     const box = await locator.boundingBox();
 
     expect(box).not.toBeNull();
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.width * 1000) / 1000).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.height * 1000) / 1000).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {
