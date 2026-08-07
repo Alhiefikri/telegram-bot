@@ -467,7 +467,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(1, CartItem::count());
         $this->assertSame(2, CartItem::first()->quantity);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.'));
+            && str_contains($r['text'], 'Angkanya belum pas. Pilih jumlah sesuai stok yang tersedia.'));
     }
 
     public function test_unavailable_product_and_buy_callbacks_do_not_mutate_cart_or_show_payment(): void

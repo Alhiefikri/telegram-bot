@@ -238,7 +238,7 @@ class TelegramMessageRouter
             }
 
             if (! ctype_digit($text)) {
-                $this->bot->sendMessage($chatId, $this->text($customer, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.', 'That quantity is not available. Please choose a quantity within the available stock.'));
+                $this->bot->sendMessage($chatId, $this->text($customer, 'Angkanya belum pas. Pilih jumlah sesuai stok yang tersedia.', 'That quantity is not available. Please choose a quantity within the available stock.'));
             }
 
             return;
