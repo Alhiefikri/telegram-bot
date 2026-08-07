@@ -3,6 +3,38 @@
                  ╚═════════════════════════════════════════════════════╝ --}}
             <div id="admin-section-stats" data-admin-return-target tabindex="-1" x-show="activeTab === 'stats'" class="mt-4 space-y-4">
 
+                <section aria-label="Perlu tindakan">
+                    <div class="flex items-end justify-between gap-3">
+                        <div>
+                            <p class="font-display text-[10px] font-black uppercase tracking-[0.2em] text-brand-muted">Antrean operasional</p>
+                            <h2 class="mt-1 font-display text-lg font-black uppercase tracking-[0.12em] text-neo-ink">Perlu tindakan</h2>
+                        </div>
+                        <span class="rounded-full border-2 border-neo-ink bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-neo-ink">Buka antrean</span>
+                    </div>
+                    <div class="mt-3 grid grid-cols-2 gap-3">
+                        @foreach ($operationalQueues as $queue)
+                            <a
+                                href="{{ $queue['url'] }}"
+                                data-operational-queue="{{ $queue['key'] }}"
+                                @class([
+                                    'admin-dashboard-action group flex min-h-28 flex-col justify-between rounded-[1rem] border-[3px] border-neo-ink p-3 text-neo-ink shadow-[3px_3px_0_0_#050505] transition hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2',
+                                    'bg-[#fef9c3]' => $queue['tone'] === 'amber',
+                                    'bg-[#fce4f0]' => $queue['tone'] === 'rose',
+                                    'bg-[#d4f6fb]' => $queue['tone'] === 'blue',
+                                    'bg-[#e8ffd4]' => $queue['tone'] === 'emerald',
+                                ])
+                            >
+                                <span class="text-[10px] font-black uppercase leading-4 tracking-[0.12em]">{{ $queue['label'] }}</span>
+                                <span class="mt-2 font-display text-3xl font-black leading-none">{{ $queue['count'] }}</span>
+                                <span class="mt-2 flex items-end justify-between gap-2 text-[10px] font-bold leading-4 text-neo-ink/70">
+                                    <span>{{ $queue['hint'] }}</span>
+                                    <span aria-hidden="true" class="text-base leading-none transition group-hover:translate-x-0.5">→</span>
+                                </span>
+                            </a>
+                        @endforeach
+                    </div>
+                </section>
+
                 {{-- Link Toko section --}}
                 <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="store-link-section overflow-hidden rounded-[1.5rem] text-neo-ink" aria-label="Link toko">
                     <p class="font-display text-xs font-black uppercase tracking-[0.18em] text-neo-ink/80">{{ $storeLink['label'] }}</p>
@@ -33,44 +65,6 @@
                     </div>
                 </x-admin-dashboard.card>
 
-                {{-- STATISTIK heading --}}
-                <div>
-                    <h2 class="font-display text-lg font-black uppercase tracking-[0.18em] text-neo-ink">📊 Ringkasan</h2>
-                    <p class="mt-1 text-xs font-semibold text-brand-muted">Gambaran cepat operasional hari ini</p>
-                </div>
-
-                <div class="grid gap-4 md:grid-cols-2">
-                    {{-- Stats cards grid --}}
-                    <section class="grid grid-cols-2 gap-3" aria-label="Kartu Stats">
-                        @foreach ($statsCards as $metric)
-                            <x-admin-dashboard.stat-card
-                                :label="$metric['label']"
-                                :value="$metric['value']"
-                                :hint="$metric['hint']"
-                                :tone="$metric['tone']"
-                                size="compact"
-                                class="rounded-xl border-[2px] shadow-[2px_2px_0_0_#050505]"
-                            />
-                        @endforeach
-                    </section>
-
-                    {{-- STATUS ORDER --}}
-                    <section aria-label="Status order">
-                        <h2 class="font-display text-sm font-black uppercase tracking-[0.18em] text-neo-ink">📦 Status Pesanan</h2>
-                        <div class="mt-3 grid grid-cols-2 gap-2">
-                            @foreach ($actionableStatusCounts as $status)
-                                <x-admin-dashboard.stat-card
-                                    :label="$status['label']"
-                                    :value="$status['count']"
-                                    :tone="$status['tone']"
-                                    size="compact"
-                                    class="rounded-[1rem] shadow-[3px_3px_0_0_#050505]"
-                                />
-                            @endforeach
-                        </div>
-                    </section>
-                </div>
-
                 {{-- Pendapatan 7 hari --}}
                 <section aria-label="Pendapatan 7 hari">
                     <h2 class="font-display text-sm font-bold uppercase tracking-wider text-neo-ink">💰 Pendapatan 7 hari</h2>
@@ -88,8 +82,17 @@
                     </div>
                 </section>
 
+                <details
+                    id="admin-configuration"
+                    class="group rounded-[1.125rem] border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]"
+                    @if ($errors->getBag('paymentMode')->isNotEmpty() || $errors->getBag('supportSettings')->isNotEmpty()) open @endif
+                >
+                    <summary class="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-display text-sm font-black uppercase tracking-wider text-neo-ink focus:outline-none focus:ring-2 focus:ring-inset focus:ring-neo-focus">
+                        <span>Pengaturan pembayaran &amp; dukungan</span>
+                        <span aria-hidden="true" class="text-lg leading-none transition group-open:rotate-45">+</span>
+                    </summary>
                 {{-- Payment control (merged from sidebar) --}}
-                <x-admin-dashboard.card id="admin-payment-settings" data-admin-return-target tabindex="-1" as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Mode pembayaran">
+                <x-admin-dashboard.card id="admin-payment-settings" data-admin-return-target tabindex="-1" as="section" tone="purple" padding="compact" shadow="none" class="rounded-none border-x-0 border-b-0" aria-label="Mode pembayaran">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Mode pembayaran</p>
@@ -302,4 +305,5 @@
                         </x-admin-dashboard.notice>
                     @endif
                 </x-admin-dashboard.card>
+                </details>
             </div>

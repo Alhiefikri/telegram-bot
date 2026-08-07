@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
 use Illuminate\Database\Events\QueryExecuted;
@@ -71,7 +72,6 @@ class AdminDashboardOverviewTest extends TestCase
 
         $this->get(route('admin.dashboard', ['tab' => 'stats']))->assertOk();
 
-        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'product_stock_items')));
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'order_items')));
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'telegram_broadcasts')));
     }
@@ -300,7 +300,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame(1, $data['statsTab']['statusCounts']['processing']['count']);
         $this->assertSame(1, $data['statsTab']['statusCounts']['completed']['count']);
         $this->assertSame(['pending_payment', 'processing', 'cancelled', 'expired'], array_keys($data['statsTab']['actionableStatusCounts']));
-        $this->assertSame(['Semua', 'Selesai', 'Masalah', 'Menunggu', 'Diproses'], array_column($data['salesTab']['filters'], 'label'));
+        $this->assertSame(['Semua', 'Selesai', 'Masalah', 'Menunggu', 'Diproses', 'Perlu perhatian'], array_column($data['salesTab']['filters'], 'label'));
         $this->assertSame(3, $data['salesTab']['filters'][0]['count']);
         $this->assertSame(1, $data['salesTab']['filters'][1]['count']);
         $this->assertSame(1, $data['salesTab']['filters'][2]['count']);
@@ -368,7 +368,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertStringNotContainsString('IDR 5.000.000', json_encode($data, JSON_THROW_ON_ERROR));
     }
 
-    public function test_stats_tab_renders_store_link_actions_cards_statuses_and_css_earnings(): void
+    public function test_stats_tab_renders_store_link_operational_queues_and_css_earnings(): void
     {
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
@@ -409,18 +409,201 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
             ->assertSeeInOrder(['Order', '2'])
             ->assertSeeInOrder(['Produk aktif', '2'])
-            ->assertSee('Menunggu bayar')
-            ->assertSee('Diproses')
-            ->assertSee('Dibatalkan')
-            ->assertSee('Expired')
+            ->assertSee('Pesanan diproses')
+            ->assertSee('Pembayaran perlu perhatian')
+            ->assertSee('Reservasi stok')
+            ->assertSee('Stok rendah')
             ->assertSee('style="width:', false)
             ->assertDontSee('chart.js', false)
             ->assertDontSee('apexcharts', false)
             ->assertDontSee('Escrow');
 
+    }
+
+    public function test_stats_data_exposes_linked_operational_queue_counts(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+
+        Product::factory()->create([
+            'name' => 'Stok Rendah Aktif',
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Stok Aman Aktif',
+            'stock' => 5,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Stok Rendah Nonaktif',
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => false,
+        ]);
+        $credentialLowStock = Product::factory()->create([
+            'name' => 'Stok Kredensial Rendah',
+            'stock' => 10,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        foreach (range(1, 3) as $index) {
+            ProductStockItem::create([
+                'product_id' => $credentialLowStock->id,
+                'secret' => "credential-low-{$index}",
+            ]);
+        }
+
+        Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $proofOrder = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $proofOrder->id,
+            'status' => PaymentStatus::Pending,
+            'payment_proof_submitted_at' => now(),
+        ]);
+        Order::factory()->create([
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+
+        $queues = app(AdminDashboardData::class)->forAdmin($admin)['statsTab']['operationalQueues'];
+
+        $this->assertSame(
+            ['processing_orders', 'payment_attention', 'stock_reservations', 'low_stock'],
+            array_column($queues, 'key'),
+        );
+        $this->assertSame([1, 2, 2, 2], array_column($queues, 'count'));
+        $this->assertSame(
+            route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'processing']),
+            $queues[0]['url'],
+        );
+        $this->assertSame(
+            route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'payment_attention']),
+            $queues[1]['url'],
+        );
+        $this->assertSame(
+            route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'waiting']),
+            $queues[2]['url'],
+        );
+        $this->assertSame(
+            route('admin.dashboard', ['tab' => 'produk', 'products_filter' => 'low_stock']),
+            $queues[3]['url'],
+        );
+    }
+
+    public function test_low_stock_product_filter_only_lists_active_products_with_at_most_three_available(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($admin);
+
+        Product::factory()->create([
+            'name' => 'Produk Stok Rendah',
+            'stock' => 4,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Produk Stok Aman',
+            'stock' => 5,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Produk Rendah Nonaktif',
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => false,
+        ]);
+        $credentialLowStock = Product::factory()->create([
+            'name' => 'Produk Kredensial Rendah',
+            'stock' => 10,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        foreach (range(1, 3) as $index) {
+            ProductStockItem::create([
+                'product_id' => $credentialLowStock->id,
+                'secret' => "filter-low-{$index}",
+            ]);
+        }
+        $credentialSafeStock = Product::factory()->create([
+            'name' => 'Produk Kredensial Aman',
+            'stock' => 10,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        foreach (range(1, 4) as $index) {
+            ProductStockItem::create([
+                'product_id' => $credentialSafeStock->id,
+                'secret' => "filter-safe-{$index}",
+            ]);
+        }
+
+        $data = app(AdminDashboardData::class)->forAdmin($admin, 'produk', 'all', 1, 'low_stock');
+        $this->assertEqualsCanonicalizing(['Produk Kredensial Rendah', 'Produk Stok Rendah'], array_column($data['productsTab']['products'], 'name'));
+
+        $response = $this->get('/admin?tab=produk&products_filter=low_stock')
+            ->assertOk()
+            ->assertSee('Produk Stok Rendah')
+            ->assertSee('Produk Kredensial Rendah');
+
         $content = $response->getContent();
-        $statusSection = substr($content, strpos($content, 'aria-label="Status order"') ?: 0, 2000);
-        $this->assertStringNotContainsString('Draft', $statusSection);
-        $this->assertStringNotContainsString('Selesai', $statusSection);
+        $productsSection = substr(
+            $content,
+            strpos($content, 'id="admin-section-products"') ?: 0,
+            (strpos($content, 'id="admin-section-sales"') ?: strlen($content)) - (strpos($content, 'id="admin-section-products"') ?: 0),
+        );
+        $this->assertStringNotContainsString('Produk Stok Aman', $productsSection);
+        $this->assertStringNotContainsString('Produk Kredensial Aman', $productsSection);
+        $this->assertStringNotContainsString('Produk Rendah Nonaktif', $productsSection);
+    }
+
+    public function test_operational_work_precedes_secondary_summary_content_and_collapsed_settings(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+
+        Product::factory()->create([
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+
+        $response = $this->get('/admin?tab=stats')
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Perlu tindakan',
+                'Link toko',
+                'Pendapatan 7 hari',
+                'Pengaturan pembayaran &amp; dukungan',
+            ], false)
+            ->assertSee('data-operational-queue="processing_orders"', false)
+            ->assertSee('tab=penjualan&amp;sales_filter=processing', false)
+            ->assertSee('data-operational-queue="payment_attention"', false)
+            ->assertSee('tab=penjualan&amp;sales_filter=payment_attention', false)
+            ->assertSee('data-operational-queue="stock_reservations"', false)
+            ->assertSee('tab=penjualan&amp;sales_filter=waiting', false)
+            ->assertSee('data-operational-queue="low_stock"', false)
+            ->assertSee('tab=produk&amp;products_filter=low_stock', false)
+            ->assertDontSee('aria-label="Kartu Stats"', false)
+            ->assertDontSee('aria-label="Status order"', false);
+
+        $content = $response->getContent();
+        $this->assertMatchesRegularExpression('/<details(?![^>]*\sopen(?:\s|=))[^>]*id="admin-configuration"/', $content);
+        $this->assertSame(1, substr_count($content, '>GMV</p>'));
     }
 }

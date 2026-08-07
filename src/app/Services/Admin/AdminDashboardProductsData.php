@@ -8,18 +8,23 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Support\Money;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 final class AdminDashboardProductsData
 {
+    private const LOW_STOCK_THRESHOLD = 3;
+
     public function __construct(private readonly ProductImageOptimizer $images) {}
 
     /**
      * @return array<string, mixed>
      */
-    public function forProducts(bool $canManageProducts, int $productsPage = 1): array
+    public function forProducts(bool $canManageProducts, int $productsPage = 1, ?string $activeFilter = null): array
     {
-        $productPage = $this->latestProducts($canManageProducts, $productsPage);
+        $activeFilter = $this->normalizeFilter($activeFilter);
+        $lowStockCount = $this->lowStockCount();
+        $productPage = $this->latestProducts($canManageProducts, $productsPage, $activeFilter);
 
         return [
             'canManage' => $canManageProducts,
@@ -27,12 +32,21 @@ final class AdminDashboardProductsData
             'products' => $productPage['products'],
             'pagination' => $productPage['pagination'],
             'categoryOptions' => $this->categoryOptions(),
+            'active_filter' => $activeFilter,
+            'low_stock_count' => $lowStockCount,
+            'filters' => $this->productFilters($activeFilter, $lowStockCount),
         ];
     }
 
-    private function latestProducts(bool $includeManageableStockItems, int $productsPage): array
+    public function lowStockCount(): int
+    {
+        return $this->applyLowStockFilter(Product::query())->count();
+    }
+
+    private function latestProducts(bool $includeManageableStockItems, int $productsPage, string $activeFilter): array
     {
         $paginator = Product::query()
+            ->when($activeFilter === 'low_stock', fn (Builder $query): Builder => $this->applyLowStockFilter($query))
             ->with('category:id,name')
             ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
@@ -156,6 +170,39 @@ final class AdminDashboardProductsData
                     ->all(),
             ],
         ];
+    }
+
+    /** @param Builder<Product> $query */
+    private function applyLowStockFilter(Builder $query): Builder
+    {
+        return $query
+            ->where('is_active', true)
+            ->where(fn (Builder $query): Builder => $query
+                ->whereRaw('stock - reserved_stock <= ?', [self::LOW_STOCK_THRESHOLD])
+                ->orWhere(fn (Builder $query): Builder => $query
+                    ->whereHas('stockItems')
+                    ->whereHas(
+                        'stockItems',
+                        fn (Builder $stockItems): Builder => $stockItems->whereNull('order_item_id'),
+                        '<=',
+                        self::LOW_STOCK_THRESHOLD,
+                    )));
+    }
+
+    private function normalizeFilter(?string $filter): string
+    {
+        return $filter === 'low_stock' ? 'low_stock' : 'all';
+    }
+
+    private function productFilters(string $activeFilter, int $lowStockCount): array
+    {
+        return collect([
+            ['key' => 'all', 'label' => 'Semua', 'count' => Product::query()->count()],
+            ['key' => 'low_stock', 'label' => 'Stok rendah', 'count' => $lowStockCount],
+        ])->map(fn (array $filter): array => $filter + [
+            'active' => $filter['key'] === $activeFilter,
+            'url' => route('admin.dashboard', ['tab' => 'produk', 'products_filter' => $filter['key']]),
+        ])->all();
     }
 
     /** @param Collection<int, Product> $products */

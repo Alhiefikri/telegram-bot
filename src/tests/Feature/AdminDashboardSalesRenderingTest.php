@@ -259,6 +259,40 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('sales_page=2', false);
     }
 
+    public function test_payment_attention_filter_lists_manual_proofs_and_late_paid_orders_only(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+
+        $proofOrder = Order::factory()->create([
+            'invoice_number' => 'INV-PROOF-ATTENTION',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $proofOrder->id,
+            'status' => PaymentStatus::Pending,
+            'payment_proof_submitted_at' => now(),
+        ]);
+        Order::factory()->create([
+            'invoice_number' => 'INV-LATE-ATTENTION',
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Order::factory()->create([
+            'invoice_number' => 'INV-ORDINARY-PENDING',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+
+        $this->get('/admin?tab=penjualan&sales_filter=payment_attention')
+            ->assertOk()
+            ->assertSee('INV-PROOF-ATTENTION')
+            ->assertSee('Bukti bayar masuk')
+            ->assertSee('INV-LATE-ATTENTION')
+            ->assertSee('Late paid')
+            ->assertDontSee('INV-ORDINARY-PENDING');
+    }
+
     public function test_admin_order_detail_shows_order_audit_actor_for_cancelled_orders(): void
     {
         $viewer = User::factory()->create(['role' => UserRole::Owner]);

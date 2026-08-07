@@ -187,6 +187,10 @@ export default function adminDashboard(initialState = {}) {
             if (! target?.matches('[data-admin-return-target]')) {
                 return;
             }
+            const disclosure = target.closest('details');
+            if (disclosure) {
+                disclosure.open = true;
+            }
 
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             target.scrollIntoView({ block: 'center', behavior: 'auto' });

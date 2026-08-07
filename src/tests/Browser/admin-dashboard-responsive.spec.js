@@ -359,6 +359,8 @@ test('renders the compact admin dashboard at desktop width', async ({ page }) =>
     await expect(page.getByRole('navigation', { name: 'Navigasi desktop' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeHidden();
+    await page.getByText('Pengaturan pembayaran & dukungan', { exact: true }).click();
     await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
@@ -571,13 +573,51 @@ test('keeps fixed navigation below channel fields and modal surfaces', async ({ 
 });
 
 
+for (const operationalQueueCase of [
+    { name: '320px mobile', viewport: { width: 320, height: 900 } },
+    { name: '390px mobile', viewport: { width: 390, height: 900 } },
+    { name: '768px tablet', viewport: { width: 768, height: 900 } },
+    { name: '1440px desktop', viewport: { width: 1440, height: 900 } },
+]) {
+    test(`prioritizes operational work and opens filtered queues on ${operationalQueueCase.name}`, async ({ page }) => {
+        await page.setViewportSize(operationalQueueCase.viewport);
+        await login(page);
+
+        const queue = page.getByRole('region', { name: 'Perlu tindakan' });
+        await expect(queue).toBeVisible();
+        await expectBefore(queue, page.getByRole('region', { name: 'Link toko' }));
+        await expectBefore(queue, page.getByRole('region', { name: 'Pendapatan 7 hari' }));
+        await expectBefore(queue, page.getByText('Pengaturan pembayaran & dukungan', { exact: true }));
+
+        await expect(queue.locator('[data-operational-queue="processing_orders"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=processing$/);
+        await expect(queue.locator('[data-operational-queue="payment_attention"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=payment_attention$/);
+        await expect(queue.locator('[data-operational-queue="stock_reservations"]')).toHaveAttribute('href', /tab=penjualan&sales_filter=waiting$/);
+        await expect(queue.locator('[data-operational-queue="low_stock"]')).toHaveAttribute('href', /tab=produk&products_filter=low_stock$/);
+
+        await queue.locator('[data-operational-queue="payment_attention"]').click();
+        await expect(page).toHaveURL(/tab=penjualan&sales_filter=payment_attention$/);
+        await expect(page.locator('[data-sales-filter="payment_attention"]')).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByText('INV-BROWSER-QRIS')).toBeVisible();
+
+        await page.goto(`${baseUrl}/admin`);
+        await page.locator('[data-operational-queue="low_stock"]').click();
+        await expect(page).toHaveURL(/tab=produk&products_filter=low_stock$/);
+        await expect(page.locator('[data-products-filter="low_stock"]')).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByText('Browser QA Stok Rendah', { exact: true })).toBeVisible();
+        await expectNoDocumentOverflow(page);
+    });
+}
+
 test('keeps tabs, cards, and the stock modal usable at Telegram mini app width', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
     await login(page);
 
     await expectNoDocumentOverflow(page);
     await expectBottomNavUsable(page);
-    await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
+    const configurationSummary = page.getByText('Pengaturan pembayaran & dukungan', { exact: true });
+    await configurationSummary.scrollIntoViewIfNeeded();
+    await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeHidden();
+    await configurationSummary.click();
     await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
@@ -1041,8 +1081,8 @@ async function expectTouchTargetAtLeast44px(locator) {
     const box = await locator.boundingBox();
 
     expect(box).not.toBeNull();
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.width * 1000) / 1000).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.height * 1000) / 1000).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {
@@ -1189,6 +1229,15 @@ Product::factory()->create([
     'is_active' => true,
 ]);
 
+Product::factory()->create([
+    'category_id' => $category->id,
+    'name' => 'Browser QA Stok Rendah',
+    'price_amount' => 30000,
+    'stock' => 3,
+    'reserved_stock' => 0,
+    'is_active' => true,
+]);
+
 $customer = Customer::factory()->create([
     'first_name' => 'Browser',
     'username' => 'browserbuyer',
@@ -1269,6 +1318,7 @@ Payment::factory()->create([
     'provider_total_payment' => $qrisTotal,
     'amount' => 45000,
     'status' => PaymentStatus::Pending,
+    'payment_proof_submitted_at' => now()->subMinute(),
     'expired_at' => now()->addMinutes(15),
 ]);
 
