@@ -244,7 +244,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
         $this->assertSame(1, PaymentEvent::count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Cek status pembayaran dibatasi sementara'));
+            && str_contains($r['text'], 'Baru bisa cek status pembayaran lagi'));
     }
 
     public function test_order_cannot_access_other_customer_order(): void

@@ -143,7 +143,7 @@ class TelegramOrderIntents
         if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
             $seconds = RateLimiter::availableIn($key);
 
-            return $this->text($customer, "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.", "Payment-status checks are temporarily limited. Try again in {$seconds} seconds.");
+            return $this->text($customer, "Baru bisa cek status pembayaran lagi dalam {$seconds} detik.", "You can check your payment status again in {$seconds} seconds.");
         }
 
         RateLimiter::hit($key, 60);
