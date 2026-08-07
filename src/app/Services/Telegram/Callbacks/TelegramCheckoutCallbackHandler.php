@@ -178,7 +178,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
             ], fn () => $this->checkout->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey));
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang ya.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
+            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
 
             return;
         }
@@ -257,7 +257,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             Cache::lock('telegram:checkout:'.$checkoutKey, 45)
                 ->block(5, fn () => $callback());
         } catch (LockTimeoutException) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Checkout sedang diproses. Tunggu sebentar ya.', 'Checkout is being processed. Please wait a moment.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Checkout sedang diproses. Tunggu sebentar.', 'Checkout is being processed. Please wait a moment.'));
         }
     }
 

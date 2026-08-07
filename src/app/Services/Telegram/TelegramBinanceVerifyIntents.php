@@ -133,7 +133,7 @@ class TelegramBinanceVerifyIntents
             $this->bot->answerCallbackQuery($callbackQueryId);
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
-                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.' ya.',
+                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.'.',
                 'You have reached the maximum of 3 Order IDs. Please contact the admin with invoice '.$order->invoice_number.'.',
             ));
 
@@ -179,7 +179,7 @@ class TelegramBinanceVerifyIntents
         if ($candidate === null) {
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
-                'Kirim Binance Order ID persis seperti di Order Details (10–128 karakter ASCII, tanpa spasi). Coba kirim ulang ya, atau ketik /batal untuk berhenti.',
+                'Kirim Binance Order ID persis seperti di Order Details (10–128 karakter ASCII, tanpa spasi). Coba kirim ulang, atau ketik /batal untuk berhenti.',
                 'Please send the Binance Order ID exactly as shown in Order Details (10–128 ASCII characters, no spaces). Try again, or type /batal to stop.',
             ));
 
@@ -187,7 +187,7 @@ class TelegramBinanceVerifyIntents
         }
 
         if (! $this->session->withinAttemptLimit($order->id)) {
-            $this->bot->sendMessage($chatId, $this->text($customer, 'Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi ya.', 'Too many attempts. Please wait a few minutes and try again.'));
+            $this->bot->sendMessage($chatId, $this->text($customer, 'Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.', 'Too many attempts. Please wait a few minutes and try again.'));
 
             return true;
         }
@@ -196,7 +196,7 @@ class TelegramBinanceVerifyIntents
         if ($submission->outcome === BinanceVerificationSubmissionOutcome::Limit) {
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
-                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.' ya.',
+                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.'.',
                 'You have reached the maximum of 3 Order IDs. Please contact the admin with invoice '.$order->invoice_number.'.',
             ));
 
@@ -321,7 +321,7 @@ class TelegramBinanceVerifyIntents
             case BinanceVerificationOutcome::AlreadyPaid:
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai ya.",
+                    "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
                     "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
                 ));
                 break;
@@ -384,7 +384,7 @@ class TelegramBinanceVerifyIntents
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    'Verifikasi otomatis sedang tidak tersedia. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan ya.',
+                    'Verifikasi otomatis sedang tidak tersedia. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
                     'Automatic verification is currently unavailable. The admin has been notified — as a backup, please send your payment screenshot with the caption /payment.',
                 ));
                 break;
@@ -429,7 +429,7 @@ class TelegramBinanceVerifyIntents
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    'Verifikasi Binance tidak dapat dilanjutkan saat ini. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan ya.',
+                    'Verifikasi Binance tidak dapat dilanjutkan saat ini. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
                     'Automatic Binance verification could not continue. The admin has been notified — please send your payment screenshot with the caption /payment as a backup.',
                 ));
                 break;
@@ -455,7 +455,7 @@ class TelegramBinanceVerifyIntents
         if ($payment->status === PaymentStatus::Paid) {
             return $this->text(
                 $customer,
-                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai ya.",
+                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
                 "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
             );
         }
@@ -463,7 +463,7 @@ class TelegramBinanceVerifyIntents
         if ($order->order_status !== OrderStatus::PendingPayment || $payment->status !== PaymentStatus::Pending) {
             return $this->text(
                 $customer,
-                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini ya.",
+                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini.",
                 "Order {$order->invoice_number} is no longer awaiting payment. If you already sent a transfer, please contact the admin with this invoice.",
             );
         }
@@ -493,7 +493,7 @@ class TelegramBinanceVerifyIntents
         if ($payment->status === PaymentStatus::Paid) {
             return $this->text(
                 $customer,
-                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai ya.",
+                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
                 "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
             );
         }
@@ -501,7 +501,7 @@ class TelegramBinanceVerifyIntents
         if ($order->order_status !== OrderStatus::PendingPayment || $payment->status !== PaymentStatus::Pending) {
             return $this->text(
                 $customer,
-                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini ya.",
+                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini.",
                 "Order {$order->invoice_number} is no longer awaiting payment. If you already sent a transfer, please contact the admin with this invoice.",
             );
         }

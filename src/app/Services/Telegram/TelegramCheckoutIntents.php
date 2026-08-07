@@ -226,8 +226,8 @@ class TelegramCheckoutIntents
     {
         return $this->locale->text(
             $customer,
-            "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nAdmin toko perlu mengecek konfigurasi pembayaran otomatis sebelum fitur ini dipakai lagi.",
-            "Automatic payment is currently unavailable, so this checkout has been redirected to a manual QR payment.\n\nThe store admin needs to check the automatic payment configuration before this feature can be used again.",
+            "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nIkuti instruksi QR di bawah untuk selesaikan pembayaran kamu.",
+            "Automatic payment is currently unavailable, so this checkout has been redirected to a manual QR payment.\n\nFollow the QR instructions below to complete your payment.",
         );
     }
 

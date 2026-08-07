@@ -37,7 +37,7 @@ class TelegramManualPaymentIntents
                 )
                 : $this->locale->text(
                     $customer,
-                    "Invoice tidak ditemukan atau bukan pesanan manual milik kamu.\n\nCoba cek lagi di /status atau /riwayat ya.",
+                    "Invoice tidak ditemukan atau bukan pesanan manual milik kamu.\n\nCoba cek lagi di /status atau /riwayat.",
                     "The invoice was not found or is not your manual order.\n\nCheck again using /status or /history.",
                 ));
 
@@ -48,7 +48,7 @@ class TelegramManualPaymentIntents
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
-                "Bukti pembayaran harus dikirim sebagai FOTO ya.\n\nPilih salah satu cara:\n1. Upload screenshot dan isi caption dengan /payment\n2. Jika screenshot sudah terkirim, balas foto itu dengan /payment\n\nKalau punya beberapa order, pakai:\n/payment {$order->invoice_number}",
+                "Bukti pembayaran harus dikirim sebagai FOTO.\n\nPilih salah satu cara:\n1. Upload screenshot dan isi caption dengan /payment\n2. Jika screenshot sudah terkirim, balas foto itu dengan /payment\n\nKalau punya beberapa order, pakai:\n/payment {$order->invoice_number}",
                 "Payment proof must be sent as a PHOTO.\n\nUse either method:\n1. Upload the screenshot with /payment as its caption\n2. If the screenshot was already sent, reply to that photo with /payment\n\nIf you have multiple orders, use:\n/payment {$order->invoice_number}",
             ));
 
@@ -59,8 +59,8 @@ class TelegramManualPaymentIntents
         if (! $adminTelegramChatId) {
             $this->bot->sendMessage($chatId, $this->locale->text(
                 $customer,
-                "📸 Bukti pembayaran sudah diterima.\n\nTapi chat admin belum dikonfigurasi, jadi verifikasi belum bisa diteruskan otomatis.\nSilakan hubungi admin untuk konfirmasi manual.",
-                "📸 Payment proof received.\n\nHowever, the admin chat has not been configured, so verification cannot be forwarded automatically.\nPlease contact the admin for manual confirmation.",
+                "📸 Bukti pembayaran sudah diterima.\n\nVerifikasi otomatis belum bisa diteruskan sekarang. Silakan hubungi admin langsung untuk konfirmasi manual.",
+                "📸 Payment proof received.\n\nAutomatic verification could not be forwarded right now. Please contact the admin directly for manual confirmation.",
             ));
 
             return;
