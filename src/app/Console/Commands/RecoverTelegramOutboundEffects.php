@@ -55,6 +55,11 @@ class RecoverTelegramOutboundEffects extends Command
         Order::query()
             ->whereNull('manual_checkout_customer_notified_at')
             ->where('manual_checkout_customer_notification_started_at', '<=', $cutoff)
+            ->where('order_status', 'pending_payment')
+            ->where(function ($query): void {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {

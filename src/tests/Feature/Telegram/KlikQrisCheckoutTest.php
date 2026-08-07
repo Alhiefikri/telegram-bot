@@ -262,6 +262,25 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendBinanceCheckoutInstructions::class);
     }
 
+    public function test_recovery_skips_expired_klikqris_checkout_claim(): void
+    {
+        config()->set('services.telegram.claim_lease_seconds', 60);
+        Queue::fake();
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'expires_at' => now()->subSecond(),
+            'manual_checkout_customer_notification_started_at' => now()->subMinutes(2),
+            'manual_checkout_customer_notified_at' => null,
+        ]);
+        Payment::factory()->for($order)->create(['provider' => 'klikqris']);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(SendKlikQrisCheckoutInstructions::class);
+    }
+
     public function test_delayed_klikqris_job_does_not_create_or_send_after_local_order_deadline(): void
     {
         $order = Order::factory()->create([
