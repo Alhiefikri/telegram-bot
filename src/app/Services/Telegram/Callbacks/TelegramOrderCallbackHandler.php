@@ -106,7 +106,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         }
 
         $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Order dibatalkan dan stok sudah dilepas.', 'Order cancelled and stock released.'));
-        $this->bot->sendMessage($context->chatId, $this->text($context->customer, "❌ Pesanan dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.", "❌ Order cancelled\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} was cancelled and the stock was released.\n\nOpen /products if you would like to order again."));
+        $this->bot->sendMessage($context->chatId, $this->text($context->customer, "❌ Pesanan dibatalkan\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.", "❌ Order cancelled\nInvoice {$cancelled->invoice_number} was cancelled and the stock was released.\n\nOpen /products if you would like to order again."));
     }
 
     private function text(Customer $customer, string $id, string $en): string
