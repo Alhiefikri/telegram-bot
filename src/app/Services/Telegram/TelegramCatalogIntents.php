@@ -33,7 +33,7 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => $this->locale->text($customer, '📂 Lainnya', '📂 Other'), 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\n━━━━━━━━━━━━━━\nProduk belum tampil karena admin belum menambahkan produk aktif.\n\nCek lagi nanti ya.", "🛍️ No products yet\n━━━━━━━━━━━━━━\nThere are no active products to show yet.\n\nPlease check again later.") : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here."), ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $keyboard === [] ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\nBelum ada produk yang bisa ditampilkan sekarang.\n\nCek lagi nanti ya.", "🛍️ No products yet\nThere are no products to show right now.\n\nPlease check again later.") : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here."), ['inline_keyboard' => $keyboard]);
     }
 
     public function sendStockChoices(Customer $customer, string $chatId, Product $product, int $availableStock): void
@@ -86,7 +86,7 @@ class TelegramCatalogIntents
                 .$this->locale->qrisCrossBorderSupport($customer)
                 ."\n\n"
                 .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.')
-            : $this->locale->text($customer, 'Stoknya lagi habis nih. Cek produk lain dulu ya, atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
+            : $this->locale->text($customer, 'Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -140,7 +140,7 @@ class TelegramCatalogIntents
         } else {
             $category = Category::whereKey((int) $categoryId)->where('is_active', true)->first();
             if (! $category) {
-                $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Kategori ini belum tersedia atau sudah dipindahkan.', 'This category is no longer available.'), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'), 'callback_data' => 'back:categories']]]]);
+                $this->bot->sendMessage($chatId, $this->locale->text($customer, '😕 Kategori ini sudah tidak tersedia. Coba pilih kategori lain.', '😕 This category is no longer available. Please choose another category.'), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'), 'callback_data' => 'back:categories']]]]);
 
                 return;
             }

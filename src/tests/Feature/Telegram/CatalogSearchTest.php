@@ -181,7 +181,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Produk masih kosong')
-            && str_contains($r['text'], 'admin belum menambahkan produk aktif'));
+            && str_contains($r['text'], 'Belum ada produk yang bisa ditampilkan sekarang')
+            && ! str_contains($r['text'], 'admin'));
     }
 
     public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void

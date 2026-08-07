@@ -15,7 +15,7 @@ class TelegramCartIntents
     public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity, bool $forceConfirmation = false, bool $sendConfirmation = true): bool
     {
         if ($quantity < 1) {
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Angkanya belum pas nih. Pilih jumlah sesuai stok yang tersedia ya.', 'That quantity is not available. Please choose a quantity within the available stock.'));
+            $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Angkanya belum pas. Pilih jumlah sesuai stok yang tersedia.', 'That quantity is not available. Please choose a quantity within the available stock.'));
 
             return false;
         }
@@ -46,7 +46,7 @@ class TelegramCartIntents
             }
 
             $subtotal = $product->price_amount * $quantity;
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, "🛒 Masuk keranjang\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", "🛒 Added to cart\n━━━━━━━━━━━━━━\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nLooks right? Continue to checkout below."), [
+            $this->bot->sendMessage($chatId, $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nLooks right? Continue to checkout below."), [
                 'inline_keyboard' => [
                     [
                         ['text' => $this->locale->text($customer, '💳 Lanjut Checkout', '💳 Continue to Checkout'), 'callback_data' => 'checkout'],
