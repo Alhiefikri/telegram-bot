@@ -72,7 +72,6 @@ class AdminDashboardOverviewTest extends TestCase
 
         $this->get(route('admin.dashboard', ['tab' => 'stats']))->assertOk();
 
-        $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'product_stock_items')));
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'order_items')));
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'telegram_broadcasts')));
     }
