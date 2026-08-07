@@ -194,7 +194,7 @@ class TelegramMessageRouter
             $order = $customer->orders()->latest()->first();
             $orderStatus = $order ? $this->locale->orderStatus($customer, $order->order_status) : null;
             $paymentStatus = $order ? $this->locale->paymentStatus($customer, $order->payment_status) : null;
-            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Pesanan: {$orderStatus}\n💳 Pembayaran: {$paymentStatus}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$orderStatus}\n💳 Payment: {$paymentStatus}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja 🛍️", "You do not have any orders yet.\n\nOpen /products to start shopping 🛍️"));
+            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Pesanan: {$orderStatus}\n💳 Pembayaran: {$paymentStatus}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$orderStatus}\n💳 Payment: {$paymentStatus}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "📦 Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja.", "📦 You do not have any orders yet.\n\nOpen /products to start shopping."));
 
             return;
         }
@@ -210,7 +210,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $invoice = trim(substr($text, strlen('/order')));
             if ($invoice === '') {
-                $this->bot->sendMessage($chatId, $this->text($customer, "Ketik nomor invoice setelah command ya.\n\nContoh:\n/order INV-12345678", "Type the invoice number after the command.\n\nExample:\n/order INV-12345678"));
+                $this->bot->sendMessage($chatId, $this->text($customer, "Ketik nomor invoice setelah command.\n\nContoh:\n/order INV-12345678", "Type the invoice number after the command.\n\nExample:\n/order INV-12345678"));
 
                 return;
             }
@@ -245,7 +245,7 @@ class TelegramMessageRouter
         }
 
         $this->session->forget($customer);
-        $this->bot->sendMessage($chatId, $this->text($customer, "Aku belum paham perintah itu 😅\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.", "I did not understand that command 😅\n\nOpen /products to shop or /support if you need help."));
+        $this->bot->sendMessage($chatId, $this->text($customer, "Aku belum paham perintah itu.\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.", "I did not understand that command.\n\nOpen /products to shop or /support if you need help."));
     }
 
     private function isPrivateOnlyCommand(string $text): bool

@@ -218,8 +218,8 @@ class TelegramBinanceVerifyIntents
             $this->session->forget($customer);
             $this->bot->sendMessage($chatId, $this->text(
                 $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
-                "Automatic verification for order {$order->invoice_number} has closed after the previous check. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} if needed.",
+                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
+                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
             ));
 
             return true;
@@ -348,8 +348,8 @@ class TelegramBinanceVerifyIntents
                     $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                     $this->bot->sendMessage($chatId, $this->text(
                         $customer,
-                        "⏳ Order ID sudah diterima, tetapi pembayaran belum terlihat setelah beberapa pemeriksaan otomatis. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} agar bisa dicek manual.",
-                        "⏳ Order ID received, but the payment was not visible after several automatic checks. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} for a manual review.",
+                        "⏳ Order ID sudah diterima, tetapi pembayaran belum terlihat. Kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} agar bisa dicek manual.",
+                        "⏳ Order ID received, but the payment is not visible yet. Send a payment screenshot with the caption /payment {$order->invoice_number} for a manual review.",
                     ));
 
                     break;
@@ -357,8 +357,8 @@ class TelegramBinanceVerifyIntents
 
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    "🔎 Order ID sudah diterima\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nPembayaran belum terlihat di riwayat Binance. Sistem akan mengecek ulang otomatis setiap 30 detik selama masa verifikasi. Kamu tidak perlu mengirim ulang ID yang sama.",
-                    "🔎 Order ID received\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment is not visible in Binance history yet. We will check automatically every 30 seconds during the verification window. You do not need to resend the same ID.",
+                    "🔎 Order ID sudah diterima\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nPembayaran belum terlihat. Tunggu hasil verifikasi; kamu tidak perlu mengirim ulang ID yang sama.",
+                    "🔎 Order ID received\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment is not visible yet. Please wait for the verification result; you do not need to resend the same ID.",
                 ), $allowRetryButtons ? [
                     'inline_keyboard' => [
                         [[
@@ -375,8 +375,8 @@ class TelegramBinanceVerifyIntents
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    "⚠️ Pembayaran kamu butuh pengecekan manual\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nDetail pembayaran tidak sepenuhnya cocok dengan pesanan ini, jadi admin sudah kami beri tahu dan akan menyelesaikannya segera. Kamu tidak perlu melakukan apa-apa lagi.",
-                    "⚠️ Your payment needs a manual check\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment details do not fully match this order, so the store admin has been notified and will resolve it shortly. No further action is needed from you.",
+                    "⚠️ Pembayaran kamu butuh pengecekan manual\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nDetail pembayaran belum sepenuhnya cocok dengan pesanan ini, jadi konfirmasi membutuhkan waktu lebih lama. Kamu tidak perlu melakukan apa-apa lagi.",
+                    "⚠️ Your payment needs a manual check\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment details do not fully match this order, so confirmation will take longer. No further action is needed from you.",
                 ));
                 break;
 
@@ -384,8 +384,8 @@ class TelegramBinanceVerifyIntents
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    'Verifikasi otomatis sedang tidak tersedia. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
-                    'Automatic verification is currently unavailable. The admin has been notified — as a backup, please send your payment screenshot with the caption /payment.',
+                    'Verifikasi otomatis sedang tidak tersedia. Kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
+                    'Automatic verification is currently unavailable. As a backup, please send your payment screenshot with the caption /payment.',
                 ));
                 break;
 
@@ -407,8 +407,8 @@ class TelegramBinanceVerifyIntents
                         $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                         $this->bot->sendMessage($chatId, $this->text(
                             $customer,
-                            "Verifikasi otomatis belum berhasil diselesaikan. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} sebagai cadangan.",
-                            "Automatic verification could not be completed. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} as a backup.",
+                            "Verifikasi otomatis belum berhasil diselesaikan. Kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} sebagai cadangan.",
+                            "Automatic verification could not be completed. Send a payment screenshot with the caption /payment {$order->invoice_number} as a backup.",
                         ));
 
                         break;
@@ -429,8 +429,8 @@ class TelegramBinanceVerifyIntents
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
                 $this->bot->sendMessage($chatId, $this->text(
                     $customer,
-                    'Verifikasi Binance tidak dapat dilanjutkan saat ini. Admin sudah diberi tahu — kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
-                    'Automatic Binance verification could not continue. The admin has been notified — please send your payment screenshot with the caption /payment as a backup.',
+                    'Verifikasi Binance tidak dapat dilanjutkan saat ini. Kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
+                    'Automatic Binance verification could not continue. Please send your payment screenshot with the caption /payment as a backup.',
                 ));
                 break;
 
@@ -480,8 +480,8 @@ class TelegramBinanceVerifyIntents
         if ($verificationStatus->closed()) {
             return $this->text(
                 $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
-                "Automatic verification for order {$order->invoice_number} has closed after the previous check. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} if needed.",
+                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
+                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
             );
         }
 
@@ -518,8 +518,8 @@ class TelegramBinanceVerifyIntents
         if ($verificationStatus->closed()) {
             return $this->text(
                 $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah ditutup setelah pemeriksaan sebelumnya. Admin sudah diberi tahu; kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} bila perlu.",
-                "Automatic verification for order {$order->invoice_number} has closed after the previous check. The admin has been notified; send a payment screenshot with the caption /payment {$order->invoice_number} if needed.",
+                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
+                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
             );
         }
 

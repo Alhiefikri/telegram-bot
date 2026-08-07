@@ -29,12 +29,12 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertLocalizedCopy(
             $idPayload,
             ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk'],
-            ['Main menu', 'Browse Products', 'Choose a button or type /products'],
+            ['Main menu', 'Browse Products', 'Choose a button or type /products', '🚀'],
         );
         $this->assertLocalizedCopy(
             $enPayload,
             ['Main menu', 'Browse Products', 'Choose a button or type /products'],
-            ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk'],
+            ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk', '🚀'],
         );
     }
 
@@ -51,12 +51,12 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41011),
             ['Ada kendala order, pembayaran, atau login akun?', '💬 Hubungi Admin'],
-            ['Need help with an order, payment, or account login?', '💬 Chat with Admin'],
+            ['Need help with an order, payment, or account login?', '💬 Chat with Admin', '━━━━━━━━━━━━━━'],
         );
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41012),
             ['Need help with an order, payment, or account login?', '💬 Chat with Admin'],
-            ['Ada kendala order, pembayaran, atau login akun?', '💬 Hubungi Admin'],
+            ['Ada kendala order, pembayaran, atau login akun?', '💬 Hubungi Admin', '━━━━━━━━━━━━━━'],
         );
     }
 
@@ -188,13 +188,13 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41061),
-            ['💎 CHECKOUT USDT', 'BINANCE PAY ID', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran sebagai foto dengan caption /payment'],
-            ['💎 USDT CHECKOUT', 'Send the payment screenshot'],
+            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran sebagai foto dengan caption /payment'],
+            ['💎 Binance Pay checkout', '💎 CHECKOUT USDT', '1️⃣', 'Send the payment screenshot'],
         );
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41062),
-            ['💎 USDT CHECKOUT', 'BINANCE PAY ID', 'Scan the QR code or enter the Pay ID', 'Send the payment screenshot as a photo with the caption /payment'],
-            ['💎 CHECKOUT USDT', 'Kirim screenshot pembayaran'],
+            ['💎 Binance Pay checkout', 'BINANCE PAY ID', 'Scan the QR code or enter the Pay ID', 'Send the payment screenshot as a photo with the caption /payment'],
+            ['💎 Checkout Binance Pay', '💎 USDT CHECKOUT', '1️⃣', 'Kirim screenshot pembayaran'],
         );
     }
 
@@ -279,6 +279,30 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
             ['Choose a payment method below.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China'],
             ['Pilih metode pembayaran di bawah.', '🇸🇬 Singapura'],
         );
+    }
+
+    public function test_router_error_and_empty_order_copy_follow_customer_voice(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41091, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 41092, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 41093, 'locale' => 'id']);
+
+        $this->postTelegramWebhook($this->messageUpdate(41091, '/status', ['id' => 41091], 41091))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41092, '/order', ['id' => 41092], 41092))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41093, '/tidak-dikenal', ['id' => 41093], 41093))->assertOk();
+
+        $emptyOrderCopy = $this->visibleCopy($this->customerPayload('/sendMessage', 41091));
+        $this->assertStringContainsString("📦 Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja.", $emptyOrderCopy);
+        $this->assertStringNotContainsString('🛍️', $emptyOrderCopy);
+
+        $missingInvoiceCopy = $this->visibleCopy($this->customerPayload('/sendMessage', 41092));
+        $this->assertStringContainsString('Ketik nomor invoice setelah command.', $missingInvoiceCopy);
+        $this->assertStringNotContainsString('command ya', $missingInvoiceCopy);
+
+        $unknownCopy = $this->visibleCopy($this->customerPayload('/sendMessage', 41093));
+        $this->assertStringContainsString('Aku belum paham perintah itu.', $unknownCopy);
+        $this->assertStringNotContainsString('😅', $unknownCopy);
     }
 
     /**

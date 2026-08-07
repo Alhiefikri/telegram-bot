@@ -84,7 +84,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(204, '/order'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Ketik nomor invoice')
+            && str_contains($r['text'], 'Ketik nomor invoice setelah command.')
+            && ! str_contains($r['text'], 'command ya')
             && str_contains($r['text'], 'INV-'));
     }
 
@@ -492,6 +493,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $message = $this->sentMessageContaining($order->invoice_number);
         $this->assertStringContainsString($copy['cancelSuccessMessage'], $message);
         $this->assertStringNotContainsString($copy['otherCancelSuccessMessage'], $message);
+        $this->assertStringNotContainsString('━━━━━━━━━━━━━━', $message);
     }
 
     #[DataProvider('customerLocaleCases')]

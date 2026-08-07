@@ -26,12 +26,12 @@ class TelegramMenuIntents
         $firstName = trim((string) $customer->first_name) ?: $this->locale->text($customer, 'Kak', 'there');
         [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
         $caption = implode("\n", $this->locale->code($customer) === 'en' ? [
-            $greetingIcon.' '.$greetingText.', '.$firstName.' — Welcome to LHIE STORE 👋',
+            $greetingIcon.' '.$greetingText.', '.$firstName.' — Welcome to LHIE STORE',
             '━━━━━━━━━━━━━━',
             'A simple, fast way to shop for digital products directly from Telegram.',
             '', '🛍️ Browse products', '💳 Pay by QRIS / transfer', '📦 Check your orders anytime', '⚡ Accounts are delivered automatically after payment is confirmed', '', 'Where would you like to start?',
         ] : [
-            $greetingIcon.' '.$greetingText.', '.$firstName.' — selamat datang di LHIE STORE 👋',
+            $greetingIcon.' '.$greetingText.', '.$firstName.' — selamat datang di LHIE STORE',
             '━━━━━━━━━━━━━━',
             'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
             '',
@@ -66,7 +66,7 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set 🚀", "☰ Main menu\nWhat would you like to do?"), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
+        $this->bot->sendMessage($chatId, $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set.", "☰ Main menu\nWhat would you like to do?"), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
 
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array

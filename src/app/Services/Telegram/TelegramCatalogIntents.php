@@ -140,7 +140,7 @@ class TelegramCatalogIntents
         } else {
             $category = Category::whereKey((int) $categoryId)->where('is_active', true)->first();
             if (! $category) {
-                $this->bot->sendMessage($chatId, $this->locale->text($customer, '😕 Kategori ini sudah tidak tersedia. Coba pilih kategori lain.', '😕 This category is no longer available. Please choose another category.'), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'), 'callback_data' => 'back:categories']]]]);
+                $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Kategori ini sudah tidak tersedia. Coba pilih kategori lain.', 'This category is no longer available. Please choose another category.'), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'), 'callback_data' => 'back:categories']]]]);
 
                 return;
             }
@@ -162,7 +162,7 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Pilih Kategori', '⬅️ Choose Category'), 'callback_data' => 'back:categories']];
         }
 
-        $this->bot->sendMessage($chatId, $products->isEmpty() ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\n━━━━━━━━━━━━━━\nCoba cek kategori lain dulu ya.", "📂 No products in this category\n━━━━━━━━━━━━━━\nPlease check another category.") : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $this->bot->sendMessage($chatId, $products->isEmpty() ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\nCoba cek kategori lain dulu ya.", "📂 No products in this category\nPlease check another category.") : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
     public function sendSearchResults(Customer $customer, string $chatId, string $keyword): void

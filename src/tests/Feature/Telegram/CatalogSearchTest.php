@@ -89,6 +89,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertIsInt($welcomeMessageIndex);
         $welcomeText = (string) ($recorded->get($welcomeMessageIndex)[0]['text'] ?? '');
         $this->assertStringContainsString('Selamat pagi, Kak — selamat datang di LHIE STORE', $welcomeText);
+        $this->assertStringNotContainsString('👋', $welcomeText);
         $this->assertStringNotContainsString('welcome', strtolower($welcomeText));
         $this->assertStringNotContainsString('there', strtolower($welcomeText));
         $this->assertStringNotContainsString('BANNER PLACEHOLDER', $welcomeText);
@@ -193,6 +194,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Menu utama')
+            && ! str_contains($r['text'], '🚀')
             && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
             && ! str_contains(json_encode($r->data()), '☰ Menu')
             && ! str_contains(json_encode($r->data()), 'Akun Saya'));
@@ -281,6 +283,23 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Lihat Produk')
             && str_contains(json_encode($r->data()), 'category:'.$category->id)
             && str_contains(json_encode($r->data()), 'category:uncategorized'));
+    }
+
+    public function test_unavailable_and_empty_category_messages_follow_customer_error_voice(): void
+    {
+        $this->fakeTelegramHttp();
+        $unavailable = Category::factory()->create(['name' => 'Unavailable']);
+        $empty = Category::factory()->create(['name' => 'Empty']);
+        $unavailable->delete();
+
+        $this->postTelegramWebhook($this->callbackUpdate(123, 'unavailable-category', 'category:'.$unavailable->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(124, 'empty-category', 'category:'.$empty->id))->assertOk();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && $r['text'] === 'Kategori ini sudah tidak tersedia. Coba pilih kategori lain.');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Belum ada produk di kategori ini')
+            && ! str_contains($r['text'], '━━━━━━━━━━━━━━'));
     }
 
     public function test_search_product_button_shows_usdt_and_respects_telegram_label_limit(): void
@@ -518,6 +537,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Produk baru sudah masuk', (string) $createdId['text']);
         $this->assertStringContainsString('💰 Harga: Rp30.000', (string) $createdId['text']);
         $this->assertStringContainsString('📦 Stok: 2', (string) $createdId['text']);
+        $this->assertStringNotContainsString('👀', (string) $createdId['text']);
         $this->assertStringContainsString('📝 Deskripsi', (string) $createdId['text']);
         $this->assertStringContainsString('Butuh bantuan? Balas /support ya.', (string) $createdId['text']);
         $this->assertSame('👀 Lihat Produk', $createdId['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
@@ -528,13 +548,17 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertStringContainsString('📝 Description', (string) $createdEn['text']);
         $this->assertStringContainsString('Need help? Reply with /support.', (string) $createdEn['text']);
         $this->assertSame('👀 View Product', $createdEn['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
-
+        $this->assertStringNotContainsString('👀', (string) $createdEn['text']);
+        $this->assertStringContainsString('A new product just arrived', (string) $createdEn['text']);
         $this->assertStringContainsString('✅ Stok Tersedia', (string) $restockedId['text']);
-        $this->assertStringContainsString('Stok tersedia lagi 🔥', (string) $restockedId['text']);
+        $this->assertStringContainsString('Stok tersedia lagi', (string) $restockedId['text']);
         $this->assertStringNotContainsString('ready', strtolower((string) $restockedId['text']));
         $this->assertStringContainsString('💰 Harga: Rp45.000', (string) $restockedId['text']);
         $this->assertStringContainsString('📦 Stok: 1', (string) $restockedId['text']);
         $this->assertStringContainsString('📝 Deskripsi', (string) $restockedId['text']);
+        $this->assertStringNotContainsString('🔥', (string) $restockedEn['text']);
+        $this->assertStringContainsString('Back in stock', (string) $restockedEn['text']);
+        $this->assertStringNotContainsString('🔥', (string) $restockedId['text']);
         $this->assertStringContainsString('Butuh bantuan? Balas /support ya.', (string) $restockedId['text']);
         $this->assertSame('👀 Lihat Produk', $restockedId['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
 
@@ -576,8 +600,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'ChatGPT Plus 1 Bulan Fresh Bill')
-            && str_contains($r['text'], '✅ Stok Tersedia')
-            && str_contains($r['text'], 'Stok tersedia lagi 🔥')
+            && str_contains($r['text'], 'Stok tersedia lagi')
+            && ! str_contains($r['text'], '🔥')
             && ! str_contains(strtolower($r['text']), 'ready')
             && str_contains($r['text'], '💰 Harga: Rp25.000')
             && str_contains($r['text'], '📦 Stok: 1')

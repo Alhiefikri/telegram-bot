@@ -30,7 +30,7 @@ class TelegramProductNotificationService
 
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", $customer->locale === 'en' ? [
-                'A new product just arrived 👀',
+                'A new product just arrived',
                 '📦 '.$product->name,
                 '💰 Price: Rp'.number_format($product->price_amount, 0, ',', '.'),
                 '📦 Stock: '.$availableStock,
@@ -38,7 +38,7 @@ class TelegramProductNotificationService
                 '📝 Description',
                 $this->descriptionText($product, true),
             ] : [
-                'Produk baru sudah masuk nih 👀',
+                'Produk baru sudah masuk nih',
                 '📦 '.$product->name,
                 '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
                 '📦 Stok: '.$availableStock,
@@ -87,7 +87,7 @@ class TelegramProductNotificationService
 
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", $customer->locale === 'en' ? [
-                'Back in stock 🔥',
+                'Back in stock',
                 '📦 '.$product->name,
                 '💰 Price: Rp'.number_format($product->price_amount, 0, ',', '.'),
                 '📦 Stock: '.$availableStock,
@@ -95,7 +95,7 @@ class TelegramProductNotificationService
                 '📝 Description',
                 $this->descriptionText($product, true),
             ] : [
-                'Stok tersedia lagi 🔥',
+                'Stok tersedia lagi',
                 '📦 '.$product->name,
                 '💰 Harga: Rp'.number_format($product->price_amount, 0, ',', '.'),
                 '📦 Stok: '.$availableStock,

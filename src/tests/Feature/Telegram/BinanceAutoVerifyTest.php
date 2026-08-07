@@ -19,6 +19,7 @@ use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceUsdtAmount;
 use App\Services\Binance\BinanceVerificationOutcome;
+use App\Services\Binance\BinanceVerificationResult;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
@@ -157,7 +158,7 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $body);
         $this->assertStringContainsString('caption_entities', $body);
         $this->assertStringContainsString('"type":"code"', $body);
-        $this->assertStringContainsString('⚠️ IMPORTANT: Send exactly', $body);
+        $this->assertStringContainsString('⚠️ Important: Send exactly', $body);
         $this->assertStringContainsString('including every decimal digit', $body);
         $this->assertStringContainsString('Do not round or change the amount.', $body);
         $this->assertStringContainsString('Order Details', $body);
@@ -402,6 +403,27 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
 
         $this->assertSame(BinanceVerificationOutcome::NotConfigured, $result->outcome);
         $this->assertSame('not_configured', $payment->fresh()->binance_verification_status);
+    }
+
+    public function test_customer_binance_fallbacks_hide_internal_escalation_details(): void
+    {
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder();
+        $this->fakeTelegramHttp();
+        $intents = app(TelegramBinanceVerifyIntents::class);
+
+        $intents->respondToResult($order->customer, '12345', $order, $payment, BinanceVerificationResult::of(BinanceVerificationOutcome::NotConfigured), false);
+        $intents->respondToResult($order->customer, '12345', $order, $payment, BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError, retryable: false), false);
+        $intents->respondToResult($order->customer, '12345', $order, $payment, BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch), false);
+
+        $customerMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(3, $customerMessages);
+        foreach ($customerMessages as [$request]) {
+            $text = (string) ($request['text'] ?? '');
+            $this->assertStringNotContainsString('Admin sudah diberi tahu', $text);
+            $this->assertStringNotContainsString('admin has been notified', strtolower($text));
+        }
     }
 
     public function test_uid_receiver_is_checked_against_binance_pay_uid_not_pay_id(): void

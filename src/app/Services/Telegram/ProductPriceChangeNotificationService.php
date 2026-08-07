@@ -343,15 +343,15 @@ class ProductPriceChangeNotificationService
     {
         $decrease = $this->isPureDecrease($event);
         $title = $english
-            ? ($decrease ? '🎉 Price Drop!' : '📢 Price Update')
-            : ($decrease ? '🎉 Harganya Turun!' : '📢 Update Harga');
+            ? ($decrease ? '🏷️ Price Drop' : '📢 Price Update')
+            : ($decrease ? '🏷️ Harga Turun' : '📢 Update Harga');
 
         $lines = [
             $title,
             '━━━━━━━━━━━━━━',
             $english
-                ? ($decrease ? 'Good news for you 👀' : 'A product price has been updated.')
-                : ($decrease ? 'Kabar bagus buat kamu 👀' : 'Ada update harga produk.'),
+                ? ($decrease ? 'Good news for you.' : 'A product price has been updated.')
+                : ($decrease ? 'Kabar bagus buat kamu.' : 'Ada update harga produk.'),
             '📦 '.$event->product_name,
             '',
             '💵 QRIS',
@@ -438,7 +438,7 @@ class ProductPriceChangeNotificationService
             return null;
         }
 
-        return ($english ? 'You save ' : 'Lebih hemat ').implode(' + ', $savings).' ✨';
+        return ($english ? 'You save ' : 'Lebih hemat ').implode(' + ', $savings).'.';
     }
 
     private function replyMarkup(ProductPriceChangeEvent $event, bool $english): array

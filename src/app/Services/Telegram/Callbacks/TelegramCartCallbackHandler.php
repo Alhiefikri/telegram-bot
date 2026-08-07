@@ -61,13 +61,13 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product || $availableStock < 1) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang.', 'This product cannot be purchased right now.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
 
                 return true;
             }
             if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini.', 'Binance Pay is not available for this product.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini. Pilih QRIS untuk melanjutkan.', 'Binance Pay is not available for this product. Choose QRIS to continue.'));
 
                 return true;
             }
@@ -84,7 +84,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product || $availableStock < 1) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang.', 'This product cannot be purchased right now.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
 
                 return true;
             }

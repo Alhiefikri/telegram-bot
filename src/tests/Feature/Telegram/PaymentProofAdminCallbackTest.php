@@ -668,6 +668,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Rotate the password and MFA after signing in.', $receiptText);
         $this->assertStringContainsString('Netflix setup guide', $receiptText);
         $this->assertStringContainsString(url('/netflix/setup'), $receiptText);
+        $this->assertStringContainsString('Thank you for shopping at LHIE STORE.', $receiptText);
+        $this->assertStringNotContainsString('🌙', $receiptText);
         $this->assertStringNotContainsString('Need help signing in and securing the account?', $receiptText);
         $this->assertStringNotContainsString('/gpt/panduan-login-akun', $receiptText);
         $this->assertSame('Netflix setup guide', $receiptRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);

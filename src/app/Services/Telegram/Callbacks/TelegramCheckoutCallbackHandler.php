@@ -89,13 +89,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 $product = Product::publicVisible()->whereKey($productId)->first();
                 if (! $product || $product->availableStock() < $quantity) {
                     $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk atau jumlah ini sudah tidak tersedia.', 'This product or quantity is no longer available.'));
+                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk atau jumlah ini sudah tidak tersedia. Coba pilih produk lain.', 'This product or quantity is no longer available. Please choose another product.'));
 
                     return;
                 }
                 if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
                     $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini.', 'Binance Pay is not available for this product.'));
+                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini. Pilih QRIS untuk melanjutkan.', 'Binance Pay is not available for this product. Choose QRIS to continue.'));
 
                     return;
                 }

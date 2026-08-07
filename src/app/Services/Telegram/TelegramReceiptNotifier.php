@@ -90,13 +90,13 @@ class TelegramReceiptNotifier
                 }
                 $lines[] = '';
                 $lines[] = $this->locale->text($claimed->customer, 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.', 'If you have a login problem, contact /support and include this invoice.');
-                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE 🌙', 'Thank you for shopping at LHIE STORE 🌙');
+                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE.', 'Thank you for shopping at LHIE STORE.');
             } else {
                 $lines[] = '';
                 $lines[] = $this->locale->text($claimed->customer, 'Pesanan kamu sudah tercatat. Simpan pesan ini sebagai bukti pembelian.', 'Your order has been recorded. Save this message as proof of purchase.');
                 $lines[] = '';
                 $lines[] = $this->locale->text($claimed->customer, 'Kalau butuh bantuan, hubungi /support dan sertakan invoice ini.', 'If you need help, contact /support and include this invoice.');
-                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE 🌙', 'Thank you for shopping at LHIE STORE 🌙');
+                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE.', 'Thank you for shopping at LHIE STORE.');
             }
 
             try {

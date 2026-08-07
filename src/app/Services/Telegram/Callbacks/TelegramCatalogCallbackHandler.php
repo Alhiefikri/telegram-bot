@@ -66,7 +66,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Produk ini belum bisa dibeli sekarang.', 'This product cannot be purchased right now.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
 
                 return true;
             }

@@ -106,11 +106,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($r->data()), 'qty:'.$product->id.':6'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], '🛒 Masuk keranjang')
+            && ! str_contains($r['text'], '━━━━━━━━━━━━━━')
             && str_contains($r['text'], 'Kopi')
             && str_contains($r['text'], 'Jumlah: 2')
             && str_contains($r['text'], 'Subtotal: Rp50.000')
-            && str_contains(json_encode($r->data()), 'Sudah cocok? Lanjutkan checkout di bawah.')
-            && str_contains(json_encode($r->data()), 'checkout')
             && str_contains(json_encode($r->data()), 'Lanjut Checkout')
             && ! str_contains(json_encode($r->data()), 'payment:'));
     }
@@ -484,17 +483,23 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(17, 'stock-product', 'product:'.$outOfStock->id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(18, 'stock-buy', 'buy:'.$outOfStock->id))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(19, '1'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(20, 'inactive-direct-checkout', 'qty:qris:'.$inactive->id.':1'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(21, 'binance-unavailable', 'qty:binance:'.$available->id.':1'))->assertOk();
 
         $this->assertSame(0, CartItem::count());
         $unavailableAnswers = 0;
         Http::assertSent(function ($r) use (&$unavailableAnswers) {
-            if (str_ends_with($r->url(), '/answerCallbackQuery') && ($r['text'] ?? '') === 'Produk ini belum bisa dibeli sekarang.') {
+            if (str_ends_with($r->url(), '/answerCallbackQuery') && ($r['text'] ?? '') === 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.') {
                 $unavailableAnswers++;
             }
 
             return true;
         });
         $this->assertSame(3, $unavailableAnswers);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && ($r['text'] ?? '') === 'Produk atau jumlah ini sudah tidak tersedia. Coba pilih produk lain.');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/answerCallbackQuery')
+            && ($r['text'] ?? '') === 'Binance Pay sedang tidak tersedia untuk produk ini. Pilih QRIS untuk melanjutkan.');
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Kosong')
             && str_contains($r['text'], '❌ Status: Stok kosong')
