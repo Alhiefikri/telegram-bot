@@ -67,7 +67,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
             $messageId = null;
 
             try {
-                $payment = $order->payments->firstWhere('method', 'BINANCE_PAY_ID');
+                $payment = $order->payments->first(fn ($payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID');
                 if ($payment === null) {
                     throw new \RuntimeException('Binance payment is missing for order '.$order->id.'.');
                 }
@@ -102,7 +102,7 @@ class SendBinanceCheckoutInstructions implements ShouldBeUnique, ShouldQueue
 
             $terminalOrder = $order->fresh(['payments']);
             if (in_array($terminalOrder->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)
-                && $terminalOrder->payments->contains(fn ($payment): bool => $payment->method === 'BINANCE_PAY_ID')) {
+                && $terminalOrder->payments->contains(fn ($payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID')) {
                 DeleteBuyerBinanceCheckoutInstruction::dispatch($terminalOrder->id, now()->toISOString())
                     ->onQueue('notifications');
             }

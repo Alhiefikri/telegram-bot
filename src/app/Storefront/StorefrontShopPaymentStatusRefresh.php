@@ -197,12 +197,17 @@ class StorefrontShopPaymentStatusRefresh
 
     private function shouldRefreshFromProvider(OrderLifecycleProjection $projection, Payment $payment): bool
     {
-        return $this->hasPayableNativeQris($payment) && $projection->isPendingPayment;
+        if (! $projection->isPendingPayment) {
+            return false;
+        }
+
+        return ($this->isPakasirPayment($payment) && $payment->method === 'hosted')
+            || $this->hasPayableNativeQris($payment);
     }
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
     {
-        return $this->isAutomaticQrisPayment($payment)
+        return $this->hasNativeQrisRail($payment)
             && $projection->isPendingPayment
             && ! $this->hasPayableNativeQris($payment);
     }
@@ -220,6 +225,12 @@ class StorefrontShopPaymentStatusRefresh
     private function isKlikQrisPayment(?Payment $payment): bool
     {
         return strtolower((string) $payment?->provider) === 'klikqris';
+    }
+
+    private function hasNativeQrisRail(?Payment $payment): bool
+    {
+        return $this->isKlikQrisPayment($payment)
+            || ($this->isPakasirPayment($payment) && $payment?->method === 'api_qris');
     }
 
     private function isBinancePayment(?Payment $payment): bool
@@ -254,7 +265,9 @@ class StorefrontShopPaymentStatusRefresh
             return;
         }
 
-        $this->nativeQris->ensureCreated($payment);
+        if ($this->isPakasirPayment($payment) && $payment->method === 'api_qris') {
+            $this->nativeQris->ensureCreated($payment);
+        }
     }
 
     private function processProviderReconciliation(Payment $payment): void

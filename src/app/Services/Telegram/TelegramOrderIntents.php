@@ -149,7 +149,8 @@ class TelegramOrderIntents
     {
         return match (strtolower(trim((string) $payment?->provider))) {
             'klikqris' => $this->refreshEligibleKlikQrisPayment($customer, $order, $payment),
-            default => $this->refreshPendingPakasirPayment($customer, $order, $payment),
+            'pakasir' => $this->refreshPendingPakasirPayment($customer, $order, $payment),
+            default => null,
         };
     }
 

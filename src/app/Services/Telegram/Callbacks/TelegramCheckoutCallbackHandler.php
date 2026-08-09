@@ -12,6 +12,7 @@ use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
@@ -186,17 +187,27 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        if ($requestedPaymentMode === 'pakasir' && $paymentMode === 'manual') {
+        $payment = $order->payments()->latest('created_at')->firstOrFail();
+        if ($requestedPaymentMode === 'pakasir'
+            && $payment->provider === 'manual'
+            && $payment->method === 'QR_MANUAL') {
             $this->bot->sendMessage($context->chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage($context->customer));
         }
 
-        match ($paymentIntent->postCreationBehavior()) {
-            CheckoutPostCreationBehavior::BinancePayInstructions => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
-            CheckoutPostCreationBehavior::KlikQrisInstructions => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
-            CheckoutPostCreationBehavior::PakasirInstructions => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
-            CheckoutPostCreationBehavior::ManualQrisInstructions => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit(),
-        };
+        $this->dispatchCheckoutInstructions($order, $payment);
         SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+    }
+
+    private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
+    {
+        $job = match (true) {
+            $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === 'klikqris' => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === 'pakasir' => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            default => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString()),
+        };
+
+        $job->onQueue('telegram-outbound')->afterCommit();
     }
 
     private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void

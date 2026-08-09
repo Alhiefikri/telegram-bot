@@ -175,6 +175,26 @@ class StorefrontShopSignedInvoice
             ];
         }
 
+        if ($payment?->provider === 'manual' && $payment->method === 'QR_MANUAL') {
+            return [
+                'is_payable' => false,
+                'state' => 'manual',
+                'title' => 'Pembayaran manual',
+                'message' => 'Scan QR manual dan bayar tepat sesuai total produk. Setelah membayar, hubungi admin dengan nomor invoice ini.',
+                'retry_label' => 'Cek status pembayaran',
+            ];
+        }
+
+        if ($payment?->provider === 'pakasir' && $payment->method === 'hosted') {
+            return [
+                'is_payable' => false,
+                'state' => 'hosted',
+                'title' => 'Bayar via Pakasir',
+                'message' => 'Buka halaman pembayaran Pakasir dan selesaikan pembayaran sebelum batas waktu invoice.',
+                'retry_label' => 'Cek status pembayaran',
+            ];
+        }
+
         if ($this->hasPayableNativeQris($payment)) {
             return [
                 'is_payable' => true,

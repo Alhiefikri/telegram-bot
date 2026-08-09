@@ -6,6 +6,8 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\Checkout\PaymentProviderSelection;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -27,6 +29,7 @@ class TelegramCheckoutIntents
         private TelegramLocale $locale,
         private KlikQrisNativeQrisService $klikQris,
         private KlikQrisQrisImage $klikQrisImages,
+        private PaymentProviderResolver $providerResolver,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -51,7 +54,7 @@ class TelegramCheckoutIntents
     {
         $order->loadMissing('customer');
         $locale = $this->locale->code($order->customer);
-        if ($this->pakasirCheckoutFlow() === 'api_qris') {
+        if ($payment->method === PakasirCheckoutFlow::API_QRIS) {
             try {
                 $transaction = $this->nativeQris->ensureCreated($payment);
             } catch (Throwable $e) {
@@ -216,19 +219,18 @@ class TelegramCheckoutIntents
     /** @return array{requested: string, effective: string, pakasir_checkout_flow: string} */
     public function providerSelection(): array
     {
-        $settings = ManualPaymentSetting::current();
-        $requested = $settings?->paymentProvider() ?? 'manual';
-        $requestedFlow = (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
-        $checkoutFlow = $this->pakasirReadiness->checkout($requestedFlow)->checkoutFlow();
-        $effective = $requested === 'pakasir'
-            ? $this->pakasirReadiness->effectivePaymentMode($requested, $requestedFlow)
-            : $requested;
+        $selection = $this->configuredProviderSelection();
 
         return [
-            'requested' => $requested,
-            'effective' => $effective,
-            'pakasir_checkout_flow' => $checkoutFlow,
+            'requested' => $selection->requestedProvider,
+            'effective' => $selection->provider,
+            'pakasir_checkout_flow' => $selection->pakasirCheckoutFlow,
         ];
+    }
+
+    public function configuredProviderSelection(bool $binance = false): PaymentProviderSelection
+    {
+        return $this->providerResolver->resolve($binance ? 'binance_pay' : null);
     }
 
     public function paymentMode(): string

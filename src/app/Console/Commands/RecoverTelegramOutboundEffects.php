@@ -10,6 +10,7 @@ use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
@@ -63,10 +64,13 @@ class RecoverTelegramOutboundEffects extends Command
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    if ($order->payments()->where('provider', 'klikqris')->exists()) {
-                        $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } elseif ($order->payments()->where('method', 'BINANCE_PAY_ID')->exists()) {
+                    $payment = $order->payments()->latest('created_at')->first();
+                    if ($payment?->provider === 'manual' && $payment?->method === 'BINANCE_PAY_ID') {
                         $job = SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } elseif ($payment?->provider === 'klikqris') {
+                        $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } elseif ($payment?->provider === 'pakasir') {
+                        $job = SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString());
                     } else {
                         $job = SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
                     }
@@ -79,7 +83,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->where(function ($query): void {
                 $query->whereNotNull('telegram_receipt_sent_at')
                     ->orWhere('order_status', 'cancelled')
-                    ->orWhereHas('payments', fn ($payments) => $payments->where('method', 'BINANCE_PAY_ID'));
+                    ->orWhereHas('payments', fn ($payments) => $payments->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID'));
             })
             ->whereIn('order_status', ['completed', 'cancelled'])
             ->where(function ($query) use ($cutoff): void {
@@ -103,7 +107,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()
+                    $job = $order->payments()->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID')->exists()
                         ? DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
                         : DeleteBuyerCheckoutMessages::dispatch($order->id, now()->toISOString());
                     $job

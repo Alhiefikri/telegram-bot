@@ -137,7 +137,9 @@ class TelegramBuyerCheckoutInstructionCleaner
                 || $this->hasActiveDeletionClaim($target->{$startedColumn})
                 || ($prefix === 'manual_checkout_customer_notification' && ! Payment::query()
                     ->where('order_id', $target->id)
-                    ->where(fn ($query) => $query->where('method', 'BINANCE_PAY_ID')->orWhere('provider', 'klikqris'))
+                    ->where(fn ($query) => $query
+                        ->where(fn ($binance) => $binance->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID'))
+                        ->orWhere('provider', 'klikqris'))
                     ->exists())) {
                 return null;
             }

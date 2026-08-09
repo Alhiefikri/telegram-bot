@@ -164,6 +164,34 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $selection->paymentIntent->provider());
     }
 
+    public function test_checkout_rechecks_a_provider_selection_when_the_switch_changes_before_creation(): void
+    {
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'payment_provider_version' => 0,
+            'is_active' => true,
+        ]);
+        $selection = app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $setting->forceFill([
+            'payment_mode' => 'klikqris',
+            'payment_provider_version' => 1,
+        ])->save();
+
+        $customer = Customer::factory()->create();
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, $selection->paymentIntent);
+        $payment = $order->payments()->sole();
+
+        $this->assertSame('klikqris', $payment->provider);
+        $this->assertSame('QRIS', $payment->method);
+        $this->assertSame(1, $order->payments()->count());
+    }
+
     public function test_stale_provider_switch_version_does_not_overwrite_a_newer_switch_or_create_a_second_audit(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);

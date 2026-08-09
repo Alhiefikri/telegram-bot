@@ -1009,37 +1009,49 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_checkout_rejects_before_local_rows_when_pakasir_native_qris_is_not_available(): void
+    public function test_checkout_routes_manual_and_hosted_provider_selections_without_native_qris_creation(): void
     {
         $message = 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.';
-        $cases = [
-            'missing pakasir credentials' => function (): void {
-                $this->pakasirNativeQrisHasMissingCredentials();
-            },
-            'admin payment mode is manual' => function (): void {
-                $this->manualPaymentModeIsActive();
-            },
-            'admin pakasir flow is hosted' => function (): void {
-                $this->pakasirHostedCheckoutIsActive();
-            },
-        ];
 
-        foreach ($cases as $case => $configure) {
-            $this->pakasirPaymentSettingsStartEmpty();
-            $configure();
-            $product = $this->availableProduct(['stock' => 3]);
-            Http::fake();
+        $this->pakasirNativeQrisHasMissingCredentials();
+        $unreadyProduct = $this->availableProduct(['stock' => 3]);
+        Http::fake();
+        $this->postStorefrontShopCheckout($unreadyProduct, 1, 'Web Buyer')
+            ->assertRedirect(route('storefront.products.show', ['product' => $unreadyProduct, 'checkout' => 1]))
+            ->assertInvalid(['product_id' => $message]);
+        $this->assertNoLocalCheckoutRowsCreated('missing pakasir credentials');
+        Http::assertNothingSent();
 
-            $response = $this->postStorefrontShopCheckout($product, 1, 'Web Buyer');
+        $this->pakasirPaymentSettingsStartEmpty();
+        $this->manualPaymentModeIsActive();
+        $manualProduct = $this->availableProduct(['stock' => 3]);
+        Http::fake();
+        $manualResponse = $this->postStorefrontShopCheckout($manualProduct, 1, 'Manual Web Buyer');
+        $manualResponse->assertRedirect();
+        $manualPayment = Order::latest('id')->firstOrFail()->payments()->sole();
+        $this->assertSame('manual', $manualPayment->provider);
+        $this->assertSame('QR_MANUAL', $manualPayment->method);
+        $this->get($manualResponse->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('QR manual invoice')
+            ->assertSee('/qr-lhie.jpg', false)
+            ->assertDontSee('data-shop-payment-status', false);
+        Http::assertNothingSent();
 
-            $response
-                ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
-                ->assertInvalid(['product_id' => $message]);
-            $this->assertNoLocalCheckoutRowsCreated($case);
-            $this->assertSame(3, $product->fresh()->stock, $case);
-            $this->assertSame(0, $product->fresh()->reserved_stock, $case);
-            Http::assertNothingSent();
-        }
+        $this->pakasirPaymentSettingsStartEmpty();
+        $this->pakasirHostedCheckoutIsActive();
+        $hostedProduct = $this->availableProduct(['stock' => 3]);
+        Http::fake();
+        $hostedResponse = $this->postStorefrontShopCheckout($hostedProduct, 1, 'Hosted Web Buyer');
+        $hostedResponse->assertRedirect();
+        $hostedPayment = Order::latest('id')->firstOrFail()->payments()->sole();
+        $this->assertSame('pakasir', $hostedPayment->provider);
+        $this->assertSame(PakasirCheckoutFlow::HOSTED, $hostedPayment->method);
+        $this->get($hostedResponse->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Bayar via Website Pakasir')
+            ->assertSee('data-shop-payment-status', false);
+        Http::assertNothingSent();
     }
 
     public function test_failed_native_qris_create_keeps_pending_reservation_for_safe_recovery(): void

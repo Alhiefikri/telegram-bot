@@ -15,7 +15,8 @@ use App\Services\Binance\BinancePayClient;
 use App\Services\Binance\BinanceUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
-use Carbon\CarbonInterface;
+use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -27,17 +28,17 @@ class OrderCheckoutService
         private readonly ProductCredentialAllocator $credentials,
         private readonly BinancePayClient $binance,
         private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
+        private readonly PaymentProviderResolver $providerResolver,
     ) {}
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
     {
         $paymentIntent ??= CheckoutPaymentIntents::manualQris();
-        $expiresAt = $paymentIntent->expiresAt();
 
         $order = null;
         for ($i = 0; $i < 5; $i++) {
             try {
-                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentIntent, $expiresAt, $checkoutKey), 5);
+                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey), 5);
 
                 return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {
@@ -50,7 +51,7 @@ class OrderCheckoutService
         throw new InvalidCheckout('Unable to create unique checkout references.');
     }
 
-    private function checkoutOnce(Cart $cart, CheckoutPaymentIntent $paymentIntent, CarbonInterface $expiresAt, ?string $checkoutKey): Order
+    private function checkoutOnce(Cart $cart, CheckoutPaymentIntent $paymentIntent, ?string $checkoutKey): Order
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             return $existing;
@@ -81,11 +82,26 @@ class OrderCheckoutService
 
         // Provider switch mutations and checkout creation share this lock so a
         // selected intent is persisted atomically with its order and payment.
-        ManualPaymentSetting::query()
+        $lockedSetting = ManualPaymentSetting::query()
             ->where('is_active', true)
             ->oldest('id')
             ->lockForUpdate()
             ->first();
+
+        if ($lockedSetting === null) {
+            $lockedSetting = ManualPaymentSetting::query()
+                ->oldest('id')
+                ->lockForUpdate()
+                ->first();
+        }
+
+        $activeSetting = $lockedSetting?->is_active ? $lockedSetting : null;
+        if ($paymentIntent instanceof ProviderBoundCheckoutPaymentIntent
+            && ! $this->providerResolver->matchesCurrentSetting($paymentIntent, $activeSetting)) {
+            $paymentIntent = $this->providerResolver->resolve(setting: $activeSetting)->paymentIntent;
+        }
+
+        $expiresAt = $paymentIntent->expiresAt();
         $paymentIntent->assertReady($lockedCart, $items, $products);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);

@@ -57,7 +57,9 @@ class StorefrontShopOrderPresenter
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
             'qrisImageSource' => $invoice->qrisImageSource,
             'payableAmountDisplay' => $invoice->payableAmountDisplay,
-            'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
+            'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
+            'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
+            'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),
             'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)
