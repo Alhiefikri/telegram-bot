@@ -1,5 +1,7 @@
 # Issue #196 — KlikQRIS integration merge result
 
+Fixes #196.
+
 This branch is an integration of the current `main` architecture. The legacy
 `feature/klikqris-sandbox` branch was not merged. Production credentials,
 production traffic, and provider cutover are outside this change.
