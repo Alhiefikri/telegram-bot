@@ -2,56 +2,40 @@
 
 namespace Tests\Unit\Services\KlikQris;
 
+use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\KlikQris\KlikQrisQrisImage;
-use App\Services\KlikQris\KlikQrisTransaction;
 use GuzzleHttp\Psr7\Response as Psr7Response;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use Mockery;
+use RuntimeException;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
 class KlikQrisQrisImageTest extends TestCase
 {
+    use RefreshDatabase;
+
     private const PNG_BYTES = "\x89PNG\r\n\x1A\n".'downloaded-qris-png';
 
-    private const JPEG_BYTES = "\xFF\xD8\xFF\xE0".'downloaded-qris-jpeg';
-
-    public function test_downloads_allowlisted_https_klikqris_png_before_using_base64_fallback(): void
+    public function test_downloads_allowlisted_https_klikqris_png(): void
     {
         $this->fakeStreamedDownload(self::PNG_BYTES);
-        $transaction = $this->transaction([
-            'qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png',
-            'qris_image' => 'data:image/png;base64,'.base64_encode("\x89PNG\r\n\x1A\n".'fallback-png'),
-        ]);
 
-        $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($transaction));
-    }
-
-    public function test_uses_strict_png_data_uri_fallback_when_download_fails(): void
-    {
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png' => Http::response('server down', 503, ['Content-Type' => 'text/plain']),
-        ]);
-        $fallback = "\x89PNG\r\n\x1A\n".'fallback-png';
-        $transaction = $this->transaction([
-            'qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png',
-            'qris_image' => 'data:image/png;base64,'.base64_encode($fallback),
-        ]);
-
-        $this->assertSame($fallback, app(KlikQrisQrisImage::class)->contents($transaction));
+        $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($this->payable()));
     }
 
     public function test_download_configures_bounded_streaming_sink_headers_progress_and_redirect_controls(): void
     {
         $this->fakeStreamedDownload(self::PNG_BYTES, assertOptions: true);
 
-        $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($this->transaction([])));
+        $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($this->payable()));
     }
 
-    public function test_rejects_oversized_content_length_before_accepting_remote_body_and_uses_base64_fallback(): void
+    public function test_rejects_oversized_content_length_before_accepting_remote_body(): void
     {
         Http::preventStrayRequests();
         Http::fake([
@@ -60,14 +44,11 @@ class KlikQrisQrisImageTest extends TestCase
                 'Content-Length' => '2000001',
             ]),
         ]);
-        $fallback = "\x89PNG\r\n\x1A\n".'fallback-after-content-length';
 
-        $this->assertSame($fallback, app(KlikQrisQrisImage::class)->contents($this->transaction([
-            'qris_image' => 'data:image/png;base64,'.base64_encode($fallback),
-        ])));
+        $this->assertUnavailable(fn () => app(KlikQrisQrisImage::class)->contents($this->payable()));
     }
 
-    public function test_rejects_untrusted_urls_redirects_non_images_and_oversized_bodies_without_leaking_response(): void
+    public function test_rejects_redirects_non_images_and_oversized_bodies_without_leaking_response(): void
     {
         Http::preventStrayRequests();
         Http::fake([
@@ -77,14 +58,12 @@ class KlikQrisQrisImageTest extends TestCase
         ]);
 
         foreach ([
-            ['qris_url' => 'https://evil.test/storage/sandbox/qris_bad.png'],
-            ['qris_url' => 'http://klikqris.com/storage/sandbox/qris_bad.png'],
-            ['qris_url' => 'https://klikqris.com/storage/sandbox/qris_redirect.png'],
-            ['qris_url' => 'https://klikqris.com/storage/sandbox/qris_html.png'],
-            ['qris_url' => 'https://klikqris.com/storage/sandbox/qris_big.png'],
-        ] as $overrides) {
+            'https://klikqris.com/storage/sandbox/qris_redirect.png',
+            'https://klikqris.com/storage/sandbox/qris_html.png',
+            'https://klikqris.com/storage/sandbox/qris_big.png',
+        ] as $url) {
             try {
-                app(KlikQrisQrisImage::class)->contents($this->transaction($overrides));
+                app(KlikQrisQrisImage::class)->contents($this->payable($url));
                 $this->fail('Unsafe KlikQRIS QR image should be rejected.');
             } catch (InvalidArgumentException $exception) {
                 $this->assertSame('KlikQRIS QR image is unavailable.', $exception->getMessage());
@@ -94,36 +73,52 @@ class KlikQrisQrisImageTest extends TestCase
         }
     }
 
-    public function test_rejects_malformed_base64_oversize_base64_and_non_png_data_uri_fallbacks(): void
+    public function test_payable_rejects_untrusted_non_https_or_missing_qris_media(): void
     {
         foreach ([
-            ['qris_url' => null, 'qris_image' => 'not-a-data-uri'],
-            ['qris_url' => null, 'qris_image' => 'data:image/png;base64,@@not-base64@@'],
-            ['qris_url' => null, 'qris_image' => 'data:image/png;base64,'.base64_encode('<svg></svg>')],
-            ['qris_url' => null, 'qris_image' => 'data:image/jpeg;base64,'.base64_encode(self::JPEG_BYTES)],
-            ['qris_url' => null, 'qris_image' => 'data:image/png;base64,'.base64_encode("\x89PNG\r\n\x1A\n".str_repeat('A', 2_100_000))],
-        ] as $overrides) {
+            'untrusted host' => ['https://evil.test/storage/sandbox/qris_bad.png'],
+            'non https' => ['http://klikqris.com/storage/sandbox/qris_bad.png'],
+            'missing qris_url' => [null],
+        ] as $label => $parameters) {
             try {
-                app(KlikQrisQrisImage::class)->contents($this->transaction($overrides));
-                $this->fail('Malformed KlikQRIS QR image should be rejected.');
-            } catch (InvalidArgumentException $exception) {
-                $this->assertSame('KlikQRIS QR image is unavailable.', $exception->getMessage());
+                $this->payable(...$parameters);
+                $this->fail('Untrusted KlikQRIS QR media must never become payable ('.$label.').');
+            } catch (RuntimeException) {
+                $this->addToAssertionCount(1);
             }
         }
     }
 
-    /** @param array<string, mixed> $overrides */
-    private function transaction(array $overrides): KlikQrisTransaction
+    private function payable(?string $qrisUrl = 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png'): KlikQrisPayableNativeQris
     {
-        return KlikQrisTransaction::fromCreatePayload(['data' => array_replace([
-            'order_id' => 'INV-KLIK-IMAGE',
+        $expiresAt = now()->addMinutes(15);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'merchant_ref' => 'INV-KLIK-IMAGE-'.bin2hex(random_bytes(4)),
             'amount' => 1000,
-            'total_amount' => 1016,
-            'status' => 'PENDING',
-            'qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png',
-            'expired_at' => '2026-07-28T10:24:00+00:00',
-            'signature' => 'opaque-test-signature',
-        ], $overrides)]);
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_expires_at' => $expiresAt,
+            'provider_create_state' => 'created',
+        ]);
+        $payment->update([
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment, [
+                'qris_url' => $qrisUrl,
+                'expired_at' => $expiresAt->toAtomString(),
+            ]),
+        ]);
+
+        return KlikQrisPayableNativeQris::fromPayment($payment->fresh());
+    }
+
+    private function assertUnavailable(callable $callback): void
+    {
+        try {
+            $callback();
+            $this->fail('Unsafe KlikQRIS QR image should be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('KlikQRIS QR image is unavailable.', $exception->getMessage());
+        }
     }
 
     private function fakeStreamedDownload(string $contents, bool $assertOptions = false): void

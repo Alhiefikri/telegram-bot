@@ -13,12 +13,12 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
+use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
-use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -96,7 +96,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             'merchant_ref' => 'INV-KLIK-600',
             'amount' => 1000,
             'provider_total_payment' => 1016,
-            'provider_expires_at' => CarbonImmutable::parse('2026-07-28 10:24:00', 'UTC'),
+            'provider_expires_at' => $order->expires_at->copy()->addMinute(),
             'status' => PaymentStatus::Pending,
             'provider_payload' => ['data' => [
                 'order_id' => 'INV-KLIK-600',
@@ -104,24 +104,17 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
                 'total_amount' => '1016.00',
                 'status' => 'PENDING',
                 'qris_url' => 'https://klikqris.com/storage/sandbox/qris_job.png',
-                'expired_at' => '2026-07-28T10:24:00+00:00',
+                'expired_at' => $order->expires_at->copy()->addMinute()->toAtomString(),
             ]],
             'provider_create_state' => 'created',
         ]);
         $native = $this->mock(KlikQrisNativeQrisService::class);
-        $native->shouldReceive('ensureCreated')
+        $native->shouldReceive('lifecycle')
             ->once()
             ->with(Mockery::on(fn (Payment $argument): bool => $argument->is($payment)))
-            ->andReturn(KlikQrisTransaction::fromCreatePayload(['data' => [
-                'order_id' => 'INV-KLIK-600',
-                'amount' => 1000,
-                'total_amount' => 1016,
-                'status' => 'PENDING',
-                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_job.png',
-                'qris_image' => 'data:image/png;base64,'.base64_encode(self::PNG_BYTES),
-                'expired_at' => '2026-07-28T10:24:00+00:00',
-                'signature' => 'secret-signature-token',
-            ]]));
+            ->andReturn(KlikQrisNativeQrisLifecycleResult::payableResult(
+                KlikQrisPayableNativeQris::fromPayment($payment->fresh()),
+            ));
 
         (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
         (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
@@ -137,7 +130,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Do not round or change any digit', $caption);
         $this->assertStringContainsString('INV-KLIK-600', $caption);
         $this->assertStringContainsString('15 minutes', $caption);
-        $this->assertStringContainsString('10:24', $caption);
+        $this->assertStringContainsString('17:24', $caption);
         $this->assertStringNotContainsString('https://', $caption);
         $this->assertStringNotContainsString('Popup Snap', $caption);
         $this->assertStringNotContainsString('secret-signature-token', $caption);
@@ -150,7 +143,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
     }
 
-    public function test_klikqris_job_can_send_initial_base64_only_qris_without_persisting_or_leaking_base64(): void
+    public function test_base64_only_create_is_never_sent_and_job_releases_claim_until_recovery(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
@@ -186,7 +179,12 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             'status' => PaymentStatus::Pending,
         ]);
 
-        (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+        try {
+            (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+            $this->fail('Base64-only provider media must never be exposed to the customer.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.', $exception->getMessage());
+        }
 
         $fresh = $payment->fresh();
         $payloadJson = json_encode($fresh->provider_payload, JSON_THROW_ON_ERROR);
@@ -196,12 +194,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('MERCHANT_SECRET_TELEGRAM', $payloadJson);
 
         $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
-        $this->assertCount(1, $sendPhotos);
-        $body = $sendPhotos->first()[0]->body();
-        $this->assertStringContainsString(base64_decode(substr($base64, strlen('data:image/png;base64,')), true), $body);
-        $this->assertStringNotContainsString($base64, $body);
-        $this->assertStringNotContainsString('TOKEN_SHOULD_NOT_LEAK', $body);
-        $this->assertStringNotContainsString('MERCHANT_SECRET_TELEGRAM', $body);
+        $this->assertCount(0, $sendPhotos);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
     }
 
     public function test_klikqris_job_releases_claim_after_definite_send_failure_and_keeps_provider_transaction(): void

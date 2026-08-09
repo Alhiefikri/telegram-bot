@@ -73,13 +73,20 @@ class ValidateKlikQrisSandbox extends Command
 
         if ((bool) $this->option('create')) {
             try {
-                $first = $nativeQris->ensureCreated($payment);
+                $first = $nativeQris->lifecycle($payment);
                 $payment->refresh();
-                $second = $nativeQris->ensureCreated($payment);
+                $second = $nativeQris->lifecycle($payment);
                 $payment->refresh();
 
-                if ($first->orderId() === $second->orderId() && $first->totalAmount() === $second->totalAmount() && $first->qrisUrl() === $second->qrisUrl()) {
+                $firstPayable = $first->payable();
+                $secondPayable = $second->payable();
+                if ($firstPayable !== null
+                    && $secondPayable !== null
+                    && $firstPayable->qrisUrl() === $secondPayable->qrisUrl()
+                    && $firstPayable->totalAmount() === $secondPayable->totalAmount()) {
                     $this->addCheck($checks, 'pass', 'idempotent KlikQRIS create returned stable transaction');
+                } elseif (! $first->isPayable() && ! $second->isPayable()) {
+                    $this->addCheck($checks, 'fail', 'idempotent KlikQRIS create returned stable transaction', 'Repeated app create did not become payable (outcome='.$second->outcome()->value.').');
                 } else {
                     $this->addCheck($checks, 'fail', 'idempotent KlikQRIS create returned stable transaction', 'Repeated app create returned inconsistent redacted fields.');
                 }

@@ -215,7 +215,7 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_actual_provider_qris_url_with_query_is_rejected_and_not_persisted_as_successful_transaction(): void
+    public function test_actual_provider_qris_url_with_query_is_rejected_and_persisted_only_as_non_payable_state(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['merchant_ref' => 'INV-KLIKQRIS-QUERY-SECRET']);
         $queryQrisUrl = 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png?token=secret-query';
@@ -246,8 +246,13 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         ]);
 
         $payment->refresh();
-        $this->assertNotSame('created', $payment->provider_create_state);
-        $this->assertNull($payment->provider_payload);
+        $this->assertSame('provider_qris_unusable', $payment->provider_create_state);
+        $persistedPayload = json_encode($payment->provider_payload, JSON_THROW_ON_ERROR);
+        $this->assertIsArray($payment->provider_payload);
+        $this->assertStringNotContainsString($queryQrisUrl, $persistedPayload);
+        $this->assertStringNotContainsString('secret-query', $persistedPayload);
+        $this->assertStringNotContainsString('opaque-test-signature', $persistedPayload);
+        $this->assertStringNotContainsString('iVBORw0KGgo', $persistedPayload);
     }
 
     public function test_stored_provider_qris_url_with_fragment_fails_validation_without_leaking_payload_fragments(): void
@@ -295,7 +300,7 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         $createCode = Artisan::call('klikqris:validate-sandbox', ['payment' => $payment->id, '--create' => true]);
         $createOutput = Artisan::output();
         $this->assertSame(1, $createCode, $createOutput);
-        $this->assertStringContainsString(RuntimeException::class, $createOutput);
+        $this->assertStringContainsString('FAIL idempotent KlikQRIS create returned stable transaction - Repeated app create did not become payable (outcome=recovery_pending)', $createOutput);
         $this->assertSensitiveDenyListAbsent($createOutput, [
             'provider exploded',
             'token=secret-query',

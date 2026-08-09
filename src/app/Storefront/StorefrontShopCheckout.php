@@ -190,7 +190,7 @@ class StorefrontShopCheckout
     private function ensureNativeQrisCreated(Payment $payment): void
     {
         if ($payment->provider === PaymentProvider::KLIKQRIS) {
-            $this->klikQrisNativeQris->ensureCreated($payment);
+            $this->klikQrisNativeQris->lifecycle($payment);
 
             return;
         }

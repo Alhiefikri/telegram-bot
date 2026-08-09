@@ -8,6 +8,7 @@ use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
@@ -81,9 +82,10 @@ class StorefrontShopPaymentStatusRefresh
         $qrisRecoveredDuringRetry = false;
 
         $projection = $this->orders->project($order, $payment);
+        $recoveryOutcome = null;
         if ($this->shouldRecoverQris($projection, $payment)) {
             try {
-                $this->ensureNativeQrisCreated($payment);
+                $recoveryOutcome = $this->attemptNativeQrisRecovery($payment);
             } catch (Throwable $exception) {
                 report($exception);
                 $qrisRecoveryFailed = true;
@@ -97,10 +99,18 @@ class StorefrontShopPaymentStatusRefresh
                     'idempotent_reuse' => false,
                 ]);
             }
+
+            if (! $qrisRecoveryFailed
+                && ! $this->hasPayableNativeQris($payment)
+                && $this->isKlikQrisPayment($payment)
+                && $recoveryOutcome !== null
+                && ! in_array($recoveryOutcome, [KlikQrisNativeQrisOutcome::Payable, KlikQrisNativeQrisOutcome::ProviderTotalPending], true)) {
+                $qrisRecoveryFailed = true;
+            }
         }
 
         if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
-            $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment);
+            $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment, $recoveryOutcome);
             $this->events->checkoutSubmitted(null, $order, [
                 'status_endpoint_result' => 'qris_not_ready',
                 'qris_readiness_state' => $readiness['state'],
@@ -258,17 +268,17 @@ class StorefrontShopPaymentStatusRefresh
         return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
     }
 
-    private function ensureNativeQrisCreated(Payment $payment): void
+    private function attemptNativeQrisRecovery(Payment $payment): ?KlikQrisNativeQrisOutcome
     {
         if ($this->isKlikQrisPayment($payment)) {
-            $this->klikQrisNativeQris->ensureCreated($payment);
-
-            return;
+            return $this->klikQrisNativeQris->lifecycle($payment)->outcome();
         }
 
         if ($this->isPakasirPayment($payment) && $payment->method === 'api_qris') {
             $this->nativeQris->ensureCreated($payment);
         }
+
+        return null;
     }
 
     private function processProviderReconciliation(Payment $payment): void
@@ -303,10 +313,21 @@ class StorefrontShopPaymentStatusRefresh
     /**
      * @return array{state: string, title: string, message: string}
      */
-    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment): array
+    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisOutcome $outcome = null): array
     {
         if (! $projection->isPendingPayment) {
             return ['state' => 'terminal', 'title' => 'QRIS tidak aktif', 'message' => 'Invoice ini tidak sedang menunggu pembayaran QRIS.'];
+        }
+
+        if ($outcome !== null) {
+            return match ($outcome) {
+                KlikQrisNativeQrisOutcome::Payable => ['state' => 'payable', 'title' => 'QRIS siap dibayar', 'message' => 'QRIS dan total bayar final sudah siap.'],
+                KlikQrisNativeQrisOutcome::Creating => ['state' => 'creating', 'title' => 'Sedang membuat QRIS', 'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.'],
+                KlikQrisNativeQrisOutcome::RecoveryPending => ['state' => 'recovery_pending', 'title' => 'Sedang membuat QRIS', 'message' => 'QRIS sedang dipulihkan. Buka kembali invoice ini sebentar lagi.'],
+                KlikQrisNativeQrisOutcome::ProviderTotalPending => ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'],
+                KlikQrisNativeQrisOutcome::InvalidProviderResult => ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'],
+                KlikQrisNativeQrisOutcome::Expired => ['state' => 'expired', 'title' => 'QRIS kedaluwarsa', 'message' => 'Batas bayar QRIS sudah lewat. Jangan bayar QRIS ini; buat order baru dari katalog.'],
+            };
         }
 
         if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {

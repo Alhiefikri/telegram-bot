@@ -11,17 +11,9 @@ class KlikQrisQrisImage
 {
     private const MAX_BYTES = 2_000_000;
 
-    public function contents(KlikQrisTransaction $transaction): string
+    public function contents(KlikQrisPayableNativeQris $payable): string
     {
-        if ($transaction->qrisUrl() !== null) {
-            try {
-                return $this->download($transaction->qrisUrl(), $transaction->environment());
-            } catch (InvalidArgumentException) {
-                // Fall back to the create-response image held in memory only.
-            }
-        }
-
-        return $this->decodeBase64($transaction->qrisImageBase64());
+        return $this->download($payable->qrisUrl(), KlikQrisEnvironment::runtime());
     }
 
     private function download(string $url, KlikQrisEnvironment $environment): string
@@ -85,20 +77,6 @@ class KlikQrisQrisImage
         } finally {
             fclose($sink);
         }
-    }
-
-    private function decodeBase64(?string $value): string
-    {
-        if (! is_string($value) || ! preg_match('/^data:image\/png;base64,([A-Za-z0-9+\/]+=*)$/', $value, $matches)) {
-            throw $this->unavailable();
-        }
-
-        $decoded = base64_decode($matches[1], true);
-        if (! is_string($decoded) || strlen($decoded) > self::MAX_BYTES || ! $this->isPng($decoded)) {
-            throw $this->unavailable();
-        }
-
-        return $decoded;
     }
 
     private function isPng(string $contents): bool

@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\PaymentProviderSelection;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -16,6 +17,7 @@ use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
+use RuntimeException;
 use Throwable;
 
 class TelegramCheckoutIntents
@@ -76,7 +78,11 @@ class TelegramCheckoutIntents
     public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');
-        $transaction = $this->klikQris->ensureCreated($payment);
+        $result = $this->klikQris->lifecycle($payment);
+        $payable = $result->payable();
+        if ($payable === null) {
+            throw new RuntimeException($this->nonPayableKlikQrisMessage($result->outcome()));
+        }
         $payment->refresh();
 
         return $this->sendPaymentInstruction(
@@ -84,10 +90,22 @@ class TelegramCheckoutIntents
             $this->paymentInstructions->klikQris(
                 $order,
                 $payment,
-                $this->klikQrisImages->contents($transaction),
+                $this->klikQrisImages->contents($payable),
                 $this->locale->code($order->customer),
             ),
         );
+    }
+
+    private function nonPayableKlikQrisMessage(KlikQrisNativeQrisOutcome $outcome): string
+    {
+        return match ($outcome) {
+            KlikQrisNativeQrisOutcome::Creating => 'QRIS sedang disiapkan. Coba lagi dari invoice ini sebentar lagi.',
+            KlikQrisNativeQrisOutcome::RecoveryPending => 'QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.',
+            KlikQrisNativeQrisOutcome::ProviderTotalPending => 'Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.',
+            KlikQrisNativeQrisOutcome::InvalidProviderResult => 'Provider memberi hasil QRIS yang tidak valid. Hubungi bantuan untuk menyelesaikan pesanan ini.',
+            KlikQrisNativeQrisOutcome::Expired => 'QRIS sudah kedaluwarsa. Buat pesanan baru untuk melanjutkan.',
+            KlikQrisNativeQrisOutcome::Payable => 'QRIS siap dibayar.',
+        };
     }
 
     public function binancePayEnabled(): bool
@@ -117,7 +135,7 @@ class TelegramCheckoutIntents
         $photoPath = public_path('binance.jpeg');
         $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
         if ($photoContents === false) {
-            throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
+            throw new RuntimeException('Binance Pay image is not readable: '.$photoPath);
         }
 
         $keyboard = [];
