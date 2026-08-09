@@ -130,24 +130,36 @@ Expected result: authoritative status processing validates the exact `provider=k
 Validate and record evidence for each scenario:
 
 1. Initial sandbox checkout creates a payable QR.
-2. Paid webhook processes successfully.
-3. Duplicate webhook does not double-fulfill.
-4. No-webhook reconciliation applies authoritative status.
-5. Expired QR becomes unpayable after the provider expiry.
-6. New checkout after expiry creates a fresh disposable checkout.
-7. Merchant reference collision with a Pakasir row does not validate Pakasir. UUID lookup may reject a non-KlikQRIS UUID. Merchant reference lookup must select the exact `provider=klikqris` row.
+2. QR is displayed and readable.
+3. Display nominal equals the provider `total_amount`.
+4. Dashboard simulation triggers a webhook.
+5. Authoritative status marks the order paid once.
+6. Telegram receipt is sent once.
+7. Duplicate webhook is idempotent.
+8. No-webhook reconciliation applies authoritative status.
+9. Expired QR becomes unpayable and a fresh transaction is created.
+10. Create/status transport outage does not create a duplicate transaction.
+11. Fake callback and nominal mismatch cannot mark a payment paid.
+12. Storefront/admin observability is correct and secret-safe.
 
 ## 11. Evidence table
 
 | Scenario | Timestamp | Payment UUID | Merchant ref hash | Result | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Initial checkout |  |  |  | PASS/FAIL |  |
-| Paid webhook |  |  |  | PASS/FAIL |  |
-| Duplicate webhook |  |  |  | PASS/FAIL |  |
-| No-webhook reconciliation |  |  |  | PASS/FAIL |  |
-| Expiry |  |  |  | PASS/FAIL |  |
-| New checkout after expiry |  |  |  | PASS/FAIL |  |
-| Pakasir collision safety |  |  |  | PASS/FAIL |  |
+| 1. Initial checkout creates QRIS | 2026-08-08T02:17:42Z | redacted | redacted | PASS | Testing Bot checkout created a payable KlikQRIS sandbox payment. |
+| 2. QR is readable | 2026-08-08T02:17:42Z | redacted | redacted | PASS | PNG reference decoded successfully; QR bytes and payload were not retained. |
+| 3. Exact provider total display | 2026-08-08T02:17:42Z | redacted | redacted | PASS | Display preserved the exact provider total representation. |
+| 4. Paid webhook | 2026-08-08T03:35:04Z | redacted | redacted | PASS | Sandbox simulator callback was received and acknowledged. |
+| 5. Authoritative paid lifecycle | 2026-08-08T03:35:07Z | redacted | redacted | PASS | Authoritative `SUCCESS` resulted in one paid order/payment and one sale movement. |
+| 6. Exactly-once receipt | 2026-08-08T02:30:00Z | redacted | redacted | PASS | One receipt marker was recorded. |
+| 7. Duplicate webhook | 2026-08-08T02:31:29Z | redacted | redacted | PASS | Duplicate delivery remained idempotent with no second sale or receipt. |
+| 8. No-webhook reconciliation | 2026-08-08T03:38:08Z | redacted | redacted | PASS | Reconciliation used authoritative status after callback delivery was unavailable. |
+| 9. Expiry and fresh transaction | 2026-08-08T03:50:47Z | redacted | redacted | PASS | Expired payment became unpayable; the next checkout used a distinct transaction. |
+| 10. Create/status outage recovery | 2026-08-08T12:13:42Z | redacted | redacted | PASS | Recovery reused status, created no duplicate provider transaction, and produced no fulfillment effects. |
+| 11. Fake callback/amount mismatch | 2026-08-08T03:51:08Z | redacted | redacted | PASS | Invalid callback signals left the target payment and order pending. |
+| 12. Storefront/admin observability | 2026-08-08T12:41:41Z | redacted | redacted | PASS | Provider total display was exact and secret-sensitive fields were omitted. |
+
+The final 12/12 qualification evidence from issue #197 and its follow-up is preserved in [the sanitized sandbox results](klikqris-sandbox-results-2026-08-08.md). The result records labels, timestamps, bounded hashes, and outcomes only; it does not contain credentials, signatures, QR base64, or raw provider payloads.
 
 ## 12. Production authorization
 
