@@ -57,7 +57,7 @@ production traffic, and provider cutover are outside this change.
 | Browser smoke | PASS — admin/customer suite 28 tests; customer filter 1 test |
 | Dependency audit | PASS — `composer audit --locked --no-dev --abandoned=fail` |
 | Whitespace check | PASS — `git diff --check` |
-| GitHub Actions CI | Pending — rerun after the review fixes on this integration branch |
+| GitHub Actions CI | PASS — run `31311280308`, all 6 required jobs green |
 
 The repository has no `composer lint` script; Pint is the configured PHP
 formatter/linter and was run directly. The host PHP CLI lacked `pdo_pgsql`, so
