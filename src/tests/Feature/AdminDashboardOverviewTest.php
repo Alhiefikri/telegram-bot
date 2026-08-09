@@ -368,6 +368,34 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertStringNotContainsString('IDR 5.000.000', json_encode($data, JSON_THROW_ON_ERROR));
     }
 
+    public function test_dashboard_earnings_use_provider_total_for_buyer_paid_qris_fees(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 35000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'klikqris',
+            'method' => 'QRIS',
+            'provider_payment_method' => 'qris',
+            'amount' => 35000,
+            'provider_fee' => 227,
+            'provider_total_payment' => 35227,
+            'currency' => 'IDR',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        $data = app(AdminDashboardData::class)->forAdmin($admin);
+
+        $this->assertSame(35000, $data['metrics']['read_only_balance_amount']);
+        $this->assertSame(35000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
+        $this->assertSame('IDR 35.000', $data['salesTab']['orders'][0]['earning']);
+    }
+
     public function test_stats_tab_renders_store_link_actions_cards_statuses_and_css_earnings(): void
     {
         $this->actingAs(User::factory()->create([

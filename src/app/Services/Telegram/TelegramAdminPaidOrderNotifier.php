@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Services\PaymentReceiptReport;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,7 @@ class TelegramAdminPaidOrderNotifier
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramAdminAccess $adminAccess,
+        private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
     public function send(Order $order): void
@@ -108,20 +110,22 @@ class TelegramAdminPaidOrderNotifier
     private function earningLabel(?Payment $payment, Order $order): string
     {
         $amount = $payment?->amount ?? $order->total_amount;
-        $fee = $payment?->provider_fee ?? 0;
+        $net = $payment === null ? (int) $amount : $this->receiptReport->netAmount($payment);
+        $feeReducesEarning = $payment !== null
+            && (int) ($payment->provider_fee ?? 0) > 0
+            && $net < (int) $amount;
 
         if ($payment?->currency === 'USDT') {
-            $net = $amount - $fee;
-            $label = rtrim(rtrim(number_format($net / 1_000_000, 6, '.', ''), '0'), '.').' USDT';
+            $label = $this->usdtLabel($net);
 
-            return $fee > 0 ? $label.' (setelah fee)' : $label;
+            return $feeReducesEarning ? $label.' (setelah fee)' : $label;
         }
 
-        if ($fee > 0) {
-            return $this->rupiah($amount - $fee).' (setelah fee)';
+        if ($feeReducesEarning) {
+            return $this->rupiah($net).' (setelah fee)';
         }
 
-        return $this->rupiah($amount);
+        return $this->rupiah($net);
     }
 
     private function stockLines(Order $order): array
@@ -212,6 +216,20 @@ class TelegramAdminPaidOrderNotifier
     private function rupiah(int $amount): string
     {
         return 'Rp'.number_format($amount, 0, ',', '.');
+    }
+
+    private function usdtLabel(int $microAmount): string
+    {
+        $whole = intdiv($microAmount, 1_000_000);
+        $fraction = $microAmount % 1_000_000;
+
+        if ($fraction === 0) {
+            return $whole.' USDT';
+        }
+
+        $fractionLabel = rtrim(str_pad((string) $fraction, 6, '0', STR_PAD_LEFT), '0');
+
+        return $whole.'.'.$fractionLabel.' USDT';
     }
 
     private function timeLabel($date): string

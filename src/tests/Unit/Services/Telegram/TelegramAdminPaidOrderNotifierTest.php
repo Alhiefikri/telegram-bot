@@ -97,9 +97,10 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_paid_order_notification_shows_earning_after_fee(): void
+    public function test_paid_order_notification_shows_earning_after_merchant_paid_fee(): void
     {
         config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.pakasir.qris_fee.payer', 'merchant');
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 321]])]);
 
@@ -107,6 +108,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $order->payments()->first()->update([
             'amount' => 32000,
             'provider_fee' => 2000,
+            'provider_payment_method' => 'qris',
         ]);
 
         $order->update(['total_amount' => 32000]);
@@ -117,6 +119,33 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $text = $sends->first()[0]['text'];
 
         $this->assertStringContainsString('Earning: Rp30.000 (setelah fee)', $text);
+    }
+
+    public function test_paid_order_notification_does_not_reduce_earning_for_buyer_paid_qris_fee(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.pakasir.qris_fee.payer', 'customer');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 321]])]);
+
+        $order = $this->paidOrderWithItems(1);
+        $order->payments()->first()->update([
+            'provider' => 'klikqris',
+            'method' => 'QRIS',
+            'provider_payment_method' => 'qris',
+            'amount' => 35000,
+            'provider_fee' => 227,
+            'provider_total_payment' => 35227,
+        ]);
+        $order->update(['total_amount' => 35000]);
+
+        app(TelegramAdminPaidOrderNotifier::class)->send($order);
+
+        $text = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->first()[0]['text'];
+
+        $this->assertStringContainsString('Earning: Rp35.000', $text);
+        $this->assertStringNotContainsString('Earning: Rp34.773', $text);
+        $this->assertStringNotContainsString('(setelah fee)', $text);
     }
 
     public function test_paid_binance_order_notification_keeps_earning_in_usdt(): void

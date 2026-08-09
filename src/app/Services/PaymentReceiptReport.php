@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Services\Pakasir\PakasirQrisFeePolicy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -24,7 +25,11 @@ class PaymentReceiptReport
                 'canonical_payments.order_id',
                 'canonical_payments.amount',
                 'canonical_payments.currency',
+                'canonical_payments.provider',
+                'canonical_payments.method',
+                'canonical_payments.provider_payment_method',
                 'canonical_payments.provider_fee',
+                'canonical_payments.provider_total_payment',
                 'canonical_payments.paid_at',
             ]);
     }
@@ -36,7 +41,7 @@ class PaymentReceiptReport
      */
     public function idrNetTotalCanonical(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
     {
-        $net = '(canonical_payments.amount - COALESCE(canonical_payments.provider_fee, 0))';
+        $net = $this->netAmountSql('canonical_payments');
 
         return (int) $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)
             ->where(function ($query): void {
@@ -122,11 +127,51 @@ class PaymentReceiptReport
 
     public function netAmount(Payment $payment): int
     {
-        return max(0, (int) $payment->amount - (int) ($payment->provider_fee ?? 0));
+        $amount = (int) $payment->amount;
+        $fee = (int) ($payment->provider_fee ?? 0);
+
+        if ($payment->provider_total_payment !== null) {
+            return max(0, (int) $payment->provider_total_payment - $fee);
+        }
+
+        if ($this->usesCustomerPaidPakasirQris($payment)) {
+            return max(0, $amount);
+        }
+
+        return max(0, $amount - $fee);
     }
 
     public function currency(Payment $payment): string
     {
         return strtoupper((string) $payment->currency ?: 'IDR');
+    }
+
+    private function usesCustomerPaidPakasirQris(Payment $payment): bool
+    {
+        return $this->isPakasirQris($payment)
+            && PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer';
+    }
+
+    private function isPakasirQris(Payment $payment): bool
+    {
+        $provider = strtolower(trim((string) $payment->provider));
+        $method = strtolower(trim((string) $payment->method));
+        $providerPaymentMethod = strtolower(trim((string) $payment->provider_payment_method));
+
+        return $provider === 'pakasir'
+            && ($method === 'api_qris' || $providerPaymentMethod === 'qris');
+    }
+
+    private function netAmountSql(string $table): string
+    {
+        $amount = $table.'.amount';
+        $fee = 'COALESCE('.$table.'.provider_fee, 0)';
+        $providerTotal = $table.'.provider_total_payment';
+        $isPakasirQris = "(LOWER(COALESCE({$table}.provider, '')) = 'pakasir' AND (LOWER(COALESCE({$table}.method, '')) = 'api_qris' OR LOWER(COALESCE({$table}.provider_payment_method, '')) = 'qris'))";
+        $fallback = PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer'
+            ? "CASE WHEN {$isPakasirQris} THEN {$amount} ELSE {$amount} - {$fee} END"
+            : "{$amount} - {$fee}";
+
+        return "CASE WHEN {$providerTotal} IS NOT NULL THEN {$providerTotal} - {$fee} ELSE {$fallback} END";
     }
 }

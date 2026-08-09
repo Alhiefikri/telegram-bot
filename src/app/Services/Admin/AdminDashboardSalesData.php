@@ -46,7 +46,19 @@ final class AdminDashboardSalesData
                 'orderItems:id,order_id,product_name,quantity,subtotal',
                 'payments' => fn ($query) => $query
                     ->where('status', PaymentStatus::Paid)
-                    ->select(['id', 'order_id', 'amount', 'currency', 'provider_fee', 'status', 'paid_at']),
+                    ->select([
+                        'id',
+                        'order_id',
+                        'amount',
+                        'currency',
+                        'provider',
+                        'method',
+                        'provider_payment_method',
+                        'provider_fee',
+                        'provider_total_payment',
+                        'status',
+                        'paid_at',
+                    ]),
                 'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
