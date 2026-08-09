@@ -121,7 +121,7 @@
                             @if ($detail['events'] !== [])
                                 <ul class="mt-3 space-y-1 text-xs text-brand-muted">
                                     @foreach ($detail['events'] as $event)
-                                        <li>{{ $event['type'] }} · {{ $event['provider_status'] }} · received {{ $event['received_at'] }} · processed {{ $event['processed_at'] }} · deliveries {{ $event['received_count'] }}</li>
+                                        <li>{{ $event['type'] }} · @if ($event['condition'] !== '-'){{ $event['condition'] }} · @endif{{ $event['provider_status'] }} · received {{ $event['received_at'] }} · processed {{ $event['processed_at'] }} · deliveries {{ $event['received_count'] }}</li>
                                     @endforeach
                                 </ul>
                             @endif

@@ -66,6 +66,7 @@ class AdminOrderDetailController extends Controller
             ->map(fn (PaymentEvent $event): array => [
                 'type' => $event->event_type?->value ?? (string) $event->event_type,
                 'provider_status' => $this->bounded((string) $event->provider_status, 40),
+                'condition' => $this->eventCondition($event),
                 'received_at' => $event->received_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
                 'processed_at' => $event->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
                 'received_count' => $event->received_count,
@@ -97,6 +98,15 @@ class AdminOrderDetailController extends Controller
         $value = trim($value);
 
         return mb_strlen($value) > $length ? mb_substr($value, 0, $length).'…' : $value;
+    }
+
+    private function eventCondition(PaymentEvent $event): string
+    {
+        $payload = is_array($event->raw_payload) ? $event->raw_payload : [];
+
+        return ($payload['condition'] ?? null) === 'unknown_callback_status'
+            ? 'unknown_callback_status'
+            : '-';
     }
 
     private function auditEntries(Order $order): array
