@@ -29,6 +29,8 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly string $qrisReadinessMessage,
         public readonly string $qrisRetryLabel,
         public readonly ?string $qrisImageDataUri,
+        public readonly ?string $qrisImageSource,
+        public readonly ?string $payableAmountDisplay,
         public readonly ?string $hostedPaymentUrl,
         public readonly array $accountGroups,
         public readonly array $usageGuides,

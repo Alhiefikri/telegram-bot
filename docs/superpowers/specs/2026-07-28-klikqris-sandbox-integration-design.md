@@ -31,8 +31,10 @@ Runtime pengujian menggunakan:
 - LhieStore Testing Bot dan token Telegram testing.
 - Database lokal/testing yang terpisah.
 - API key dan merchant ID KlikQRIS sandbox.
-- URL publik sementara menuju aplikasi lokal untuk callback, misalnya Cloudflare Tunnel.
-- Callback URL sandbox khusus, misalnya `https://<tunnel>/webhooks/klikqris/sandbox`.
+- URL publik sementara menuju aplikasi lokal untuk callback. Validasi awal memakai
+  ngrok yang sudah tersedia pada host dan meneruskan HTTPS publik ke port web
+  Docker lokal `8000`; Cloudflare Tunnel tetap dapat dipakai sebagai alternatif.
+- Callback URL sandbox khusus: `https://<tunnel>/api/webhook/klikqris/sandbox`.
 
 Nilai credential tidak boleh dimasukkan ke Git, fixture, dokumentasi, log, payload audit, atau UI admin. Konfigurasi memakai nama environment khusus KlikQRIS seperti `KLIKQRIS_SANDBOX_API_KEY`, `KLIKQRIS_SANDBOX_MERCHANT_ID`, dan pengaturan timeout. Fase sandbox tidak menyediakan konfigurasi endpoint atau credential produksi.
 
@@ -74,7 +76,7 @@ Untuk payment KlikQRIS:
 - `provider_payment_method`: `qris`.
 - `provider_created_at` dan `provider_expires_at`: waktu dari provider yang sudah dinormalisasi ke zona waktu aplikasi.
 - `provider_payload`: metadata tersanitasi yang diperlukan untuk audit, seperti status, nama toko, URL QRIS, dan representasi asli nominal untuk display. API key, merchant credential, signature, dan base64 QR tidak boleh masuk ke field ini.
-- `provider_transaction_token`: signature transaksi KlikQRIS yang disimpan dengan cast terenkripsi untuk recovery sandbox. Token tidak ditaruh dalam payload biasa, tidak digunakan sebagai bukti pembayaran, dan tidak ditampilkan kembali.
+- Signature transaksi KlikQRIS tidak dipersistenkan. Signature provider hanya berada di memori selama pemrosesan response; recovery status otoritatif memakai endpoint status provider dan signature tidak pernah dianggap sebagai bukti pembayaran.
 - State create mengikuti pola `creating`, `created`, `outcome_unknown`, dan keadaan gagal yang dapat dipulihkan.
 
 KlikQRIS mengembalikan nilai uang sebagai campuran integer dan string desimal. Parser harus menormalisasi tanpa floating point. Karena order internal memakai rupiah bulat, respons hanya diterima jika nilai desimal mewakili rupiah bulat secara tepat, misalnya `1016.00`. Nilai pecahan non-nol ditolak secara fail-closed sampai model uang mendukungnya secara eksplisit. String asli `total_amount` yang tervalidasi dipertahankan untuk menampilkan seluruh digit desimal secara persis.

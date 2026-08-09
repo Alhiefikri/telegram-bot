@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
 use App\Support\Money;
@@ -23,7 +25,7 @@ class AdminOrderDetailController extends Controller
 
         Gate::authorize('view', $order);
 
-        $order->load(['customer', 'orderItems', 'payments', 'salesProofPost']);
+        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'salesProofPost']);
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
@@ -53,7 +55,48 @@ class AdminOrderDetailController extends Controller
             ] : null,
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
             'auditEntries' => $this->auditEntries($order),
+            'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment))->all(),
         ]);
+    }
+
+    private function paymentDetail(Payment $payment): array
+    {
+        $events = $payment->paymentEvents
+            ->sortByDesc(fn (PaymentEvent $event) => $event->received_at?->getTimestamp() ?? 0)
+            ->map(fn (PaymentEvent $event): array => [
+                'type' => $event->event_type?->value ?? (string) $event->event_type,
+                'provider_status' => $this->bounded((string) $event->provider_status, 40),
+                'received_at' => $event->received_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+                'processed_at' => $event->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+                'received_count' => $event->received_count,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'provider' => strtolower((string) $payment->provider),
+            'merchant_ref_short' => $this->bounded((string) $payment->merchant_ref, 8),
+            'merchant_ref_hash' => hash('sha256', (string) $payment->merchant_ref),
+            'base_amount' => Money::idr((int) $payment->amount),
+            'final_amount' => $payment->provider_total_payment !== null ? Money::idr((int) $payment->provider_total_payment) : '-',
+            'provider_create_state' => $payment->provider_create_state ?: '-',
+            'provider_status' => $events[0]['provider_status'] ?? '-',
+            'expires_at' => $payment->provider_expires_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+            'callback_count' => collect($events)->where('type', 'callback')->sum('received_count'),
+            'latest_reconciliation_at' => $payment->paymentEvents
+                ->where('event_type', PaymentEventType::Reconciliation)
+                ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
+                ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
+                ->first()?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+            'events' => $events,
+        ];
+    }
+
+    private function bounded(string $value, int $length): string
+    {
+        $value = trim($value);
+
+        return mb_strlen($value) > $length ? mb_substr($value, 0, $length).'…' : $value;
     }
 
     private function auditEntries(Order $order): array

@@ -34,6 +34,7 @@ use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
@@ -107,6 +108,54 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(CheckoutPostCreationBehavior::BinancePayInstructions, $binanceIntent->postCreationBehavior());
     }
 
+    public function test_klik_qris_checkout_intent_owns_provider_currency_deadline_and_post_creation_behavior(): void
+    {
+        $deadline = now()->addMinutes(12);
+
+        $intent = CheckoutPaymentIntents::klikQris($deadline);
+
+        $this->assertSame('klikqris', $intent->provider());
+        $this->assertSame('QRIS', $intent->method());
+        $this->assertSame('IDR', $intent->orderCurrency());
+        $this->assertSame('IDR', $intent->paymentCurrency());
+        $this->assertTrue($intent->expiresAt()->equalTo($deadline));
+        $requestedDeadline = now()->addMinutes(3);
+        $this->assertTrue($intent->expiresAt($requestedDeadline)->equalTo($requestedDeadline));
+        $this->assertSame(CheckoutPostCreationBehavior::KlikQrisInstructions, $intent->postCreationBehavior());
+    }
+
+    public function test_klik_qris_checkout_persists_idr_payment_for_current_product_total_with_default_deadline(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $startedAt = now()->startOfMinute();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            $product = Product::factory()->create([
+                'price_amount' => 12_500,
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+
+            $order = app(OrderCheckoutService::class)->checkout(
+                $this->cartWithProduct($product, quantity: 2),
+                CheckoutPaymentIntents::klikQris(),
+            );
+            $payment = $order->payments()->sole();
+
+            $this->assertSame('klikqris', $payment->provider);
+            $this->assertSame('QRIS', $payment->method);
+            $this->assertSame('IDR', $order->currency);
+            $this->assertSame('IDR', $payment->currency);
+            $this->assertSame(25_000, $order->total_amount);
+            $this->assertSame(25_000, $payment->amount);
+            $this->assertTrue($order->expires_at->equalTo($startedAt->copy()->addMinutes(15)));
+            $this->assertTrue($payment->expired_at->equalTo($startedAt->copy()->addMinutes(15)));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_unready_checkout_payment_intent_fails_before_order_payment_or_stock_reservation(): void
     {
         ManualPaymentSetting::create(['binance_pay_enabled' => false, 'is_active' => true]);
@@ -143,6 +192,41 @@ class OrderCartDomainTest extends TestCase
             $this->fail('Expected unready Pakasir rail to fail.');
         } catch (InvalidCheckout $exception) {
             $this->assertStringStartsWith('Pakasir payment rail is not ready.', $exception->getMessage());
+        }
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, ProductStockItem::query()->whereNotNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_klik_qris_checkout_fails_closed_in_production_before_order_payment_or_stock_reservation(): void
+    {
+        app()->detectEnvironment(fn () => 'production');
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
+            'sandbox_api_key' => 'test-only-key',
+            'sandbox_merchant_id' => 'merchant-test',
+            'qris_ttl_minutes' => 15,
+        ]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+
+        try {
+            app(OrderCheckoutService::class)->checkout(
+                $this->cartWithProduct($product),
+                CheckoutPaymentIntents::klikQris(),
+            );
+            $this->fail('Expected KlikQRIS production checkout to fail closed.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame('KlikQRIS checkout is not ready. Please try again later or contact support.', $exception->getMessage());
+            $this->assertNotNull($exception->getPrevious());
+            $this->assertStringContainsString('KLIKQRIS_PRODUCTION_ENABLED', $exception->getPrevious()->getMessage());
+            $this->assertStringNotContainsString('APP_ENV', $exception->getMessage());
+            $this->assertStringNotContainsString('KLIKQRIS', $exception->getMessage());
+            $this->assertStringNotContainsString('klikqris.com', $exception->getMessage());
+            $this->assertStringNotContainsString('merchant-test', $exception->getMessage());
+            $this->assertStringNotContainsString('test-only-key', $exception->getMessage());
         }
 
         $this->assertSame(0, Order::count());

@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
+use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\QrisEmvPayload;
 use Database\Factories\PaymentFactory;
@@ -127,6 +129,44 @@ class Payment extends Model
         }
 
         return true;
+    }
+
+    public function isNativeKlikQris(): bool
+    {
+        return $this->providerName() === 'klikqris'
+            && $this->providerPaymentMethodName() === 'qris'
+            && filled($this->klikQrisQrisUrl());
+    }
+
+    public function isPayableNativeKlikQris(): bool
+    {
+        return $this->status === PaymentStatus::Pending
+            && $this->isNativeKlikQris()
+            && $this->provider_total_payment !== null
+            && $this->provider_total_payment >= $this->amount
+            && $this->provider_expires_at !== null
+            && $this->provider_expires_at->isFuture();
+    }
+
+    public function klikQrisQrisUrl(?KlikQrisEnvironment $environment = null): ?string
+    {
+        $payload = is_array($this->provider_payload) ? $this->provider_payload : [];
+        $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+        $url = trim((string) ($data['qris_url'] ?? ''));
+
+        return KlikQrisTransaction::isAllowedQrisUrl(
+            $url,
+            environment: $environment ?? KlikQrisEnvironment::runtime(),
+        ) ? $url : null;
+    }
+
+    public function klikQrisTotalAmountDisplay(): ?string
+    {
+        if ($this->provider_total_payment === null) {
+            return null;
+        }
+
+        return 'IDR '.number_format((int) $this->provider_total_payment, 2, '.', ',');
     }
 
     private function providerName(): string

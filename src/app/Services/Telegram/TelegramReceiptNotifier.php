@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\PaymentStatus;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Services\CredentialDeliveryFormatter;
@@ -122,6 +123,7 @@ class TelegramReceiptNotifier
                 $receiptSentAt->whereNotNull('telegram_receipt_send_started_at')->whereNull('telegram_receipt_sent_at');
             }
             $receiptSentAt->update(['telegram_receipt_sent_at' => now(), 'telegram_receipt_send_started_at' => null]);
+            DeleteBuyerCheckoutMessages::dispatch($claimed->id, now()->toISOString())->onQueue('notifications');
         } finally {
             $lock->release();
         }

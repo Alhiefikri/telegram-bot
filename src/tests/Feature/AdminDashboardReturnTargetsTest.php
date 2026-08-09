@@ -79,8 +79,10 @@ class AdminDashboardReturnTargetsTest extends TestCase
         ])->assertRedirect('/admin?tab=produk#admin-category-create');
 
         $this->post(route('admin.payment-mode.update'), [
+            'update_scope' => 'provider_switch',
             'payment_mode' => 'manual',
             'qris_payment_ttl_minutes' => '15',
+            'confirm_provider_switch' => '1',
         ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->post(route('admin.support-settings.update'), [

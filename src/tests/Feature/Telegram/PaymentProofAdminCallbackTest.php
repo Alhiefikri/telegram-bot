@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Models\Customer;
@@ -1125,6 +1126,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
     public function test_receipt_notifier_sends_paid_order_receipt(): void
     {
+        Queue::fake([DeleteBuyerCheckoutMessages::class]);
         config()->set('services.telegram.admin_contact_url', 'https://t.me/store_support');
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 777, 'locale' => 'id']);
@@ -1139,6 +1141,45 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 1
             && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.text') === 'Hubungi Support'
             && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.url') === 'https://t.me/store_support');
+        Queue::assertPushedOn('notifications', DeleteBuyerCheckoutMessages::class, fn (DeleteBuyerCheckoutMessages $job): bool => $job->orderId === $order->id);
+    }
+
+    public function test_paid_klikqris_cleanup_deletes_checkout_and_latest_order_detail_messages(): void
+    {
+        $this->fakeTelegramHttp();
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'manual_checkout_customer_notification_chat_id' => '777',
+            'manual_checkout_customer_notification_message_id' => 701,
+            'buyer_order_detail_message_chat_id' => '777',
+            'buyer_order_detail_message_id' => 702,
+        ]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'status' => PaymentStatus::Paid,
+        ]);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+
+        app(TelegramBuyerCheckoutInstructionCleaner::class)->deleteTrackedMessages($order);
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));
+
+        $order->update(['telegram_receipt_sent_at' => now()]);
+
+        app(TelegramBuyerCheckoutInstructionCleaner::class)->deleteTrackedMessages($order);
+
+        $deleteRequests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));
+        $this->assertCount(2, $deleteRequests, json_encode($order->fresh()->only([
+            'manual_checkout_customer_notification_deleted_at',
+            'buyer_order_detail_message_chat_id',
+            'buyer_order_detail_message_id',
+            'buyer_order_detail_message_deleted_at',
+            'buyer_order_detail_message_deletion_started_at',
+        ]), JSON_THROW_ON_ERROR));
+        $this->assertEqualsCanonicalizing([701, 702], $deleteRequests->map(fn (array $record) => $record[0]['message_id'])->all());
+        $fresh = $order->fresh();
+        $this->assertNotNull($fresh->manual_checkout_customer_notification_deleted_at);
+        $this->assertNotNull($fresh->buyer_order_detail_message_deleted_at);
     }
 
     public function test_receipt_omits_support_button_without_admin_contact(): void

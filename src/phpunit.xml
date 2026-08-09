@@ -20,6 +20,7 @@
     <php>
         <env name="APP_ENV" value="testing" force="true"/>
         <env name="APP_FORCE_HTTPS" value="false" force="true"/>
+        <env name="TRUSTED_HOSTS" value="" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
         <env name="ADMIN_ALLOWED_LOGINS" value="" force="true"/>
         <env name="BCRYPT_ROUNDS" value="4" force="true"/>
@@ -39,6 +40,7 @@
         <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
         <server name="APP_ENV" value="testing" force="true"/>
         <server name="APP_FORCE_HTTPS" value="false" force="true"/>
+        <server name="TRUSTED_HOSTS" value="" force="true"/>
         <server name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
         <server name="ADMIN_ALLOWED_LOGINS" value="" force="true"/>
         <server name="BCRYPT_ROUNDS" value="4" force="true"/>

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -20,6 +21,11 @@ class ManualPaymentSetting extends Model
             'binance_pay_enabled' => 'boolean',
             'binance_order_id_compatibility_ready_at' => 'datetime',
         ];
+    }
+
+    public function paymentProvider(): string
+    {
+        return PaymentProvider::normalize($this->payment_mode);
     }
 
     public function pakasirCheckoutFlow(): string

@@ -83,6 +83,41 @@ return [
         ],
     ],
 
+    'klikqris' => [
+        'sandbox_enabled' => (bool) env('KLIKQRIS_SANDBOX_ENABLED', false),
+        'sandbox_base_url' => env('KLIKQRIS_SANDBOX_BASE_URL', 'https://klikqris.com/api/sandbox'),
+        'sandbox_api_key' => env('KLIKQRIS_SANDBOX_API_KEY'),
+        'sandbox_merchant_id' => env('KLIKQRIS_SANDBOX_MERCHANT_ID'),
+        'sandbox_webhook_secret' => env('KLIKQRIS_SANDBOX_WEBHOOK_SECRET'),
+        'sandbox_callback_url' => env('KLIKQRIS_SANDBOX_CALLBACK_URL'),
+        'sandbox_callback_allowed_hosts' => array_values(array_filter(array_map(
+            static fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('KLIKQRIS_SANDBOX_CALLBACK_ALLOWED_HOSTS', '')),
+        ))),
+        'production_enabled' => (bool) env('KLIKQRIS_PRODUCTION_ENABLED', false),
+        'production_base_url' => env('KLIKQRIS_PRODUCTION_BASE_URL'),
+        'production_api_key' => env('KLIKQRIS_PRODUCTION_API_KEY'),
+        'production_merchant_id' => env('KLIKQRIS_PRODUCTION_MERCHANT_ID'),
+        'production_callback_url' => env('KLIKQRIS_PRODUCTION_CALLBACK_URL'),
+        'production_webhook_secret' => env('KLIKQRIS_PRODUCTION_WEBHOOK_SECRET'),
+        'production_allowed_hosts' => array_values(array_filter(array_map(
+            static fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('KLIKQRIS_PRODUCTION_ALLOWED_HOSTS', '')),
+        ))),
+        'production_callback_allowed_hosts' => array_values(array_filter(array_map(
+            static fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('KLIKQRIS_PRODUCTION_CALLBACK_ALLOWED_HOSTS', '')),
+        ))),
+        'qris_ttl_minutes' => (int) env('KLIKQRIS_QRIS_TTL_MINUTES', 15),
+        'http_timeout_seconds' => (float) env('KLIKQRIS_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('KLIKQRIS_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
+        'status_max_attempts' => (int) env('KLIKQRIS_STATUS_MAX_ATTEMPTS', 3),
+        'status_retry_delay_ms' => (int) env('KLIKQRIS_STATUS_RETRY_DELAY_MS', 250),
+        'webhook_rate_limit_per_minute' => (int) env('KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
+        'status_refresh_rate_limit_per_minute' => (int) env('KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+        'reconciliation_command' => 'klikqris:reconcile --chunk=100',
+    ],
+
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),

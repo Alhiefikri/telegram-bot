@@ -79,11 +79,13 @@ class OrderCheckoutService
         $products = $this->inventory->lockedCheckoutProducts($items);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
 
-        // Serialize checkout mode selection with the guarded readiness
-        // activation so mode and amount cannot straddle the index switch.
-        if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
-            ManualPaymentSetting::query()->where('is_active', true)->oldest('id')->lockForUpdate()->first();
-        }
+        // Provider switch mutations and checkout creation share this lock so a
+        // selected intent is persisted atomically with its order and payment.
+        ManualPaymentSetting::query()
+            ->where('is_active', true)
+            ->oldest('id')
+            ->lockForUpdate()
+            ->first();
         $paymentIntent->assertReady($lockedCart, $items, $products);
 
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);

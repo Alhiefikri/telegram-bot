@@ -100,6 +100,37 @@
             @endif
         </x-admin-dashboard.card>
 
+        @if ($paymentDetails !== [])
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
+                <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">KlikQRIS observability</p>
+                <div class="mt-3 space-y-3 text-sm font-semibold">
+                    @foreach ($paymentDetails as $detail)
+                        <div class="rounded-xl border-2 border-brand-border bg-[#f8fafc] p-3">
+                            <dl class="grid gap-2 sm:grid-cols-2">
+                                <div><dt class="text-brand-muted">Provider</dt><dd class="font-black">{{ $detail['provider'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Merchant ref</dt><dd class="font-black">{{ $detail['merchant_ref_short'] }}</dd></div>
+                                <div class="sm:col-span-2"><dt class="text-brand-muted">Merchant ref hash</dt><dd class="break-all font-mono text-xs">{{ $detail['merchant_ref_hash'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Base amount</dt><dd>{{ $detail['base_amount'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Final amount</dt><dd>{{ $detail['final_amount'] }}</dd></div>
+                                <div><dt class="text-brand-muted">provider_create_state</dt><dd>{{ $detail['provider_create_state'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Provider status</dt><dd>{{ $detail['provider_status'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Expiry</dt><dd>{{ $detail['expires_at'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Callback count</dt><dd>{{ $detail['callback_count'] }}</dd></div>
+                                <div><dt class="text-brand-muted">Latest reconciliation</dt><dd>{{ $detail['latest_reconciliation_at'] }}</dd></div>
+                            </dl>
+                            @if ($detail['events'] !== [])
+                                <ul class="mt-3 space-y-1 text-xs text-brand-muted">
+                                    @foreach ($detail['events'] as $event)
+                                        <li>{{ $event['type'] }} · {{ $event['provider_status'] }} · received {{ $event['received_at'] }} · processed {{ $event['processed_at'] }} · deliveries {{ $event['received_count'] }}</li>
+                                    @endforeach
+                                </ul>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            </x-admin-dashboard.card>
+        @endif
+
         @if ($auditEntries !== [])
             <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
                 <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Riwayat aksi</p>

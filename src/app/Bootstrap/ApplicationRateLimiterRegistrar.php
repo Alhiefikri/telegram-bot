@@ -40,6 +40,20 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('telegram:webhook:identity:'.(string) $identity);
         });
 
+        $this->rateLimiter->for('klikqris-sandbox-webhook', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.klikqris.webhook_rate_limit_per_minute', 30));
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('klikqris:sandbox-webhook:source:'.$source);
+        });
+
+        $this->rateLimiter->for('klikqris-production-webhook', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.klikqris.webhook_rate_limit_per_minute', 30));
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('klikqris:production-webhook:source:'.$source);
+        });
+
         $this->rateLimiter->for('pakasir-webhook', function (Request $request) {
             $limit = (int) $this->config->get('services.pakasir.webhook_rate_limit_per_minute', 30);
             $source = $request->ip() ?: 'unknown';
@@ -47,7 +61,7 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
         });
 
-        $this->rateLimiter->for('pakasir-status-refresh', function (Request $request) {
+        $statusRefreshLimiter = function (Request $request, string $bucketPrefix = 'automatic-payment') {
             $limit = max(1, (int) $this->config->get('services.pakasir.status_refresh_rate_limit_per_minute', 3));
             $routeOrder = $request->route('order');
             $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
@@ -66,10 +80,13 @@ class ApplicationRateLimiterRegistrar
             $source = $request->ip() ?: 'unknown';
 
             return [
-                Limit::perMinute($limit)->by('pakasir:status-refresh:order:'.$identity)->response($rateLimitedResponse),
-                Limit::perMinute($limit)->by('pakasir:status-refresh:source:'.$source)->response($rateLimitedResponse),
+                Limit::perMinute($limit)->by($bucketPrefix.':status-refresh:order:'.$identity)->response($rateLimitedResponse),
+                Limit::perMinute($limit)->by($bucketPrefix.':status-refresh:source:'.$source)->response($rateLimitedResponse),
             ];
-        });
+        };
+
+        $this->rateLimiter->for('automatic-payment-status-refresh', $statusRefreshLimiter);
+        $this->rateLimiter->for('pakasir-status-refresh', fn (Request $request) => $statusRefreshLimiter($request, 'pakasir'));
 
         $this->rateLimiter->for('storefront-checkout', function (Request $request) {
             $limit = max(1, (int) $this->config->get('services.storefront.checkout_rate_limit_per_minute', 5));

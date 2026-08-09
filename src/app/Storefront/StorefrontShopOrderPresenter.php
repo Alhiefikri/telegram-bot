@@ -55,6 +55,8 @@ class StorefrontShopOrderPresenter
             'qrisReadinessMessage' => $invoice->qrisReadinessMessage,
             'qrisRetryLabel' => $invoice->qrisRetryLabel,
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
+            'qrisImageSource' => $invoice->qrisImageSource,
+            'payableAmountDisplay' => $invoice->payableAmountDisplay,
             'isBinancePay' => $invoice->payment?->method === 'BINANCE_PAY_ID',
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),

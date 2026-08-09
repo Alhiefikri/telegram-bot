@@ -1,8 +1,14 @@
 <?php
 
+use App\Enums\KlikQrisEnvironment;
 use App\Jobs\SendDailyAdminStatsNotification;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use Illuminate\Support\Facades\Schedule;
 
+$klikQrisEnvironment = KlikQrisEnvironment::runtime();
+if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
+    Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))->everyMinute()->withoutOverlapping();
+}
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();

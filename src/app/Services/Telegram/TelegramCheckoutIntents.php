@@ -6,6 +6,8 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -23,6 +25,8 @@ class TelegramCheckoutIntents
         private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
+        private KlikQrisNativeQrisService $klikQris,
+        private KlikQrisQrisImage $klikQrisImages,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): void
@@ -64,6 +68,23 @@ class TelegramCheckoutIntents
         }
 
         $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
+    }
+
+    public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
+    {
+        $order->loadMissing('customer');
+        $transaction = $this->klikQris->ensureCreated($payment);
+        $payment->refresh();
+
+        return $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->klikQris(
+                $order,
+                $payment,
+                $this->klikQrisImages->contents($transaction),
+                $this->locale->code($order->customer),
+            ),
+        );
     }
 
     public function binancePayEnabled(): bool
@@ -168,7 +189,7 @@ class TelegramCheckoutIntents
         );
     }
 
-    private function sendPaymentInstruction(string $chatId, TelegramPaymentInstruction $instruction, array $timingContext = []): void
+    private function sendPaymentInstruction(string $chatId, TelegramPaymentInstruction $instruction, array $timingContext = []): array
     {
         $send = fn () => $this->bot->sendPhoto(
             $chatId,
@@ -179,40 +200,50 @@ class TelegramCheckoutIntents
         );
 
         if ($timingContext === []) {
-            $send();
-
-            return;
+            return $send();
         }
 
-        DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
+        return DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
     }
 
-    public function pakasirPaymentMethod(): string
+    public function pakasirPaymentMethod(?string $checkoutFlow = null): string
     {
-        return $this->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
+        return ($checkoutFlow ?? $this->pakasirCheckoutFlow()) === PakasirCheckoutFlow::API_QRIS
             ? PakasirCheckoutFlow::API_QRIS
             : PakasirCheckoutFlow::HOSTED;
+    }
+
+    /** @return array{requested: string, effective: string, pakasir_checkout_flow: string} */
+    public function providerSelection(): array
+    {
+        $settings = ManualPaymentSetting::current();
+        $requested = $settings?->paymentProvider() ?? 'manual';
+        $requestedFlow = (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
+        $checkoutFlow = $this->pakasirReadiness->checkout($requestedFlow)->checkoutFlow();
+        $effective = $requested === 'pakasir'
+            ? $this->pakasirReadiness->effectivePaymentMode($requested, $requestedFlow)
+            : $requested;
+
+        return [
+            'requested' => $requested,
+            'effective' => $effective,
+            'pakasir_checkout_flow' => $checkoutFlow,
+        ];
+    }
+
+    public function paymentMode(): string
+    {
+        return $this->providerSelection()['effective'];
+    }
+
+    public function requestedPaymentMode(): string
+    {
+        return $this->providerSelection()['requested'];
     }
 
     private function pakasirCheckoutFlow(): string
     {
         return $this->pakasirReadiness->checkout($this->requestedPakasirCheckoutFlow())->checkoutFlow();
-    }
-
-    public function paymentMode(): string
-    {
-        return $this->pakasirReadiness->effectivePaymentMode(
-            $this->requestedPaymentMode(),
-            $this->requestedPakasirCheckoutFlow(),
-        );
-    }
-
-    public function requestedPaymentMode(): string
-    {
-        $settings = ManualPaymentSetting::current();
-        $mode = (string) ($settings?->payment_mode ?: 'manual');
-
-        return $mode === 'pakasir' ? 'pakasir' : 'manual';
     }
 
     private function requestedPakasirCheckoutFlow(): string

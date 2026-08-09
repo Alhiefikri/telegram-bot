@@ -7,6 +7,9 @@ use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
@@ -20,6 +23,9 @@ class StorefrontShopPaymentStatusRefresh
         private readonly PakasirProviderAdapter $pakasir,
         private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirCallbackProcessor $processor,
+        private readonly KlikQrisProviderAdapter $klikQris,
+        private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
+        private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
@@ -65,7 +71,7 @@ class StorefrontShopPaymentStatusRefresh
             );
         }
 
-        if (! $this->isPakasirPayment($payment)) {
+        if (! $this->isAutomaticQrisPayment($payment)) {
             return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
         }
 
@@ -76,7 +82,7 @@ class StorefrontShopPaymentStatusRefresh
         $projection = $this->orders->project($order, $payment);
         if ($this->shouldRecoverQris($projection, $payment)) {
             try {
-                $this->nativeQris->ensureCreated($payment);
+                $this->ensureNativeQrisCreated($payment);
             } catch (Throwable $exception) {
                 report($exception);
                 $qrisRecoveryFailed = true;
@@ -125,7 +131,7 @@ class StorefrontShopPaymentStatusRefresh
 
             try {
                 if (! $skipProviderLookup) {
-                    $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+                    $this->processProviderReconciliation($payment);
                     $this->coordinator->markRecentlyRefreshed($payment);
                 }
             } catch (Throwable $exception) {
@@ -196,14 +202,24 @@ class StorefrontShopPaymentStatusRefresh
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
     {
-        return $this->isPakasirPayment($payment)
+        return $this->isAutomaticQrisPayment($payment)
             && $projection->isPendingPayment
             && ! $this->hasPayableNativeQris($payment);
+    }
+
+    private function isAutomaticQrisPayment(?Payment $payment): bool
+    {
+        return $this->isPakasirPayment($payment) || $this->isKlikQrisPayment($payment);
     }
 
     private function isPakasirPayment(?Payment $payment): bool
     {
         return strtolower((string) $payment?->provider) === 'pakasir';
+    }
+
+    private function isKlikQrisPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === 'klikqris';
     }
 
     private function isBinancePayment(?Payment $payment): bool
@@ -227,7 +243,29 @@ class StorefrontShopPaymentStatusRefresh
 
     private function hasPayableNativeQris(?Payment $payment): bool
     {
-        return $payment?->isPayableNativePakasirQris() === true;
+        return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
+    }
+
+    private function ensureNativeQrisCreated(Payment $payment): void
+    {
+        if ($this->isKlikQrisPayment($payment)) {
+            $this->klikQrisNativeQris->ensureCreated($payment);
+
+            return;
+        }
+
+        $this->nativeQris->ensureCreated($payment);
+    }
+
+    private function processProviderReconciliation(Payment $payment): void
+    {
+        if ($this->isKlikQrisPayment($payment)) {
+            $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQris->transactionStatus($payment));
+
+            return;
+        }
+
+        $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
     }
 
     private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState

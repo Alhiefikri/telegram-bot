@@ -59,4 +59,30 @@ class PaymentDocumentationTest extends TestCase
 
         $this->assertSame([], $violations, implode("\n", $violations));
     }
+
+    public function test_klikqris_sandbox_configuration_is_forwarded_by_shared_compose_environment(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+
+        foreach ([
+            'KLIKQRIS_SANDBOX_ENABLED',
+            'KLIKQRIS_SANDBOX_BASE_URL',
+            'KLIKQRIS_SANDBOX_API_KEY',
+            'KLIKQRIS_SANDBOX_MERCHANT_ID',
+            'KLIKQRIS_QRIS_TTL_MINUTES',
+            'KLIKQRIS_HTTP_TIMEOUT_SECONDS',
+            'KLIKQRIS_HTTP_CONNECT_TIMEOUT_SECONDS',
+            'KLIKQRIS_STATUS_MAX_ATTEMPTS',
+            'KLIKQRIS_STATUS_RETRY_DELAY_MS',
+            'KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE',
+            'KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE',
+        ] as $variable) {
+            $this->assertStringContainsString(
+                '  '.$variable.': ${'.$variable,
+                $sharedAppEnvironment,
+                $variable.' must be forwarded to app and scheduler containers.',
+            );
+        }
+    }
 }

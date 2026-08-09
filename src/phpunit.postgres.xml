@@ -14,6 +14,8 @@
             <file>tests/Feature/Telegram/CartCheckoutTest.php</file>
             <file>tests/Feature/Telegram/PaymentProofAdminCallbackTest.php</file>
             <file>tests/Feature/AdminOrderPaymentOperationsTest.php</file>
+            <file>tests/Feature/KlikQrisNativeQrisTest.php</file>
+            <file>tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php</file>
         </testsuite>
     </testsuites>
     <source>

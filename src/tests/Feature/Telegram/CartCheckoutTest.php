@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Cart;
@@ -22,12 +23,15 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelection;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\QrisTestPayload;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -267,6 +271,51 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(2, Order::count());
         $this->assertSame(2, Payment::count());
         $this->assertSame(2, $product->fresh()->reserved_stock);
+    }
+
+    public function test_telegram_dispatches_klik_qris_checkout_intent_without_pakasir_or_manual_instruction_jobs(): void
+    {
+        Queue::fake([
+            SendKlikQrisCheckoutInstructions::class,
+            SendManualCheckoutNotifications::class,
+            SendPakasirCheckoutInstructions::class,
+        ]);
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $this->app->bind(
+            TelegramCheckoutPaymentIntentSelector::class,
+            fn () => new class implements TelegramCheckoutPaymentIntentSelector
+            {
+                public function select(bool $binance): TelegramCheckoutPaymentIntentSelection
+                {
+                    KlikQrisSandboxScenarios::configureReadySandbox();
+
+                    return new TelegramCheckoutPaymentIntentSelection(
+                        requestedPaymentMode: 'klikqris',
+                        paymentMode: 'klikqris',
+                        paymentIntent: CheckoutPaymentIntents::klikQris(),
+                    );
+                }
+            },
+        );
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $product = Product::factory()->create(['name' => 'Supported KlikQRIS', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(6261, 'supported-klikqris', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99021))->assertOk();
+
+        $order = Order::query()->sole();
+        $payment = Payment::query()->sole();
+        $this->assertSame('klikqris', $payment->provider);
+        $this->assertSame(CartStatus::CheckedOut, Cart::query()->sole()->status);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushedOn(
+            'telegram-outbound',
+            SendKlikQrisCheckoutInstructions::class,
+            fn (SendKlikQrisCheckoutInstructions $job): bool => $job->orderId === $order->id,
+        );
+        Queue::assertNotPushed(SendPakasirCheckoutInstructions::class);
+        Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
     public function test_duplicate_direct_binance_quantity_callbacks_share_one_checkout_intent(): void

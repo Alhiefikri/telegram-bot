@@ -20,8 +20,10 @@ use App\Models\Product;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class CoreSchemaAndModelCastsTest extends TestCase
@@ -46,6 +48,28 @@ class CoreSchemaAndModelCastsTest extends TestCase
         $payment = Payment::factory()->create(['order_id' => $order->id, 'currency' => 'USDT']);
 
         $this->assertSame('USDT', $payment->fresh()->currency);
+    }
+
+    public function test_payment_merchant_ref_provider_scope_migration_down_fails_fast_when_global_refs_are_duplicated(): void
+    {
+        Payment::factory()->create(['provider' => 'pakasir', 'merchant_ref' => 'SHARED-ROLLBACK-REF']);
+        Payment::factory()->create(['provider' => 'klikqris', 'merchant_ref' => 'SHARED-ROLLBACK-REF']);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Cannot safely roll back payments merchant_ref uniqueness');
+
+        $this->paymentMerchantRefScopeMigration()->down();
+    }
+
+    public function test_payment_merchant_ref_provider_scope_migration_down_restores_global_unique_index_without_duplicates(): void
+    {
+        Payment::factory()->create(['provider' => 'pakasir', 'merchant_ref' => 'PAKASIR-ROLLBACK-REF']);
+        Payment::factory()->create(['provider' => 'klikqris', 'merchant_ref' => 'KLIKQRIS-ROLLBACK-REF']);
+
+        $this->paymentMerchantRefScopeMigration()->down();
+
+        $this->assertContains('payments_merchant_ref_unique', $this->paymentIndexNames());
+        $this->assertNotContains('payments_provider_merchant_ref_unique', $this->paymentIndexNames());
     }
 
     public function test_uuid_models_persist_with_uuid_primary_keys(): void
@@ -103,5 +127,18 @@ class CoreSchemaAndModelCastsTest extends TestCase
         $this->assertTrue($customer->telegramUpdates->contains($update));
         $this->assertSame($user->id, $audit->user->id);
         $this->assertSame(CartStatus::Active, $cart->status);
+    }
+
+    private function paymentMerchantRefScopeMigration(): object
+    {
+        return require database_path('migrations/2026_07_28_124810_scope_payment_merchant_ref_uniqueness_to_provider.php');
+    }
+
+    /** @return list<string> */
+    private function paymentIndexNames(): array
+    {
+        return collect(DB::select('PRAGMA index_list(payments)'))
+            ->pluck('name')
+            ->all();
     }
 }

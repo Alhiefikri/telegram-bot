@@ -41,7 +41,10 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('name="pakasir_checkout_flow" value="hosted"', false)
             ->assertSee('name="pakasir_checkout_flow" value="api_qris"', false);
 
-        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
+        $this->post(route('admin.payment-mode.update'), [
+            'payment_mode' => 'manual',
+            'confirm_provider_switch' => '1',
+        ])
             ->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
@@ -50,7 +53,7 @@ class AdminDashboardPaymentModeTest extends TestCase
             'is_active' => true,
         ]);
         $this->assertDatabaseHas('audit_logs', [
-            'action' => 'payment_mode.updated',
+            'action' => 'payment_provider.switched',
             'subject_type' => ManualPaymentSetting::class,
             'subject_id' => (string) $setting->id,
         ]);
@@ -81,6 +84,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->post(route('admin.payment-mode.update'), [
             'payment_mode' => 'pakasir',
             'pakasir_checkout_flow' => 'api_qris',
+            'confirm_provider_switch' => '1',
         ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
@@ -90,7 +94,7 @@ class AdminDashboardPaymentModeTest extends TestCase
             'is_active' => true,
         ]);
         $this->assertDatabaseHas('audit_logs', [
-            'action' => 'payment_mode.updated',
+            'action' => 'payment_provider.switched',
             'subject_type' => ManualPaymentSetting::class,
             'subject_id' => (string) $setting->id,
         ]);
@@ -98,7 +102,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->get('/admin')
             ->assertOk()
             ->assertSee('Pakasir native QRIS aktif')
-            ->assertSee('QR payment_number dikirim di Telegram');
+            ->assertSee('Paid tetap diverifikasi melalui status provider');
     }
 
     public function test_owner_can_toggle_binance_pay_while_pakasir_mode_is_active(): void
@@ -128,6 +132,7 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->from('/admin?tab=stats')
             ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'binance_settings',
                 'payment_mode' => 'pakasir',
                 'pakasir_checkout_flow' => 'api_qris',
                 'binance_pay_enabled' => '1',
@@ -167,6 +172,7 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertDontSee('transaksi canary admin');
 
         $this->post(route('admin.payment-mode.update'), [
+            'update_scope' => 'binance_verification',
             'payment_mode' => 'manual',
             'binance_verification_mode' => 'order_id',
         ])->assertRedirect('/admin?tab=stats#admin-payment-settings')
@@ -190,6 +196,7 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->from('/admin?tab=stats')
             ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'binance_verification',
                 'payment_mode' => 'manual',
                 'binance_verification_mode' => 'order_id',
             ])
@@ -213,6 +220,7 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->from('/admin?tab=stats')
             ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'binance_verification',
                 'payment_mode' => 'manual',
                 'binance_verification_mode' => 'order_id',
             ])
@@ -261,6 +269,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         ]);
 
         $this->post(route('admin.payment-mode.update'), [
+            'update_scope' => 'binance_settings',
             'payment_mode' => 'manual',
             'qris_payment_ttl_minutes' => 7,
             'binance_payment_ttl_minutes' => 25,
@@ -318,6 +327,7 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->from('/admin?tab=stats')
             ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'binance_settings',
                 'payment_mode' => 'manual',
                 'qris_payment_ttl_minutes' => 0,
                 'binance_payment_ttl_minutes' => 'twenty',
@@ -358,9 +368,8 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Manual /payment aktif — Pakasir belum siap')
-            ->assertSee('Mode tersimpan meminta Pakasir, tapi checkout baru dialihkan ke QR manual sampai konfigurasi Pakasir siap.')
-            ->assertSee('Mode Pakasir belum siap. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment. Checkout baru akan memakai QR manual sampai diperbaiki.')
+            ->assertSee('Mode tersimpan meminta Pakasir, tetapi checkout baru ditahan sampai readiness Pakasir pulih.')
+            ->assertSee('Provider Pakasir belum siap. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment.')
             ->assertSee('PAKASIR BELUM SIAP')
             ->assertDontSee('Pakasir hosted aktif');
     }
@@ -383,20 +392,22 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Manual /payment aktif — Pakasir belum siap')
-            ->assertSee('Mode Pakasir belum siap. pakasir_checkout_flow must be one of: hosted, api_qris. Checkout baru akan memakai QR manual sampai diperbaiki.')
+            ->assertSee('Mode tersimpan meminta Pakasir, tetapi checkout baru ditahan sampai readiness Pakasir pulih.')
+            ->assertSee('Provider Pakasir belum siap. pakasir_checkout_flow must be one of: hosted, api_qris.')
             ->assertDontSee('Pakasir hosted aktif');
     }
 
     public function test_payment_mode_toggle_creates_active_setting_when_none_exists(): void
     {
         $this->actingAs(User::factory()->create([
-            'role' => UserRole::Admin,
+            'role' => UserRole::Owner,
         ]));
-
         $this->assertSame(0, ManualPaymentSetting::query()->count());
 
-        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'manual'])
+        $this->post(route('admin.payment-mode.update'), [
+            'payment_mode' => 'manual',
+            'confirm_provider_switch' => '1',
+        ])
             ->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $this->assertDatabaseHas('manual_payment_settings', [
@@ -408,11 +419,13 @@ class AdminDashboardPaymentModeTest extends TestCase
     public function test_payment_mode_validation_uses_payment_mode_error_bag_and_stats_tab(): void
     {
         $this->actingAs(User::factory()->create([
-            'role' => UserRole::Admin,
+            'role' => UserRole::Owner,
         ]));
-
         $this->from('/admin?tab=stats')
-            ->post(route('admin.payment-mode.update'), ['payment_mode' => 'unknown'])
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'unknown',
+                'confirm_provider_switch' => '1',
+            ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
 

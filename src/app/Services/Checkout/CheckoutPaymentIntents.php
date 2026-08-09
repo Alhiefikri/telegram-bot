@@ -21,4 +21,9 @@ final class CheckoutPaymentIntents
     {
         return new PakasirCheckoutIntent($checkoutFlow, $deadline);
     }
+
+    public static function klikQris(?CarbonInterface $deadline = null): KlikQrisCheckoutIntent
+    {
+        return new KlikQrisCheckoutIntent($deadline);
+    }
 }

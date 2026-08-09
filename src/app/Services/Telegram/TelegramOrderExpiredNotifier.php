@@ -59,7 +59,6 @@ class TelegramOrderExpiredNotifier
                 '',
                 $this->locale->text($order->customer, 'Admin akan mengecek pembayaran terlambat secara manual. Stok tidak dikunci ulang otomatis.', 'The admin will review the late payment manually. Stock is not reserved again automatically.'),
             ];
-
             $replyMarkup = [];
         } else {
             $lines = [
@@ -73,8 +72,11 @@ class TelegramOrderExpiredNotifier
                 '',
                 $this->locale->text($order->customer, 'Tenang, kamu masih bisa order ulang kapan aja.', 'You can place a new order anytime.'),
             ];
+            $buttonText = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === 'klikqris')
+                ? $this->locale->text($order->customer, '🔄 Buat QRIS Baru', '🔄 Create New QRIS')
+                : $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again');
             $replyMarkup = [
-                'inline_keyboard' => [[['text' => $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again'), 'callback_data' => 'katalog']]],
+                'inline_keyboard' => [[['text' => $buttonText, 'callback_data' => 'katalog']]],
             ];
         }
 

@@ -3,20 +3,25 @@
 namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Support\Money;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
 
 final class AdminDashboardStatsData
 {
     public function __construct(
         private readonly PakasirProviderReadiness $pakasirReadiness,
+        private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SalesProofPostNumbering $salesProofNumbers,
         private readonly PaymentReceiptReport $receiptReport,
     ) {}
@@ -115,55 +120,103 @@ final class AdminDashboardStatsData
     private function paymentControl(User $user): array
     {
         $settings = ManualPaymentSetting::current();
-        $requestedMode = (string) ($settings?->payment_mode ?: 'manual');
-        $requestedMode = $requestedMode === 'pakasir' ? 'pakasir' : 'manual';
+        $requestedMode = $settings?->paymentProvider() ?? PaymentProvider::MANUAL;
         $requestedCheckoutFlow = (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
-        $readiness = $this->pakasirReadiness->checkout($requestedCheckoutFlow);
-        $checkoutFlow = $readiness->checkoutFlow();
-        $isPakasirConfigured = $readiness->isReady();
-        $isPakasirEnabled = $requestedMode === 'pakasir' && $isPakasirConfigured;
-        $isPakasirRequestedButUnavailable = $requestedMode === 'pakasir' && ! $isPakasirConfigured;
+        $pakasirReadiness = $this->pakasirReadiness->checkout($requestedCheckoutFlow);
+        $klikQrisReadiness = $this->klikQrisReadiness->checkout();
+        $checkoutFlow = $pakasirReadiness->checkoutFlow();
+        $isPakasirConfigured = $pakasirReadiness->isReady();
+        $isKlikQrisConfigured = $klikQrisReadiness->isReady();
+        $isPakasirEnabled = $requestedMode === PaymentProvider::PAKASIR && $isPakasirConfigured;
+        $isKlikQrisEnabled = $requestedMode === PaymentProvider::KLIKQRIS && $isKlikQrisConfigured;
+        $isPakasirRequestedButUnavailable = $requestedMode === PaymentProvider::PAKASIR && ! $isPakasirConfigured;
+        $isKlikQrisRequestedButUnavailable = $requestedMode === PaymentProvider::KLIKQRIS && ! $isKlikQrisConfigured;
+        $effectiveMode = $isPakasirRequestedButUnavailable ? PaymentProvider::MANUAL : $requestedMode;
 
-        $pakasirFlowLabel = $checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'native QRIS' : 'hosted';
         $label = match (true) {
+            $isKlikQrisEnabled => 'KlikQRIS aktif',
+            $isKlikQrisRequestedButUnavailable => 'KlikQRIS aktif — belum siap',
             $isPakasirRequestedButUnavailable => 'Manual /payment aktif — Pakasir belum siap',
-            ! $isPakasirEnabled => 'Manual /payment aktif',
-            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Pakasir native QRIS aktif',
-            default => 'Pakasir hosted aktif',
+            $isPakasirEnabled && $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Pakasir native QRIS aktif',
+            $isPakasirEnabled => 'Pakasir hosted aktif',
+            default => 'Manual /payment aktif',
         };
         $hint = match (true) {
-            $isPakasirRequestedButUnavailable => 'Mode tersimpan meminta Pakasir, tapi checkout baru dialihkan ke QR manual sampai konfigurasi Pakasir siap.',
-            ! $isPakasirEnabled => 'Provider manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
-            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Provider Pakasir / native QRIS: QR payment_number dikirim di Telegram, tombol hosted tetap jadi fallback, dan paid tetap diverifikasi via Transaction Detail.',
-            default => 'Provider Pakasir / hosted: customer memakai QR/link website Pakasir, dan paid tetap diverifikasi via Transaction Detail.',
+            $isKlikQrisEnabled => 'Provider KlikQRIS untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
+            $isKlikQrisRequestedButUnavailable => 'KlikQRIS tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness atau rollback eksplisit ke provider lain.',
+            $isPakasirRequestedButUnavailable => 'Mode tersimpan meminta Pakasir, tetapi checkout baru ditahan sampai readiness Pakasir pulih.',
+            $isPakasirEnabled && $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'Provider Pakasir native QRIS. Paid tetap diverifikasi melalui status provider dan payment lama tidak berubah.',
+            $isPakasirEnabled => 'Provider Pakasir hosted. Paid tetap diverifikasi melalui status provider dan payment lama tidak berubah.',
+            default => 'Provider Manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
         };
         $statusBadge = match (true) {
+            $isKlikQrisEnabled => 'KLIKQRIS',
+            $isKlikQrisRequestedButUnavailable => 'KLIKQRIS BELUM SIAP',
             $isPakasirRequestedButUnavailable => 'PAKASIR BELUM SIAP',
-            ! $isPakasirEnabled => 'MANUAL',
-            $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'NATIVE QRIS',
-            default => 'HOSTED',
+            $isPakasirEnabled && $checkoutFlow === PakasirCheckoutFlow::API_QRIS => 'NATIVE QRIS',
+            $isPakasirEnabled => 'HOSTED',
+            default => 'MANUAL',
         };
-        $canEnablePakasir = $isPakasirConfigured;
+        $providers = [
+            PaymentProvider::MANUAL => [
+                'label' => PaymentProvider::label(PaymentProvider::MANUAL),
+                'ready' => true,
+                'reason' => 'Jalur darurat selalu tersedia.',
+                'can_activate' => true,
+            ],
+            PaymentProvider::PAKASIR => [
+                'label' => PaymentProvider::label(PaymentProvider::PAKASIR),
+                'ready' => $isPakasirConfigured,
+                'reason' => $isPakasirConfigured ? null : $pakasirReadiness->configurationMessage(),
+                'can_activate' => $isPakasirConfigured,
+            ],
+            PaymentProvider::KLIKQRIS => [
+                'label' => PaymentProvider::label(PaymentProvider::KLIKQRIS),
+                'ready' => $isKlikQrisConfigured,
+                'reason' => $isKlikQrisConfigured ? null : $klikQrisReadiness->configurationMessage(),
+                'can_activate' => $isKlikQrisConfigured,
+            ],
+        ];
+        $pending = $this->pendingPayments();
 
         return [
-            'mode' => $isPakasirEnabled ? 'pakasir' : 'manual',
+            'mode' => $effectiveMode,
+            'effective_mode' => $effectiveMode,
             'requested_mode' => $requestedMode,
+            'active_provider_label' => PaymentProvider::label($requestedMode),
             'checkout_flow' => $checkoutFlow,
             'requested_checkout_flow' => $requestedCheckoutFlow,
-            'checkout_flow_label' => $pakasirFlowLabel,
+            'checkout_flow_label' => $checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'native QRIS' : 'hosted',
             'is_pakasir_enabled' => $isPakasirEnabled,
             'is_pakasir_configured' => $isPakasirConfigured,
-            'can_enable_pakasir' => $canEnablePakasir,
-            'pakasir_config_missing' => $readiness->missing(),
-            'pakasir_config_invalid' => array_keys($readiness->invalid()),
-            'pakasir_guard_message' => $canEnablePakasir
+            'can_enable_pakasir' => $isPakasirConfigured,
+            'is_klikqris_enabled' => $isKlikQrisEnabled,
+            'is_klikqris_configured' => $isKlikQrisConfigured,
+            'can_enable_klikqris' => $isKlikQrisConfigured,
+            'pakasir_config_missing' => $pakasirReadiness->missing(),
+            'pakasir_config_invalid' => array_keys($pakasirReadiness->invalid()),
+            'pakasir_guard_message' => $isPakasirConfigured
                 ? null
-                : 'Mode Pakasir belum siap. '.$readiness->configurationMessage().' Checkout baru akan memakai QR manual sampai diperbaiki.',
+                : 'Provider Pakasir belum siap. '.$pakasirReadiness->configurationMessage(),
+            'klikqris_config_missing' => $klikQrisReadiness->missing(),
+            'klikqris_config_invalid' => array_keys($klikQrisReadiness->invalid()),
+            'klikqris_guard_message' => $isKlikQrisConfigured
+                ? null
+                : 'Provider KlikQRIS belum siap. '.$klikQrisReadiness->configurationMessage(),
+            'providers' => $providers,
+            'pending_by_provider' => $pending['counts'],
+            'oldest_pending_by_provider' => $pending['oldest'],
+            'switch_audit' => $this->switchAudits(),
+            'pakasir_cutoff' => $this->pakasirCutoff(),
             'label' => $label,
             'hint' => $hint,
-            'tone' => $isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber',
+            'tone' => $isKlikQrisEnabled ? 'purple' : ($isPakasirEnabled ? ($checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'purple' : 'emerald') : 'amber'),
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'can_switch_provider' => (bool) $user->role?->canSwitchPaymentProvider(),
+            'provider_switch_guard_message' => $user->role?->canSwitchPaymentProvider()
+                ? null
+                : 'Hanya owner yang bisa mengganti provider aktif.',
             'binance_pay_enabled' => (bool) $settings?->binance_pay_enabled,
             'binance_verification_mode' => in_array($settings?->binance_verification_mode, ['amount_unique', 'order_id'], true)
                 ? $settings->binance_verification_mode
@@ -179,6 +232,65 @@ final class AdminDashboardStatsData
             'status_badge' => [
                 'label' => $statusBadge,
             ],
+        ];
+    }
+
+    /** @return array{counts: array<string, int>, oldest: array<string, ?string>} */
+    private function pendingPayments(): array
+    {
+        $counts = [];
+        $oldest = [];
+        foreach (PaymentProvider::allowed() as $provider) {
+            $query = Payment::query()
+                ->where('provider', $provider)
+                ->where('status', PaymentStatus::Pending);
+            $counts[$provider] = (clone $query)->count();
+            $oldestCreatedAt = (clone $query)->oldest('created_at')->value('created_at');
+            $oldest[$provider] = $oldestCreatedAt === null
+                ? null
+                : Carbon::parse((string) $oldestCreatedAt)->timezone((string) config('app.timezone'))->format('d M Y H:i');
+        }
+
+        return ['counts' => $counts, 'oldest' => $oldest];
+    }
+
+    /** @return list<array{actor: string, at: ?string, old_provider: string, new_provider: string}> */
+    private function switchAudits(): array
+    {
+        return AuditLog::query()
+            ->with('user')
+            ->where('action', 'payment_provider.switched')
+            ->latest('created_at')
+            ->limit(5)
+            ->get()
+            ->map(static function (AuditLog $audit): array {
+                $oldProvider = PaymentProvider::normalize($audit->old_values['provider'] ?? 'manual');
+                $newProvider = PaymentProvider::normalize($audit->new_values['provider'] ?? 'manual');
+
+                return [
+                    'actor' => (string) ($audit->user?->name ?: $audit->user?->email ?: 'Unknown'),
+                    'at' => $audit->created_at?->toIso8601String(),
+                    'old_provider' => PaymentProvider::label($oldProvider),
+                    'new_provider' => PaymentProvider::label($newProvider),
+                ];
+            })
+            ->all();
+    }
+
+    /** @return array{date: string, is_past: bool, days_remaining: int, message: string} */
+    private function pakasirCutoff(): array
+    {
+        $cutoff = Carbon::create(2026, 8, 15, 0, 0, 0, (string) config('app.timezone'));
+        $hoursRemaining = (int) now()->diffInHours($cutoff, false);
+        $isPast = $hoursRemaining < 0;
+
+        return [
+            'date' => $cutoff->toDateString(),
+            'is_past' => $isPast,
+            'days_remaining' => $isPast ? 0 : (int) ceil($hoursRemaining / 24),
+            'message' => $isPast
+                ? 'Batas operasional Pakasir telah lewat. Matikan Pakasir secara manual setelah payment lama terminal.'
+                : 'Pakasir akan dihentikan manual sebelum 15 Agustus 2026; tidak ada cutoff otomatis.',
         ];
     }
 

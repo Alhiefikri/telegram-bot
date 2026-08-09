@@ -3,10 +3,12 @@
 namespace App\Console\Commands;
 
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramReceipt;
@@ -53,31 +55,58 @@ class RecoverTelegramOutboundEffects extends Command
         Order::query()
             ->whereNull('manual_checkout_customer_notified_at')
             ->where('manual_checkout_customer_notification_started_at', '<=', $cutoff)
+            ->where('order_status', 'pending_payment')
+            ->where(function ($query): void {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()
-                        ? SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString())
-                        : SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
+                    if ($order->payments()->where('provider', 'klikqris')->exists()) {
+                        $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } elseif ($order->payments()->where('method', 'BINANCE_PAY_ID')->exists()) {
+                        $job = SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString());
+                    } else {
+                        $job = SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
+                    }
                     $job->onQueue((string) $this->option('queue'));
                     $dispatched++;
                 }
             });
 
         Order::query()
-            ->whereNotNull('manual_checkout_customer_notification_message_id')
-            ->whereNull('manual_checkout_customer_notification_deleted_at')
-            ->where(function ($query) use ($cutoff): void {
-                $query->whereNull('manual_checkout_customer_notification_deletion_started_at')
-                    ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
+            ->where(function ($query): void {
+                $query->whereNotNull('telegram_receipt_sent_at')
+                    ->orWhere('order_status', 'cancelled')
+                    ->orWhereHas('payments', fn ($payments) => $payments->where('method', 'BINANCE_PAY_ID'));
             })
-            ->whereHas('payments', fn ($payments) => $payments->where('method', 'BINANCE_PAY_ID'))
             ->whereIn('order_status', ['completed', 'cancelled'])
+            ->where(function ($query) use ($cutoff): void {
+                $query->where(function ($checkout) use ($cutoff): void {
+                    $checkout->whereNotNull('manual_checkout_customer_notification_message_id')
+                        ->whereNull('manual_checkout_customer_notification_deleted_at')
+                        ->where(function ($claim) use ($cutoff): void {
+                            $claim->whereNull('manual_checkout_customer_notification_deletion_started_at')
+                                ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
+                        });
+                })->orWhere(function ($detail) use ($cutoff): void {
+                    $detail->whereNotNull('buyer_order_detail_message_id')
+                        ->whereNull('buyer_order_detail_message_deleted_at')
+                        ->where(function ($claim) use ($cutoff): void {
+                            $claim->whereNull('buyer_order_detail_message_deletion_started_at')
+                                ->orWhere('buyer_order_detail_message_deletion_started_at', '<=', $cutoff);
+                        });
+                });
+            })
             ->select('id')
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
+                    $job = $order->payments()->where('method', 'BINANCE_PAY_ID')->exists()
+                        ? DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
+                        : DeleteBuyerCheckoutMessages::dispatch($order->id, now()->toISOString());
+                    $job
                         ->onQueue((string) $this->option('queue'));
                     $dispatched++;
                 }

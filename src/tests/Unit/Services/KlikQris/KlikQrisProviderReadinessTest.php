@@ -1,0 +1,251 @@
+<?php
+
+namespace Tests\Unit\Services\KlikQris;
+
+use App\Enums\KlikQrisEnvironment;
+use App\Enums\PaymentStatus;
+use App\Models\Payment;
+use App\Services\KlikQris\KlikQrisCheckoutSelector;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
+use Tests\Support\KlikQrisSandboxScenarios;
+use Tests\Support\QrisTestPayload;
+use Tests\TestCase;
+
+class KlikQrisProviderReadinessTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_sandbox_is_ready_only_when_enabled_with_complete_sandbox_configuration_outside_production(): void
+    {
+        $this->configureReadySandbox();
+
+        $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandbox()->isReady());
+        $this->assertTrue(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_production_environment_can_never_enable_sandbox_checkout(): void
+    {
+        $this->app['env'] = 'production';
+        config()->set('app.env', 'production');
+        config()->set('services.klikqris.sandbox_enabled', true);
+        config()->set('services.klikqris.sandbox_base_url', 'https://klikqris.com/api/sandbox');
+        config()->set('services.klikqris.sandbox_api_key', 'test-only-key');
+        config()->set('services.klikqris.sandbox_merchant_id', 'merchant-test');
+        config()->set('services.klikqris.qris_ttl_minutes', 15);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('APP_ENV', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_production_is_ready_only_from_production_configuration_in_production(): void
+    {
+        KlikQrisSandboxScenarios::configureReadyProduction();
+
+        $report = app(KlikQrisProviderReadiness::class)->production();
+
+        $this->assertTrue($report->isReady());
+        $this->assertTrue(app(KlikQrisProviderReadiness::class)->productionSchedulingEnabled());
+        $this->assertFalse(app(KlikQrisProviderReadiness::class)->sandbox()->isReady());
+    }
+
+    public function test_production_readiness_rejects_untrusted_production_urls(): void
+    {
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        config()->set('services.klikqris.production_base_url', 'http://evil.example.test/api');
+        config()->set('services.klikqris.production_callback_url', 'https://evil.example.test/api/webhook/klikqris');
+
+        $report = app(KlikQrisProviderReadiness::class)->production();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_PRODUCTION_BASE_URL_SCHEME', $report->problemLabels());
+        $this->assertContains('KLIKQRIS_PRODUCTION_CALLBACK_URL_HOST', $report->problemLabels());
+    }
+
+    public function test_production_readiness_rejects_non_string_urls(): void
+    {
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        config()->set('services.klikqris.production_base_url', true);
+        config()->set('services.klikqris.production_callback_url', false);
+
+        $report = app(KlikQrisProviderReadiness::class)->production();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_PRODUCTION_BASE_URL_FORMAT', $report->problemLabels());
+        $this->assertContains('KLIKQRIS_PRODUCTION_CALLBACK_URL_FORMAT', $report->problemLabels());
+    }
+
+    public function test_sandbox_selector_is_disabled_when_callback_route_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        app('router')->setRoutes(new RouteCollection);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_CALLBACK_ROUTE', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_sandbox_selector_is_disabled_when_queue_connection_is_not_operationally_configured(): void
+    {
+        $this->configureReadySandbox();
+        config()->set('queue.default', 'sync');
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('QUEUE_CONNECTION', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_sandbox_selector_is_disabled_when_queue_schema_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        Schema::dropIfExists('jobs');
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('QUEUE_JOBS_TABLE', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_sandbox_selector_is_disabled_when_reconciliation_scheduler_is_missing(): void
+    {
+        $this->configureReadySandbox();
+        config()->set('services.klikqris.reconciliation_command', null);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_RECONCILIATION_SCHEDULE', $report->problemLabels());
+        $this->assertFalse(app(KlikQrisProviderReadiness::class)->sandboxSchedulingEnabled());
+        $this->assertFalse(app(KlikQrisCheckoutSelector::class)->enabled(KlikQrisEnvironment::Sandbox));
+    }
+
+    public function test_sandbox_reports_disabled_missing_credentials_wrong_url_and_invalid_ttl(): void
+    {
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => false,
+            'sandbox_base_url' => 'http://evil.example.test/api/sandbox/',
+            'sandbox_api_key' => '',
+            'sandbox_merchant_id' => '   ',
+            'qris_ttl_minutes' => 4,
+        ]);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertSame([
+            'KLIKQRIS_SANDBOX_ENABLED',
+            'KLIKQRIS_SANDBOX_API_KEY',
+            'KLIKQRIS_SANDBOX_MERCHANT_ID',
+            'KLIKQRIS_SANDBOX_BASE_URL_SCHEME',
+            'KLIKQRIS_SANDBOX_BASE_URL_HOST',
+            'KLIKQRIS_QRIS_TTL_MINUTES',
+        ], $report->problemLabels());
+        $this->assertStringContainsString('KLIKQRIS_SANDBOX_API_KEY', $report->configurationMessage());
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('KlikQRIS sandbox is not ready.');
+
+        $report->assertReady('KlikQRIS sandbox is not ready.');
+    }
+
+    private function configureReadySandbox(): void
+    {
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://klikqris.com/api/sandbox',
+            'sandbox_api_key' => 'test-only-key',
+            'sandbox_merchant_id' => 'merchant-test',
+            'qris_ttl_minutes' => 15,
+            'status_retry_delay_ms' => 0,
+            'reconciliation_command' => 'klikqris:reconcile --chunk=100',
+        ]);
+        config()->set('queue.default', 'database');
+    }
+
+    public function test_sandbox_rejects_base_url_paths_other_than_api_sandbox_after_normalization(): void
+    {
+        config()->set('services.klikqris', [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://klikqris.com/api/live/',
+            'sandbox_api_key' => 'test-only-key',
+            'sandbox_merchant_id' => 'merchant-test',
+            'qris_ttl_minutes' => 15,
+        ]);
+
+        $report = app(KlikQrisProviderReadiness::class)->sandbox();
+
+        $this->assertFalse($report->isReady());
+        $this->assertContains('KLIKQRIS_SANDBOX_BASE_URL_PATH', $report->problemLabels());
+    }
+
+    public function test_native_klikqris_helpers_use_payload_qris_metadata_and_payment_deadline(): void
+    {
+        $payment = Payment::factory()->make([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'provider_payload' => [
+                'qris_url' => '  https://klikqris.com/storage/sandbox/qris_sandbox-123.png  ',
+            ],
+            'amount' => 10000,
+            'provider_total_payment' => 10025,
+            'provider_expires_at' => now()->addMinutes(10),
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->assertTrue($payment->isNativeKlikQris());
+        $this->assertTrue($payment->isPayableNativeKlikQris());
+        $this->assertSame('https://klikqris.com/storage/sandbox/qris_sandbox-123.png', $payment->klikQrisQrisUrl());
+        $this->assertSame('IDR 10,025.00', $payment->klikQrisTotalAmountDisplay());
+    }
+
+    public function test_native_klikqris_is_not_payable_without_pending_status_valid_amount_or_unexpired_deadline(): void
+    {
+        $basePayment = [
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'provider_payload' => ['qris_url' => 'https://klikqris.com/storage/sandbox/qris_sandbox-123.png'],
+            'amount' => 10000,
+            'provider_total_payment' => 9999,
+            'provider_expires_at' => now()->addMinutes(10),
+            'status' => PaymentStatus::Pending,
+        ];
+
+        $this->assertFalse(Payment::factory()->make($basePayment)->isPayableNativeKlikQris());
+        $this->assertFalse(Payment::factory()->make(array_merge($basePayment, [
+            'provider_total_payment' => 10000,
+            'provider_expires_at' => now()->subMinute(),
+        ]))->isPayableNativeKlikQris());
+        $this->assertFalse(Payment::factory()->make(array_merge($basePayment, [
+            'provider_total_payment' => 10000,
+            'provider_expires_at' => now()->addMinute(),
+            'status' => PaymentStatus::Paid,
+        ]))->isPayableNativeKlikQris());
+    }
+
+    public function test_pakasir_native_qris_behavior_is_unchanged(): void
+    {
+        $payment = Payment::factory()->make([
+            'provider' => 'pakasir',
+            'provider_payment_method' => 'qris',
+            'provider_payment_number' => QrisTestPayload::forAmount(10_380),
+            'provider_payment_number_hash' => hash('sha256', QrisTestPayload::forAmount(10_380)),
+            'provider_fee' => 380,
+            'amount' => 10_000,
+            'provider_total_payment' => 10_380,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->assertTrue($payment->isNativePakasirQris());
+        $this->assertTrue($payment->isPayableNativePakasirQris());
+    }
+}

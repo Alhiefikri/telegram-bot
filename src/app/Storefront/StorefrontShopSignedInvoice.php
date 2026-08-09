@@ -56,6 +56,8 @@ class StorefrontShopSignedInvoice
             qrisReadinessMessage: $qrisReadiness['message'],
             qrisRetryLabel: $qrisReadiness['retry_label'],
             qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
+            qrisImageSource: $this->qrisImageSource($projection, $payment),
+            payableAmountDisplay: $payment?->isPayableNativeKlikQris() === true ? $payment->klikQrisTotalAmountDisplay() : null,
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
             accountGroups: $accountGroups,
             usageGuides: $state === StorefrontShopSignedInvoiceState::Paid
@@ -113,11 +115,24 @@ class StorefrontShopSignedInvoice
 
     private function qrisImageDataUri(OrderLifecycleProjection $projection, ?Payment $payment): ?string
     {
-        if (! $projection->isPendingPayment || ! $this->hasPayableNativeQris($payment)) {
+        if (! $projection->isPendingPayment || $payment?->isPayableNativePakasirQris() !== true) {
             return null;
         }
 
         return 'data:image/png;base64,'.base64_encode($this->qrCodes->png($payment->provider_payment_number));
+    }
+
+    private function qrisImageSource(OrderLifecycleProjection $projection, ?Payment $payment): ?string
+    {
+        if (! $projection->isPendingPayment || ! $this->hasPayableNativeQris($payment)) {
+            return null;
+        }
+
+        if ($payment?->isPayableNativeKlikQris() === true) {
+            return $payment->klikQrisQrisUrl();
+        }
+
+        return $this->qrisImageDataUri($projection, $payment);
     }
 
     private function hostedPaymentUrl(OrderLifecycleProjection $projection, ?Payment $payment): ?string
@@ -201,7 +216,7 @@ class StorefrontShopSignedInvoice
 
     private function hasPayableNativeQris(?Payment $payment): bool
     {
-        return $payment?->isPayableNativePakasirQris() === true;
+        return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
     }
 
     /**
