@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Support\PaymentProvider;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -138,8 +139,8 @@ class TelegramBuyerCheckoutInstructionCleaner
                 || ($prefix === 'manual_checkout_customer_notification' && ! Payment::query()
                     ->where('order_id', $target->id)
                     ->where(fn ($query) => $query
-                        ->where(fn ($binance) => $binance->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID'))
-                        ->orWhere('provider', 'klikqris'))
+                        ->where(fn ($binance) => $binance->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'))
+                        ->orWhere('provider', PaymentProvider::KLIKQRIS))
                     ->exists())) {
                 return null;
             }

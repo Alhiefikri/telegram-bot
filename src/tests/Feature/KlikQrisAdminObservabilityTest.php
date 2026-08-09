@@ -151,4 +151,57 @@ class KlikQrisAdminObservabilityTest extends TestCase
             $html,
         );
     }
+
+    public function test_admin_order_detail_shows_only_the_safe_unknown_callback_condition_and_token(): void
+    {
+        $this->withoutVite();
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        KlikQrisSandboxScenarios::configureReadySandbox();
+
+        $order = Order::factory()->create([
+            'invoice_number' => 'INV-KLIK-UNKNOWN',
+            'total_amount' => 1000,
+        ]);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'order_id' => $order->id,
+            'merchant_ref' => 'FULL UNKNOWN MERCHANT REF 1234567890',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_create_state' => 'created',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => $payment->merchant_ref,
+            'amount' => 1000,
+            'total_amount' => 1016,
+            'status' => ' disputed.review-1 ',
+            'signature' => 'UNKNOWN_ADMIN_SIGNATURE_SHOULD_NOT_RENDER',
+            'api_key' => 'UNKNOWN_ADMIN_KEY_SHOULD_NOT_RENDER',
+            'merchant_id' => 'UNKNOWN_ADMIN_MERCHANT_SHOULD_NOT_RENDER',
+            'qris_base64' => 'UNKNOWN_ADMIN_QR_SHOULD_NOT_RENDER',
+            'raw_payload' => 'UNKNOWN_ADMIN_RAW_SHOULD_NOT_RENDER',
+            'internal_exception' => 'UNKNOWN_ADMIN_EXCEPTION_SHOULD_NOT_RENDER',
+        ])->assertOk();
+
+        $html = $this->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('unknown_callback_status')
+            ->assertSee('DISPUTED.REVIEW-1')
+            ->getContent();
+
+        foreach ([
+            'FULL UNKNOWN MERCHANT REF 1234567890',
+            'UNKNOWN_ADMIN_SIGNATURE_SHOULD_NOT_RENDER',
+            'UNKNOWN_ADMIN_KEY_SHOULD_NOT_RENDER',
+            'UNKNOWN_ADMIN_MERCHANT_SHOULD_NOT_RENDER',
+            'UNKNOWN_ADMIN_QR_SHOULD_NOT_RENDER',
+            'UNKNOWN_ADMIN_RAW_SHOULD_NOT_RENDER',
+            'UNKNOWN_ADMIN_EXCEPTION_SHOULD_NOT_RENDER',
+        ] as $secret) {
+            $this->assertStringNotContainsString($secret, $html);
+        }
+    }
 }

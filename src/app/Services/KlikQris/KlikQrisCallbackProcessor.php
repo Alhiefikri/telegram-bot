@@ -7,6 +7,7 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -28,6 +29,14 @@ class KlikQrisCallbackProcessor
         $callback = KlikQrisCallback::fromPayload($payload);
         $payment = $this->findPayment($callback->orderId());
         $event = $this->events->logCallback($callback, $payment);
+
+        if (! $callback->isSupportedStatus()) {
+            if ($event->processed_at === null) {
+                $event->update(['processed_at' => now()]);
+            }
+
+            return $event->fresh();
+        }
 
         if (! $this->canVerifyCallback($callback, $payment)) {
             return $event;
@@ -128,7 +137,7 @@ class KlikQrisCallbackProcessor
 
     private function isRecoverableOutcomeUnknownPayment(Payment $payment, KlikQrisTransaction $transaction): bool
     {
-        return strtolower(trim((string) $payment->provider)) === 'klikqris'
+        return strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
             && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             && $payment->provider_create_state === 'outcome_unknown'
             && ($payment->provider_payment_method === null || $payment->provider_total_payment === null || $payment->provider_payload === null)
@@ -151,7 +160,7 @@ class KlikQrisCallbackProcessor
             return true;
         }
 
-        return strtolower(trim((string) $payment->provider)) === 'klikqris'
+        return strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
             && $payment->status === PaymentStatus::Paid
             && strtolower(trim((string) $payment->provider_payment_method)) === 'qris'
             && $payment->provider_total_payment !== null;
@@ -159,7 +168,7 @@ class KlikQrisCallbackProcessor
 
     private function isEligiblePayment(Payment $payment): bool
     {
-        return strtolower(trim((string) $payment->provider)) === 'klikqris'
+        return strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
             && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             && strtolower(trim((string) $payment->provider_payment_method)) === 'qris'
             && $payment->provider_total_payment !== null;
@@ -168,7 +177,7 @@ class KlikQrisCallbackProcessor
     private function findPayment(string $merchantRef): ?Payment
     {
         return Payment::query()
-            ->where('provider', 'klikqris')
+            ->where('provider', PaymentProvider::KLIKQRIS)
             ->where('merchant_ref', $merchantRef)
             ->first();
     }

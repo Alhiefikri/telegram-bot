@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -42,7 +43,7 @@ class TelegramOrderExpiredNotifier
 
         $order = $claimed;
 
-        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === 'manual'
+        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL
             && $payment->method === 'BINANCE_PAY_ID'
             && $payment->status === PaymentStatus::Expired
             && filled($payment->binance_order_id));
@@ -72,7 +73,7 @@ class TelegramOrderExpiredNotifier
                 '',
                 $this->locale->text($order->customer, 'Tenang, kamu masih bisa order ulang kapan aja.', 'You can place a new order anytime.'),
             ];
-            $buttonText = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === 'klikqris')
+            $buttonText = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === PaymentProvider::KLIKQRIS)
                 ? $this->locale->text($order->customer, '🔄 Buat QRIS Baru', '🔄 Create New QRIS')
                 : $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again');
             $replyMarkup = [

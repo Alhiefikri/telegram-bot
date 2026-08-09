@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Support\PaymentProvider;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -54,7 +55,7 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $payment = $order->payments->firstWhere('provider', 'klikqris');
+            $payment = $order->payments->firstWhere('provider', PaymentProvider::KLIKQRIS);
             if ($payment === null) {
                 throw new \RuntimeException('KlikQRIS payment is missing for order '.$order->id.'.');
             }

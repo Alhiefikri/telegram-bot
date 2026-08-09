@@ -14,6 +14,7 @@ use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
@@ -117,7 +118,7 @@ class TelegramOrderIntents
         }
 
         $messageId = data_get($lastResponse, 'result.message_id');
-        if ($payment?->provider === 'klikqris' && $paymentStatus === PaymentStatus::Pending && is_numeric($messageId)) {
+        if ($payment?->provider === PaymentProvider::KLIKQRIS && $paymentStatus === PaymentStatus::Pending && is_numeric($messageId)) {
             Order::query()->whereKey($order->id)->update([
                 'buyer_order_detail_message_chat_id' => $chatId,
                 'buyer_order_detail_message_id' => (int) $messageId,
@@ -148,8 +149,8 @@ class TelegramOrderIntents
     private function refreshProviderPaymentStatus(Customer $customer, Order $order, ?Payment $payment): ?string
     {
         return match (strtolower(trim((string) $payment?->provider))) {
-            'klikqris' => $this->refreshEligibleKlikQrisPayment($customer, $order, $payment),
-            'pakasir' => $this->refreshPendingPakasirPayment($customer, $order, $payment),
+            PaymentProvider::KLIKQRIS => $this->refreshEligibleKlikQrisPayment($customer, $order, $payment),
+            PaymentProvider::PAKASIR => $this->refreshPendingPakasirPayment($customer, $order, $payment),
             default => null,
         };
     }
@@ -157,7 +158,7 @@ class TelegramOrderIntents
     private function refreshEligibleKlikQrisPayment(Customer $customer, Order $order, ?Payment $payment): ?string
     {
         if (! $payment
-            || $payment->provider !== 'klikqris'
+            || $payment->provider !== PaymentProvider::KLIKQRIS
             || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             || blank($payment->merchant_ref)
             || strtolower(trim((string) $payment->provider_payment_method)) !== 'qris'
@@ -194,7 +195,7 @@ class TelegramOrderIntents
     private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string
     {
         if (! $payment
-            || $payment->provider !== 'pakasir'
+            || $payment->provider !== PaymentProvider::PAKASIR
             || $payment->status !== PaymentStatus::Pending
             || $order->order_status !== OrderStatus::PendingPayment
             || blank($payment->merchant_ref)

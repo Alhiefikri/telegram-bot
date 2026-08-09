@@ -19,6 +19,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
@@ -101,7 +102,7 @@ class StorefrontShopCheckout
         $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
-        if ($payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID') {
+        if ($payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID') {
             $recoveryKey = $this->orderAccess->issue($order);
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 
@@ -179,7 +180,7 @@ class StorefrontShopCheckout
         }
 
         $selection = $this->providerResolver->resolve('qris');
-        if ($selection->requestedProvider === 'pakasir' && $selection->provider === 'manual') {
+        if ($selection->requestedProvider === PaymentProvider::PAKASIR && $selection->provider === PaymentProvider::MANUAL) {
             throw new InvalidCheckout('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
         }
 
@@ -188,21 +189,21 @@ class StorefrontShopCheckout
 
     private function ensureNativeQrisCreated(Payment $payment): void
     {
-        if ($payment->provider === 'klikqris') {
+        if ($payment->provider === PaymentProvider::KLIKQRIS) {
             $this->klikQrisNativeQris->ensureCreated($payment);
 
             return;
         }
 
-        if ($payment->provider === 'pakasir' && $payment->method === PakasirCheckoutFlow::API_QRIS) {
+        if ($payment->provider === PaymentProvider::PAKASIR && $payment->method === PakasirCheckoutFlow::API_QRIS) {
             $this->nativeQris->ensureCreated($payment);
         }
     }
 
     private function usesNativeQris(?Payment $payment): bool
     {
-        return $payment?->provider === 'klikqris'
-            || ($payment?->provider === 'pakasir' && $payment?->method === PakasirCheckoutFlow::API_QRIS);
+        return $payment?->provider === PaymentProvider::KLIKQRIS
+            || ($payment?->provider === PaymentProvider::PAKASIR && $payment?->method === PakasirCheckoutFlow::API_QRIS);
     }
 
     private function hasPayableNativeQris(Payment $payment): bool

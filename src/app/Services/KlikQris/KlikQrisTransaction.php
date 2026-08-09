@@ -5,6 +5,7 @@ namespace App\Services\KlikQris;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use RuntimeException;
 use UnexpectedValueException;
@@ -65,7 +66,7 @@ final readonly class KlikQrisTransaction
     public static function fromPersistedPayment(Payment $payment, ?KlikQrisEnvironment $environment = null): self
     {
         $environment ??= KlikQrisEnvironment::runtime();
-        if (strtolower(trim((string) $payment->provider)) !== 'klikqris') {
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::KLIKQRIS) {
             throw new RuntimeException('Persisted KlikQRIS transaction provider mismatch.');
         }
 
@@ -277,7 +278,7 @@ final readonly class KlikQrisTransaction
 
     public function assertMatches(Payment $payment): void
     {
-        if (strtolower(trim((string) $payment->provider)) !== 'klikqris') {
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::KLIKQRIS) {
             throw new UnexpectedValueException('KlikQRIS provider mismatch.');
         }
 

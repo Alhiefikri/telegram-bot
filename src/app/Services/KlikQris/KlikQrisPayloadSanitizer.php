@@ -23,6 +23,16 @@ final class KlikQrisPayloadSanitizer
         return $sanitized;
     }
 
+    /** @return array{condition: string, status: string, merchant_ref_hash: string} */
+    public static function unknownCallbackStatus(string $status, string $merchantRef): array
+    {
+        return [
+            'condition' => 'unknown_callback_status',
+            'status' => $status,
+            'merchant_ref_hash' => hash('sha256', $merchantRef),
+        ];
+    }
+
     private static function isSensitiveKey(string $key, mixed $value): bool
     {
         $normalized = strtolower($key);

@@ -27,6 +27,7 @@ use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Support\DogfoodTiming;
+use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 
@@ -188,8 +189,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $payment = $order->payments()->latest('created_at')->firstOrFail();
-        if ($requestedPaymentMode === 'pakasir'
-            && $payment->provider === 'manual'
+        if ($requestedPaymentMode === PaymentProvider::PAKASIR
+            && $payment->provider === PaymentProvider::MANUAL
             && $payment->method === 'QR_MANUAL') {
             $this->bot->sendMessage($context->chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage($context->customer));
         }
@@ -201,9 +202,9 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
     {
         $job = match (true) {
-            $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
-            $payment->provider === 'klikqris' => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
-            $payment->provider === 'pakasir' => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === PaymentProvider::KLIKQRIS => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === PaymentProvider::PAKASIR => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             default => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString()),
         };
 

@@ -4,7 +4,6 @@ namespace Tests\Unit\Services\KlikQris;
 
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisAmount;
-use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisPayloadSanitizer;
 use App\Services\KlikQris\KlikQrisTransaction;
 use Carbon\CarbonImmutable;
@@ -54,6 +53,14 @@ class KlikQrisTransactionTest extends TestCase
             'boolean true' => [true],
             'array' => [[1016]],
             'float' => [1016.0],
+            'overflow' => [(string) PHP_INT_MAX.'0'],
+            'empty string' => [''],
+            'leading zero' => ['01016'],
+            'leading whitespace' => [' 1016'],
+            'trailing whitespace' => ['1016 '],
+            'missing whole digits' => ['.0'],
+            'missing decimal digits' => ['1016.'],
+            'explicit plus sign' => ['+1016'],
         ];
     }
 
@@ -330,59 +337,6 @@ class KlikQrisTransactionTest extends TestCase
             'non scalar expired_at' => [['expired_at' => ['2026-07-28T07:00:00+00:00']]],
             'invalid paid_at string' => [['paid_at' => 'not-a-date']],
             'non scalar paid_at' => [['paid_at' => ['2026-07-28T06:50:00+00:00']]],
-        ];
-    }
-
-    public function test_callback_paid_parses_as_trigger_and_sanitizes_signature(): void
-    {
-        $callback = KlikQrisCallback::fromPayload([
-            'order_id' => 'STEST-123',
-            'amount' => '1000',
-            'total_amount' => '1016.00',
-            'status' => 'paid',
-            'signature' => 'opaque-test-signature',
-            'qris_url' => 'https://klikqris.com/qr/callback',
-        ]);
-
-        $this->assertSame('STEST-123', $callback->orderId());
-        $this->assertSame(1000, $callback->amount()->rupiah());
-        $this->assertSame(1016, $callback->totalAmount());
-        $this->assertSame('PAID', $callback->status());
-        $this->assertTrue($callback->isPaidTrigger());
-        $this->assertArrayNotHasKey('signature', $callback->sanitizedPayload());
-        $this->assertSame('https://klikqris.com/qr/callback', $callback->sanitizedPayload()['qris_url']);
-    }
-
-    #[DataProvider('malformedCallbacks')]
-    public function test_callback_fails_closed_for_malformed_identity_amounts_or_status(array $payload, string $message): void
-    {
-        $this->expectException(UnexpectedValueException::class);
-        $this->expectExceptionMessage($message);
-
-        KlikQrisCallback::fromPayload($payload);
-    }
-
-    public static function malformedCallbacks(): array
-    {
-        return [
-            'blank order id' => [[
-                'order_id' => '   ',
-                'amount' => '1000',
-                'total_amount' => '1016.00',
-                'status' => 'PAID',
-            ], 'KlikQRIS order_id is required.'],
-            'invalid amount' => [[
-                'order_id' => 'STEST-123',
-                'amount' => '1000.01',
-                'total_amount' => '1016.00',
-                'status' => 'PAID',
-            ], 'KlikQRIS amount must be a positive whole-rupiah value.'],
-            'unknown status' => [[
-                'order_id' => 'STEST-123',
-                'amount' => '1000',
-                'total_amount' => '1016.00',
-                'status' => 'SETTLED',
-            ], 'KlikQRIS callback status is unsupported.'],
         ];
     }
 

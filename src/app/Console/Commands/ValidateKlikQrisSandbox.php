@@ -9,6 +9,7 @@ use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Throwable;
@@ -51,7 +52,7 @@ class ValidateKlikQrisSandbox extends Command
             return $this->finish($checks, null);
         }
 
-        if (strtolower(trim((string) $payment->provider)) !== 'klikqris') {
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::KLIKQRIS) {
             $this->addCheck($checks, 'fail', 'payment provider is klikqris', 'Provider is '.$this->safeLabel((string) $payment->provider).'.');
 
             return $this->finish($checks, $payment);
@@ -118,7 +119,7 @@ class ValidateKlikQrisSandbox extends Command
         }
 
         return Payment::query()
-            ->where('provider', 'klikqris')
+            ->where('provider', PaymentProvider::KLIKQRIS)
             ->where('merchant_ref', $lookup)
             ->orderBy('id')
             ->first();

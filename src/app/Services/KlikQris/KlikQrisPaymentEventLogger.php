@@ -5,6 +5,7 @@ namespace App\Services\KlikQris;
 use App\Enums\PaymentEventType;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -16,7 +17,7 @@ class KlikQrisPaymentEventLogger
 
         return PaymentEvent::create([
             'payment_id' => $payment->id,
-            'provider' => 'klikqris',
+            'provider' => PaymentProvider::KLIKQRIS,
             'event_type' => PaymentEventType::ProviderCreate,
             'merchant_ref' => $transaction->orderId(),
             'provider_status' => $transaction->status(),
@@ -29,9 +30,13 @@ class KlikQrisPaymentEventLogger
 
     public function logCallback(KlikQrisCallback $callback, ?Payment $payment): PaymentEvent
     {
+        $merchantRef = $callback->isSupportedStatus()
+            ? $callback->orderId()
+            : hash('sha256', $callback->orderId());
+
         return $this->logCanonical(
             PaymentEventType::Callback,
-            $callback->orderId(),
+            $merchantRef,
             $callback->status(),
             $callback->sanitizedPayload(),
             $payment,
@@ -59,7 +64,7 @@ class KlikQrisPaymentEventLogger
         try {
             return DB::transaction(function () use ($type, $merchantRef, $status, $canonicalPayload, $payment, $receivedAt, $idempotencyKey): PaymentEvent {
                 $event = PaymentEvent::query()
-                    ->where('provider', 'klikqris')
+                    ->where('provider', PaymentProvider::KLIKQRIS)
                     ->where('event_type', $type->value)
                     ->where('idempotency_key', $idempotencyKey)
                     ->lockForUpdate()
@@ -68,7 +73,7 @@ class KlikQrisPaymentEventLogger
                 if ($event === null) {
                     return PaymentEvent::create([
                         'payment_id' => $payment?->id,
-                        'provider' => 'klikqris',
+                        'provider' => PaymentProvider::KLIKQRIS,
                         'event_type' => $type,
                         'merchant_ref' => $merchantRef,
                         'provider_status' => $status,
@@ -94,7 +99,7 @@ class KlikQrisPaymentEventLogger
             }
 
             PaymentEvent::query()
-                ->where('provider', 'klikqris')
+                ->where('provider', PaymentProvider::KLIKQRIS)
                 ->where('event_type', $type->value)
                 ->where('idempotency_key', $idempotencyKey)
                 ->update([
@@ -104,7 +109,7 @@ class KlikQrisPaymentEventLogger
                 ]);
 
             return PaymentEvent::query()
-                ->where('provider', 'klikqris')
+                ->where('provider', PaymentProvider::KLIKQRIS)
                 ->where('event_type', $type->value)
                 ->where('idempotency_key', $idempotencyKey)
                 ->firstOrFail();

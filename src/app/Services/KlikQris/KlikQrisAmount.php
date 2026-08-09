@@ -17,7 +17,7 @@ final readonly class KlikQrisAmount
             throw new UnexpectedValueException('KlikQRIS amount must be an integer or decimal string.');
         }
 
-        $raw = trim((string) $value);
+        $raw = (string) $value;
         if (preg_match('/^([1-9][0-9]*)(?:\.(0+))?$/', $raw, $matches) !== 1) {
             throw new UnexpectedValueException('KlikQRIS amount must be a positive whole-rupiah value.');
         }

@@ -101,7 +101,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             'provider_payload' => ['data' => [
                 'order_id' => 'INV-KLIK-600',
                 'amount' => 1000,
-                'total_amount' => 1016,
+                'total_amount' => '1016.00',
                 'status' => 'PENDING',
                 'qris_url' => 'https://klikqris.com/storage/sandbox/qris_job.png',
                 'expired_at' => '2026-07-28T10:24:00+00:00',
@@ -132,7 +132,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString(self::PNG_BYTES, $request->body());
         $this->assertStringContainsString('filename="klikqris-INV-KLIK-600.png"', $request->body());
         $caption = $request->body();
-        $this->assertStringContainsString('IDR 1,016.00', $caption);
+        $this->assertStringContainsString('IDR 1016.00', $caption);
         $this->assertStringNotContainsString('Rp 1.016', $caption);
         $this->assertStringContainsString('Do not round or change any digit', $caption);
         $this->assertStringContainsString('INV-KLIK-600', $caption);

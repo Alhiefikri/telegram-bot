@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Models\ManualPaymentSetting;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
@@ -23,7 +24,7 @@ final readonly class PakasirCheckoutIntent implements CheckoutPaymentIntent
 
     public function provider(): string
     {
-        return 'pakasir';
+        return PaymentProvider::PAKASIR;
     }
 
     public function method(): string

@@ -6,6 +6,7 @@ use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
@@ -32,9 +33,9 @@ class UpdatePaymentModeRequest extends FormRequest
     {
         return [
             'update_scope' => ['sometimes', 'string', Rule::in(['provider_switch', 'binance_settings', 'binance_verification'])],
-            'payment_mode' => ['required', 'string', Rule::in(['manual', 'pakasir', 'klikqris'])],
+            'payment_mode' => ['required', 'string', Rule::in(PaymentProvider::allowed())],
             'payment_provider_version' => ['sometimes', 'integer', 'min:0'],
-            'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === 'pakasir'), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
+            'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === PaymentProvider::PAKASIR), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
             'confirm_provider_switch' => $this->isProviderSwitch() ? ['required', 'accepted'] : ['sometimes'],
             'binance_pay_enabled' => ['sometimes', 'boolean'],
             'binance_verification_mode' => ['sometimes', 'string', Rule::in(['amount_unique', 'order_id'])],
@@ -72,7 +73,7 @@ class UpdatePaymentModeRequest extends FormRequest
                     return;
                 }
 
-                if ($this->input('payment_mode') === 'pakasir') {
+                if ($this->input('payment_mode') === PaymentProvider::PAKASIR) {
                     $checkoutFlow = (string) ($this->input('pakasir_checkout_flow') ?: PakasirCheckoutFlow::HOSTED);
                     $readiness = app(PakasirProviderReadiness::class)->checkout($checkoutFlow);
                     if (! $readiness->isReady()) {
@@ -85,7 +86,7 @@ class UpdatePaymentModeRequest extends FormRequest
                     return;
                 }
 
-                if ($this->input('payment_mode') === 'klikqris') {
+                if ($this->input('payment_mode') === PaymentProvider::KLIKQRIS) {
                     $readiness = app(KlikQrisProviderReadiness::class)->checkout();
                     if (! $readiness->isReady()) {
                         $validator->errors()->add(

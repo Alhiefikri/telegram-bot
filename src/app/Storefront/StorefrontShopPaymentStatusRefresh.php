@@ -15,6 +15,7 @@ use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Support\PaymentProvider;
 use Throwable;
 
 class StorefrontShopPaymentStatusRefresh
@@ -219,12 +220,12 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isPakasirPayment(?Payment $payment): bool
     {
-        return strtolower((string) $payment?->provider) === 'pakasir';
+        return strtolower((string) $payment?->provider) === PaymentProvider::PAKASIR;
     }
 
     private function isKlikQrisPayment(?Payment $payment): bool
     {
-        return strtolower((string) $payment?->provider) === 'klikqris';
+        return strtolower((string) $payment?->provider) === PaymentProvider::KLIKQRIS;
     }
 
     private function hasNativeQrisRail(?Payment $payment): bool
@@ -235,7 +236,7 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isBinancePayment(?Payment $payment): bool
     {
-        return strtolower((string) $payment?->provider) === 'manual'
+        return strtolower((string) $payment?->provider) === PaymentProvider::MANUAL
             && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID';
     }
 

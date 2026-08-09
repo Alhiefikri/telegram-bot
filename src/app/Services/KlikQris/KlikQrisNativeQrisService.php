@@ -7,6 +7,7 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -288,7 +289,7 @@ class KlikQrisNativeQrisService
     private function hasProviderCreateEvent(Payment $payment): bool
     {
         return $payment->paymentEvents()
-            ->where('provider', 'klikqris')
+            ->where('provider', PaymentProvider::KLIKQRIS)
             ->where('event_type', PaymentEventType::ProviderCreate->value)
             ->exists();
     }

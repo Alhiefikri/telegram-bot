@@ -7,6 +7,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Models\AuditLog;
 use App\Models\Cart;
@@ -24,6 +25,7 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\CartService;
@@ -33,11 +35,14 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramUpdateReplayGuard;
+use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 use Throwable;
 
@@ -104,6 +109,54 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, PaymentEvent::count());
         $this->assertNull($order->telegram_receipt_sent_at);
         $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_provider_switch_and_checkout_serialize_on_the_shared_setting_lock(): void
+    {
+        $this->requireConcurrencyLane();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::MANUAL,
+            'payment_provider_version' => 0,
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create();
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+        $selection = app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+
+        $this->assertSame(PaymentProvider::MANUAL, $selection->paymentMode);
+
+        $results = $this->runConcurrently([
+            fn () => app(PaymentProviderSwitcher::class)->change(
+                provider: PaymentProvider::KLIKQRIS,
+                checkoutFlow: null,
+                expectedVersion: 0,
+                actor: User::findOrFail($owner->id),
+                ip: null,
+            )['new_provider'],
+            fn () => Payment::query()
+                ->where('order_id', app(OrderCheckoutService::class)
+                    ->checkout(Cart::findOrFail($cart->id), $selection->paymentIntent)
+                    ->id)
+                ->sole()
+                ->provider,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $this->assertContains(PaymentProvider::KLIKQRIS, array_map(
+            fn (array $result): mixed => $result['value'] ?? null,
+            $results,
+        ));
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(PaymentProvider::KLIKQRIS, ManualPaymentSetting::current()?->paymentProvider());
+        $this->assertSame(1, ManualPaymentSetting::current()?->payment_provider_version);
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment_provider.switched')->count());
     }
 
     public function test_concurrent_binance_checkout_for_same_stock_allows_only_one_reservation(): void

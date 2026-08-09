@@ -6,7 +6,9 @@ use UnexpectedValueException;
 
 final readonly class KlikQrisCallback
 {
-    private const STATUSES = ['PENDING', 'PAID', 'SUCCESS', 'EXPIRED'];
+    private const SUPPORTED_STATUSES = ['PENDING', 'PAID', 'SUCCESS', 'EXPIRED'];
+
+    private const MAX_STATUS_LENGTH = 40;
 
     /** @param array<mixed> $sanitizedPayload */
     private function __construct(
@@ -25,11 +27,16 @@ final readonly class KlikQrisCallback
         $totalAmount = KlikQrisAmount::from($payload['total_amount'] ?? null);
         $status = strtoupper(self::requiredString($payload, 'status', 'KlikQRIS callback status is required.'));
 
-        if (! in_array($status, self::STATUSES, true)) {
-            throw new UnexpectedValueException('KlikQRIS callback status is unsupported.');
+        if (strlen($status) > self::MAX_STATUS_LENGTH
+            || preg_match('/\A[A-Z0-9][A-Z0-9._-]*\z/D', $status) !== 1) {
+            throw new UnexpectedValueException('KlikQRIS callback status is invalid.');
         }
 
-        return new self($orderId, $amount, $totalAmount, $status, KlikQrisPayloadSanitizer::sanitize($payload));
+        $sanitizedPayload = in_array($status, self::SUPPORTED_STATUSES, true)
+            ? KlikQrisPayloadSanitizer::sanitize($payload)
+            : KlikQrisPayloadSanitizer::unknownCallbackStatus($status, $orderId);
+
+        return new self($orderId, $amount, $totalAmount, $status, $sanitizedPayload);
     }
 
     public function orderId(): string
@@ -50,6 +57,11 @@ final readonly class KlikQrisCallback
     public function status(): string
     {
         return $this->status;
+    }
+
+    public function isSupportedStatus(): bool
+    {
+        return in_array($this->status, self::SUPPORTED_STATUSES, true);
     }
 
     public function isPaidTrigger(): bool

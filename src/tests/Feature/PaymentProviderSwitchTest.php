@@ -4,9 +4,12 @@ namespace Tests\Feature;
 
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Exceptions\InvalidCheckout;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
@@ -190,6 +193,30 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $payment->provider);
         $this->assertSame('QRIS', $payment->method);
         $this->assertSame(1, $order->payments()->count());
+    }
+
+    public function test_klikqris_readiness_loss_fails_closed_without_falling_back_or_creating_a_payment(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::create(['payment_mode' => 'klikqris', 'is_active' => true]);
+        $selection = app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+
+        $customer = Customer::factory()->create();
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+
+        config()->set('services.klikqris.sandbox_enabled', false);
+
+        $this->expectException(InvalidCheckout::class);
+        try {
+            app(OrderCheckoutService::class)->checkout($cart, $selection->paymentIntent);
+        } finally {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(1, $product->fresh()->stock);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+        }
     }
 
     public function test_stale_provider_switch_version_does_not_overwrite_a_newer_switch_or_create_a_second_audit(): void
