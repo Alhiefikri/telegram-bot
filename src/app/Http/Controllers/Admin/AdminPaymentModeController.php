@@ -136,8 +136,8 @@ class AdminPaymentModeController extends Controller
         }
 
         return match ($mode) {
-            'klikqris' => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
-            'pakasir' => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
+            PaymentProvider::KLIKQRIS => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
+            PaymentProvider::PAKASIR => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
                 ? 'Pakasir native QRIS diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.'
                 : 'Pakasir hosted diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',

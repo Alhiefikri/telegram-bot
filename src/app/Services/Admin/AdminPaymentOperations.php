@@ -13,6 +13,7 @@ use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Support\PaymentProvider;
 use InvalidArgumentException;
 
 class AdminPaymentOperations
@@ -41,8 +42,8 @@ class AdminPaymentOperations
         }
 
         return match ($payment->provider) {
-            'pakasir' => $this->pakasirReadiness->verification()->isReady(),
-            'klikqris' => $this->klikQrisReadiness->checkout()->isReady(),
+            PaymentProvider::PAKASIR => $this->pakasirReadiness->verification()->isReady(),
+            PaymentProvider::KLIKQRIS => $this->klikQrisReadiness->checkout()->isReady(),
             default => false,
         };
     }
@@ -54,8 +55,8 @@ class AdminPaymentOperations
         }
 
         $event = match ($payment->provider) {
-            'pakasir' => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
-            'klikqris' => $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQrisClient->transactionStatus($payment)),
+            PaymentProvider::PAKASIR => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
+            PaymentProvider::KLIKQRIS => $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQrisClient->transactionStatus($payment)),
             default => throw new InvalidArgumentException('Only supported payment providers with provider identifiers can be reconciled.'),
         };
         $this->audit->log('payment.manually_reconciled', $payment, null, ['payment_event_id' => $event->id], $user, $ip);

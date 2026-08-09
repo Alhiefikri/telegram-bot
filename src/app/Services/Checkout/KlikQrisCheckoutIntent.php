@@ -5,6 +5,7 @@ namespace App\Services\Checkout;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
+use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -15,7 +16,7 @@ final readonly class KlikQrisCheckoutIntent implements CheckoutPaymentIntent
 
     public function provider(): string
     {
-        return 'klikqris';
+        return PaymentProvider::KLIKQRIS;
     }
 
     public function method(): string

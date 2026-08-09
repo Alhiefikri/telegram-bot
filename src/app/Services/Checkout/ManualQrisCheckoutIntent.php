@@ -4,6 +4,7 @@ namespace App\Services\Checkout;
 
 use App\Models\Cart;
 use App\Models\ManualPaymentSetting;
+use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
@@ -13,7 +14,7 @@ final readonly class ManualQrisCheckoutIntent implements CheckoutPaymentIntent
 
     public function provider(): string
     {
-        return 'manual';
+        return PaymentProvider::MANUAL;
     }
 
     public function method(): string
