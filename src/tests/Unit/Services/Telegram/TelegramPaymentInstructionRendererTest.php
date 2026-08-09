@@ -205,6 +205,25 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
     }
 
+    public function test_klikqris_instruction_localizes_warning_for_id_locale(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'KLIK-QRIS-ID-103',
+            'amount' => 125000,
+            'provider_total_payment' => 125875,
+            'provider_expires_at' => CarbonImmutable::parse('2026-07-04 16:45:00', 'Asia/Jakarta'),
+            'expired_at' => CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'),
+        ]);
+
+        $instruction = $this->renderer()->klikQris($order, $payment, 'qris-png:klikqris', 'id');
+
+        $this->assertContains('⚠️ Jangan membulatkan atau mengubah satu digit pun.', $instruction->captionLines());
+        $this->assertStringNotContainsString('Do not round or change any digit.', $instruction->caption());
+    }
+
     public function test_native_qris_expiry_from_provider_utc_is_rendered_in_configured_app_timezone(): void
     {
         config()->set('app.timezone', 'Asia/Singapore');

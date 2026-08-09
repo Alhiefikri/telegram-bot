@@ -203,7 +203,9 @@ class TelegramPaymentInstructionRenderer
             ($locale === 'en' ? '📦 Products: ' : '📦 Produk: ').$this->orderItemsSummary($order),
             ($locale === 'en' ? '💳 Total QRIS payment: ' : '💳 Total bayar QRIS: ').$total,
             '',
-            '⚠️ Do not round or change any digit.',
+            $locale === 'en'
+                ? '⚠️ Do not round or change any digit.'
+                : '⚠️ Jangan membulatkan atau mengubah satu digit pun.',
             $locale === 'en'
                 ? 'Scan this QRIS directly in Telegram. Pay only from the QR image above.'
                 : 'Scan QRIS ini langsung dari Telegram. Bayar hanya dari gambar QR di atas.',
