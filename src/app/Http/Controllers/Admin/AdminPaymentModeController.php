@@ -32,7 +32,7 @@ class AdminPaymentModeController extends Controller
         $updateScope = (string) ($validated['update_scope'] ?? 'provider_switch');
         $providerSwitch = ! in_array($updateScope, ['binance_settings', 'binance_verification'], true);
         $mode = (string) $validated['payment_mode'];
-        $checkoutFlow = $mode === 'pakasir'
+        $checkoutFlow = $mode === PaymentProvider::PAKASIR
             ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
             : null;
 

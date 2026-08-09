@@ -84,7 +84,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->where(function ($query): void {
                 $query->whereNotNull('telegram_receipt_sent_at')
                     ->orWhere('order_status', 'cancelled')
-                    ->orWhereHas('payments', fn ($payments) => $payments->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID'));
+                    ->orWhereHas('payments', fn ($payments) => $payments->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'));
             })
             ->whereIn('order_status', ['completed', 'cancelled'])
             ->where(function ($query) use ($cutoff): void {
@@ -108,7 +108,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('provider', 'manual')->where('method', 'BINANCE_PAY_ID')->exists()
+                    $job = $order->payments()->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID')->exists()
                         ? DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
                         : DeleteBuyerCheckoutMessages::dispatch($order->id, now()->toISOString());
                     $job

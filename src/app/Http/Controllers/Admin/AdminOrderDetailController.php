@@ -13,6 +13,7 @@ use App\Models\PaymentEvent;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
 use App\Support\Money;
+use App\Support\PaymentProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
@@ -27,7 +28,7 @@ class AdminOrderDetailController extends Controller
 
         $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'salesProofPost']);
 
-        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID');
+        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
         $hasMismatchEvidence = $operations->hasPendingBinanceMismatch($order);
 

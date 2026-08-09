@@ -43,7 +43,7 @@ class TelegramOrderExpiredNotifier
 
         $order = $claimed;
 
-        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === 'manual'
+        $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL
             && $payment->method === 'BINANCE_PAY_ID'
             && $payment->status === PaymentStatus::Expired
             && filled($payment->binance_order_id));

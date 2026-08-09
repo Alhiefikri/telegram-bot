@@ -220,7 +220,7 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isPakasirPayment(?Payment $payment): bool
     {
-        return strtolower((string) $payment?->provider) === 'pakasir';
+        return strtolower((string) $payment?->provider) === PaymentProvider::PAKASIR;
     }
 
     private function isKlikQrisPayment(?Payment $payment): bool
@@ -236,7 +236,7 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isBinancePayment(?Payment $payment): bool
     {
-        return strtolower((string) $payment?->provider) === 'manual'
+        return strtolower((string) $payment?->provider) === PaymentProvider::MANUAL
             && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID';
     }
 

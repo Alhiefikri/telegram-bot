@@ -102,7 +102,7 @@ class StorefrontShopCheckout
         $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
-        if ($payment->provider === 'manual' && $payment->method === 'BINANCE_PAY_ID') {
+        if ($payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID') {
             $recoveryKey = $this->orderAccess->issue($order);
             SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
 

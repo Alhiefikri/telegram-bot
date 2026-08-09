@@ -189,8 +189,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $payment = $order->payments()->latest('created_at')->firstOrFail();
-        if ($requestedPaymentMode === 'pakasir'
-            && $payment->provider === 'manual'
+        if ($requestedPaymentMode === PaymentProvider::PAKASIR
+            && $payment->provider === PaymentProvider::MANUAL
             && $payment->method === 'QR_MANUAL') {
             $this->bot->sendMessage($context->chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage($context->customer));
         }
