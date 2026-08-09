@@ -64,6 +64,21 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('QR manual LHIE STORE');
     }
 
+    public function test_owner_provider_controls_use_an_accessible_confirmation_dialog(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Konfirmasi ganti provider pembayaran')
+            ->assertSee('Hanya checkout baru yang berubah.')
+            ->assertSee('aria-modal="true"', false)
+            ->assertSee('x-on:keydown.tab="trapModalFocus($event)"', false)
+            ->assertSee('payment_provider_version', false)
+            ->assertDontSee('window.confirm', false);
+    }
+
     public function test_owner_can_switch_dashboard_to_native_qris_pakasir_flow(): void
     {
         $this->actingAs(User::factory()->create([

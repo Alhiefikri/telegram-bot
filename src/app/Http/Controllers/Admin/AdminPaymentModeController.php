@@ -2,13 +2,18 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\PaymentProviderNotReady;
+use App\Exceptions\PaymentProviderSwitchConflict;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdatePaymentModeRequest;
 use App\Models\ManualPaymentSetting;
+use App\Models\User;
 use App\Services\Admin\AdminDashboardRedirector;
+use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\AuditLogger;
 use App\Services\Binance\BinanceVerificationModeManager;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -20,6 +25,7 @@ class AdminPaymentModeController extends Controller
         AuditLogger $auditLogger,
         AdminDashboardRedirector $redirector,
         BinanceVerificationModeManager $binanceModes,
+        PaymentProviderSwitcher $providerSwitcher,
     ): RedirectResponse {
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
@@ -29,6 +35,30 @@ class AdminPaymentModeController extends Controller
         $checkoutFlow = $mode === 'pakasir'
             ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
             : null;
+
+        if ($providerSwitch) {
+            $expectedVersion = array_key_exists('payment_provider_version', $validated)
+                ? (int) $validated['payment_provider_version']
+                : (int) (ManualPaymentSetting::current()?->payment_provider_version ?? 0);
+
+            try {
+                $result = $providerSwitcher->change(
+                    provider: $mode,
+                    checkoutFlow: $checkoutFlow,
+                    expectedVersion: $expectedVersion,
+                    actor: $user instanceof User ? $user : null,
+                    ip: $request->ip(),
+                );
+            } catch (PaymentProviderNotReady|PaymentProviderSwitchConflict $exception) {
+                return redirect()
+                    ->route('admin.dashboard', ['tab' => 'stats'])
+                    ->withErrors(['payment_mode' => $exception->getMessage()], 'paymentMode')
+                    ->withInput();
+            }
+
+            return $redirector->paymentSettings()
+                ->with('status', $this->providerSwitchStatus($result['setting'], $mode, $result['changed']));
+        }
 
         try {
             [$setting, $oldValues] = DB::transaction(function () use (&$mode, $checkoutFlow, $validated, $binanceModes, $providerSwitch, $updateScope): array {
@@ -86,38 +116,32 @@ class AdminPaymentModeController extends Controller
         }
 
         $newValues = $this->settingValues($setting);
-        if ($providerSwitch) {
-            $auditLogger->log(
-                'payment_provider.switched',
-                $setting,
-                ['provider' => $oldValues['provider']],
-                ['provider' => $newValues['provider']],
-                $user,
-                $request->ip(),
-            );
-        } else {
-            $auditLogger->log(
-                'payment_mode.updated',
-                $setting,
-                $oldValues,
-                $newValues,
-                $user,
-                $request->ip(),
-            );
-        }
-
-        $label = $providerSwitch
-            ? match ($mode) {
-                'klikqris' => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
-                'pakasir' => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
-                    ? 'Pakasir native QRIS diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.'
-                    : 'Pakasir hosted diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.',
-                default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',
-            }
-        : 'Pengaturan pembayaran diperbarui.';
+        $auditLogger->log(
+            'payment_mode.updated',
+            $setting,
+            $oldValues,
+            $newValues,
+            $user,
+            $request->ip(),
+        );
 
         return $redirector->paymentSettings()
-            ->with('status', $label);
+            ->with('status', 'Pengaturan pembayaran diperbarui.');
+    }
+
+    private function providerSwitchStatus(ManualPaymentSetting $setting, string $mode, bool $changed): string
+    {
+        if (! $changed) {
+            return 'Provider '.PaymentProvider::label($mode).' sudah aktif. Checkout baru tetap memakai provider ini; payment lama tetap memakai provider asal.';
+        }
+
+        return match ($mode) {
+            'klikqris' => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
+            'pakasir' => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
+                ? 'Pakasir native QRIS diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.'
+                : 'Pakasir hosted diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.',
+            default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',
+        };
     }
 
     /** @return array<string, mixed> */

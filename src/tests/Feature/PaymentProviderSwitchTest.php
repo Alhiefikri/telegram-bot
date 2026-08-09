@@ -163,4 +163,38 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $selection->paymentMode);
         $this->assertSame('klikqris', $selection->paymentIntent->provider());
     }
+
+    public function test_stale_provider_switch_version_does_not_overwrite_a_newer_switch_or_create_a_second_audit(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $setting = ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        KlikQrisSandboxScenarios::configureReadySandbox();
+
+        $this->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'klikqris',
+                'payment_provider_version' => 0,
+                'confirm_provider_switch' => '1',
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings');
+
+        config()->set('services.pakasir.slug', 'sedulur-digital');
+        config()->set('services.pakasir.api_key', 'pakasir-key');
+        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+
+        $this->from('/admin?tab=stats')
+            ->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'payment_mode' => 'pakasir',
+                'pakasir_checkout_flow' => 'hosted',
+                'payment_provider_version' => 0,
+                'confirm_provider_switch' => '1',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
+
+        $this->assertSame('klikqris', $setting->fresh()->payment_mode);
+        $this->assertSame(1, $setting->fresh()->payment_provider_version);
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment_provider.switched')->count());
+    }
 }

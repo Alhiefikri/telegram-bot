@@ -7,7 +7,7 @@ use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['payment_mode', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'whatsapp_support_url', 'whatsapp_support_number', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes', 'binance_verification_mode', 'binance_order_id_compatibility_ready_at'])]
+#[Fillable(['payment_mode', 'payment_provider_version', 'pakasir_checkout_flow', 'admin_contact_url', 'admin_username', 'admin_telegram_chat_id', 'whatsapp_support_url', 'whatsapp_support_number', 'instructions', 'is_active', 'binance_pay_enabled', 'qris_payment_ttl_minutes', 'binance_payment_ttl_minutes', 'binance_verification_mode', 'binance_order_id_compatibility_ready_at'])]
 class ManualPaymentSetting extends Model
 {
     public const DEFAULT_QRIS_PAYMENT_TTL_MINUTES = 10;
@@ -18,6 +18,7 @@ class ManualPaymentSetting extends Model
     {
         return [
             'is_active' => 'boolean',
+            'payment_provider_version' => 'integer',
             'binance_pay_enabled' => 'boolean',
             'binance_order_id_compatibility_ready_at' => 'datetime',
         ];

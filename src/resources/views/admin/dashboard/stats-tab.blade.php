@@ -121,10 +121,10 @@
                     @enderror
 
                     <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/70 p-3">
-                        <p class="text-[11px] font-black uppercase tracking-wider text-brand-muted">Provider aktif</p>
+                        <p class="text-[11px] font-black uppercase tracking-wider text-brand-muted">Provider requested / effective</p>
                         <p class="mt-1 text-sm font-black text-neo-ink">
-                            {{ $paymentControl['active_provider_label'] }}
-                            <span class="font-semibold text-brand-muted">· efektif {{ \App\Support\PaymentProvider::label($paymentControl['effective_mode']) }}</span>
+                            {{ $paymentControl['requested_provider_label'] }}
+                            <span class="font-semibold text-brand-muted">· efektif {{ $paymentControl['effective_provider_label'] }}</span>
                         </p>
                         <p class="mt-1 text-[11px] font-semibold text-brand-muted">{{ $paymentControl['hint'] }}</p>
                     </div>
@@ -155,7 +155,7 @@
                         <p class="font-black">Peringatan operasional Pakasir</p>
                         <p class="mt-1">{{ $paymentControl['pakasir_cutoff']['message'] }}</p>
                         @unless ($paymentControl['pakasir_cutoff']['is_past'])
-                            <p class="mt-1">Sisa waktu: {{ $paymentControl['pakasir_cutoff']['days_remaining'] }} hari.</p>
+                            <p class="mt-1">Countdown: {{ $paymentControl['pakasir_cutoff']['days_remaining'] }} hari ({{ $paymentControl['pakasir_cutoff']['hours_remaining'] }} jam) hingga 15 Agustus 2026.</p>
                         @endunless
                     </div>
 
@@ -179,39 +179,43 @@
                             Setiap perubahan meminta konfirmasi provider lama → baru dan hanya memengaruhi checkout baru.
                         </p>
                         <div class="mt-3 grid gap-2 md:grid-cols-4">
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" onsubmit="return window.confirm('{{ $paymentControl['active_provider_label'] }} → Manual. Hanya checkout baru yang berubah. Lanjutkan?')">
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Manual" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
                                 <input type="hidden" name="payment_mode" value="manual">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'manual' ? 'warning' : 'neutral'" size="sm" class="w-full text-[11px]">
                                     QR Manual
                                 </x-admin-dashboard.button>
                             </form>
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" onsubmit="return window.confirm('{{ $paymentControl['active_provider_label'] }} → Pakasir hosted. Hanya checkout baru yang berubah. Lanjutkan?')">
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Pakasir hosted" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
                                 <input type="hidden" name="payment_mode" value="pakasir">
                                 <input type="hidden" name="pakasir_checkout_flow" value="hosted">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'hosted' ? 'primary' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_pakasir']" title="{{ $paymentControl['pakasir_guard_message'] }}">
                                     Hosted Pakasir
                                 </x-admin-dashboard.button>
                             </form>
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" onsubmit="return window.confirm('{{ $paymentControl['active_provider_label'] }} → KlikQRIS. Hanya checkout baru yang berubah. Lanjutkan?')">
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="KlikQRIS" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
                                 <input type="hidden" name="payment_mode" value="klikqris">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'klikqris' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_klikqris']" title="{{ $paymentControl['klikqris_guard_message'] }}">
                                     KlikQRIS
                                 </x-admin-dashboard.button>
                             </form>
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" onsubmit="return window.confirm('{{ $paymentControl['active_provider_label'] }} → Pakasir native QRIS. Hanya checkout baru yang berubah. Lanjutkan?')">
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Pakasir native QRIS" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
                                 <input type="hidden" name="payment_mode" value="pakasir">
                                 <input type="hidden" name="pakasir_checkout_flow" value="api_qris">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'api_qris' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_pakasir']" title="{{ $paymentControl['pakasir_guard_message'] }}">
                                     QR Native Pakasir
@@ -222,6 +226,63 @@
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             {{ $paymentControl['provider_switch_guard_message'] }}
                         </x-admin-dashboard.notice>
+                    @endif
+
+                    @if ($paymentControl['can_switch_provider'])
+                        <div
+                            x-cloak
+                            x-show="paymentSwitchOpen"
+                            x-transition.opacity
+                            class="fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60 p-3 sm:p-4"
+                            x-on:keydown.escape.window="if (paymentSwitchOpen) closePaymentProviderSwitch()"
+                        >
+                            <div class="absolute inset-0" x-on:click="closePaymentProviderSwitch()" aria-hidden="true"></div>
+                            <div
+                                id="admin-payment-provider-switch-dialog"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="admin-payment-provider-switch-title"
+                                aria-describedby="admin-payment-provider-switch-description"
+                                tabindex="-1"
+                                x-on:keydown.tab="trapModalFocus($event)"
+                                x-on:focusin.window="if (paymentSwitchOpen) keepModalFocus($event, 'admin-payment-provider-switch-dialog')"
+                                class="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-[1.25rem] border-[4px] border-neo-ink bg-neo-paper p-4 text-neo-ink shadow-neo-xl sm:p-5"
+                            >
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0 pr-8">
+                                        <p class="font-display text-[10px] font-black uppercase tracking-[0.18em] text-brand-muted">Payment Provider Switch</p>
+                                        <h2 id="admin-payment-provider-switch-title" class="mt-1 font-display text-xl font-black uppercase leading-tight">Konfirmasi ganti provider pembayaran</h2>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-[0.45rem] border-[3px] border-neo-ink bg-white text-lg font-black shadow-neo-sm"
+                                        aria-label="Tutup dialog provider"
+                                        x-on:click="closePaymentProviderSwitch()"
+                                    >×</button>
+                                </div>
+
+                                <div id="admin-payment-provider-switch-description" class="mt-4 space-y-3 text-sm font-bold leading-6">
+                                    <p>
+                                        Ubah provider dari
+                                        <span class="font-black" x-text="paymentSwitchCurrentLabel"></span>
+                                        ke
+                                        <span class="font-black" x-text="paymentSwitchTargetLabel"></span>?
+                                    </p>
+                                    <p class="rounded-xl border-2 border-neo-ink/20 bg-white/80 p-3 text-xs font-semibold leading-5">
+                                        Hanya checkout baru yang berubah. Payment pending/lama tetap diproses dengan provider asalnya.
+                                    </p>
+                                </div>
+
+                                <div class="mt-4 grid grid-cols-2 gap-2">
+                                    <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closePaymentProviderSwitch()">
+                                        Batal
+                                    </x-admin-dashboard.button>
+                                    <x-admin-dashboard.button type="button" variant="primary" x-ref="paymentSwitchConfirm" x-on:click="submitPaymentProviderSwitch()">
+                                        Konfirmasi switch
+                                    </x-admin-dashboard.button>
+                                </div>
+                            </div>
+                        </div>
                     @endif
 
                     @if ($paymentControl['can_manage'])

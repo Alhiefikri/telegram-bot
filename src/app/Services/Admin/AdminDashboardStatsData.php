@@ -178,12 +178,19 @@ final class AdminDashboardStatsData
             ],
         ];
         $pending = $this->pendingPayments();
+        $requestedProviderLabel = PaymentProvider::label($requestedMode);
+        $effectiveProviderLabel = PaymentProvider::label($effectiveMode);
 
         return [
             'mode' => $effectiveMode,
             'effective_mode' => $effectiveMode,
             'requested_mode' => $requestedMode,
-            'active_provider_label' => PaymentProvider::label($requestedMode),
+            'requested_provider' => $requestedMode,
+            'effective_provider' => $effectiveMode,
+            'requested_provider_label' => $requestedProviderLabel,
+            'effective_provider_label' => $effectiveProviderLabel,
+            'active_provider_label' => $requestedProviderLabel,
+            'payment_provider_version' => (int) ($settings?->payment_provider_version ?? 0),
             'checkout_flow' => $checkoutFlow,
             'requested_checkout_flow' => $requestedCheckoutFlow,
             'checkout_flow_label' => $checkoutFlow === PakasirCheckoutFlow::API_QRIS ? 'native QRIS' : 'hosted',
@@ -214,6 +221,7 @@ final class AdminDashboardStatsData
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'can_switch_provider' => (bool) $user->role?->canSwitchPaymentProvider(),
+            'can_change_payment_mode' => (bool) $user->role?->canSwitchPaymentProvider(),
             'provider_switch_guard_message' => $user->role?->canSwitchPaymentProvider()
                 ? null
                 : 'Hanya owner yang bisa mengganti provider aktif.',
@@ -277,17 +285,21 @@ final class AdminDashboardStatsData
             ->all();
     }
 
-    /** @return array{date: string, is_past: bool, days_remaining: int, message: string} */
+    /** @return array{date: string, is_past: bool, hours_remaining: int, days_remaining: int, deadline_at: string, message: string} */
     private function pakasirCutoff(): array
     {
         $cutoff = Carbon::create(2026, 8, 15, 0, 0, 0, (string) config('app.timezone'));
-        $hoursRemaining = (int) now()->diffInHours($cutoff, false);
-        $isPast = $hoursRemaining < 0;
+        $now = now();
+        $isPast = $now->greaterThanOrEqualTo($cutoff);
+        $minutesRemaining = $isPast ? 0 : (int) ceil($now->diffInSeconds($cutoff, false) / 60);
+        $hoursRemaining = $isPast ? 0 : (int) ceil($minutesRemaining / 60);
 
         return [
             'date' => $cutoff->toDateString(),
             'is_past' => $isPast,
-            'days_remaining' => $isPast ? 0 : (int) ceil($hoursRemaining / 24),
+            'hours_remaining' => $hoursRemaining,
+            'days_remaining' => $isPast ? 0 : (int) ceil($minutesRemaining / 1440),
+            'deadline_at' => $cutoff->toIso8601String(),
             'message' => $isPast
                 ? 'Batas operasional Pakasir telah lewat. Matikan Pakasir secara manual setelah payment lama terminal.'
                 : 'Pakasir akan dihentikan manual sebelum 15 Agustus 2026; tidak ada cutoff otomatis.',
