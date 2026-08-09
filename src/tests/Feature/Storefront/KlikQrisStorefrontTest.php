@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
+use App\Storefront\StorefrontShopSignedInvoice;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -124,7 +125,7 @@ class KlikQrisStorefrontTest extends TestCase
             ]],
         ]);
 
-        $invoice = app(\App\Storefront\StorefrontShopSignedInvoice::class)->read($payment->order);
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($payment->order);
 
         $this->assertFalse($invoice->isQrisPayable);
         $this->assertNull($invoice->qrisImageSource);

@@ -3,8 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\PaymentStatus;
-use App\Exceptions\InvalidCheckout;
 use App\Enums\UserRole;
+use App\Exceptions\InvalidCheckout;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
