@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
+use App\Services\KlikQris\KlikQrisAmount;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\QrisEmvPayload;
+use App\Support\PaymentProvider;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -85,7 +87,7 @@ class Payment extends Model
     {
         return Attribute::make(
             get: fn (): string => match (true) {
-                $this->providerName() === 'pakasir' => 'QRIS',
+                $this->providerName() === PaymentProvider::PAKASIR => 'QRIS',
                 default => $this->localPaymentMethodLabel(),
             },
         );
@@ -93,7 +95,7 @@ class Payment extends Model
 
     public function isNativePakasirQris(): bool
     {
-        if ($this->providerName() !== 'pakasir' || $this->providerPaymentMethodName() !== 'qris') {
+        if ($this->providerName() !== PaymentProvider::PAKASIR || $this->providerPaymentMethodName() !== 'qris') {
             return false;
         }
 
@@ -105,7 +107,7 @@ class Payment extends Model
     public function isPayableNativePakasirQris(): bool
     {
         $candidate = $this->status === PaymentStatus::Pending
-            && $this->providerName() === 'pakasir'
+            && $this->providerName() === PaymentProvider::PAKASIR
             && $this->providerPaymentMethodName() === 'qris'
             && filled($this->provider_payment_number)
             && $this->provider_fee !== null
@@ -133,7 +135,7 @@ class Payment extends Model
 
     public function isNativeKlikQris(): bool
     {
-        return $this->providerName() === 'klikqris'
+        return $this->providerName() === PaymentProvider::KLIKQRIS
             && $this->providerPaymentMethodName() === 'qris'
             && filled($this->klikQrisQrisUrl());
     }
@@ -143,6 +145,7 @@ class Payment extends Model
         return $this->status === PaymentStatus::Pending
             && $this->isNativeKlikQris()
             && $this->provider_total_payment !== null
+            && $this->klikQrisTotalAmountDisplay() !== null
             && $this->provider_total_payment >= $this->amount
             && $this->provider_expires_at !== null
             && $this->provider_expires_at->isFuture();
@@ -166,7 +169,31 @@ class Payment extends Model
             return null;
         }
 
-        return 'IDR '.number_format((int) $this->provider_total_payment, 2, '.', ',');
+        $payload = $this->provider_payload;
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $data = $payload;
+        if (array_key_exists('data', $payload)) {
+            if (! is_array($payload['data'])) {
+                return null;
+            }
+
+            $data = $payload['data'];
+        }
+
+        try {
+            $totalAmount = KlikQrisAmount::from($data['total_amount'] ?? null);
+        } catch (\UnexpectedValueException) {
+            return null;
+        }
+
+        if ($totalAmount->rupiah() !== (int) $this->provider_total_payment) {
+            return null;
+        }
+
+        return 'IDR '.$totalAmount->display();
     }
 
     private function providerName(): string

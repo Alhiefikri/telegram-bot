@@ -41,12 +41,18 @@ class KlikQrisNativeQrisTest extends TestCase
 
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
             'qris_image' => 'raw-base64-image',
+            'total_amount' => '1016.0',
+            'raw_payload' => 'RAW_PROVIDER_PAYLOAD',
+            'api_key' => 'PROVIDER_API_KEY',
+            'id_merchant' => 'PROVIDER_MERCHANT_ID',
+            'nested' => ['client_secret' => 'PROVIDER_CLIENT_SECRET'],
             'expired_at' => now()->addMinutes(10)->toAtomString(),
         ]), 200));
 
         $transaction = app(KlikQrisNativeQrisService::class)->ensureCreated($payment);
 
         $fresh = $payment->fresh();
+        $persistedPayload = json_encode($fresh->provider_payload, JSON_THROW_ON_ERROR);
         $this->assertSame($payment->merchant_ref, $transaction->orderId());
         $this->assertSame('created', $fresh->provider_create_state);
         $this->assertSame(1016, $fresh->provider_total_payment);
@@ -54,8 +60,19 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame('qris', $fresh->provider_payment_method);
         $this->assertNotNull($fresh->provider_expires_at);
         $this->assertTrue($fresh->isPayableNativeKlikQris());
+        $this->assertSame('1016.0', $fresh->provider_payload['data']['total_amount']);
         $this->assertArrayNotHasKey('signature', $fresh->provider_payload['data']);
         $this->assertArrayNotHasKey('qris_image', $fresh->provider_payload['data']);
+        foreach ([
+            'raw-base64-image',
+            'opaque-test-signature',
+            'RAW_PROVIDER_PAYLOAD',
+            'PROVIDER_API_KEY',
+            'PROVIDER_MERCHANT_ID',
+            'PROVIDER_CLIENT_SECRET',
+        ] as $deniedValue) {
+            $this->assertStringNotContainsString($deniedValue, $persistedPayload);
+        }
         $this->assertSame($fresh->provider_expires_at->timestamp, $fresh->expired_at->timestamp);
         $this->assertSame($fresh->provider_expires_at->timestamp, $fresh->order->expires_at->timestamp);
         $this->assertSame(1, $fresh->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());

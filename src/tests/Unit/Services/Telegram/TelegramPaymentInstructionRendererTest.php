@@ -11,6 +11,7 @@ use App\Services\Telegram\TelegramPaymentInstructionRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TelegramPaymentInstructionRendererTest extends TestCase
@@ -214,6 +215,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             'merchant_ref' => 'KLIK-QRIS-ID-103',
             'amount' => 125000,
             'provider_total_payment' => 125875,
+            'provider_payload' => ['data' => ['total_amount' => '125875.00']],
             'provider_expires_at' => CarbonImmutable::parse('2026-07-04 16:45:00', 'Asia/Jakarta'),
             'expired_at' => CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'),
         ]);
@@ -257,6 +259,54 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         );
         $this->assertStringNotContainsString('08:45', $instruction->caption());
         $this->assertStringNotContainsString('UTC', $instruction->caption());
+    }
+
+    #[DataProvider('klikQrisExactAmountDisplays')]
+    public function test_klikqris_instruction_displays_exact_validated_provider_amount(mixed $providerValue, string $expectedDisplay): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'provider_total_payment' => 1016,
+            'provider_payload' => ['data' => ['total_amount' => $providerValue]],
+        ]);
+
+        $instruction = $this->renderer()->klikQris($order, $payment, 'provider-qris-png', 'en');
+
+        $this->assertSame('provider-qris-png', $instruction->photoContents);
+        $this->assertContains(
+            '💳 Total QRIS payment: '.$expectedDisplay,
+            $instruction->captionLines(),
+            "Caption lines:\n".$instruction->caption(),
+        );
+        $this->assertStringNotContainsString('IDR 1,016.00', $instruction->caption());
+    }
+
+    public static function klikQrisExactAmountDisplays(): array
+    {
+        return [
+            'integer' => [1016, 'IDR 1016'],
+            'integer string' => ['1016', 'IDR 1016'],
+            'one zero decimal' => ['1016.0', 'IDR 1016.0'],
+            'two zero decimals' => ['1016.00', 'IDR 1016.00'],
+        ];
+    }
+
+    public function test_klikqris_instruction_refuses_mismatched_persisted_provider_amount(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'provider_total_payment' => 1016,
+            'provider_payload' => ['data' => ['total_amount' => '1017.00']],
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('KlikQRIS total amount is missing.');
+
+        $this->renderer()->klikQris($order, $payment, 'provider-qris-png', 'en');
     }
 
     public function test_manual_instruction_uses_indonesian_caption_and_no_buyer_actions_for_id_locale(): void

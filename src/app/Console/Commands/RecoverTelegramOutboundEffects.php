@@ -17,6 +17,7 @@ use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 
 class RecoverTelegramOutboundEffects extends Command
@@ -65,11 +66,11 @@ class RecoverTelegramOutboundEffects extends Command
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
                     $payment = $order->payments()->latest('created_at')->first();
-                    if ($payment?->provider === 'manual' && $payment?->method === 'BINANCE_PAY_ID') {
+                    if ($payment?->provider === PaymentProvider::MANUAL && $payment?->method === 'BINANCE_PAY_ID') {
                         $job = SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } elseif ($payment?->provider === 'klikqris') {
+                    } elseif ($payment?->provider === PaymentProvider::KLIKQRIS) {
                         $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } elseif ($payment?->provider === 'pakasir') {
+                    } elseif ($payment?->provider === PaymentProvider::PAKASIR) {
                         $job = SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString());
                     } else {
                         $job = SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());

@@ -9,6 +9,7 @@ use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
+use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
@@ -57,7 +58,7 @@ class ReconcileKlikQrisPayments extends Command
         $failed = 0;
 
         Payment::query()
-            ->where('provider', 'klikqris')
+            ->where('provider', PaymentProvider::KLIKQRIS)
             ->whereNotNull('merchant_ref')
             ->whereIn('status', self::ELIGIBLE_PAYMENT_STATUSES)
             ->where(function ($query): void {

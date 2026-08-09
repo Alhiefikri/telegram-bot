@@ -51,7 +51,7 @@ class KlikQrisStorefrontTest extends TestCase
                     'data' => [
                         'order_id' => $request['order_id'],
                         'amount' => 1000,
-                        'total_amount' => 1016,
+                        'total_amount' => '1016.00',
                         'status' => 'PENDING',
                         'qris_url' => 'https://klikqris.com/storage/sandbox/qris_storefront.png',
                         'qris_image' => 'SHOULD_NOT_RENDER_BASE64',
@@ -82,7 +82,7 @@ class KlikQrisStorefrontTest extends TestCase
         $html = $this->get($result->redirectUrl)->assertOk()->getContent();
 
         $this->assertStringContainsString('https://klikqris.com/storage/sandbox/qris_storefront.png', $html);
-        $this->assertStringContainsString('IDR 1,016.00', $html);
+        $this->assertStringContainsString('IDR 1016.00', $html);
         $this->assertStringContainsString('Batas bayar', $html);
         $this->assertStringNotContainsString('pakasir', strtolower($html));
         $this->assertStringNotContainsString('snap.pay', strtolower($html));
@@ -110,6 +110,26 @@ class KlikQrisStorefrontTest extends TestCase
         $payment = Payment::query()->sole();
         $this->assertSame('pakasir', $payment->provider);
         $this->assertTrue($payment->isPayableNativePakasirQris());
+    }
+
+    public function test_signed_invoice_fails_closed_when_persisted_klikqris_display_amount_mismatches_provider_total(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_expires_at' => now()->addMinutes(15),
+            'provider_payload' => ['data' => [
+                'total_amount' => '1017.00',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_mismatch.png',
+            ]],
+        ]);
+
+        $invoice = app(\App\Storefront\StorefrontShopSignedInvoice::class)->read($payment->order);
+
+        $this->assertFalse($invoice->isQrisPayable);
+        $this->assertNull($invoice->qrisImageSource);
+        $this->assertNull($invoice->payableAmount);
+        $this->assertNull($invoice->payableAmountDisplay);
     }
 
     public function test_status_route_uses_provider_neutral_limiter_and_keeps_old_alias_registered(): void

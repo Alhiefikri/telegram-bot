@@ -153,6 +153,180 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_unknown_status_is_recorded_safely_without_transition_or_side_effects_before_acknowledgement(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $this->cartWithProduct(price: 10000, stock: 1),
+            CheckoutPaymentIntents::klikQris(now()->addMinutes(10)),
+        );
+        $payment = $order->payments()->sole();
+        $payment->update([
+            'provider_total_payment' => 10016,
+            'provider_fee' => 16,
+            'provider_payment_method' => 'qris',
+            'provider_expires_at' => now()->addMinutes(10),
+            'expired_at' => now()->addMinutes(10),
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment),
+        ]);
+        $product = Product::firstOrFail();
+        $paymentBefore = $payment->fresh()->getAttributes();
+        $orderBefore = $order->fresh()->getAttributes();
+        $productBefore = $product->fresh()->getAttributes();
+        $inventoryMovementCount = InventoryMovement::count();
+        $salesProofCount = SalesProofPost::count();
+        Http::fake();
+
+        $response = $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment->fresh(), [
+            'status' => '  disputed.review-1  ',
+            'signature' => 'UNKNOWN_SIGNATURE_SHOULD_NOT_PERSIST',
+            'api_key' => 'UNKNOWN_API_KEY_SHOULD_NOT_PERSIST',
+            'merchant_id' => 'UNKNOWN_MERCHANT_SHOULD_NOT_PERSIST',
+            'qris_base64' => 'UNKNOWN_QR_SHOULD_NOT_PERSIST',
+            'raw_payload' => ['secret' => 'UNKNOWN_RAW_SHOULD_NOT_PERSIST'],
+            'internal_exception' => 'UNKNOWN_EXCEPTION_SHOULD_NOT_PERSIST',
+        ]));
+
+        $response->assertOk()->assertExactJson(['success' => true]);
+        $this->assertSame($paymentBefore, $payment->fresh()->getAttributes());
+        $this->assertSame($orderBefore, $order->fresh()->getAttributes());
+        $this->assertSame($productBefore, $product->fresh()->getAttributes());
+        $this->assertSame($inventoryMovementCount, InventoryMovement::count());
+        $this->assertSame($salesProofCount, SalesProofPost::count());
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        Http::assertNothingSent();
+
+        $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
+        $this->assertSame($payment->id, $event->payment_id);
+        $this->assertSame(hash('sha256', (string) $payment->merchant_ref), $event->merchant_ref);
+        $this->assertSame('DISPUTED.REVIEW-1', $event->provider_status);
+        $this->assertSame([
+            'condition' => 'unknown_callback_status',
+            'merchant_ref_hash' => hash('sha256', (string) $payment->merchant_ref),
+            'status' => 'DISPUTED.REVIEW-1',
+        ], $event->raw_payload);
+        $this->assertNull($event->signature);
+        $this->assertNotNull($event->processed_at);
+        $this->assertStringNotContainsString((string) $payment->merchant_ref, json_encode($event->toArray(), JSON_THROW_ON_ERROR));
+    }
+
+    public function test_duplicate_unknown_status_for_unknown_order_coalesces_into_one_safe_processed_event(): void
+    {
+        Http::fake();
+        $merchantRef = 'UNKNOWN FULL MERCHANT REF 1234567890';
+        $payload = [
+            'order_id' => $merchantRef,
+            'amount' => 10000,
+            'total_amount' => 10016,
+            'status' => ' review_required ',
+            'signature' => 'FIRST_UNKNOWN_SIGNATURE',
+            'credential' => 'UNKNOWN_CREDENTIAL',
+            'merchant_id' => 'UNKNOWN_MERCHANT_ID',
+        ];
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $payload)
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+        $this->postJson('/api/webhook/klikqris/sandbox', array_replace($payload, [
+            'signature' => 'SECOND_UNKNOWN_SIGNATURE',
+        ]))->assertOk()->assertExactJson(['success' => true]);
+
+        $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
+        $this->assertNull($event->payment_id);
+        $this->assertSame(hash('sha256', $merchantRef), $event->merchant_ref);
+        $this->assertSame('REVIEW_REQUIRED', $event->provider_status);
+        $this->assertSame([
+            'condition' => 'unknown_callback_status',
+            'merchant_ref_hash' => hash('sha256', $merchantRef),
+            'status' => 'REVIEW_REQUIRED',
+        ], $event->raw_payload);
+        $this->assertSame(2, $event->received_count);
+        $this->assertNotNull($event->processed_at);
+        $this->assertStringNotContainsString($merchantRef, json_encode($event->toArray(), JSON_THROW_ON_ERROR));
+        Http::assertNothingSent();
+    }
+
+    public function test_same_unknown_status_for_different_unknown_orders_records_separate_events(): void
+    {
+        Http::fake();
+        $payload = [
+            'order_id' => 'UNKNOWN-ORDER-ONE',
+            'amount' => 10000,
+            'total_amount' => 10016,
+            'status' => 'REVIEW_REQUIRED',
+        ];
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $payload)->assertOk();
+        $this->postJson('/api/webhook/klikqris/sandbox', array_replace($payload, [
+            'order_id' => 'UNKNOWN-ORDER-TWO',
+        ]))->assertOk();
+
+        $this->assertSame(2, PaymentEvent::query()
+            ->where('provider', 'klikqris')
+            ->where('event_type', PaymentEventType::Callback->value)
+            ->count());
+        $this->assertEqualsCanonicalizing(
+            [hash('sha256', 'UNKNOWN-ORDER-ONE'), hash('sha256', 'UNKNOWN-ORDER-TWO')],
+            PaymentEvent::query()->pluck('merchant_ref')->all(),
+        );
+        Http::assertNothingSent();
+    }
+
+    public function test_unsafe_unknown_status_tokens_are_rejected_without_event_or_status_call(): void
+    {
+        Http::fake();
+        $payment = $this->payableKlikQrisPayment();
+
+        foreach (["REVIEW\nREQUIRED", str_repeat('A', 41), 'REVIEW REQUIRED'] as $status) {
+            $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+                'status' => $status,
+            ]))->assertUnprocessable();
+        }
+
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_expired_callback_preserves_known_non_paid_behavior(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        Http::fake();
+        $payment = $this->payableKlikQrisPayment();
+        $paymentBefore = $payment->getAttributes();
+        $orderBefore = $payment->order->getAttributes();
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+            'status' => ' expired ',
+        ]))->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame($paymentBefore, $payment->fresh()->getAttributes());
+        $this->assertSame($orderBefore, $payment->order->fresh()->getAttributes());
+        $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
+        $this->assertSame('EXPIRED', $event->provider_status);
+        $this->assertNull($event->processed_at);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        Http::assertNothingSent();
+    }
+
+    public function test_unknown_status_persistence_failure_returns_non_success_for_provider_retry(): void
+    {
+        Http::fake();
+        $payment = $this->payableKlikQrisPayment();
+        PaymentEvent::creating(function (PaymentEvent $event): void {
+            if ($event->provider === 'klikqris') {
+                throw new \RuntimeException('forced payment event persistence failure');
+            }
+        });
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+            'status' => 'REVIEW_REQUIRED',
+        ]))->assertServerError();
+
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        Http::assertNothingSent();
+    }
+
     public function test_malformed_content_type_json_and_schema_are_rejected_without_status_or_events(): void
     {
         Http::fake();
