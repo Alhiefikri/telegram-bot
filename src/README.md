@@ -4,18 +4,22 @@ Dokumen ini menjelaskan gambaran besar cara kerja project Telegram bot commerce 
 
 Dokumen ini **bukan** API reference detail dan tidak membahas setiap class/method. Untuk detail teknis, lihat file referensi di bagian akhir.
 
+Untuk agent/AI yang perlu memahami ownership aturan bisnis, alur lintas Telegram/Web Storefront/Admin, invariant payment, dan peta file, baca [panduan codebase](../docs/agents/codebase.md). Istilah canonical ada di [CONTEXT.md](../CONTEXT.md), sedangkan keputusan arsitektur ada di [docs/adr](../docs/adr/).
+
 ## 1. Overview Project
 
-Bot ini digunakan sebagai channel penjualan lewat Telegram. Customer membuka katalog, memilih produk, memasukkan jumlah, checkout, lalu menerima instruksi pembayaran. Admin mengelola katalog/order dari backend Laravel dan menjalankan operasi seperti menyelesaikan order manual, mengirim ulang receipt, dan rekonsiliasi pembayaran.
+Store Bot digunakan sebagai antarmuka penjualan lewat Telegram. Customer membuka katalog, memilih produk, memasukkan jumlah, checkout, lalu menerima instruksi pembayaran. Admin mengelola katalog/order dari backend Laravel dan menjalankan operasi seperti menyelesaikan order manual, mengirim ulang receipt, dan rekonsiliasi pembayaran.
 
 Komponen utama:
 
-- **Telegram**: antarmuka utama untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
+- **Store Bot**: antarmuka Telegram untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
+- **Web Storefront**: katalog publik dan guest checkout melalui `/shop`, signed invoice, dan Recovery Key; tidak bergantung pada Telegram.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
-- **Payment mode**: manual `/payment` tetap default operasional sampai owner/admin memilih Pakasir. Pakasir tersedia sebagai Pakasir hosted checkout dan Pakasir native QRIS; kedua flow memakai API-key verification ke Transaction Detail API.
+- **Payment Provider Switch**: owner memilih `Manual`, `Pakasir`, atau `KlikQRIS` untuk checkout baru. Payment yang sudah dibuat tetap memakai provider asal.
+- **Payment rails**: Manual QR, Pakasir hosted/native QRIS, KlikQRIS Native QRIS, dan Binance Pay. KlikQRIS tidak melakukan automatic fallback ke Manual; outcome create yang tidak pasti dipulihkan pada Payment yang sama.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
-- **Queue**: memproses pekerjaan background, termasuk pemrosesan update Telegram dan pengiriman receipt.
-- **Scheduler**: menjalankan expiry order pending dan rekonsiliasi pembayaran berkala.
+- **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance pada queue terpisah.
+- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir/Binance, recovery Telegram, cleanup, dan statistik harian.
 
 Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail implementasi, schema database, dan API internal sebaiknya dibaca langsung dari codebase/test.
 
@@ -68,7 +72,6 @@ Catatan:
 
 ## 3. Payment Flow
 
-
 ### 3.1 Status utama
 
 Order status yang digunakan:
@@ -114,18 +117,28 @@ Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order 
 
 ### 3.4 Pakasir payment
 
-Pakasir adalah provider otomatis yang dipilih dari Admin Dashboard, bukan dari environment. Owner/admin memilih QR Manual, Pakasir hosted, atau Pakasir native QRIS; environment hanya menyimpan kredensial/endpoint Pakasir. Hosted mengirim customer ke hosted-link checkout Pakasir. Native QRIS membuat transaksi QRIS via API, mengirim QR `payment_number` langsung di Telegram, dan tetap menyertakan hosted checkout sebagai fallback sekaligus rollback cepat ke hosted/manual dari dashboard.
+Pakasir adalah provider legacy otomatis yang dapat dipilih owner dari Admin Dashboard. Ia memiliki dua flow: `hosted` dan `api_qris`. Hosted mengirim customer ke hosted-link checkout Pakasir. Native QRIS membuat transaksi QRIS via API dan mengirim QR `payment_number` langsung di Telegram; adapter Telegram tetap menyediakan hosted URL sebagai fallback tampilan untuk Payment yang sama.
 
-Kedua flow membuat payment pending lokal lebih dulu. Hosted checkout tidak membutuhkan transaksi native. Native QRIS memanggil Pakasir setelah commit lokal; jika create gagal, order tetap pending dan customer menerima hosted fallback.
+Kedua flow membuat Payment pending lokal lebih dulu. Hosted checkout tidak membutuhkan transaksi native. Native QRIS memanggil Pakasir setelah commit lokal; jika create gagal, order tetap pending dan customer dapat diarahkan ke hosted URL pada Payment yang sama. Perilaku ini adalah legacy Pakasir, bukan pola yang boleh disalin ke KlikQRIS.
 
 Callback/webhook Pakasir adalah untrusted intake. Sistem hanya menandai paid setelah Transaction Detail API dengan API-key verification cocok terhadap `order_id`/`merchant_ref`, nominal, project/slug, status `completed`, dan payment method bila tersedia. Payload tanpa bentuk callback Pakasir tidak disimpan sebagai `payment_events`; replay callback Pakasir yang identik di-coalesce ke satu event dengan `idempotency_key`, `received_count`, dan `last_received_at` karena Pakasir tidak menyediakan ID event webhook terpisah.
 
-- `PAID`: payment menjadi `paid`, order masuk `processing`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
+- `PAID`: payment menjadi `paid`, order Pakasir masuk `completed`, stok final dikurangi, dan receipt dikirim lewat queue jika transisi berhasil.
 - `EXPIRED`: order pending menjadi `expired`, payment menjadi `expired`, dan reservasi stok dilepas.
 - `FAILED`: order pending menjadi `cancelled`, payment menjadi `failed`, dan reservasi stok dilepas.
 - `REFUND`: payment menjadi `refunded`; order menjadi `cancelled` kecuali order sudah `completed`.
 
+### 3.5 KlikQRIS Native QRIS
 
+KlikQRIS dipilih melalui Payment Provider Switch dan hanya berlaku untuk checkout baru. Lifecycle terpusat di `App\Services\KlikQris\KlikQrisNativeQrisService`, yang mengurus create, recovery, persistence, expiry, payability, safe outcome, dan single-flight lock per Payment.
+
+Outcome yang dapat diterima caller adalah `Payable`, `Creating`, `RecoveryPending`, `ProviderTotalPending`, `InvalidProviderResult`, dan `Expired`. Store Bot maupun Web Storefront hanya boleh menampilkan QR ketika outcome `Payable`; outcome lain tidak boleh menampilkan QR, total final, atau raw provider data.
+
+Jika hasil create tidak pasti, sistem melakukan status recovery pada Payment/invoice yang sama. Tidak ada Payment kedua dan tidak ada automatic fallback ke Manual. Callback KlikQRIS hanya signal; `KlikQrisCallbackProcessor` melakukan status lookup authoritative sebelum memanggil `OrderLifecycle`. Scheduler menjalankan `klikqris:reconcile` ketika environment aktif. Detail keputusan ada di [ADR-0006](../docs/adr/0006-klikqris-native-qris-and-pakasir-retirement.md) dan runbook ada di [KlikQRIS sandbox validation](../docs/klikqris-sandbox-validation.md).
+
+### 3.6 Binance Pay
+
+Binance disimpan sebagai `provider=manual` dengan `method=BINANCE_PAY_ID`, sehingga caller harus memeriksa `method` dan tidak boleh menyimpulkan rail hanya dari provider. Verifikasi otomatis dikelola `BinancePaymentVerification` dalam mode `amount_unique` atau `order_id`; mismatch dan bukti terlambat tidak auto-claim dan dapat masuk manual review.
 
 ## 4. Admin Flow
 
@@ -156,7 +169,6 @@ Receipt dikirim ke customer via queue
         ↓
 Audit log operasi admin tersimpan
 ```
-
 
 ```text
         ↓
@@ -308,8 +320,9 @@ Hal penting:
 
 Jika secret Telegram tidak dikonfigurasi di production, aplikasi dirancang untuk fail fast.
 
+### 5.2 Webhook dan validasi pembayaran otomatis
 
-### 5.2 Webhook dan validasi Pakasir
+#### Pakasir
 
 Endpoint aplikasi:
 
@@ -339,6 +352,23 @@ php artisan pakasir:validate-native-qris <payment-uuid-or-merchant-ref> --create
 ```
 
 Option `--duplicate-provider-create` secara eksplisit memanggil `transactioncreate/qris` lagi untuk payment yang sama. Jangan gunakan option itu di production.
+
+#### KlikQRIS
+
+Endpoint aplikasi:
+
+```text
+POST /api/webhook/klikqris/sandbox
+POST /api/webhook/klikqris
+```
+
+Gunakan endpoint sandbox hanya dari environment non-production dengan readiness KlikQRIS sandbox yang lengkap. Validasi sanitized report menggunakan:
+
+```bash
+php artisan klikqris:validate-sandbox <payment-uuid-or-merchant-ref> --create --reconcile
+```
+
+Callback KlikQRIS tidak cukup untuk menandai paid. Sistem harus mencocokkan Payment/provider identity, nominal, total final, dan status authoritative. Jangan menaruh API key, merchant ID, signature, QR URL query secret, raw QR base64, atau payload provider mentah pada report.
 
 ### 5.3 Queue worker
 
@@ -377,8 +407,15 @@ Sesuaikan opsi worker, queue, timeout, dan supervisor config dengan environment 
 Scheduler menjalankan command periodik dari `routes/console.php`:
 
 ```text
-orders:expire-pending          setiap menit
-pakasir:reconcile --chunk=100  setiap lima menit
+klikqris:reconcile --chunk=100 setiap menit jika environment aktif
+pakasir:reconcile --chunk=100  setiap menit
+binance:reconcile --chunk=100  setiap menit
+orders:expire-pending           setiap menit
+telegram:recover-updates        setiap menit
+telegram:forward-payment-proofs setiap menit
+telegram:recover-outbound       setiap menit
+cleanup login links              setiap jam
+cleanup retained data            setiap hari
 ```
 
 Production-like Docker menjalankan service `scheduler` yang memanggil `php artisan schedule:run` setiap menit. Service ini menulis heartbeat ke `storage/framework/scheduler-heartbeat`; cek dengan:
@@ -442,7 +479,6 @@ Fungsi:
 - mengubah payment pending menjadi `expired`;
 - melepas reservasi stok.
 
-
 ### 5.7 Reconcile Pakasir
 
 Command manual:
@@ -458,7 +494,24 @@ Fungsi:
 - menerapkan status paid hanya setelah detail Pakasir valid;
 - menyinkronkan expiry provider bila Transaction Detail mengirim `expired_at`.
 
-### 5.8 Logging dan monitoring
+### 5.8 Reconcile KlikQRIS
+
+Command manual:
+
+```bash
+php artisan klikqris:reconcile --chunk=100
+```
+
+Fungsi:
+
+- memproses Payment KlikQRIS yang pending atau memiliki outcome create yang perlu dipulihkan;
+- menggunakan lock Payment yang sama dengan customer refresh dan callback;
+- mengambil status provider authoritative dan menerapkannya melalui `KlikQrisCallbackProcessor`/`OrderLifecycle`;
+- mengirim owner alert hanya untuk outcome actionable sesuai retry budget.
+
+Command akan skip dengan aman bila KlikQRIS disabled untuk environment tersebut, dan gagal tertutup bila provider aktif tetapi readiness tidak lengkap.
+
+### 5.9 Logging dan monitoring
 
 Hal yang perlu dimonitor:
 
@@ -491,9 +544,10 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
 - [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
-- [ ] Payment mode default tetap QR manual; owner/admin bisa memilih QR Manual, Hosted Pakasir, atau QR Native Pakasir lewat panel "Mode pembayaran" di `/admin`.
+- [ ] Provider checkout baru dipilih oleh owner melalui panel "Mode pembayaran" di `/admin`: QR Manual, Pakasir hosted/native QRIS, atau KlikQRIS. Payment lama tidak ikut berpindah provider.
 - [ ] Credential Pakasir terisi jika mode Pakasir akan diaktifkan: `PAKASIR_SLUG`, `PAKASIR_API_KEY`, `PAKASIR_BASE_URL`; dashboard menolak aktivasi Pakasir tanpa slug/API key.
 - [ ] Gunakan `QR Native Pakasir` hanya setelah staging membuktikan native QRIS dengan `php artisan pakasir:validate-native-qris <payment> --create --reconcile`; rollback cepat dari dashboard ke `Hosted Pakasir` atau `QR Manual`.
+- [ ] Credential KlikQRIS sandbox/production dipisahkan; aktifkan environment sesuai readiness dan approval rollout. KlikQRIS tidak fallback otomatis ke Manual.
 - [ ] `PAKASIR_REDIRECT_URL` opsional; kosongkan jika tidak butuh return URL khusus.
 - [ ] Batas waktu checkout QRIS dan Binance Pay disesuaikan melalui dashboard admin bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
@@ -556,6 +610,24 @@ Langkah cek:
 - cek payment event yang masuk dan status payment internal;
 - cek log untuk pesan validasi callback/reconciliation;
 - jalankan reconcile manual hanya setelah credential Pakasir benar, karena paid tetap harus dikonfirmasi Transaction Detail API.
+
+### KlikQRIS tidak menampilkan QR / belum paid
+
+Kemungkinan penyebab:
+
+- environment KlikQRIS belum ready atau provider switch belum diaktifkan owner;
+- create masih `Creating`, `RecoveryPending`, atau `ProviderTotalPending`;
+- QR URL tidak trusted, total final tidak valid, atau expiry provider sudah lewat;
+- callback diterima tetapi status authoritative belum `SUCCESS`;
+- scheduler/reconciliation atau queue worker tidak berjalan.
+
+Langkah cek:
+
+- cek readiness dan environment tanpa mencetak credential;
+- buka invoice yang sama dan gunakan `Cek Pembayaran`, jangan membuat checkout kedua;
+- cek `PaymentEvent` yang sudah disanitasi dan status Payment/Order;
+- jalankan `php artisan klikqris:reconcile --chunk=100` di environment yang benar;
+- gunakan `php artisan klikqris:validate-sandbox <payment> --create --reconcile` hanya pada sandbox disposable.
 
 ### Order pending tidak expired
 
@@ -631,13 +703,28 @@ Langkah cek:
 
 ## 8. Important Files / Reference
 
+- `../docs/agents/codebase.md` — peta implementasi untuk agent/AI: ownership service, aggregate, flow Telegram/Web Storefront/Admin, payment rails, invariant, dan test map.
+- `../CONTEXT.md` — glossary domain canonical.
+- `../docs/adr/0006-klikqris-native-qris-and-pakasir-retirement.md` — keputusan KlikQRIS Native QRIS dan retirement Pakasir.
 - `src/app/Http/Controllers/TelegramWebhookController.php` — validasi secret Telegram, filter payload, simpan update, dispatch job pemrosesan update.
 - `src/app/Services/Telegram/TelegramUpdateProcessor.php` — command Telegram, katalog, cart, checkout manual, instruksi pembayaran, dan notifikasi admin manual order.
+- `src/app/Services/Telegram/TelegramCheckoutIntents.php` — adapter yang mengubah Payment rail/outcome menjadi instruksi Telegram; tidak memiliki ownership transition Order.
+- `src/app/Services/Checkout/PaymentProviderResolver.php` — resolusi active provider + payment intent untuk checkout baru.
+- `src/app/Services/Admin/PaymentProviderSwitcher.php` — owner-only provider switch, readiness, version conflict, dan audit.
+- `src/app/Services/KlikQris/KlikQrisNativeQrisService.php` — lifecycle KlikQRIS Native QRIS dan safe outcomes.
+- `src/app/Services/KlikQris/KlikQrisCallbackProcessor.php` — callback signal + authoritative status verification.
+- `src/app/Services/Pakasir/PakasirNativeQrisService.php` — legacy Pakasir native QRIS create/recovery.
+- `src/app/Services/Binance/BinancePaymentVerification.php` — Binance verification workflow.
+- `src/app/Storefront/StorefrontShopCheckout.php` — guest storefront checkout dan Recovery Key issuance.
+- `src/app/Storefront/StorefrontShopPaymentStatusRefresh.php` — signed invoice status refresh/recovery adapter.
 - `src/app/Services/Admin/AdminOrderOperations.php` — operasi admin untuk complete manual order dan resend receipt, termasuk audit log.
 - `src/app/Services/OrderStateMachine.php` — transisi status order/payment, release reservasi, sale stock movement, refund, cancel, dan expiry.
 - `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor}`.
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
+- `src/app/Console/Commands/ReconcileKlikQrisPayments.php` — command `klikqris:reconcile {--chunk=100}`.
+- `src/app/Console/Commands/ReconcilePakasirPayments.php` — command `pakasir:reconcile {--chunk=100}`.
+- `src/app/Console/Commands/ReconcileBinancePayments.php` — command `binance:reconcile {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.
 - `src/config/orders.php` — konfigurasi TTL pending payment.
 - `scripts/concurrency-deploy-gate.sh` — deploy gate PostgreSQL untuk race test inventory/cart/checkout/payment/admin stock.

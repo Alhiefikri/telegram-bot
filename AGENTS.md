@@ -10,4 +10,4 @@ Use the default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, 
 
 ### Domain docs
 
-This is a single-context repo with `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+This is a single-context repo with `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md` and `docs/agents/codebase.md` for the implementation map, flow ownership, invariants, and test entry points.
