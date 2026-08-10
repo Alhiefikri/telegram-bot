@@ -7,6 +7,11 @@ updates:
       day: monday
     labels:
       - dependencies
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
     open-pull-requests-limit: 5
 
   - package-ecosystem: composer
@@ -25,4 +30,13 @@ updates:
       day: monday
     labels:
       - dependencies
+    groups:
+      frontend-toolchain:
+        applies-to: version-updates
+        patterns:
+          - "@tailwindcss/*"
+          - "concurrently"
+          - "laravel-vite-plugin"
+          - "tailwindcss"
+          - "vite"
     open-pull-requests-limit: 5
