@@ -628,7 +628,11 @@ SH);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $release);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
-        $this->assertStringContainsString('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4', $contents);
+        $this->assertMatchesRegularExpression(
+            '/actions\/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+)*/',
+            $contents,
+            'The production workflow must pin upload-artifact to an immutable SHA and document its version.',
+        );
         $this->assertStringContainsString('ops:release-health-summary --baseline-stdin', $release);
         $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
         $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
