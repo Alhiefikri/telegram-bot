@@ -102,6 +102,44 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         $this->assertSame(1, $recovered->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
     }
 
+    /** @group postgres */
+    public function test_postgres_reconciliation_and_customer_recovery_share_one_payment_lock(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
+        }
+
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
+        }
+
+        $this->guardIsolatedPostgresTestingDatabase();
+        $this->migrateCommittedPostgresFixtureSchema();
+
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        $this->prepareConcurrencyTables();
+
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->reconcile(
+                Payment::findOrFail($payment->id),
+                fn (Payment $payment, KlikQrisTransaction $transaction): null => null,
+            )?->outcome()->value,
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, DB::table('klikqris_test_status_lookups')->where('payment_id', $payment->id)->count());
+        $this->assertSame('created', Payment::findOrFail($payment->id)->provider_create_state);
+    }
+
     private function prepareConcurrencyTables(): void
     {
         Schema::dropIfExists('klikqris_test_provider_effects');

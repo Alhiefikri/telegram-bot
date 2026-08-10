@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Storefront\StorefrontShopSignedInvoice;
@@ -13,6 +14,7 @@ use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
@@ -181,6 +183,40 @@ class KlikQrisStorefrontTest extends TestCase
 
         $this->assertSame(1, $statusCalls);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+    }
+
+    public function test_klikqris_status_refresh_uses_the_native_qris_payment_lock(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload(Payment::factory()->make([
+                'merchant_ref' => 'INV-KLIK-LOCKED-REFRESH',
+                'amount' => 1000,
+            ]), [
+                'order_id' => 'INV-KLIK-LOCKED-REFRESH',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_locked_refresh.png',
+                'expired_at' => now()->addMinutes(15)->toISOString(),
+            ]),
+            'merchant_ref' => 'INV-KLIK-LOCKED-REFRESH',
+            'provider_expires_at' => now()->addMinutes(15),
+        ]);
+        $lock = Cache::lock(app(KlikQrisNativeQrisService::class)->paymentLockKey($payment), 30);
+        $this->assertTrue($lock->get());
+        Http::fake();
+
+        try {
+            $response = $this->postJson(URL::signedRoute('storefront.shop.orders.status', $payment->order, null, false));
+        } finally {
+            $lock->release();
+        }
+
+        $response->assertStatus(202)->assertJsonPath('status', 'in_progress');
+        Http::assertNothingSent();
     }
 
     public function test_klikqris_provider_failure_returns_retryable_json_without_details(): void

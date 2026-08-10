@@ -61,6 +61,41 @@ class KlikQrisReconciliationTest extends TestCase
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_command_creates_pending_native_qris_and_verifies_it_without_customer_refresh(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_create_state' => null,
+        ]);
+
+        Http::fakeSequence()
+            ->push(KlikQrisSandboxScenarios::createPayload($payment, [
+                'total_amount' => 1016,
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_background.png',
+            ]), 200)
+            ->push(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'total_amount' => 1016,
+            ]), 200);
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame('created', $payment->provider_create_state);
+        $this->assertSame(1016, $payment->provider_total_payment);
+        $this->assertSame(1, $payment->paymentEvents()->where('event_type', 'provider_create')->count());
+        $this->assertSame(1, $payment->paymentEvents()->where('event_type', 'reconciliation')->count());
+        Http::assertSentCount(2);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
     public function test_command_skips_payment_when_callback_holds_the_status_lock(): void
     {
         $payment = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-LOCKED']);

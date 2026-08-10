@@ -6,18 +6,16 @@ use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
-use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
+use App\Services\KlikQris\KlikQrisTransaction;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class ReconcileKlikQrisPayments extends Command
 {
-    private const STATUS_LOCK_LEASE_SECONDS = 60;
-
     private const ELIGIBLE_PAYMENT_STATUSES = [
         PaymentStatus::Pending->value,
         PaymentStatus::Expired->value,
@@ -29,7 +27,7 @@ class ReconcileKlikQrisPayments extends Command
     protected $description = 'Reconcile eligible KlikQRIS payments from authoritative transaction status.';
 
     public function handle(
-        KlikQrisProviderAdapter $client,
+        KlikQrisNativeQrisService $nativeQris,
         KlikQrisCallbackProcessor $processor,
         KlikQrisProviderReadiness $readiness,
     ): int {
@@ -67,32 +65,24 @@ class ReconcileKlikQrisPayments extends Command
                     ->orWhere('provider_create_state', 'outcome_unknown');
             })
             ->orderBy('id')
-            ->chunkById($chunk, function ($payments) use ($client, $processor, &$processed, &$skipped, &$failed): void {
+            ->chunkById($chunk, function ($payments) use ($nativeQris, $processor, &$processed, &$skipped, &$failed): void {
                 foreach ($payments as $payment) {
                     try {
-                        $statusLock = Cache::lock('klikqris:callback-status:'.$payment->getKey(), self::STATUS_LOCK_LEASE_SECONDS);
-                        if (! $statusLock->get()) {
+                        $event = null;
+                        $result = $nativeQris->reconcile(
+                            $payment,
+                            function (Payment $payment, KlikQrisTransaction $transaction) use (&$event, $processor): void {
+                                $event = $processor->processReconciliationForPayment($payment, $transaction);
+                            },
+                        );
+
+                        if ($result === null || $event === null || $event->processed_at === null) {
                             $skipped++;
 
                             continue;
                         }
 
-                        try {
-                            $event = $processor->processReconciliationForPayment(
-                                $payment,
-                                $client->transactionStatus($payment),
-                            );
-
-                            if ($event->processed_at === null) {
-                                $skipped++;
-
-                                continue;
-                            }
-
-                            $processed++;
-                        } finally {
-                            $statusLock->release();
-                        }
+                        $processed++;
                     } catch (Throwable $exception) {
                         report($exception);
                         $failed++;

@@ -10,7 +10,6 @@ use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
-use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
@@ -25,7 +24,6 @@ class StorefrontShopPaymentStatusRefresh
         private readonly PakasirProviderAdapter $pakasir,
         private readonly PakasirNativeQrisService $nativeQris,
         private readonly PakasirCallbackProcessor $processor,
-        private readonly KlikQrisProviderAdapter $klikQris,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
@@ -126,21 +124,37 @@ class StorefrontShopPaymentStatusRefresh
             $lock = null;
             $skipProviderLookup = $this->coordinator->recentlyRefreshed($payment);
 
-            if (! $skipProviderLookup) {
-                $lock = $this->coordinator->acquire($payment);
-                if ($lock === null) {
-                    $this->events->checkoutSubmitted(null, $order, [
-                        'status_endpoint_result' => 'in_progress',
-                    ]);
-
-                    return StorefrontShopSignedStatusRefreshResult::inProgress(
-                        $this->coordinator->retryAfterSeconds(),
-                    );
-                }
-            }
-
             try {
-                if (! $skipProviderLookup) {
+                if (! $skipProviderLookup && $this->isKlikQrisPayment($payment)) {
+                    $lookupCompleted = $this->klikQrisNativeQris->tryWithPaymentLock($payment, function () use ($payment): bool {
+                        $this->processProviderReconciliation($payment);
+
+                        return true;
+                    });
+
+                    if ($lookupCompleted === null) {
+                        $this->events->checkoutSubmitted(null, $order, [
+                            'status_endpoint_result' => 'in_progress',
+                        ]);
+
+                        return StorefrontShopSignedStatusRefreshResult::inProgress(
+                            $this->coordinator->retryAfterSeconds(),
+                        );
+                    }
+
+                    $this->coordinator->markRecentlyRefreshed($payment);
+                } elseif (! $skipProviderLookup) {
+                    $lock = $this->coordinator->acquire($payment);
+                    if ($lock === null) {
+                        $this->events->checkoutSubmitted(null, $order, [
+                            'status_endpoint_result' => 'in_progress',
+                        ]);
+
+                        return StorefrontShopSignedStatusRefreshResult::inProgress(
+                            $this->coordinator->retryAfterSeconds(),
+                        );
+                    }
+
                     $this->processProviderReconciliation($payment);
                     $this->coordinator->markRecentlyRefreshed($payment);
                 }
@@ -306,7 +320,7 @@ class StorefrontShopPaymentStatusRefresh
     private function processProviderReconciliation(Payment $payment): void
     {
         if ($this->isKlikQrisPayment($payment)) {
-            $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQris->transactionStatus($payment));
+            $this->klikQrisProcessor->reconcilePayment($payment);
 
             return;
         }

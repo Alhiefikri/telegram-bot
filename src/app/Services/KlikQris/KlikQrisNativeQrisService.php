@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Support\PaymentProvider;
+use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,10 @@ use Throwable;
  */
 class KlikQrisNativeQrisService
 {
+    private const PAYMENT_LOCK_LEASE_SECONDS = 60;
+
+    private const PAYMENT_LOCK_WAIT_SECONDS = 10;
+
     public function __construct(
         private readonly KlikQrisProviderAdapter $provider,
         private readonly KlikQrisPaymentEventLogger $events,
@@ -60,20 +65,107 @@ class KlikQrisNativeQrisService
         }
 
         try {
-            return Cache::lock('klikqris:native-qris:create:'.$payment->getKey(), 30)
-                ->block(10, fn (): KlikQrisNativeQrisLifecycleResult => $this->createOrRecover($payment));
+            return Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS)
+                ->block(self::PAYMENT_LOCK_WAIT_SECONDS, fn (): KlikQrisNativeQrisLifecycleResult => $this->createOrRecover($payment));
         } catch (LockTimeoutException) {
             // Another attempt holds the single-flight lock; the QR is still being prepared.
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
         }
     }
 
+    /**
+     * Reconcile one Payment while holding the same lock used by customer
+     * refreshes and callback verification.
+     *
+     * The callback performs authoritative paid-status handling after this
+     * module has recovered QR state.
+     *
+     * @param  Closure(Payment, KlikQrisTransaction): mixed  $onAuthoritativeStatus
+     */
+    public function reconcile(Payment $payment, Closure $onAuthoritativeStatus): ?KlikQrisNativeQrisLifecycleResult
+    {
+        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            $payment->refresh();
+
+            if ($payment->status !== PaymentStatus::Pending || $this->hasNonRecoverableState($payment)) {
+                $transaction = $this->provider->transactionStatus($payment);
+                $transaction->assertMatches($payment);
+                $onAuthoritativeStatus($payment, $transaction);
+
+                return $this->classifyPersisted($payment->fresh());
+            }
+
+            $work = $this->createOrRecoverWithTransaction($payment, throwRecoveryFailure: true);
+            if ($work['authoritativeTransaction'] !== null) {
+                $onAuthoritativeStatus($payment, $work['authoritativeTransaction']);
+
+                return $work['result'];
+            }
+
+            if (in_array($work['result']->outcome(), [
+                KlikQrisNativeQrisOutcome::Creating,
+                KlikQrisNativeQrisOutcome::RecoveryPending,
+            ], true)) {
+                return $work['result'];
+            }
+
+            $transaction = $this->provider->transactionStatus($payment);
+            $transaction->assertMatches($payment);
+            $onAuthoritativeStatus($payment, $transaction);
+
+            return $work['result'];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Execute a status or persistence operation without waiting for another
+     * recovery attempt to finish. A null return means this Payment is busy.
+     */
+    public function tryWithPaymentLock(Payment $payment, Closure $callback): mixed
+    {
+        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function paymentLockKey(Payment $payment): string
+    {
+        // Keep the established key so callback/reconciliation workers already
+        // holding the old status lock continue to serialize with this module.
+        return 'klikqris:callback-status:'.$payment->getKey();
+    }
+
     private function createOrRecover(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    {
+        return $this->createOrRecoverWithTransaction($payment)['result'];
+    }
+
+    /**
+     * @return array{result: KlikQrisNativeQrisLifecycleResult, authoritativeTransaction: ?KlikQrisTransaction}
+     */
+    private function createOrRecoverWithTransaction(Payment $payment, bool $throwRecoveryFailure = false): array
     {
         $payment->refresh();
 
         if ($this->hasReusablePersistedQris($payment)) {
-            return $this->payableResult($payment);
+            return [
+                'result' => $this->payableResult($payment),
+                'authoritativeTransaction' => null,
+            ];
         }
 
         if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
@@ -81,7 +173,7 @@ class KlikQrisNativeQrisService
                 $this->resetPreRequestFailure($payment);
                 $payment->refresh();
             } else {
-                return $this->recoverCreationOutcome($payment);
+                return $this->recoverCreationOutcome($payment, $throwRecoveryFailure);
             }
         }
 
@@ -99,15 +191,24 @@ class KlikQrisNativeQrisService
             // The create may or may not have reached the provider; recover on the same Payment.
             $this->markCreationOutcomeUnknown($payment, $exception);
 
-            return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+            return [
+                'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending),
+                'authoritativeTransaction' => null,
+            ];
         }
 
         $this->persistCreatedTransaction($payment, $transaction);
 
-        return $this->postWorkResult($payment);
+        return [
+            'result' => $this->postWorkResult($payment),
+            'authoritativeTransaction' => null,
+        ];
     }
 
-    private function recoverCreationOutcome(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    /**
+     * @return array{result: KlikQrisNativeQrisLifecycleResult, authoritativeTransaction: ?KlikQrisTransaction}
+     */
+    private function recoverCreationOutcome(Payment $payment, bool $throwFailure = false): array
     {
         try {
             $transaction = $this->provider->transactionStatus($payment);
@@ -117,10 +218,20 @@ class KlikQrisNativeQrisService
             $this->markRecoveryUnconfirmed($payment, $exception);
             $payment->refresh();
 
-            return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+            if ($throwFailure) {
+                throw $exception;
+            }
+
+            return [
+                'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending),
+                'authoritativeTransaction' => null,
+            ];
         }
 
-        return $this->postWorkResult($payment);
+        return [
+            'result' => $this->postWorkResult($payment),
+            'authoritativeTransaction' => $transaction,
+        ];
     }
 
     private function postWorkResult(Payment $payment): KlikQrisNativeQrisLifecycleResult
