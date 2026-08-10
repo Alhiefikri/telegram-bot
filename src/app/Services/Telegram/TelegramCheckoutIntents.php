@@ -78,34 +78,34 @@ class TelegramCheckoutIntents
     public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');
+        $locale = $this->locale->code($order->customer);
         $result = $this->klikQris->lifecycle($payment);
         $payable = $result->payable();
         if ($payable === null) {
-            throw new RuntimeException($this->nonPayableKlikQrisMessage($result->outcome()));
+            return $this->sendKlikQrisRetryState($chatId, $order, $result->outcome(), $locale);
         }
+
         $payment->refresh();
 
         return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->klikQris(
                 $order,
-                $payment,
+                $payable,
                 $this->klikQrisImages->contents($payable),
-                $this->locale->code($order->customer),
+                $locale,
             ),
         );
     }
 
-    private function nonPayableKlikQrisMessage(KlikQrisNativeQrisOutcome $outcome): string
+    private function sendKlikQrisRetryState(string $chatId, Order $order, KlikQrisNativeQrisOutcome $outcome, string $locale): array
     {
-        return match ($outcome) {
-            KlikQrisNativeQrisOutcome::Creating => 'QRIS sedang disiapkan. Coba lagi dari invoice ini sebentar lagi.',
-            KlikQrisNativeQrisOutcome::RecoveryPending => 'QRIS sedang dipulihkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar.',
-            KlikQrisNativeQrisOutcome::ProviderTotalPending => 'Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.',
-            KlikQrisNativeQrisOutcome::InvalidProviderResult => 'Provider memberi hasil QRIS yang tidak valid. Hubungi bantuan untuk menyelesaikan pesanan ini.',
-            KlikQrisNativeQrisOutcome::Expired => 'QRIS sudah kedaluwarsa. Buat pesanan baru untuk melanjutkan.',
-            KlikQrisNativeQrisOutcome::Payable => 'QRIS siap dibayar.',
-        };
+        return $this->bot->sendMessage($chatId, $this->paymentInstructions->klikQrisRetry($order, $outcome, $locale), [
+            'inline_keyboard' => [
+                [['text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+            ],
+        ]);
     }
 
     public function binancePayEnabled(): bool

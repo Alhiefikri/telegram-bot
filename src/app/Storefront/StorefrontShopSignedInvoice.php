@@ -9,6 +9,10 @@ use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\CredentialDeliveryFormatter;
+use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
 use App\Services\ProductUsageGuide;
@@ -25,6 +29,7 @@ class StorefrontShopSignedInvoice
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
         private readonly BinancePaymentVerification $verification,
+        private readonly KlikQrisNativeQrisService $klikQris,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -36,8 +41,10 @@ class StorefrontShopSignedInvoice
         $verificationStatus = $this->binanceVerificationStatus($payment);
         $state = $this->state($projection);
         $redirectUrl = $this->redirectUrl($order);
-        $qrisReadiness = $this->qrisReadiness($projection, $payment);
+        $klikQrisResult = $this->isKlikQrisPayment($payment) ? $this->klikQris->classify($payment) : null;
+        $qrisReadiness = $this->qrisReadiness($projection, $payment, $klikQrisResult);
         $accountGroups = $this->accountGroups($order, $state);
+        $payable = $projection->isPendingPayment ? $klikQrisResult?->payable() : null;
 
         return new StorefrontShopSignedInvoiceReadResult(
             order: $order,
@@ -48,7 +55,7 @@ class StorefrontShopSignedInvoice
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
             canCancel: $this->canCancel($order, $projection),
-            payableAmount: $qrisReadiness['is_payable'] ? $payment?->provider_total_payment : null,
+            payableAmount: $payable?->totalAmount() ?? ($qrisReadiness['is_payable'] ? $payment?->provider_total_payment : null),
             payableAmountFromProvider: $qrisReadiness['is_payable'],
             isQrisPayable: $qrisReadiness['is_payable'],
             qrisReadinessState: $qrisReadiness['state'],
@@ -56,8 +63,9 @@ class StorefrontShopSignedInvoice
             qrisReadinessMessage: $qrisReadiness['message'],
             qrisRetryLabel: $qrisReadiness['retry_label'],
             qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
-            qrisImageSource: $this->qrisImageSource($projection, $payment),
-            payableAmountDisplay: $payment?->isPayableNativeKlikQris() === true ? $payment->klikQrisTotalAmountDisplay() : null,
+            qrisImageSource: $this->qrisImageSource($projection, $payment, $payable),
+            payableAmountDisplay: $payable?->totalAmountDisplay(),
+            qrisEffectiveExpiresAt: $payable?->effectiveExpiresAt(),
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
             accountGroups: $accountGroups,
             usageGuides: $state === StorefrontShopSignedInvoiceState::Paid
@@ -113,6 +121,11 @@ class StorefrontShopSignedInvoice
         return strtolower((string) $payment?->provider) === 'pakasir';
     }
 
+    private function isKlikQrisPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === 'klikqris';
+    }
+
     private function qrisImageDataUri(OrderLifecycleProjection $projection, ?Payment $payment): ?string
     {
         if (! $projection->isPendingPayment || $payment?->isPayableNativePakasirQris() !== true) {
@@ -122,14 +135,18 @@ class StorefrontShopSignedInvoice
         return 'data:image/png;base64,'.base64_encode($this->qrCodes->png($payment->provider_payment_number));
     }
 
-    private function qrisImageSource(OrderLifecycleProjection $projection, ?Payment $payment): ?string
+    private function qrisImageSource(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisPayableNativeQris $payable): ?string
     {
-        if (! $projection->isPendingPayment || ! $this->hasPayableNativeQris($payment)) {
+        if (! $projection->isPendingPayment) {
             return null;
         }
 
-        if ($payment?->isPayableNativeKlikQris() === true) {
-            return $payment->klikQrisQrisUrl();
+        if ($payable !== null) {
+            return $payable->qrisUrl();
+        }
+
+        if (! $this->hasPayableNativePakasirQris($payment)) {
+            return null;
         }
 
         return $this->qrisImageDataUri($projection, $payment);
@@ -163,7 +180,7 @@ class StorefrontShopSignedInvoice
     /**
      * @return array{is_payable: bool, state: string, title: string, message: string, retry_label: string}
      */
-    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment): array
+    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisLifecycleResult $klikQrisResult = null): array
     {
         if (! $projection->isPendingPayment) {
             return [
@@ -195,7 +212,54 @@ class StorefrontShopSignedInvoice
             ];
         }
 
-        if ($this->hasPayableNativeQris($payment)) {
+        if ($klikQrisResult !== null) {
+            return match ($klikQrisResult->outcome()) {
+                KlikQrisNativeQrisOutcome::Payable => [
+                    'is_payable' => true,
+                    'state' => 'ready',
+                    'title' => 'QRIS siap dibayar',
+                    'message' => 'Bayar hanya memakai QRIS dan total bayar final di invoice ini.',
+                    'retry_label' => 'Cek status pembayaran',
+                ],
+                KlikQrisNativeQrisOutcome::Creating => [
+                    'is_payable' => false,
+                    'state' => 'creating',
+                    'title' => 'Sedang membuat QRIS',
+                    'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.',
+                    'retry_label' => 'Coba cek QRIS',
+                ],
+                KlikQrisNativeQrisOutcome::RecoveryPending => [
+                    'is_payable' => false,
+                    'state' => 'recovery_pending',
+                    'title' => 'Sedang membuat QRIS',
+                    'message' => 'QRIS sedang dipulihkan pada invoice yang sama. Buka kembali invoice ini sebentar lagi.',
+                    'retry_label' => 'Coba cek QRIS',
+                ],
+                KlikQrisNativeQrisOutcome::ProviderTotalPending => [
+                    'is_payable' => false,
+                    'state' => 'provider_total_pending',
+                    'title' => 'Provider belum memberi nominal',
+                    'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.',
+                    'retry_label' => 'Coba ambil total QRIS',
+                ],
+                KlikQrisNativeQrisOutcome::InvalidProviderResult => [
+                    'is_payable' => false,
+                    'state' => 'failed',
+                    'title' => 'Gagal membuat QRIS',
+                    'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
+                    'retry_label' => 'Coba buat QRIS lagi',
+                ],
+                KlikQrisNativeQrisOutcome::Expired => [
+                    'is_payable' => false,
+                    'state' => 'expired',
+                    'title' => 'QRIS kedaluwarsa',
+                    'message' => 'Batas bayar QRIS sudah lewat. Jangan bayar QRIS ini; buat order baru dari katalog.',
+                    'retry_label' => 'Cek status pembayaran',
+                ],
+            };
+        }
+
+        if ($this->hasPayableNativePakasirQris($payment)) {
             return [
                 'is_payable' => true,
                 'state' => 'ready',
@@ -215,7 +279,8 @@ class StorefrontShopSignedInvoice
             ];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
+        if ($this->isPakasirPayment($payment)
+            && in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return [
                 'is_payable' => false,
                 'state' => 'failed',
@@ -234,9 +299,9 @@ class StorefrontShopSignedInvoice
         ];
     }
 
-    private function hasPayableNativeQris(?Payment $payment): bool
+    private function hasPayableNativePakasirQris(?Payment $payment): bool
     {
-        return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
+        return $payment?->isPayableNativePakasirQris() === true;
     }
 
     /**

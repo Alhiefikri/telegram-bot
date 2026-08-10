@@ -77,7 +77,7 @@ class StorefrontShopPaymentStatusRefresh
             return StorefrontShopSignedStatusRefreshResult::unsupportedPayment();
         }
 
-        $wasQrisReady = $this->hasPayableNativeQris($payment);
+        $wasQrisReady = $this->isNativeQrisPayable($payment);
         $qrisRecoveryFailed = false;
         $qrisRecoveredDuringRetry = false;
 
@@ -92,8 +92,8 @@ class StorefrontShopPaymentStatusRefresh
             }
 
             $payment->refresh();
-            if (! $wasQrisReady && $this->hasPayableNativeQris($payment)) {
-                $qrisRecoveredDuringRetry = true;
+            $qrisRecoveredDuringRetry = ! $wasQrisReady && $this->isPayableOutcome($recoveryOutcome, $payment);
+            if ($qrisRecoveredDuringRetry) {
                 $this->events->qrisCreated($order, $payment, [
                     'source' => 'status_retry',
                     'idempotent_reuse' => false,
@@ -101,7 +101,6 @@ class StorefrontShopPaymentStatusRefresh
             }
 
             if (! $qrisRecoveryFailed
-                && ! $this->hasPayableNativeQris($payment)
                 && $this->isKlikQrisPayment($payment)
                 && $recoveryOutcome !== null
                 && ! in_array($recoveryOutcome, [KlikQrisNativeQrisOutcome::Payable, KlikQrisNativeQrisOutcome::ProviderTotalPending], true)) {
@@ -109,7 +108,7 @@ class StorefrontShopPaymentStatusRefresh
             }
         }
 
-        if ($qrisRecoveryFailed && ! $this->hasPayableNativeQris($payment)) {
+        if ($qrisRecoveryFailed && ! $this->isNativeQrisPayable($payment)) {
             $readiness = $this->qrisReadiness($this->orders->project($order, $payment), $payment, $recoveryOutcome);
             $this->events->checkoutSubmitted(null, $order, [
                 'status_endpoint_result' => 'qris_not_ready',
@@ -165,7 +164,7 @@ class StorefrontShopPaymentStatusRefresh
         $order->refresh();
         $payment->refresh();
         $projection = $this->orders->project($order, $payment);
-        $qrisReady = $this->hasPayableNativeQris($payment);
+        $qrisReady = $this->isNativeQrisPayable($payment);
         if (! $wasQrisReady && $qrisReady && ! $qrisRecoveredDuringRetry) {
             $this->events->qrisCreated($order, $payment, [
                 'source' => 'status_refresh',
@@ -213,14 +212,14 @@ class StorefrontShopPaymentStatusRefresh
         }
 
         return ($this->isPakasirPayment($payment) && $payment->method === 'hosted')
-            || $this->hasPayableNativeQris($payment);
+            || $this->isNativeQrisPayable($payment);
     }
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
     {
         return $this->hasNativeQrisRail($payment)
             && $projection->isPendingPayment
-            && ! $this->hasPayableNativeQris($payment);
+            && ! $this->isNativeQrisPayable($payment);
     }
 
     private function isAutomaticQrisPayment(?Payment $payment): bool
@@ -265,7 +264,30 @@ class StorefrontShopPaymentStatusRefresh
 
     private function hasPayableNativeQris(?Payment $payment): bool
     {
-        return $payment?->isPayableNativePakasirQris() === true || $payment?->isPayableNativeKlikQris() === true;
+        return $payment?->isPayableNativePakasirQris() === true;
+    }
+
+    /**
+     * Whether the currently persisted state is payable. KlikQRIS payments are
+     * classified by the KlikQRIS lifecycle outcome; Pakasir keeps its legacy
+     * model-level readiness check.
+     */
+    private function isNativeQrisPayable(?Payment $payment): bool
+    {
+        if ($this->isKlikQrisPayment($payment)) {
+            return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        return $this->hasPayableNativeQris($payment);
+    }
+
+    private function isPayableOutcome(?KlikQrisNativeQrisOutcome $outcome, Payment $payment): bool
+    {
+        if ($outcome !== null) {
+            return $outcome === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        return $this->isNativeQrisPayable($payment);
     }
 
     private function attemptNativeQrisRecovery(Payment $payment): ?KlikQrisNativeQrisOutcome
@@ -334,7 +356,8 @@ class StorefrontShopPaymentStatusRefresh
             return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
         }
 
-        if (in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
+        if ($this->isPakasirPayment($payment)
+            && in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
             return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
         }
 

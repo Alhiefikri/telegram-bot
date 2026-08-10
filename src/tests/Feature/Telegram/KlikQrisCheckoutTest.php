@@ -143,12 +143,13 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
     }
 
-    public function test_base64_only_create_is_never_sent_and_job_releases_claim_until_recovery(): void
+    public function test_base64_only_create_is_never_sent_and_job_sends_retry_state_until_recovery(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
         $base64 = KlikQrisSandboxScenarios::pngDataUri('telegram-base64-only');
         $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654321]]),
             'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) use ($base64) {
                 return Http::response([
                     'data' => [
@@ -179,12 +180,7 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
             'status' => PaymentStatus::Pending,
         ]);
 
-        try {
-            (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
-            $this->fail('Base64-only provider media must never be exposed to the customer.');
-        } catch (RuntimeException $exception) {
-            $this->assertSame('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.', $exception->getMessage());
-        }
+        (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
 
         $fresh = $payment->fresh();
         $payloadJson = json_encode($fresh->provider_payload, JSON_THROW_ON_ERROR);
@@ -195,7 +191,14 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
 
         $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
         $this->assertCount(0, $sendPhotos);
-        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $sendMessages);
+        $messageRequest = $sendMessages->first()[0];
+        $this->assertStringContainsString('final payable amount', $messageRequest->body());
+        $this->assertStringContainsString('Check Payment', $messageRequest->body());
+        $this->assertStringNotContainsString($base64, $messageRequest->body());
+        $this->assertStringNotContainsString('MERCHANT_SECRET_TELEGRAM', $messageRequest->body());
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
     }
 

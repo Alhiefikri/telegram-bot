@@ -5,6 +5,7 @@ namespace App\Storefront;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Binance\BinanceVerificationStatus;
+use Carbon\CarbonImmutable;
 
 class StorefrontShopSignedInvoiceReadResult
 {
@@ -31,6 +32,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly ?string $qrisImageDataUri,
         public readonly ?string $qrisImageSource,
         public readonly ?string $payableAmountDisplay,
+        public readonly ?CarbonImmutable $qrisEffectiveExpiresAt,
         public readonly ?string $hostedPaymentUrl,
         public readonly array $accountGroups,
         public readonly array $usageGuides,

@@ -5,6 +5,7 @@ namespace Tests\Unit\Services\Telegram;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\TelegramPaymentInstruction;
 use App\Services\Telegram\TelegramPaymentInstructionRenderer;
@@ -209,18 +210,10 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     public function test_klikqris_instruction_localizes_warning_for_id_locale(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
-        $payment = Payment::factory()->for($order)->create([
-            'provider' => 'klikqris',
-            'provider_payment_method' => 'qris',
-            'merchant_ref' => 'KLIK-QRIS-ID-103',
-            'amount' => 125000,
-            'provider_total_payment' => 125875,
-            'provider_payload' => ['data' => ['total_amount' => '125875.00']],
-            'provider_expires_at' => CarbonImmutable::parse('2026-07-04 16:45:00', 'Asia/Jakarta'),
-            'expired_at' => CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'),
-        ]);
+        $payment = $this->klikPayment($order, 125000, '125875.00', 125875);
+        $payable = KlikQrisPayableNativeQris::fromPayment($payment);
 
-        $instruction = $this->renderer()->klikQris($order, $payment, 'qris-png:klikqris', 'id');
+        $instruction = $this->renderer()->klikQris($order, $payable, 'qris-png:klikqris', 'id');
 
         $this->assertContains('⚠️ Jangan membulatkan atau mengubah satu digit pun.', $instruction->captionLines());
         $this->assertStringNotContainsString('Do not round or change any digit.', $instruction->caption());
@@ -265,14 +258,10 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     public function test_klikqris_instruction_displays_exact_validated_provider_amount(mixed $providerValue, string $expectedDisplay): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
-        $payment = Payment::factory()->for($order)->create([
-            'provider' => 'klikqris',
-            'provider_payment_method' => 'qris',
-            'provider_total_payment' => 1016,
-            'provider_payload' => ['data' => ['total_amount' => $providerValue]],
-        ]);
+        $payment = $this->klikPayment($order, 1000, $providerValue, 1016);
+        $payable = KlikQrisPayableNativeQris::fromPayment($payment);
 
-        $instruction = $this->renderer()->klikQris($order, $payment, 'provider-qris-png', 'en');
+        $instruction = $this->renderer()->klikQris($order, $payable, 'provider-qris-png', 'en');
 
         $this->assertSame('provider-qris-png', $instruction->photoContents);
         $this->assertContains(
@@ -293,20 +282,14 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         ];
     }
 
-    public function test_klikqris_instruction_refuses_mismatched_persisted_provider_amount(): void
+    public function test_klikqris_payable_payload_refuses_mismatched_persisted_provider_amount(): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
-        $payment = Payment::factory()->for($order)->create([
-            'provider' => 'klikqris',
-            'provider_payment_method' => 'qris',
-            'provider_total_payment' => 1016,
-            'provider_payload' => ['data' => ['total_amount' => '1017.00']],
-        ]);
+        $payment = $this->klikPayment($order, 1000, '1017.00', 1016);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('KlikQRIS total amount is missing.');
 
-        $this->renderer()->klikQris($order, $payment, 'provider-qris-png', 'en');
+        KlikQrisPayableNativeQris::fromPayment($payment);
     }
 
     public function test_manual_instruction_uses_indonesian_caption_and_no_buyer_actions_for_id_locale(): void
@@ -399,6 +382,31 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         ]);
 
         return $order;
+    }
+
+    private function klikPayment(Order $order, int $amount, mixed $providerValue, int $providerTotal): Payment
+    {
+        $providerExpiresAt = CarbonImmutable::now('Asia/Jakarta')->addMinutes(15)->startOfSecond();
+        $order->update(['expires_at' => $providerExpiresAt->copy()->subMinutes(5)]);
+
+        return Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => $order->invoice_number,
+            'amount' => $amount,
+            'provider_fee' => $providerTotal - $amount,
+            'provider_total_payment' => $providerTotal,
+            'provider_expires_at' => $providerExpiresAt,
+            'provider_create_state' => 'created',
+            'provider_payload' => ['data' => [
+                'order_id' => $order->invoice_number,
+                'amount' => $amount,
+                'total_amount' => $providerValue,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_renderer.png',
+                'expired_at' => $providerExpiresAt->utc()->toAtomString(),
+            ]],
+        ]);
     }
 
     private function nativeTransaction(string $paymentNumber): PakasirQrisTransaction

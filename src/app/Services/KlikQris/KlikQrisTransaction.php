@@ -94,7 +94,10 @@ final readonly class KlikQrisTransaction
                 throw new RuntimeException('Persisted KlikQRIS transaction QRIS URL is not trusted.');
             }
 
-            if ($payment->provider_expires_at === null || $transaction->expiresAt() === null || ! $transaction->expiresAt()->equalTo($payment->provider_expires_at)) {
+            // Payment timestamps use the database timestamp precision. Compare
+            // at that precision so valid provider milliseconds do not make the
+            // persisted transaction fail closed on the next customer read.
+            if ($payment->provider_expires_at === null || $transaction->expiresAt() === null || $transaction->expiresAt()->getTimestamp() !== $payment->provider_expires_at->getTimestamp()) {
                 throw new RuntimeException('Persisted KlikQRIS transaction expiry is inconsistent.');
             }
 

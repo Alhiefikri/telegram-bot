@@ -28,6 +28,25 @@ class KlikQrisNativeQrisService
         private readonly KlikQrisPaymentEventLogger $events,
     ) {}
 
+    /**
+     * Classify the persisted Payment without performing any provider work.
+     *
+     * Read-only surfaces (invoice rendering, status reads) use this to present
+     * exactly the same safe outcomes lifecycle() returns, so they never classify
+     * provider payloads or persistence-state strings themselves. Only lifecycle()
+     * may create or recover a QR.
+     */
+    public function classify(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    {
+        $payment->refresh();
+
+        if ($this->hasReusablePersistedQris($payment)) {
+            return $this->payableResult($payment);
+        }
+
+        return $this->classifyPersisted($payment);
+    }
+
     public function lifecycle(Payment $payment): KlikQrisNativeQrisLifecycleResult
     {
         $payment->refresh();
@@ -153,8 +172,9 @@ class KlikQrisNativeQrisService
     {
         $outcome = match ($payment->provider_create_state) {
             'outcome_unknown', 'recovery_unconfirmed' => KlikQrisNativeQrisOutcome::RecoveryPending,
-            'transient_qris_image' => KlikQrisNativeQrisOutcome::ProviderTotalPending,
-            'provider_total_invalid', 'provider_qris_unusable', 'provider_not_payable', 'provider_SUCCESS', 'created' => KlikQrisNativeQrisOutcome::InvalidProviderResult,
+            'transient_qris_image', 'provider_total_pending' => KlikQrisNativeQrisOutcome::ProviderTotalPending,
+            'creating', null => KlikQrisNativeQrisOutcome::Creating,
+            'provider_total_invalid', 'provider_qris_unusable', 'provider_not_payable', 'provider_SUCCESS', 'created', 'financial_integrity_failed' => KlikQrisNativeQrisOutcome::InvalidProviderResult,
             'provider_expired', 'provider_EXPIRED' => KlikQrisNativeQrisOutcome::Expired,
             default => KlikQrisNativeQrisOutcome::InvalidProviderResult,
         };
