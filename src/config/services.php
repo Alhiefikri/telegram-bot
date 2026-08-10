@@ -112,6 +112,7 @@ return [
         'http_timeout_seconds' => (float) env('KLIKQRIS_HTTP_TIMEOUT_SECONDS', 10),
         'http_connect_timeout_seconds' => (float) env('KLIKQRIS_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
         'status_max_attempts' => (int) env('KLIKQRIS_STATUS_MAX_ATTEMPTS', 3),
+        'recovery_alert_max_attempts' => (int) env('KLIKQRIS_RECOVERY_ALERT_MAX_ATTEMPTS', 3),
         'status_retry_delay_ms' => (int) env('KLIKQRIS_STATUS_RETRY_DELAY_MS', 250),
         'webhook_rate_limit_per_minute' => (int) env('KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
         'status_refresh_rate_limit_per_minute' => (int) env('KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),

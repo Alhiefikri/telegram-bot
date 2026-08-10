@@ -10,6 +10,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\Telegram\TelegramKlikQrisRecoveryEscalator;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 use Throwable;
@@ -30,6 +31,7 @@ class ReconcileKlikQrisPayments extends Command
         KlikQrisNativeQrisService $nativeQris,
         KlikQrisCallbackProcessor $processor,
         KlikQrisProviderReadiness $readiness,
+        TelegramKlikQrisRecoveryEscalator $escalator,
     ): int {
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
@@ -65,7 +67,7 @@ class ReconcileKlikQrisPayments extends Command
                     ->orWhere('provider_create_state', 'outcome_unknown');
             })
             ->orderBy('id')
-            ->chunkById($chunk, function ($payments) use ($nativeQris, $processor, &$processed, &$skipped, &$failed): void {
+            ->chunkById($chunk, function ($payments) use ($nativeQris, $processor, $escalator, &$processed, &$skipped, &$failed): void {
                 foreach ($payments as $payment) {
                     try {
                         $event = null;
@@ -75,6 +77,10 @@ class ReconcileKlikQrisPayments extends Command
                                 $event = $processor->processReconciliationForPayment($payment, $transaction);
                             },
                         );
+
+                        if ($result !== null) {
+                            $escalator->notifyFor($payment);
+                        }
 
                         if ($result === null || $event === null || $event->processed_at === null) {
                             $skipped++;
@@ -87,6 +93,7 @@ class ReconcileKlikQrisPayments extends Command
                         report($exception);
                         $failed++;
                         $this->error('KlikQRIS reconciliation failed payment '.$payment->id.': '.$this->safeExceptionMessage($exception));
+                        $escalator->notifyFor($payment);
                     }
                 }
             });

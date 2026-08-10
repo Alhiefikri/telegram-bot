@@ -28,6 +28,8 @@ class KlikQrisNativeQrisService
 
     private const PAYMENT_LOCK_WAIT_SECONDS = 10;
 
+    private const OWNER_ALERT_TERMINAL_STATE = 'terminal';
+
     public function __construct(
         private readonly KlikQrisProviderAdapter $provider,
         private readonly KlikQrisPaymentEventLogger $events,
@@ -50,6 +52,75 @@ class KlikQrisNativeQrisService
         }
 
         return $this->classifyPersisted($payment);
+    }
+
+    /**
+     * Observe the current lifecycle state and return an owner alert only when
+     * the state is actionable and its retry policy has been met. This stays in
+     * the lifecycle module so customer-facing callers never inspect Payment
+     * persistence fields or maintain a second retry counter.
+     */
+    public function ownerAlert(Payment $payment): ?KlikQrisOwnerAlert
+    {
+        $alert = $this->tryWithPaymentLock($payment, function () use ($payment): ?KlikQrisOwnerAlert {
+            $payment->refresh();
+
+            $outcome = $payment->status === PaymentStatus::Pending
+                ? $this->classifyPersisted($payment)->outcome()
+                : null;
+            $state = $outcome?->value ?? self::OWNER_ALERT_TERMINAL_STATE;
+            $observation = $this->events->observeOwnerAlert($payment, $state);
+
+            if ($outcome === null
+                || ! $this->isOwnerActionableOutcome($outcome)
+                || $observation['alreadyAlerted']
+                || ($outcome === KlikQrisNativeQrisOutcome::RecoveryPending
+                    && $observation['observations'] < $this->ownerAlertRetryBudget())) {
+                return null;
+            }
+
+            return new KlikQrisOwnerAlert(
+                $outcome,
+                $observation['observations'],
+                $this->ownerAlertRetryBudget(),
+            );
+        });
+
+        return $alert instanceof KlikQrisOwnerAlert ? $alert : null;
+    }
+
+    /**
+     * Deliver an owner alert while holding the same Payment lock as lifecycle,
+     * callback, and reconciliation work. The delivery marker is written only
+     * after the callback confirms a successful Telegram response.
+     *
+     * @param  Closure(): void  $deliver
+     */
+    public function deliverOwnerAlert(Payment $payment, KlikQrisOwnerAlert $alert, Closure $deliver): bool
+    {
+        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        if (! $lock->get()) {
+            return false;
+        }
+
+        try {
+            $payment->refresh();
+            if ($payment->status !== PaymentStatus::Pending
+                || $this->classifyPersisted($payment)->outcome() !== $alert->outcome()
+                || ! $this->events->ownerAlertNeedsDelivery($payment, $alert->outcome()->value, $alert->observations())) {
+                return false;
+            }
+
+            $deliver();
+
+            return $this->events->markOwnerAlertDelivered(
+                $payment,
+                $alert->outcome()->value,
+                $alert->observations(),
+            );
+        } finally {
+            $lock->release();
+        }
     }
 
     public function lifecycle(Payment $payment): KlikQrisNativeQrisLifecycleResult
@@ -291,6 +362,19 @@ class KlikQrisNativeQrisService
         };
 
         return KlikQrisNativeQrisLifecycleResult::state($outcome);
+    }
+
+    private function isOwnerActionableOutcome(KlikQrisNativeQrisOutcome $outcome): bool
+    {
+        return in_array($outcome, [
+            KlikQrisNativeQrisOutcome::RecoveryPending,
+            KlikQrisNativeQrisOutcome::InvalidProviderResult,
+        ], true);
+    }
+
+    private function ownerAlertRetryBudget(): int
+    {
+        return max(1, (int) config('services.klikqris.recovery_alert_max_attempts', 3));
     }
 
     private function hasNonRecoverableState(Payment $payment): bool

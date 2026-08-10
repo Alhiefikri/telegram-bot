@@ -9,8 +9,9 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
-use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
@@ -25,9 +26,10 @@ class TelegramOrderIntents
         private PakasirProviderAdapter $pakasir,
         private PakasirCallbackProcessor $pakasirProcessor,
         private PakasirProviderReadiness $pakasirReadiness,
-        private KlikQrisProviderAdapter $klikQris,
+        private KlikQrisNativeQrisService $klikQrisNativeQris,
         private KlikQrisCallbackProcessor $klikQrisProcessor,
         private KlikQrisProviderReadiness $klikQrisReadiness,
+        private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
         private TelegramMessageChunker $messageChunker,
@@ -178,14 +180,25 @@ class TelegramOrderIntents
         RateLimiter::hit($key, 60);
 
         try {
-            $event = $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQris->transactionStatus($payment));
+            $event = null;
+            $result = $this->klikQrisNativeQris->reconcile(
+                $payment,
+                function (Payment $payment, KlikQrisTransaction $transaction) use (&$event): void {
+                    $event = $this->klikQrisProcessor->processReconciliationForPayment($payment, $transaction);
+                },
+            );
         } catch (Throwable $e) {
             report($e);
+            $this->klikQrisAlerts->notifyFor($payment);
 
             return $this->text($customer, 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.', 'Payment status cannot be checked automatically right now. Please try again later.');
         }
 
-        if ($event->processed_at !== null) {
+        if ($result !== null) {
+            $this->klikQrisAlerts->notifyFor($payment);
+        }
+
+        if ($event?->processed_at !== null) {
             return $this->text($customer, 'Status pembayaran dicek ulang dan sudah terverifikasi.', 'Payment status was checked again and verified.');
         }
 

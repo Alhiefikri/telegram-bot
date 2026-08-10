@@ -19,6 +19,7 @@ final class KlikQrisSandboxScenarios
             'http_connect_timeout_seconds' => 1.5,
             'status_max_attempts' => 3,
             'status_retry_delay_ms' => 0,
+            'recovery_alert_max_attempts' => 3,
             'webhook_rate_limit_per_minute' => 30,
             'status_refresh_rate_limit_per_minute' => 3,
             'reconciliation_command' => 'klikqris:reconcile --chunk=100',

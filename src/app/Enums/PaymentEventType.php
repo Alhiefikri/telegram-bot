@@ -9,4 +9,5 @@ enum PaymentEventType: string
     case ProviderCancel = 'provider_cancel';
     case Reconciliation = 'reconciliation';
     case ManualUpdate = 'manual_update';
+    case OwnerAlert = 'owner_alert';
 }

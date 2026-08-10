@@ -54,6 +54,119 @@ class KlikQrisPaymentEventLogger
         );
     }
 
+    /**
+     * Record one observation of the current safe outcome state for a Payment.
+     * A new row is created for each transition, preserving the alert history;
+     * repeated observations update only the current transition row.
+     *
+     * @return array{observations: int, alreadyAlerted: bool, transitioned: bool}
+     */
+    public function observeOwnerAlert(Payment $payment, string $state): array
+    {
+        return DB::transaction(function () use ($payment, $state): array {
+            $event = $this->latestOwnerAlertEvent($payment, lock: true);
+            $previousState = data_get($event?->raw_payload, 'state');
+            $transitioned = $event === null || $previousState !== $state;
+
+            if ($transitioned) {
+                $event = PaymentEvent::create([
+                    'payment_id' => $payment->id,
+                    'provider' => PaymentProvider::KLIKQRIS,
+                    'event_type' => PaymentEventType::OwnerAlert,
+                    // The state is the module's own safe classification, not a
+                    // provider payload; no secrets, QR media, or customer data.
+                    'raw_payload' => ['state' => $state],
+                    'idempotency_key' => $this->ownerAlertIdempotencyKey($payment, $event?->getKey(), $state),
+                    'received_at' => now(),
+                    'last_received_at' => now(),
+                    'received_count' => 1,
+                ]);
+
+                return [
+                    'observations' => 1,
+                    'alreadyAlerted' => false,
+                    'transitioned' => true,
+                ];
+            }
+
+            $observations = ((int) $event->received_count) + 1;
+            $alreadyAlerted = $event->processed_at !== null;
+            $event->forceFill([
+                'last_received_at' => now(),
+                'received_count' => $observations,
+            ])->save();
+
+            return [
+                'observations' => $observations,
+                'alreadyAlerted' => $alreadyAlerted,
+                'transitioned' => false,
+            ];
+        }, 5);
+    }
+
+    /**
+     * Check whether the current transition still needs delivery.
+     */
+    public function ownerAlertNeedsDelivery(Payment $payment, string $state, int $observations): bool
+    {
+        return DB::transaction(function () use ($payment, $state, $observations): bool {
+            $event = $this->latestOwnerAlertEvent($payment, lock: true);
+            if ($event === null
+                || data_get($event->raw_payload, 'state') !== $state
+                || (int) $event->received_count !== $observations
+                || $event->processed_at !== null) {
+                return false;
+            }
+
+            return true;
+        }, 5);
+    }
+
+    /**
+     * Mark a transition delivered after Telegram has acknowledged the message.
+     */
+    public function markOwnerAlertDelivered(Payment $payment, string $state, int $observations): bool
+    {
+        return DB::transaction(function () use ($payment, $state, $observations): bool {
+            $event = $this->latestOwnerAlertEvent($payment, lock: true);
+            if ($event === null
+                || data_get($event->raw_payload, 'state') !== $state
+                || (int) $event->received_count !== $observations
+                || $event->processed_at !== null) {
+                return false;
+            }
+
+            $event->forceFill(['processed_at' => now()])->save();
+
+            return true;
+        }, 5);
+    }
+
+    private function ownerAlertIdempotencyKey(Payment $payment, int|string|null $previousEventId, string $state): string
+    {
+        return hash('sha256', implode(':', [
+            'owner_alert',
+            $payment->getKey(),
+            $previousEventId ?? 'initial',
+            $state,
+        ]));
+    }
+
+    private function latestOwnerAlertEvent(Payment $payment, bool $lock = false): ?PaymentEvent
+    {
+        $query = PaymentEvent::query()
+            ->where('payment_id', $payment->getKey())
+            ->where('provider', PaymentProvider::KLIKQRIS)
+            ->where('event_type', PaymentEventType::OwnerAlert->value)
+            ->latest('id');
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
+    }
+
     /** @param array<mixed> $sanitizedPayload */
     private function logCanonical(PaymentEventType $type, string $merchantRef, string $status, array $sanitizedPayload, ?Payment $payment): PaymentEvent
     {

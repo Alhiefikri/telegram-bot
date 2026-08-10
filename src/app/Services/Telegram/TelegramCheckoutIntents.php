@@ -30,6 +30,7 @@ class TelegramCheckoutIntents
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
         private KlikQrisNativeQrisService $klikQris,
+        private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private KlikQrisQrisImage $klikQrisImages,
         private PaymentProviderResolver $providerResolver,
     ) {}
@@ -79,7 +80,11 @@ class TelegramCheckoutIntents
     {
         $order->loadMissing('customer');
         $locale = $this->locale->code($order->customer);
-        $result = $this->klikQris->lifecycle($payment);
+        try {
+            $result = $this->klikQris->lifecycle($payment);
+        } finally {
+            $this->klikQrisAlerts->notifyFor($payment);
+        }
         $payable = $result->payable();
         if ($payable === null) {
             return $this->sendKlikQrisRetryState($chatId, $order, $result->outcome(), $locale);
