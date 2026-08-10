@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -190,7 +191,7 @@ class StorefrontShopCheckout
     private function ensureNativeQrisCreated(Payment $payment): void
     {
         if ($payment->provider === PaymentProvider::KLIKQRIS) {
-            $this->klikQrisNativeQris->ensureCreated($payment);
+            $this->klikQrisNativeQris->lifecycle($payment);
 
             return;
         }
@@ -208,7 +209,11 @@ class StorefrontShopCheckout
 
     private function hasPayableNativeQris(Payment $payment): bool
     {
-        return $payment->isPayableNativePakasirQris() || $payment->isPayableNativeKlikQris();
+        if ($payment->provider === PaymentProvider::KLIKQRIS) {
+            return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        return $payment->isPayableNativePakasirQris();
     }
 
     private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId): ?string

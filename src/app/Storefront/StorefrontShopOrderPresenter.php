@@ -5,6 +5,7 @@ namespace App\Storefront;
 use App\Models\Order;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
+use Carbon\Carbon;
 
 class StorefrontShopOrderPresenter
 {
@@ -57,6 +58,8 @@ class StorefrontShopOrderPresenter
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
             'qrisImageSource' => $invoice->qrisImageSource,
             'payableAmountDisplay' => $invoice->payableAmountDisplay,
+            'paymentDeadline' => $invoice->qrisEffectiveExpiresAt
+                ?? $this->localPaymentDeadline($invoice),
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
@@ -96,5 +99,22 @@ class StorefrontShopOrderPresenter
             BinanceVerificationOutcome::IncompleteWindow => 'checking',
             default => $status->outcome->value,
         };
+    }
+
+    /**
+     * Deadline shown for non-KlikQRIS rails (manual QR, Pakasir). KlikQRIS
+     * deadlines always come from the lifecycle Payable outcome, so a
+     * non-payable KlikQRIS Payment never exposes a provider deadline.
+     */
+    private function localPaymentDeadline(StorefrontShopSignedInvoiceReadResult $invoice): ?Carbon
+    {
+        $payment = $invoice->payment;
+        if ($payment !== null && strtolower((string) $payment->provider) === 'klikqris') {
+            return null;
+        }
+
+        return $payment?->provider_expires_at
+            ?? $payment?->expired_at
+            ?? $invoice->order->expires_at;
     }
 }

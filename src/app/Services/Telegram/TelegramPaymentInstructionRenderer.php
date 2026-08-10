@@ -4,6 +4,8 @@ namespace App\Services\Telegram;
 
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
@@ -187,15 +189,11 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
-    public function klikQris(Order $order, Payment $payment, string $photoContents, string $locale = 'id'): TelegramPaymentInstruction
+    public function klikQris(Order $order, KlikQrisPayableNativeQris $payable, string $photoContents, string $locale = 'id'): TelegramPaymentInstruction
     {
         $order->loadMissing('orderItems');
-        $total = $payment->klikQrisTotalAmountDisplay();
-        if ($total === null) {
-            throw new \RuntimeException('KlikQRIS total amount is missing.');
-        }
-
-        $expiry = $this->earliestDate($payment->provider_expires_at, $payment->expired_at, $order->expires_at);
+        $total = $payable->totalAmountDisplay();
+        $expiry = $payable->effectiveExpiresAt();
         $lines = [
             $locale === 'en' ? '✅ KlikQRIS checkout created' : '✅ Checkout KlikQRIS berhasil dibuat',
             '━━━━━━━━━━━━━━',
@@ -211,13 +209,11 @@ class TelegramPaymentInstructionRenderer
                 : 'Scan QRIS ini langsung dari Telegram. Bayar hanya dari gambar QR di atas.',
         ];
 
-        if ($expiry) {
-            $lines[] = '';
-            $lines[] = ($locale === 'en' ? '⏳ Provider deadline: ' : '⏳ Batas provider: ').$this->formatDate($expiry, $locale);
-            $lines[] = $locale === 'en'
-                ? 'This QRIS is valid for 15 minutes. After the deadline, create a new QRIS instead of paying this one.'
-                : 'QRIS ini berlaku 15 menit. Setelah batas waktu, buat QRIS baru dan jangan bayar QR ini.';
-        }
+        $lines[] = '';
+        $lines[] = ($locale === 'en' ? '⏳ Provider deadline: ' : '⏳ Batas provider: ').$this->formatDate($expiry, $locale);
+        $lines[] = $locale === 'en'
+            ? 'This QRIS is valid for 15 minutes. After the deadline, create a new QRIS instead of paying this one.'
+            : 'QRIS ini berlaku 15 menit. Setelah batas waktu, buat QRIS baru dan jangan bayar QR ini.';
 
         $lines[] = '';
         $lines[] = $locale === 'en'
@@ -235,6 +231,66 @@ class TelegramPaymentInstructionRenderer
                 ],
             ],
         );
+    }
+
+    /**
+     * Text-only retry state for a non-payable KlikQRIS outcome. No QR, total,
+     * or provider data is presented; the customer either waits and retries on
+     * the same invoice or checks the order deadline.
+     */
+    public function klikQrisRetry(Order $order, KlikQrisNativeQrisOutcome $outcome, string $locale = 'id'): string
+    {
+        if ($outcome === KlikQrisNativeQrisOutcome::Expired) {
+            return implode("\n", array_filter([
+                '⏳ QRIS '.($locale === 'en' ? 'expired' : 'kedaluwarsa'),
+                '━━━━━━━━━━━━━━',
+                '🧾 Invoice: '.$order->invoice_number,
+                '',
+                $locale === 'en'
+                    ? 'This QRIS can no longer be paid. Do not pay it. Create a new order if you still want to buy.'
+                    : 'QRIS ini sudah tidak bisa dibayar. Jangan bayar QR ini. Buat pesanan baru kalau masih ingin membeli.',
+            ]));
+        }
+
+        $lead = match ($outcome) {
+            KlikQrisNativeQrisOutcome::Creating => $locale === 'en'
+                ? '⏳ Preparing your QRIS'
+                : '⏳ Sedang menyiapkan QRIS',
+            KlikQrisNativeQrisOutcome::RecoveryPending => $locale === 'en'
+                ? '⏳ Restoring your QRIS'
+                : '⏳ Sedang memulihkan QRIS',
+            KlikQrisNativeQrisOutcome::ProviderTotalPending => $locale === 'en'
+                ? '⏳ Waiting for the final amount'
+                : '⏳ Menunggu nominal final dari provider',
+            KlikQrisNativeQrisOutcome::InvalidProviderResult => $locale === 'en'
+                ? '⚠️ QRIS could not be prepared'
+                : '⚠️ QRIS tidak bisa disiapkan',
+            KlikQrisNativeQrisOutcome::Payable => 'QRIS is ready',
+        };
+
+        $body = match ($outcome) {
+            KlikQrisNativeQrisOutcome::Creating => $locale === 'en'
+                ? 'The provider is preparing your QRIS and its final amount. Do not create another checkout; open this invoice again shortly or tap Check Payment.'
+                : 'Provider sedang menyiapkan QRIS dan nominal final. Jangan membuat checkout baru; buka invoice ini lagi sebentar atau tap Cek Pembayaran.',
+            KlikQrisNativeQrisOutcome::RecoveryPending => $locale === 'en'
+                ? 'Your QRIS is being recovered on this same invoice, and no new payment instruction was created. Tap Check Payment shortly or open this invoice again.'
+                : 'QRIS sedang dipulihkan pada invoice yang sama, tanpa membuat instruksi bayar baru. Tap Cek Pembayaran sebentar lagi atau buka invoice ini lagi.',
+            KlikQrisNativeQrisOutcome::ProviderTotalPending => $locale === 'en'
+                ? 'The provider has not supplied the final payable amount yet. Do not pay the product subtotal. Open this invoice again shortly.'
+                : 'Provider belum memberi total bayar final. Jangan bayar total produk. Buka invoice ini lagi sebentar.',
+            KlikQrisNativeQrisOutcome::InvalidProviderResult => $locale === 'en'
+                ? 'The provider returned an unusable QRIS result. Do not pay. Contact support with your invoice number to resolve this order.'
+                : 'Provider memberi hasil QRIS yang tidak valid. Jangan bayar. Hubungi bantuan dengan nomor invoice ini untuk menyelesaikan pesanan.',
+            KlikQrisNativeQrisOutcome::Payable => 'Your QRIS is ready to pay.',
+        };
+
+        return implode("\n", array_filter([
+            $lead,
+            '━━━━━━━━━━━━━━',
+            '🧾 Invoice: '.$order->invoice_number,
+            '',
+            $body,
+        ]));
     }
 
     /**

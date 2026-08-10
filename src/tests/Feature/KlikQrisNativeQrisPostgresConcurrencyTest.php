@@ -43,6 +43,105 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         config()->set('cache.default', 'database');
         Cache::purge('database');
 
+        $this->prepareConcurrencyTables();
+
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->payable()?->qrisUrl(),
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->payable()?->qrisUrl(),
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, DB::table('klikqris_test_provider_effects')->where('payment_id', $payment->id)->count());
+        $this->assertSame(1, Payment::findOrFail($payment->id)->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
+    }
+
+    /** @group postgres */
+    public function test_postgres_concurrent_recovery_keeps_one_payment_state_without_second_create(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
+        }
+
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
+        }
+
+        $this->guardIsolatedPostgresTestingDatabase();
+        $this->migrateCommittedPostgresFixtureSchema();
+
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+
+        $this->prepareConcurrencyTables();
+
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, DB::table('klikqris_test_provider_effects')->where('payment_id', $payment->id)->count());
+
+        $recovered = Payment::findOrFail($payment->id);
+        $this->assertSame(1, DB::table('klikqris_test_status_lookups')->where('payment_id', $payment->id)->count());
+        $this->assertSame('created', $recovered->provider_create_state);
+        $this->assertSame(1016, $recovered->provider_total_payment);
+        $this->assertNotNull($recovered->provider_expires_at);
+        $this->assertTrue($recovered->isPayableNativeKlikQris());
+        $this->assertSame(1, $recovered->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
+    }
+
+    /** @group postgres */
+    public function test_postgres_reconciliation_and_customer_recovery_share_one_payment_lock(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
+        }
+
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
+        }
+
+        $this->guardIsolatedPostgresTestingDatabase();
+        $this->migrateCommittedPostgresFixtureSchema();
+
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        $this->prepareConcurrencyTables();
+
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'amount' => 1000,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->reconcile(
+                Payment::findOrFail($payment->id),
+                fn (Payment $payment, KlikQrisTransaction $transaction): null => null,
+            )?->outcome()->value,
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, DB::table('klikqris_test_status_lookups')->where('payment_id', $payment->id)->count());
+        $this->assertSame('created', Payment::findOrFail($payment->id)->provider_create_state);
+    }
+
+    private function prepareConcurrencyTables(): void
+    {
         Schema::dropIfExists('klikqris_test_provider_effects');
         Schema::create('klikqris_test_provider_effects', function (Blueprint $table): void {
             $table->id();
@@ -51,19 +150,15 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
             $table->timestamps();
         });
 
-        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+        Schema::dropIfExists('klikqris_test_status_lookups');
+        Schema::create('klikqris_test_status_lookups', function (Blueprint $table): void {
+            $table->id();
+            $table->uuid('payment_id');
+            $table->string('merchant_ref');
+            $table->timestamps();
+        });
+
         app()->bind(KlikQrisProviderAdapter::class, fn () => new DatabaseBackedKlikQrisProviderAdapter);
-
-        DB::disconnect();
-        $results = $this->runConcurrently([
-            fn () => app(KlikQrisNativeQrisService::class)->ensureCreated(Payment::findOrFail($payment->id))->orderId(),
-            fn () => app(KlikQrisNativeQrisService::class)->ensureCreated(Payment::findOrFail($payment->id))->orderId(),
-        ]);
-        DB::reconnect();
-
-        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
-        $this->assertSame(1, DB::table('klikqris_test_provider_effects')->where('payment_id', $payment->id)->count());
-        $this->assertSame(1, Payment::findOrFail($payment->id)->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
     }
 
     private function guardIsolatedPostgresTestingDatabase(): void
@@ -320,6 +415,15 @@ final class DatabaseBackedKlikQrisProviderAdapter implements KlikQrisProviderAda
 
     public function transactionStatus(Payment $payment): KlikQrisTransaction
     {
+        DB::table('klikqris_test_status_lookups')->insert([
+            'payment_id' => $payment->id,
+            'merchant_ref' => $payment->merchant_ref,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        usleep(150_000);
+
         return KlikQrisTransaction::fromStatusPayload(KlikQrisSandboxScenarios::createPayload($payment, [
             'expired_at' => now()->addMinutes(10)->toAtomString(),
         ]));

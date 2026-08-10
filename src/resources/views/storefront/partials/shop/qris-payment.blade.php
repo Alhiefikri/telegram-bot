@@ -2,7 +2,6 @@
     $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageSource ?? $qrisImageDataUri);
     $isManualQris = $isManualQris ?? false;
     $isHostedPakasir = $isHostedPakasir ?? false;
-    $paymentDeadline = $payment?->provider_expires_at ?? $payment?->expired_at ?? $order->expires_at;
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
     $customerPaysQrisFee = config('services.pakasir.qris_fee.payer', 'customer') === 'customer';
 @endphp

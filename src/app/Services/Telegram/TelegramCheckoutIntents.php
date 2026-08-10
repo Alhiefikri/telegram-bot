@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\PaymentProviderSelection;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -16,6 +17,7 @@ use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
+use RuntimeException;
 use Throwable;
 
 class TelegramCheckoutIntents
@@ -76,18 +78,34 @@ class TelegramCheckoutIntents
     public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');
-        $transaction = $this->klikQris->ensureCreated($payment);
+        $locale = $this->locale->code($order->customer);
+        $result = $this->klikQris->lifecycle($payment);
+        $payable = $result->payable();
+        if ($payable === null) {
+            return $this->sendKlikQrisRetryState($chatId, $order, $result->outcome(), $locale);
+        }
+
         $payment->refresh();
 
         return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->klikQris(
                 $order,
-                $payment,
-                $this->klikQrisImages->contents($transaction),
-                $this->locale->code($order->customer),
+                $payable,
+                $this->klikQrisImages->contents($payable),
+                $locale,
             ),
         );
+    }
+
+    private function sendKlikQrisRetryState(string $chatId, Order $order, KlikQrisNativeQrisOutcome $outcome, string $locale): array
+    {
+        return $this->bot->sendMessage($chatId, $this->paymentInstructions->klikQrisRetry($order, $outcome, $locale), [
+            'inline_keyboard' => [
+                [['text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+            ],
+        ]);
     }
 
     public function binancePayEnabled(): bool
@@ -117,7 +135,7 @@ class TelegramCheckoutIntents
         $photoPath = public_path('binance.jpeg');
         $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
         if ($photoContents === false) {
-            throw new \RuntimeException('Binance Pay image is not readable: '.$photoPath);
+            throw new RuntimeException('Binance Pay image is not readable: '.$photoPath);
         }
 
         $keyboard = [];
