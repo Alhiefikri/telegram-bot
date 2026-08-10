@@ -10,11 +10,11 @@ class PaymentDocumentationTest extends TestCase
     {
         $readme = file_get_contents(base_path('README.md'));
 
-        $this->assertStringContainsString('manual `/payment` tetap default operasional', $readme);
-        $this->assertStringContainsString('Pakasir hosted checkout', $readme);
-        $this->assertStringContainsString('Pakasir native QRIS', $readme);
+        $this->assertStringContainsString('Payment Provider Switch', $readme);
+        $this->assertStringContainsString('Pakasir hosted/native QRIS', $readme);
+        $this->assertStringContainsString('Pakasir adalah provider legacy', $readme);
         $this->assertStringContainsString('Transaction Detail API', $readme);
-        $this->assertStringContainsString('rollback cepat ke hosted', $readme);
+        $this->assertStringContainsString('rollback cepat dari dashboard', $readme);
         $this->assertStringContainsString('Mode pembayaran', $readme);
         $this->assertStringContainsString('pakasir:validate-native-qris', $readme);
         $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
