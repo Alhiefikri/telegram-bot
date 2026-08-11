@@ -149,9 +149,8 @@ return [
         ],
     ],
 
-    // This is deliberately configuration-only during the expand phase: the
-    // current and previous workers continue to use the same database rows and
-    // cache keys. Operators promote the rollout after the report is clean.
+    // Existing deployments retain hardened behavior; new deployments can begin
+    // in shadow while operators reconcile in-flight Payments before switching.
     'payment_lifecycle_rollout' => [
         'mode' => env('PAYMENT_LIFECYCLE_ROLLOUT_MODE', 'enabled'),
         'canary_percentage' => (int) env('PAYMENT_LIFECYCLE_ROLLOUT_CANARY_PERCENTAGE', 0),

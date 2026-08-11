@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schedule;
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
     Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))->everyMinute()->withoutOverlapping();
+    Schedule::command('klikqris:backfill-in-flight --chunk=100')->everyFiveMinutes()->withoutOverlapping();
 }
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();

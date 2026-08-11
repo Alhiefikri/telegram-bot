@@ -109,6 +109,31 @@ class KlikQrisNativeQrisTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_rollout_modes_select_the_hardened_lifecycle_path_and_rollback_stops_new_selection(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000, 'merchant_ref' => 'KLIK-SHADOW']);
+        $payment->order->update(['order_status' => OrderStatus::Cancelled]);
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment), 200));
+
+        config()->set('services.payment_lifecycle_rollout.mode', 'shadow');
+        $this->lifecycle($payment->fresh());
+        Http::assertSentCount(1);
+
+        $hardened = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000, 'merchant_ref' => 'KLIK-ENABLED']);
+        $hardened->order->update(['order_status' => OrderStatus::Cancelled]);
+        config()->set('services.payment_lifecycle_rollout.mode', 'enabled');
+        $result = $this->lifecycle($hardened->fresh());
+
+        $this->assertSame(KlikQrisNativeQrisOutcome::Expired, $result->outcome());
+        Http::assertSentCount(1);
+
+        config()->set('services.payment_lifecycle_rollout.mode', 'rollback');
+        $rollback = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000, 'merchant_ref' => 'KLIK-ROLLBACK']);
+        $rollback->order->update(['order_status' => OrderStatus::Cancelled]);
+        $this->lifecycle($rollback->fresh());
+        Http::assertSentCount(2);
+    }
+
     public function test_lifecycle_does_not_persist_provider_response_if_order_becomes_terminal_during_create(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);

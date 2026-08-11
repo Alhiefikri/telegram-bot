@@ -217,6 +217,43 @@ class KlikQrisReconciliationTest extends TestCase
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_in_flight_backfill_recovers_old_creating_payment_during_rollback_without_creating_again(): void
+    {
+        $payment = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-EXPAND-CREATING',
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_create_state' => 'creating',
+        ]);
+        config()->set('services.payment_lifecycle_rollout.mode', 'rollback');
+        Http::fake(function ($request) use ($payment) {
+            $this->assertSame('GET', $request->method());
+            $this->assertStringContainsString('/qris/status/KLIK-EXPAND-CREATING', $request->url());
+            $this->assertStringNotContainsString('/qris/create', $request->url());
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_backfill.png',
+                'expired_at' => '2026-07-28T07:20:00Z',
+            ]), 200);
+        });
+
+        $this->artisan('klikqris:backfill-in-flight --chunk=100')
+            ->expectsOutputToContain('recovered=1 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $fresh = $payment->fresh();
+        $this->assertSame('created', $fresh->provider_create_state);
+        $this->assertSame(1016, $fresh->provider_total_payment);
+        Http::assertSentCount(1);
+
+        $this->artisan('klikqris:backfill-in-flight --chunk=100')
+            ->expectsOutputToContain('recovered=0 skipped=0 failed=0')
+            ->assertSuccessful();
+        Http::assertSentCount(1);
+    }
+
     public function test_mismatched_status_response_creates_no_reconciliation_event_provider_status_or_fulfillment(): void
     {
         Queue::fake([SendTelegramReceipt::class]);

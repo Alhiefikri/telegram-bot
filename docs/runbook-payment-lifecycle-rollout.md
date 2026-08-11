@@ -10,19 +10,22 @@ Set the mode to `shadow` (or `observe`) and run:
 php artisan ops:payment-lifecycle-rollout-report
 ```
 
-Use `canary` with `PAYMENT_LIFECYCLE_ROLLOUT_CANARY_PERCENTAGE` for a deterministic subset of Payments, then `enabled` after the report is clean. `rollback` stops selecting the hardened path; it does not delete data or reverse a paid transition.
+The Native QRIS lifecycle gate is active at the KlikQRIS and Pakasir create/recovery boundaries, and KlikQRIS also gates safe exposure and reconciliation. Use `canary` with `PAYMENT_LIFECYCLE_ROLLOUT_CANARY_PERCENTAGE` for a deterministic subset of Payments, then `enabled` after the report is clean. `rollback` stops new hardened-path selection; it does not delete data or reverse a paid transition.
 
 ## Reconcile before contract
 
 Run the existing provider reconciliation commands and notification recovery until the report has no unresolved rows:
 
 ```sh
+php artisan klikqris:backfill-in-flight --chunk=100
 php artisan klikqris:reconcile --chunk=100
 php artisan pakasir:reconcile --chunk=100
 php artisan telegram:reconcile-stock-notifications --chunk=100
 php artisan telegram:recover-outbound --queue=notifications
 php artisan ops:payment-lifecycle-rollout-report --require-contract-safe
 ```
+
+`klikqris:backfill-in-flight` is idempotent and only selects pending KlikQRIS Payments in `creating` or `outcome_unknown`. It recovers each one from provider status on the same Payment and never calls provider create; it continues to do so during rollback. The scheduler runs it every five minutes while KlikQRIS reconciliation is enabled.
 
 Investigate rather than discard `late_payment_queue`, `cancellation_attempts`, and terminal notification failures. Only remove legacy columns or workers in a separate contract migration after the final command succeeds and the PostgreSQL concurrency and end-to-end release gates pass.
 

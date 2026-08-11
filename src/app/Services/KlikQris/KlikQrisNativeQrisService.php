@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\PaymentLifecycleCoordinator;
+use App\Services\PaymentLifecycleRollout;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
 use Closure;
@@ -33,6 +34,7 @@ class KlikQrisNativeQrisService
         private readonly KlikQrisProviderAdapter $provider,
         private readonly KlikQrisPaymentEventLogger $events,
         private readonly PaymentLifecycleCoordinator $lifecycleCoordinator,
+        private readonly PaymentLifecycleRollout $rollout,
     ) {}
 
     /**
@@ -47,7 +49,8 @@ class KlikQrisNativeQrisService
     {
         $payment->refresh();
 
-        if (! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+        if ($this->usesHardenedPath($payment)
+            && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
         }
 
@@ -102,7 +105,7 @@ class KlikQrisNativeQrisService
      */
     public function deliverOwnerAlert(Payment $payment, KlikQrisOwnerAlert $alert, Closure $deliver): bool
     {
-        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        $lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());
         if (! $lock->get()) {
             return false;
         }
@@ -130,8 +133,9 @@ class KlikQrisNativeQrisService
     public function lifecycle(Payment $payment): KlikQrisNativeQrisLifecycleResult
     {
         $payment->refresh();
+        $hardened = $this->usesHardenedPath($payment);
 
-        if (! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+        if ($hardened && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
         }
 
@@ -145,7 +149,7 @@ class KlikQrisNativeQrisService
 
         try {
             return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())
-                ->block(self::PAYMENT_LOCK_WAIT_SECONDS, fn (): KlikQrisNativeQrisLifecycleResult => $this->createOrRecover($payment));
+                ->block(self::PAYMENT_LOCK_WAIT_SECONDS, fn (): KlikQrisNativeQrisLifecycleResult => $this->createOrRecover($payment, $hardened));
         } catch (LockTimeoutException) {
             // Another attempt holds the single-flight lock; the QR is still being prepared.
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
@@ -179,7 +183,11 @@ class KlikQrisNativeQrisService
                 return $this->classifyPersisted($payment->fresh());
             }
 
-            $work = $this->createOrRecoverWithTransaction($payment, throwRecoveryFailure: true);
+            $work = $this->createOrRecoverWithTransaction(
+                $payment,
+                throwRecoveryFailure: true,
+                hardened: $this->usesHardenedPath($payment),
+            );
             if ($work['authoritativeTransaction'] !== null) {
                 $onAuthoritativeStatus($payment, $work['authoritativeTransaction']);
 
@@ -196,6 +204,45 @@ class KlikQrisNativeQrisService
             $transaction = $this->provider->transactionStatus($payment);
             $transaction->assertMatches($payment);
             $onAuthoritativeStatus($payment, $transaction);
+
+            return $work['result'];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Reconcile a Payment which entered its uncertain create state before the
+     * rollout switch. This never sends a create request, and intentionally
+     * remains hardened in rollback so existing in-flight money is recoverable.
+     *
+     * @param  Closure(Payment, KlikQrisTransaction): mixed  $onAuthoritativeStatus
+     */
+    public function reconcileInFlight(Payment $payment, Closure $onAuthoritativeStatus): ?KlikQrisNativeQrisLifecycleResult
+    {
+        $lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            $payment->refresh();
+            if (! in_array($payment->provider_create_state, ['creating', 'outcome_unknown'], true)) {
+                return null;
+            }
+
+            if ($payment->status !== PaymentStatus::Pending || $this->hasNonRecoverableState($payment)) {
+                $transaction = $this->provider->transactionStatus($payment);
+                $transaction->assertMatches($payment);
+                $onAuthoritativeStatus($payment, $transaction);
+
+                return $this->classifyPersisted($payment->fresh());
+            }
+
+            $work = $this->createOrRecoverWithTransaction($payment, throwRecoveryFailure: true, hardened: true);
+            if ($work['authoritativeTransaction'] !== null) {
+                $onAuthoritativeStatus($payment, $work['authoritativeTransaction']);
+            }
 
             return $work['result'];
         } finally {
@@ -228,6 +275,11 @@ class KlikQrisNativeQrisService
         return 'klikqris:callback-status:'.$payment->getKey();
     }
 
+    private function usesHardenedPath(Payment $payment): bool
+    {
+        return $this->rollout->usesHardenedPath($payment);
+    }
+
     private function paymentLockLeaseSeconds(): int
     {
         // The lease must cover the most aggressive (background) verification
@@ -235,19 +287,19 @@ class KlikQrisNativeQrisService
         return max(60, ProviderVerificationProfiles::requiredLeaseSeconds());
     }
 
-    private function createOrRecover(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    private function createOrRecover(Payment $payment, bool $hardened): KlikQrisNativeQrisLifecycleResult
     {
-        return $this->createOrRecoverWithTransaction($payment)['result'];
+        return $this->createOrRecoverWithTransaction($payment, hardened: $hardened)['result'];
     }
 
     /**
      * @return array{result: KlikQrisNativeQrisLifecycleResult, authoritativeTransaction: ?KlikQrisTransaction}
      */
-    private function createOrRecoverWithTransaction(Payment $payment, bool $throwRecoveryFailure = false): array
+    private function createOrRecoverWithTransaction(Payment $payment, bool $throwRecoveryFailure = false, bool $hardened = true): array
     {
         $payment->refresh();
 
-        if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+        if ($hardened && ! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
             return [
                 'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
                 'authoritativeTransaction' => null,
@@ -266,11 +318,11 @@ class KlikQrisNativeQrisService
                 $this->resetPreRequestFailure($payment);
                 $payment->refresh();
             } else {
-                return $this->recoverCreationOutcome($payment, $throwRecoveryFailure);
+                return $this->recoverCreationOutcome($payment, $throwRecoveryFailure, $hardened);
             }
         }
 
-        if (! $this->markCreationAttempted($payment)) {
+        if (! $this->markCreationAttempted($payment, $hardened)) {
             $payment->refresh();
 
             if ($this->hasReusablePersistedQris($payment)) {
@@ -280,7 +332,7 @@ class KlikQrisNativeQrisService
                 ];
             }
 
-            if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+            if ($hardened && ! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
                 return [
                     'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
                     'authoritativeTransaction' => null,
@@ -288,7 +340,7 @@ class KlikQrisNativeQrisService
             }
 
             if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
-                return $this->recoverCreationOutcome($payment);
+                return $this->recoverCreationOutcome($payment, hardened: $hardened);
             }
 
             return [
@@ -315,7 +367,7 @@ class KlikQrisNativeQrisService
             ];
         }
 
-        if (! $this->persistCreatedTransaction($payment, $transaction)) {
+        if (! $this->persistCreatedTransaction($payment, $transaction, $hardened)) {
             $this->markCreationOutcomeUnknown($payment, new RuntimeException('Order is no longer pending payment.'));
 
             return [
@@ -333,12 +385,12 @@ class KlikQrisNativeQrisService
     /**
      * @return array{result: KlikQrisNativeQrisLifecycleResult, authoritativeTransaction: ?KlikQrisTransaction}
      */
-    private function recoverCreationOutcome(Payment $payment, bool $throwFailure = false): array
+    private function recoverCreationOutcome(Payment $payment, bool $throwFailure = false, bool $hardened = true): array
     {
         try {
             $transaction = $this->provider->transactionStatus($payment);
             $transaction->assertMatches($payment);
-            if (! $this->persistCreatedTransaction($payment, $transaction)) {
+            if (! $this->persistCreatedTransaction($payment, $transaction, $hardened)) {
                 $this->markCreationOutcomeUnknown($payment, new RuntimeException('Order is no longer pending payment.'));
 
                 return [
@@ -466,10 +518,10 @@ class KlikQrisNativeQrisService
         return KlikQrisNativeQrisLifecycleResult::payableResult($payable);
     }
 
-    private function persistCreatedTransaction(Payment $payment, KlikQrisTransaction $transaction): bool
+    private function persistCreatedTransaction(Payment $payment, KlikQrisTransaction $transaction, bool $hardened): bool
     {
-        return $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($payment, $transaction): bool {
-            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)) {
+        return $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($payment, $transaction, $hardened): bool {
+            if ($hardened && ! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)) {
                 return false;
             }
 
@@ -519,10 +571,10 @@ class KlikQrisNativeQrisService
         });
     }
 
-    private function markCreationAttempted(Payment $payment): bool
+    private function markCreationAttempted(Payment $payment, bool $hardened): bool
     {
-        $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment): bool {
-            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)
+        $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($hardened): bool {
+            if (($hardened && ! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment))
                 || $this->hasPayablePersistedQris($lockedPayment)
                 || $lockedPayment->provider_create_state !== null
                 || $this->hasPersistedQrisPayload($lockedPayment)) {
