@@ -42,6 +42,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 
         $payment = $this->pendingPakasirPayment(30103, 'INV-STAGE-QRIS-1');
         $paymentNumber = QrisTestPayload::forAmount(30_624);
+        $expiresAt = now()->addMinutes(15);
         $apiKey = 'pakasir-secret';
         $providerSecret = 'provider-secret-for-report';
 
@@ -55,7 +56,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'total_payment' => $request['amount'] + 521,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => $expiresAt->utc()->toAtomString(),
                     'api_key' => $apiKey,
                     'provider_context' => [
                         'x-api-key' => $apiKey,
@@ -74,7 +75,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'total_payment' => 30624,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => $expiresAt->utc()->toAtomString(),
                     'status' => 'completed',
                     'api_key' => $apiKey,
                     'provider_context' => [
@@ -163,6 +164,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
         $this->configureNativePakasir();
 
         $payment = $this->pendingPakasirPayment(15000, 'INV-STAGE-DUPLICATE-1');
+        $expiresAt = now()->addMinutes(15);
         $paymentNumbers = [
             QrisTestPayload::forAmount(15_415, 'FIRST'),
             QrisTestPayload::forAmount(15_415, 'SECOND'),
@@ -170,7 +172,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
         $createCalls = 0;
 
         Http::fake([
-            'https://app.pakasir.test/api/transactioncreate/qris' => function (Request $request) use (&$createCalls, $paymentNumbers) {
+            'https://app.pakasir.test/api/transactioncreate/qris' => function (Request $request) use (&$createCalls, $paymentNumbers, $expiresAt) {
                 $paymentNumber = $paymentNumbers[$createCalls] ?? $paymentNumbers[1];
                 $createCalls++;
 
@@ -183,7 +185,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                         'total_payment' => $request['amount'] + 415,
                         'payment_method' => 'qris',
                         'payment_number' => $paymentNumber,
-                        'expired_at' => '2026-07-04T16:30:00Z',
+                        'expired_at' => $expiresAt->utc()->toAtomString(),
                     ],
                 ]);
             },
@@ -196,7 +198,7 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
                     'total_payment' => 15415,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumbers[0],
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => $expiresAt->utc()->toAtomString(),
                     'status' => 'pending',
                 ],
             ]),

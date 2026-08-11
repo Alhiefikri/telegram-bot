@@ -15,10 +15,13 @@ class PaymentQrisReadinessTest extends TestCase
         $valid = $this->payment(20_000, 450, 20_450, QrisTestPayload::forAmount(20_450));
         $badFinancials = $this->payment(20_000, 2_660, 268_660, QrisTestPayload::forAmount(268_660));
         $badQrAmount = $this->payment(20_000, 450, 20_450, QrisTestPayload::forAmount(20_451));
+        $expired = $this->payment(20_000, 450, 20_450, QrisTestPayload::forAmount(20_450));
+        $expired->expired_at = now()->subMinute();
 
         $this->assertTrue($valid->isPayableNativePakasirQris());
         $this->assertFalse($badFinancials->isPayableNativePakasirQris());
         $this->assertFalse($badQrAmount->isPayableNativePakasirQris());
+        $this->assertFalse($expired->isPayableNativePakasirQris());
     }
 
     #[DataProvider('klikQrisProviderAmountDisplays')]

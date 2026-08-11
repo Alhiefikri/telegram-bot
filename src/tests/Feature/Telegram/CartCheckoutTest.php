@@ -205,6 +205,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
         $this->bindInspectableQrRenderer();
         $paymentNumber = QrisTestPayload::forAmount(15_415);
+        $expiresAt = now()->addMinutes(15);
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
                 'payment' => [
@@ -215,7 +216,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                     'total_payment' => $request['amount'] + 415,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => $expiresAt->utc()->toAtomString(),
                 ],
             ], 200),
         ]);
@@ -1001,6 +1002,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         config()->set('services.pakasir', ['slug' => 'sedulur-digital', 'api_key' => 'pakasir-key', 'base_url' => 'https://app.pakasir.test', 'redirect_url' => null, 'qris_only' => false, 'checkout_flow' => 'hosted']);
         $this->bindInspectableQrRenderer();
         $paymentNumber = QrisTestPayload::forAmount(30_520);
+        $expiresAt = now()->addMinutes(15);
         $this->fakeTelegramHttp([
             'https://app.pakasir.test/api/transactioncreate/qris' => fn ($request) => Http::response([
                 'payment' => [
@@ -1011,7 +1013,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                     'total_payment' => $request['amount'] + 520,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => $expiresAt->utc()->toAtomString(),
                 ],
             ], 200),
         ]);

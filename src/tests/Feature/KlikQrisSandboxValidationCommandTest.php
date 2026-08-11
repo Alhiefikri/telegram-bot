@@ -198,6 +198,10 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
                 'expired_at' => $expiresAt->toISOString(),
             ]),
         ]);
+        $payment->order->update([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
 
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
 

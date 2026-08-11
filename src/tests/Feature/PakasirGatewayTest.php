@@ -265,6 +265,7 @@ class PakasirGatewayTest extends TestCase
     {
         Http::fake();
         $paymentNumber = QrisTestPayload::forAmount(10_380);
+        $expiresAt = now()->addMinutes(15);
         $providerSecretValues = [
             'provider-top-level-api-key',
             'provider-nested-x-api-key',
@@ -283,7 +284,7 @@ class PakasirGatewayTest extends TestCase
                 'total_payment' => 10380,
                 'payment_method' => 'qris',
                 'payment_number' => $paymentNumber,
-                'expired_at' => '2026-07-04T16:30:00Z',
+                'expired_at' => $expiresAt->utc()->toAtomString(),
                 'api_key' => $providerSecretValues[0],
                 'provider_context' => [
                     'x-api-key' => $providerSecretValues[1],
@@ -329,7 +330,7 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame('qris', $payment->provider_payment_method);
         $this->assertSame($paymentNumber, $payment->provider_payment_number);
         $this->assertSame(hash('sha256', $paymentNumber), $payment->provider_payment_number_hash);
-        $this->assertSame('2026-07-04T16:30:00+00:00', $payment->provider_expires_at?->utc()->toAtomString());
+        $this->assertSame($expiresAt->utc()->toAtomString(), $payment->provider_expires_at?->utc()->toAtomString());
         $this->assertNotNull($payment->provider_created_at);
         $this->assertArrayNotHasKey('payment_number', $payment->provider_payload['payment']);
         $this->assertArrayNotHasKey('api_key', $payment->provider_payload['payment']);
@@ -405,7 +406,7 @@ class PakasirGatewayTest extends TestCase
                     'total_payment' => $request['amount'] + 380,
                     'payment_method' => 'qris',
                     'payment_number' => $paymentNumber,
-                    'expired_at' => '2026-07-04T16:30:00Z',
+                    'expired_at' => now()->addMinutes(15)->utc()->toAtomString(),
                 ],
             ], 200),
         ]);
@@ -420,6 +421,133 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame($paymentNumber, $second->paymentNumber());
         $this->assertCount(1, Http::recorded(fn ($request) => $request->url() === 'https://app.pakasir.com/api/transactioncreate/qris'));
         $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
+    }
+
+    public function test_native_qris_uncertain_create_is_recovered_on_the_same_payment(): void
+    {
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
+        $payment = $order->payments()->firstOrFail();
+
+        Http::fakeSequence()
+            ->push(['message' => 'provider unavailable'], 500)
+            ->push([
+                'transaction' => [
+                    'project' => 'warung-ai',
+                    'order_id' => $payment->merchant_ref,
+                    'amount' => $payment->amount,
+                    'fee' => 380,
+                    'total_payment' => 10380,
+                    'payment_method' => 'qris',
+                    'payment_number' => $paymentNumber,
+                    'status' => 'pending',
+                    'expired_at' => now()->addMinutes(15)->utc()->toAtomString(),
+                ],
+            ], 200);
+
+        $service = app(PakasirNativeQrisService::class);
+        try {
+            $service->ensureCreated($payment);
+            $this->fail('Expected the first provider response to be uncertain.');
+        } catch (RuntimeException) {
+            $this->assertSame('outcome_unknown', $payment->fresh()->provider_create_state);
+            $this->assertSame(1, Payment::query()->count());
+        }
+
+        $transaction = $service->ensureCreated($payment->fresh());
+
+        $this->assertSame($paymentNumber, $transaction->paymentNumber());
+        $this->assertSame('created', $payment->fresh()->provider_create_state);
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCreate)->count());
+        Http::assertSentCount(2);
+    }
+
+    public function test_native_qris_service_does_not_call_provider_for_cancelled_order(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
+        $payment = $order->payments()->firstOrFail();
+        $order->update(['order_status' => OrderStatus::Cancelled]);
+        Http::fake();
+
+        try {
+            app(PakasirNativeQrisService::class)->ensureCreated($payment->fresh());
+            $this->fail('Expected cancelled Order to reject Native QRIS creation.');
+        } catch (RuntimeException) {
+            $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+            $this->assertNull($payment->fresh()->provider_payment_number);
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_native_qris_service_does_not_persist_provider_response_if_order_becomes_terminal_during_create(): void
+    {
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
+        $payment = $order->payments()->firstOrFail();
+        $paymentNumber = QrisTestPayload::forAmount($payment->amount + 380);
+        Http::fake([
+            'https://app.pakasir.com/api/transactioncreate/qris' => function ($request) use ($order, $payment, $paymentNumber) {
+                $order->update(['order_status' => OrderStatus::Cancelled]);
+
+                return Http::response([
+                    'payment' => [
+                        'project' => 'warung-ai',
+                        'order_id' => $request['order_id'],
+                        'amount' => $payment->amount,
+                        'fee' => 380,
+                        'total_payment' => $payment->amount + 380,
+                        'payment_method' => 'qris',
+                        'payment_number' => $paymentNumber,
+                        'expired_at' => '2026-07-04T16:30:00Z',
+                    ],
+                ], 200);
+            },
+        ]);
+
+        $this->expectException(RuntimeException::class);
+
+        try {
+            app(PakasirNativeQrisService::class)->ensureCreated($payment);
+        } finally {
+            $fresh = $payment->fresh();
+            $this->assertNull($fresh->provider_payload);
+            $this->assertNull($fresh->provider_payment_method);
+            $this->assertSame('outcome_unknown', $fresh->provider_create_state);
+            $this->assertSame(0, $fresh->paymentEvents()->count());
+            $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+            Http::assertSentCount(1);
+        }
+    }
+
+    public function test_native_qris_service_does_not_expose_an_expired_provider_response(): void
+    {
+        $paymentNumber = QrisTestPayload::forAmount(10_380);
+        Http::fake(fn ($request) => Http::response([
+            'payment' => [
+                'project' => 'warung-ai',
+                'order_id' => $request['order_id'],
+                'amount' => $request['amount'],
+                'fee' => 380,
+                'total_payment' => $request['amount'] + 380,
+                'payment_method' => 'qris',
+                'payment_number' => $paymentNumber,
+                'expired_at' => now()->subMinute()->utc()->toAtomString(),
+            ],
+        ], 200));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir());
+        $payment = $order->payments()->firstOrFail();
+
+        try {
+            app(PakasirNativeQrisService::class)->ensureCreated($payment);
+            $this->fail('Expected an expired provider response to remain non-payable.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Pakasir native QRIS has expired.', $exception->getMessage());
+        }
+
+        $fresh = $payment->fresh();
+        $this->assertSame('provider_expired', $fresh->provider_create_state);
+        $this->assertFalse($fresh->isPayableNativePakasirQris());
+        $this->assertTrue($fresh->provider_expires_at?->isPast());
     }
 
     public function test_qris_transaction_create_fails_closed_for_mismatched_response_or_missing_payment_number(): void

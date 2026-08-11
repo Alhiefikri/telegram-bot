@@ -118,6 +118,11 @@ class Payment extends Model
             return false;
         }
 
+        if (($this->expired_at !== null && ! $this->expired_at->isFuture())
+            || ($this->provider_expires_at !== null && ! $this->provider_expires_at->isFuture())) {
+            return false;
+        }
+
         try {
             PakasirQrisFeePolicy::fromConfig()->assertValid(
                 (int) $this->amount,

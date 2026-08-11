@@ -6,11 +6,11 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\PaymentLifecycleCoordinator;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
 
@@ -33,6 +33,7 @@ class KlikQrisNativeQrisService
     public function __construct(
         private readonly KlikQrisProviderAdapter $provider,
         private readonly KlikQrisPaymentEventLogger $events,
+        private readonly PaymentLifecycleCoordinator $lifecycleCoordinator,
     ) {}
 
     /**
@@ -46,6 +47,10 @@ class KlikQrisNativeQrisService
     public function classify(Payment $payment): KlikQrisNativeQrisLifecycleResult
     {
         $payment->refresh();
+
+        if (! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+            return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
+        }
 
         if ($this->hasReusablePersistedQris($payment)) {
             return $this->payableResult($payment);
@@ -126,6 +131,10 @@ class KlikQrisNativeQrisService
     public function lifecycle(Payment $payment): KlikQrisNativeQrisLifecycleResult
     {
         $payment->refresh();
+
+        if (! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+            return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
+        }
 
         if ($this->hasReusablePersistedQris($payment)) {
             return $this->payableResult($payment);
@@ -232,6 +241,13 @@ class KlikQrisNativeQrisService
     {
         $payment->refresh();
 
+        if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+            return [
+                'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
+                'authoritativeTransaction' => null,
+            ];
+        }
+
         if ($this->hasReusablePersistedQris($payment)) {
             return [
                 'result' => $this->payableResult($payment),
@@ -248,7 +264,32 @@ class KlikQrisNativeQrisService
             }
         }
 
-        $this->markCreationAttempted($payment);
+        if (! $this->markCreationAttempted($payment)) {
+            $payment->refresh();
+
+            if ($this->hasReusablePersistedQris($payment)) {
+                return [
+                    'result' => $this->payableResult($payment),
+                    'authoritativeTransaction' => null,
+                ];
+            }
+
+            if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+                return [
+                    'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
+                    'authoritativeTransaction' => null,
+                ];
+            }
+
+            if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
+                return $this->recoverCreationOutcome($payment);
+            }
+
+            return [
+                'result' => $this->classifyPersisted($payment),
+                'authoritativeTransaction' => null,
+            ];
+        }
 
         try {
             $transaction = $this->provider->createTransaction($payment);
@@ -268,7 +309,14 @@ class KlikQrisNativeQrisService
             ];
         }
 
-        $this->persistCreatedTransaction($payment, $transaction);
+        if (! $this->persistCreatedTransaction($payment, $transaction)) {
+            $this->markCreationOutcomeUnknown($payment, new RuntimeException('Order is no longer pending payment.'));
+
+            return [
+                'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
+                'authoritativeTransaction' => null,
+            ];
+        }
 
         return [
             'result' => $this->postWorkResult($payment),
@@ -284,7 +332,14 @@ class KlikQrisNativeQrisService
         try {
             $transaction = $this->provider->transactionStatus($payment);
             $transaction->assertMatches($payment);
-            $this->persistCreatedTransaction($payment, $transaction);
+            if (! $this->persistCreatedTransaction($payment, $transaction)) {
+                $this->markCreationOutcomeUnknown($payment, new RuntimeException('Order is no longer pending payment.'));
+
+                return [
+                    'result' => KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
+                    'authoritativeTransaction' => $transaction,
+                ];
+            }
         } catch (Throwable $exception) {
             $this->markRecoveryUnconfirmed($payment, $exception);
             $payment->refresh();
@@ -405,14 +460,15 @@ class KlikQrisNativeQrisService
         return KlikQrisNativeQrisLifecycleResult::payableResult($payable);
     }
 
-    private function persistCreatedTransaction(Payment $payment, KlikQrisTransaction $transaction): void
+    private function persistCreatedTransaction(Payment $payment, KlikQrisTransaction $transaction): bool
     {
-        DB::transaction(function () use ($payment, $transaction): void {
-            $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->first();
-            $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+        return $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($payment, $transaction): bool {
+            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)) {
+                return false;
+            }
 
             if ($this->hasPayablePersistedQris($lockedPayment)) {
-                return;
+                return true;
             }
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
@@ -452,90 +508,104 @@ class KlikQrisNativeQrisService
             if ($isPayableCreated && ! $this->hasProviderCreateEvent($lockedPayment)) {
                 $this->events->logProviderCreate($payment, $transaction);
             }
+
+            return true;
         });
     }
 
-    private function markCreationAttempted(Payment $payment): void
+    private function markCreationAttempted(Payment $payment): bool
     {
-        DB::transaction(function () use ($payment): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked) || $locked->provider_create_state !== null) {
-                return;
+        $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment): bool {
+            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)
+                || $this->hasPayablePersistedQris($lockedPayment)
+                || $lockedPayment->provider_create_state !== null
+                || $this->hasPersistedQrisPayload($lockedPayment)) {
+                return false;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => 'creating',
                 'provider_create_attempted_at' => now(),
             ]);
+
+            return true;
         });
 
-        $payment->refresh();
+        if ($reserved) {
+            $payment->refresh();
+        }
+
+        return $reserved;
     }
 
     private function markCreationOutcomeUnknown(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
 
-        DB::transaction(function () use ($payment, $providerException): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked)) {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+            if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => 'outcome_unknown',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
             ]);
         });
+
+        $payment->refresh();
     }
 
     private function markCreationDefinitivelyFailed(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
 
-        DB::transaction(function () use ($payment, $providerException): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked)) {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+            if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => 'create_failed',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
             ]);
         });
+
+        $payment->refresh();
     }
 
     private function resetPreRequestFailure(Payment $payment): void
     {
-        DB::transaction(function () use ($payment): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked) || $locked->provider_create_state !== 'create_failed') {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment): void {
+            if ($this->hasPayablePersistedQris($lockedPayment) || $lockedPayment->provider_create_state !== 'create_failed') {
                 return;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => null,
                 'provider_create_last_error' => null,
             ]);
         });
+
+        $payment->refresh();
     }
 
     private function markRecoveryUnconfirmed(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
 
-        DB::transaction(function () use ($payment, $providerException): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked)) {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+            if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => 'recovery_unconfirmed',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
             ]);
         });
+
+        $payment->refresh();
     }
 
     private function hasPersistedQrisPayload(Payment $payment): bool

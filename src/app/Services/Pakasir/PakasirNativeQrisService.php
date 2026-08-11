@@ -4,9 +4,9 @@ namespace App\Services\Pakasir;
 
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\PaymentLifecycleCoordinator;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 class PakasirNativeQrisService
 {
@@ -14,13 +14,18 @@ class PakasirNativeQrisService
         private readonly PakasirProviderAdapter $pakasir,
         private readonly PakasirProviderReadiness $readiness,
         private readonly PakasirPaymentEventLogger $events,
+        private readonly PaymentLifecycleCoordinator $lifecycleCoordinator,
     ) {}
 
     public function ensureCreated(Payment $payment): PakasirQrisTransaction
     {
+        $payment->refresh();
+        if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+            throw new \RuntimeException('Order is no longer pending payment.');
+        }
+
         $this->readiness->verification(PakasirCheckoutFlow::API_QRIS)->assertReady('Pakasir native QRIS cannot be created.');
 
-        $payment->refresh();
         if ($this->hasPayablePersistedQris($payment)) {
             return $this->transactionFromPayment($payment);
         }
@@ -28,6 +33,10 @@ class PakasirNativeQrisService
         return Cache::lock('pakasir:native-qris:create:'.$payment->getKey(), 30)
             ->block(10, function () use ($payment): PakasirQrisTransaction {
                 $payment->refresh();
+                if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+                    throw new \RuntimeException('Order is no longer pending payment.');
+                }
+
                 if ($this->hasPayablePersistedQris($payment)) {
                     return $this->transactionFromPayment($payment);
                 }
@@ -39,10 +48,39 @@ class PakasirNativeQrisService
                         return $this->transactionFromPayment($payment);
                     }
 
+                    if ($payment->provider_create_state === 'provider_expired') {
+                        throw new \RuntimeException('Pakasir native QRIS has expired.');
+                    }
+
                     throw new \RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
                 }
 
-                $this->markCreationAttempted($payment);
+                if (! $this->markCreationAttempted($payment)) {
+                    $payment->refresh();
+
+                    if ($this->hasPayablePersistedQris($payment)) {
+                        return $this->transactionFromPayment($payment);
+                    }
+
+                    if (! $this->lifecycleCoordinator->isNativeQrisCreationAllowed($payment)) {
+                        throw new \RuntimeException('Order is no longer pending payment.');
+                    }
+
+                    if ($payment->provider_create_state !== null || $this->hasPersistedQrisPayload($payment)) {
+                        $this->recoverCreationOutcome($payment);
+                        $payment->refresh();
+
+                        if ($this->hasPayablePersistedQris($payment)) {
+                            return $this->transactionFromPayment($payment);
+                        }
+
+                        if ($payment->provider_create_state === 'provider_expired') {
+                            throw new \RuntimeException('Pakasir native QRIS has expired.');
+                        }
+                    }
+
+                    throw new \RuntimeException('Pakasir native QRIS creation is already in progress.');
+                }
 
                 try {
                     $transaction = $this->pakasir->createQrisTransaction($payment);
@@ -54,29 +92,40 @@ class PakasirNativeQrisService
                 }
 
                 $transaction = $this->persistCreatedTransaction($payment, $transaction);
+                if ($transaction === null) {
+                    $this->markCreationFailure($payment, new \RuntimeException('Order is no longer pending payment.'));
+
+                    throw new \RuntimeException('Order is no longer pending payment.');
+                }
 
                 if (! $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig())) {
                     throw new \RuntimeException('Provider belum memberi nominal final QRIS. Coba lagi dari invoice ini sebentar lagi.');
+                }
+
+                $payment->refresh();
+                if (! $this->hasPayablePersistedQris($payment)) {
+                    throw new \RuntimeException('Pakasir native QRIS has expired.');
                 }
 
                 return $transaction;
             });
     }
 
-    private function persistCreatedTransaction(Payment $payment, PakasirQrisTransaction $transaction): PakasirQrisTransaction
+    private function persistCreatedTransaction(Payment $payment, PakasirQrisTransaction $transaction): ?PakasirQrisTransaction
     {
-        return DB::transaction(function () use ($payment, $transaction): PakasirQrisTransaction {
-            $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->first();
-            $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+        return $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($payment, $transaction): ?PakasirQrisTransaction {
+            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)) {
+                return null;
+            }
 
             if ($this->hasPayablePersistedQris($lockedPayment)) {
-                $payment->refresh();
-
-                return $this->transactionFromPayment($payment);
+                return $this->transactionFromPayment($lockedPayment);
             }
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
             $providerTotalPayment = $transaction->totalPayment();
+            $hasValidFinalAmount = $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig());
+            $providerExpired = $providerExpiresAt !== null && ! $providerExpiresAt->isFuture();
             $paymentUpdates = [
                 'provider_payload' => $transaction->sanitizedPayload(),
                 'provider_fee' => $transaction->fee() ?? ($providerTotalPayment !== null ? max(0, $providerTotalPayment - $lockedPayment->amount) : null),
@@ -86,8 +135,8 @@ class PakasirNativeQrisService
                 'provider_expires_at' => $providerExpiresAt,
                 'provider_payment_number' => $transaction->paymentNumber(),
                 'provider_payment_number_hash' => hash('sha256', $transaction->paymentNumber()),
-                'provider_create_state' => $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig()) ? 'created' : 'provider_total_pending',
-                'provider_create_last_error' => $transaction->hasValidFinalAmount(PakasirQrisFeePolicy::fromConfig()) ? null : 'missing_provider_total_payment',
+                'provider_create_state' => $providerExpired ? 'provider_expired' : ($hasValidFinalAmount ? 'created' : 'provider_total_pending'),
+                'provider_create_last_error' => $providerExpired ? 'provider_expired' : ($hasValidFinalAmount ? null : 'missing_provider_total_payment'),
             ];
 
             if ($providerExpiresAt !== null && ($lockedPayment->expired_at === null || $providerExpiresAt->lt($lockedPayment->expired_at))) {
@@ -117,33 +166,46 @@ class PakasirNativeQrisService
         return $payment->isPayableNativePakasirQris();
     }
 
-    private function markCreationAttempted(Payment $payment): void
+    private function markCreationAttempted(Payment $payment): bool
     {
-        DB::transaction(function () use ($payment): void {
-            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
-            if ($this->hasPayablePersistedQris($locked) || $locked->provider_create_state !== null) {
-                return;
+        $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment): bool {
+            if (! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment)
+                || $this->hasPayablePersistedQris($lockedPayment)
+                || $lockedPayment->provider_create_state !== null
+                || $this->hasPersistedQrisPayload($lockedPayment)) {
+                return false;
             }
 
-            $locked->update([
+            $lockedPayment->update([
                 'provider_create_state' => 'creating',
                 'provider_create_attempted_at' => now(),
             ]);
+
+            return true;
         });
 
-        $payment->refresh();
+        if ($reserved) {
+            $payment->refresh();
+        }
+
+        return $reserved;
     }
 
     private function markCreationFailure(Payment $payment, \Throwable $exception): void
     {
         $integrityFailure = $exception instanceof \UnexpectedValueException;
-        Payment::query()
-            ->whereKey($payment->id)
-            ->whereNull('provider_payment_number_hash')
-            ->update([
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($integrityFailure, $exception): void {
+            if ($lockedPayment->provider_payment_number_hash !== null) {
+                return;
+            }
+
+            $lockedPayment->update([
                 'provider_create_state' => $integrityFailure ? 'financial_integrity_failed' : 'outcome_unknown',
                 'provider_create_last_error' => substr($integrityFailure ? $exception->getMessage() : $exception::class, 0, 500),
             ]);
+        });
+
+        $payment->refresh();
     }
 
     private function recoverCreationOutcome(Payment $payment): void
@@ -151,7 +213,9 @@ class PakasirNativeQrisService
         try {
             $transaction = PakasirQrisTransaction::fromPayload($this->pakasir->transactionDetail($payment));
             $transaction->assertMatches($payment, (string) config('services.pakasir.slug'), PakasirQrisFeePolicy::fromConfig());
-            $this->persistCreatedTransaction($payment, $transaction);
+            if ($this->persistCreatedTransaction($payment, $transaction) === null) {
+                $this->markCreationFailure($payment, new \RuntimeException('Order is no longer pending payment.'));
+            }
         } catch (\Throwable $exception) {
             $this->markCreationFailure($payment, $exception);
         }

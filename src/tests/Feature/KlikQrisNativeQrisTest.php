@@ -96,6 +96,46 @@ class KlikQrisNativeQrisTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_lifecycle_does_not_call_provider_for_cancelled_order(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+        $payment->order->update(['order_status' => OrderStatus::Cancelled]);
+        Http::fake();
+
+        $result = $this->lifecycle($payment->fresh());
+
+        $this->assertSame(KlikQrisNativeQrisOutcome::Expired, $result->outcome());
+        $this->assertNull($result->payable());
+        Http::assertNothingSent();
+    }
+
+    public function test_lifecycle_does_not_persist_provider_response_if_order_becomes_terminal_during_create(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
+        $order = $payment->order;
+        Http::fake([
+            'https://klikqris.com/api/sandbox/qris/create' => function () use ($order, $payment) {
+                $order->update(['order_status' => OrderStatus::Cancelled]);
+
+                return Http::response(KlikQrisSandboxScenarios::createPayload($payment), 200);
+            },
+        ]);
+
+        $result = $this->lifecycle($payment);
+        $fresh = $payment->fresh();
+
+        $this->assertSame(KlikQrisNativeQrisOutcome::Expired, $result->outcome());
+        $this->assertNull($result->payable());
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertNull($fresh->provider_payload);
+        $this->assertNull($fresh->provider_total_payment);
+        $this->assertNull($fresh->provider_created_at);
+        $this->assertNull($fresh->provider_expires_at);
+        $this->assertSame('outcome_unknown', $fresh->provider_create_state);
+        $this->assertSame(0, $fresh->paymentEvents()->count());
+        Http::assertSentCount(1);
+    }
+
     public function test_base64_only_create_returns_provider_total_pending_without_exposing_or_persisting_media(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
@@ -177,6 +217,10 @@ class KlikQrisNativeQrisTest extends TestCase
             'provider_payment_method' => 'qris',
             'provider_expires_at' => $expiresAt,
             'provider_create_state' => 'created',
+        ]);
+        $payment->order->update([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
         ]);
         $payment->update([
             'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment->fresh(), [
