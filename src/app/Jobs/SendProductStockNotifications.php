@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
-use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 

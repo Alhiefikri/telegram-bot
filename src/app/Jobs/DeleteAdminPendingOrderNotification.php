@@ -6,11 +6,13 @@ use App\Models\Order;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 
 class DeleteAdminPendingOrderNotification implements ShouldBeUnique, ShouldQueue
 {
@@ -25,6 +27,18 @@ class DeleteAdminPendingOrderNotification implements ShouldBeUnique, ShouldQueue
     public function uniqueId(): string
     {
         return $this->orderId;
+    }
+
+    /**
+     * Keep the unique lock outside the order transaction's database connection.
+     *
+     * Laravel acquires unique job locks when the PendingDispatch is destroyed,
+     * before an afterCommit callback enqueues the job. A database cache lock can
+     * therefore abort a competing lifecycle transaction on a unique-key race.
+     */
+    public function uniqueVia(): Repository
+    {
+        return Cache::driver('file');
     }
 
     public function backoff(): array

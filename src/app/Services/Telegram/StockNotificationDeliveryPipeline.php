@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\InventoryMovementType;
+use App\Jobs\SendProductStockNotifications;
 use App\Models\InventoryMovement;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
@@ -15,6 +16,7 @@ use Throwable;
 class StockNotificationDeliveryPipeline
 {
     private const CLAIM_TTL_MINUTES = 15;
+
     private const MAX_ATTEMPTS = 5;
 
     public function __construct(private TelegramProductNotificationService $notifications, private TelegramBotClient $bot) {}
@@ -72,7 +74,7 @@ class StockNotificationDeliveryPipeline
         $movementIds = $recipientMovementIds->merge($legacyMovementIds)->unique()->values();
 
         foreach ($movementIds as $movementId) {
-            \App\Jobs\SendProductStockNotifications::dispatch($movementId)->onQueue('notifications');
+            SendProductStockNotifications::dispatch($movementId)->onQueue('notifications');
         }
 
         return $movementIds->count();
@@ -125,6 +127,7 @@ class StockNotificationDeliveryPipeline
                 return null;
             }
             $locked->forceFill(['claim_token' => $token, 'claim_expires_at' => now()->addMinutes(self::CLAIM_TTL_MINUTES), 'attempts' => $locked->attempts + 1])->save();
+
             return $locked->fresh();
         }, 5);
         if (! $claimed) {
@@ -140,12 +143,14 @@ class StockNotificationDeliveryPipeline
                 'last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
             ]);
             Log::warning('telegram.stock_notification_recipient_failed', ['recipient_id' => $claimed->id, 'customer_id' => $claimed->customer_id, 'terminal' => $terminal, 'attempts' => $claimed->attempts, 'exception' => $e::class]);
+
             return $terminal ? 'terminal_failure' : 'transient_failure';
         }
 
         StockNotificationRecipient::query()->whereKey($claimed->id)->where('claim_token', $token)->whereNull('sent_at')->update([
             'sent_at' => now(), 'claim_token' => null, 'claim_expires_at' => null, 'failed_at' => null, 'last_error' => null,
         ]);
+
         return 'sent';
     }
 
