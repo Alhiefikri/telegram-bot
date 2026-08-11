@@ -21,6 +21,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
+use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\ProductStockItem;
 use App\Models\TelegramUpdate;
 use App\Models\User;
@@ -30,6 +31,10 @@ use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
@@ -39,8 +44,10 @@ use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramUpdateReplayGuard;
 use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
@@ -412,6 +419,163 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         $this->assertNull($order->telegram_receipt_sent_at);
+    }
+
+    public function test_native_qris_creation_racing_expiry_never_persists_a_payable_qr_on_an_expired_order(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
+
+        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $order->update(['expires_at' => now()->subSecond()]);
+        $payment = $order->payments()->sole();
+        $payment->update(['expired_at' => now()->subSecond()]);
+
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+            fn () => app(OrderStateMachine::class)->expirePendingOrder(Order::findOrFail($order->id))?->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $order->refresh();
+        $payment->refresh();
+        $this->assertSame(OrderStatus::Expired, $order->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->status);
+        $this->assertSame(0, $payment->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate)->count());
+        $this->assertFalse($payment->isPayableNativeKlikQris());
+    }
+
+    public function test_native_qris_creation_racing_cancellation_never_revives_a_cancelled_order(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
+
+        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $payment = $order->payments()->sole();
+
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+            fn () => app(OrderStateMachine::class)->cancelPendingOrder(Order::findOrFail($order->id))->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $order->refresh();
+        $payment->refresh();
+        $this->assertSame(OrderStatus::Cancelled, $order->order_status);
+        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        $this->assertFalse($payment->isPayableNativeKlikQris());
+    }
+
+    public function test_klikqris_callback_verification_racing_cancellation_has_one_valid_lifecycle_outcome(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter(successfulStatus: true));
+
+        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $payment = $order->payments()->sole();
+        $payment->update([
+            'provider_total_payment' => $payment->amount + 16,
+            'provider_payment_method' => 'qris',
+            'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment),
+            'provider_create_state' => 'created',
+        ]);
+        $payload = [
+            'order_id' => $payment->merchant_ref,
+            'amount' => (string) $payment->amount,
+            'total_amount' => (string) ($payment->amount + 16),
+            'status' => 'PAID',
+            'signature' => 'ignored-signature',
+        ];
+
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisCallbackProcessor::class)->processCallback($payload)->id,
+            fn () => app(OrderStateMachine::class)->cancelPendingOrder(Order::findOrFail($order->id))->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $order->refresh();
+        $payment->refresh();
+        $sales = InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count();
+        $releases = InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count();
+
+        if ($order->order_status === OrderStatus::Cancelled) {
+            $this->assertSame(PaymentStatus::Paid, $payment->status);
+            $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+            $this->assertSame(0, $sales);
+            $this->assertSame(1, $releases);
+            $this->assertDatabaseCount('manual_fulfillment_reviews', 1);
+
+            return;
+        }
+
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(1, $sales);
+        $this->assertSame(0, $releases);
+    }
+
+    public function test_klikqris_reconciliation_racing_native_qris_creation_keeps_one_provider_create_event(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
+
+        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $payment = $order->payments()->sole();
+
+        $results = $this->runConcurrently([
+            fn () => app(KlikQrisNativeQrisService::class)->reconcile(
+                Payment::findOrFail($payment->id),
+                fn (Payment $payment, KlikQrisTransaction $transaction): null => null,
+            )?->outcome()->value,
+            fn () => app(KlikQrisNativeQrisService::class)->lifecycle(Payment::findOrFail($payment->id))->outcome()->value,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $payment->refresh();
+        $this->assertSame(1, $payment->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate)->count());
+        $this->assertTrue($payment->isPayableNativeKlikQris());
+    }
+
+    public function test_duplicate_durable_notification_recipient_claims_send_once(): void
+    {
+        $this->requireConcurrencyLane();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+
+        $customer = Customer::factory()->create(['telegram_id' => '901233']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) Str::uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 10000,
+            'new_price_amount' => 11000,
+        ]);
+        $event->update(['recipients_materialized_at' => now()]);
+        $recipient = ProductPriceChangeNotificationRecipient::create([
+            'event_id' => $event->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => $customer->telegram_id,
+            'locale' => 'id',
+        ]);
+
+        $results = $this->runConcurrently([
+            fn () => app(ProductPriceChangeNotificationService::class)->processBatch($event->id, 1)->processed,
+            fn () => app(ProductPriceChangeNotificationService::class)->processBatch($event->id, 1)->processed,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $recipient->refresh();
+        $this->assertNotNull($recipient->sent_at);
+        $this->assertSame(1, $recipient->attempts);
     }
 
     public function test_admin_manual_completion_racing_expiry_preserves_single_valid_inventory_outcome(): void
@@ -901,6 +1065,20 @@ class ProductionConcurrencyTest extends TestCase
         return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($expiresAt));
     }
 
+    private function klikQrisReadyOrder(mixed $expiresAt): Order
+    {
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        $cart = $this->cartForProduct($product);
+
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::klikQris($expiresAt));
+    }
+
+    private function useDatabaseLocks(): void
+    {
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+    }
+
     private function pakasirReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
     {
         $order = $this->manualReadyOrder($stock, $quantity, $expiresAt);
@@ -926,5 +1104,32 @@ class ProductionConcurrencyTest extends TestCase
         $response->assertOk();
 
         return $response->getStatusCode();
+    }
+}
+
+final class ProductionConcurrencyKlikQrisAdapter implements KlikQrisProviderAdapter
+{
+    public function __construct(private readonly bool $successfulStatus = false) {}
+
+    public function createTransaction(Payment $payment): KlikQrisTransaction
+    {
+        usleep(150_000);
+
+        return KlikQrisTransaction::fromCreatePayload(KlikQrisSandboxScenarios::createPayload($payment, [
+            'expired_at' => now()->addMinutes(10)->toAtomString(),
+        ]));
+    }
+
+    public function transactionStatus(Payment $payment): KlikQrisTransaction
+    {
+        usleep(150_000);
+
+        if ($this->successfulStatus) {
+            return KlikQrisTransaction::fromStatusPayload(KlikQrisSandboxScenarios::statusPayload($payment));
+        }
+
+        return KlikQrisTransaction::fromStatusPayload(KlikQrisSandboxScenarios::createPayload($payment, [
+            'expired_at' => now()->addMinutes(10)->toAtomString(),
+        ]));
     }
 }
