@@ -16,6 +16,8 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\StoreChannelSetting;
+use App\Models\StockNotificationEvent;
+use App\Models\StockNotificationRecipient;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
@@ -23,6 +25,7 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\TelegramProductNotificationService;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -269,6 +272,47 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         $this->assertCount(1, $sendMessages);
         $this->assertNotNull($sale->fresh()->stock_notification_sent_at);
+    }
+
+    public function test_stock_notification_snapshots_recipients_and_retries_a_transient_failure(): void
+    {
+        Customer::factory()->create(['telegram_id' => 991001, 'locale' => 'id']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'durable restock', $admin, '127.0.0.1', ['durable-secret'])['movement_id'];
+
+        Http::fakeSequence()->pushStatus(500)->push(['ok' => true]);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $first = $pipeline->deliver($movementId);
+
+        $event = StockNotificationEvent::where('inventory_movement_id', $movementId)->sole();
+        $recipient = StockNotificationRecipient::where('stock_notification_event_id', $event->id)->where('telegram_id', '991001')->sole();
+        $this->assertNotNull($event->recipients_snapshotted_at);
+        $this->assertSame(1, $recipient->attempts);
+        $this->assertNotNull($recipient->failed_at);
+        $this->assertTrue($first['has_more']);
+
+        $second = $pipeline->deliver($movementId);
+        $recipient->refresh();
+        $this->assertSame(2, $recipient->attempts);
+        $this->assertNotNull($recipient->sent_at);
+        $this->assertFalse($second['has_more']);
+    }
+
+    public function test_permanent_stock_notification_failure_is_recorded_for_operator_follow_up(): void
+    {
+        Customer::factory()->create(['telegram_id' => 991002]);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'lease recovery', $admin, '127.0.0.1', ['lease-secret'])['movement_id'];
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+
+        Http::fake(['*' => Http::response(['ok' => false], 403)]);
+        $pipeline->deliver($movementId, 1);
+        $event = StockNotificationEvent::where('inventory_movement_id', $movementId)->sole();
+        $recipient = StockNotificationRecipient::where('stock_notification_event_id', $event->id)->where('telegram_id', '991002')->sole();
+        $this->assertNotNull($recipient->terminal_failed_at);
+        $this->assertNotEmpty($recipient->last_error);
     }
 
     public function test_restock_channel_notification_includes_added_stock_available_stock_and_current_prices(): void
