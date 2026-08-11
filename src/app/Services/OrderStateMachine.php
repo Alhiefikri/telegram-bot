@@ -11,6 +11,7 @@ use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
@@ -335,6 +336,18 @@ class OrderStateMachine implements OrderLifecycle
             $order->update(['payment_status' => PaymentStatus::Paid]);
             $changed = true;
         }
+
+        ManualFulfillmentReview::query()->firstOrCreate(
+            ['payment_id' => $payment->id],
+            [
+                'order_id' => $order->id,
+                'amount' => $payment->provider_total_payment ?? $payment->amount,
+                'currency' => $payment->currency,
+                'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+                'state' => ManualFulfillmentReview::STATE_PENDING,
+                'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
+            ],
+        );
 
         if ($changed) {
             $this->dispatchAdminPendingNotificationDelete($order);

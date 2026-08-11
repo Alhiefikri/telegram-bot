@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
+use App\Http\Controllers\Admin\AdminManualFulfillmentReviewController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
 use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
@@ -108,6 +109,11 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('{order}/reject-manual', AdminOrderManualRejectController::class)->name('reject-manual');
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
+            });
+
+            Route::prefix('manual-fulfillment-reviews')->name('manual-fulfillment-reviews.')->group(function (): void {
+                Route::get('/', [AdminManualFulfillmentReviewController::class, 'index'])->name('index');
+                Route::get('{review}', [AdminManualFulfillmentReviewController::class, 'show'])->name('show');
             });
 
             Route::prefix('products')->name('products.')->group(function (): void {

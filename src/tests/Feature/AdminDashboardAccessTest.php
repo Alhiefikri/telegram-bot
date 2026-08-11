@@ -119,6 +119,16 @@ class AdminDashboardAccessTest extends TestCase
                 'methods' => ['POST'],
                 'middleware' => ['web', 'admin.no-cache', 'admin.access'],
             ],
+            'admin.manual-fulfillment-reviews.index' => [
+                'uri' => 'admin/manual-fulfillment-reviews',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.manual-fulfillment-reviews.show' => [
+                'uri' => 'admin/manual-fulfillment-reviews/{review}',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
             'admin.products.store' => [
                 'uri' => 'admin/products',
                 'methods' => ['POST'],

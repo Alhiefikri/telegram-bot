@@ -233,6 +233,11 @@ class Payment extends Model
         return $this->hasMany(PaymentEvent::class);
     }
 
+    public function manualFulfillmentReview()
+    {
+        return $this->hasOne(ManualFulfillmentReview::class);
+    }
+
     public function auditLogs()
     {
         return $this->hasMany(AuditLog::class, 'subject_id', 'audit_subject_id')->where('subject_type', self::class);
