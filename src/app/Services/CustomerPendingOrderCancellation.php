@@ -119,7 +119,9 @@ final readonly class CustomerPendingOrderCancellation
     private function scheduleReconciliation(Payment $payment): void
     {
         if ($this->requiresProviderVerification($payment)) {
-            ReconcileCustomerCancellationPayment::dispatchAfterResponse($payment->id);
+            ReconcileCustomerCancellationPayment::dispatch($payment->id)
+                ->onQueue('payments')
+                ->afterCommit();
         }
     }
 }

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\ProcessProviderCancellationAttempt;
 use App\Models\Payment;
 use App\Models\ProviderCancellationAttempt;
+use App\Services\Pakasir\PakasirPayloadSanitizer;
 use App\Services\Pakasir\PakasirPaymentEventLogger;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Support\PaymentProvider;
@@ -87,7 +88,7 @@ final readonly class ProviderCancellationAttempts
                 $this->events->logProviderCancel($payment, $response);
                 ProviderCancellationAttempt::query()->whereKey($attempt->id)->update([
                     'state' => ProviderCancellationAttempt::STATE_SUCCEEDED,
-                    'provider_response' => $response,
+                    'provider_response' => PakasirPayloadSanitizer::sanitize($response),
                     'finished_at' => now(),
                 ]);
             }, attempts: 5);
@@ -101,7 +102,7 @@ final readonly class ProviderCancellationAttempts
             app(OrderLifecycle::class)->applyPaymentPaid($payment);
             ProviderCancellationAttempt::query()->whereKey($attempt->id)->update([
                 'state' => ProviderCancellationAttempt::STATE_ALREADY_PAID,
-                'provider_response' => $response,
+                'provider_response' => PakasirPayloadSanitizer::sanitize($response),
                 'finished_at' => now(),
             ]);
 
@@ -131,7 +132,7 @@ final readonly class ProviderCancellationAttempts
     {
         ProviderCancellationAttempt::query()->whereKey($attemptId)->update([
             'state' => ProviderCancellationAttempt::STATE_RETRYABLE_FAILURE,
-            'provider_response' => $response,
+            'provider_response' => $response === null ? null : PakasirPayloadSanitizer::sanitize($response),
             'last_error' => $this->errorMessage($exception),
         ]);
     }
@@ -148,6 +149,6 @@ final readonly class ProviderCancellationAttempts
 
     private function errorMessage(Throwable $exception): string
     {
-        return mb_substr($exception->getMessage(), 0, 4000);
+        return mb_substr(PakasirPayloadSanitizer::redactText($exception->getMessage()), 0, 4000);
     }
 }

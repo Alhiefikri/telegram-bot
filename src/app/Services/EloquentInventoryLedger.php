@@ -162,6 +162,47 @@ class EloquentInventoryLedger implements InventoryLedger
     }
 
     /**
+     * A late payment was already released, so it has matching release proof
+     * rather than a live reservation. The sale is still ledger-owned to keep
+     * stock movements and stock-notification semantics consistent.
+     */
+    public function recordLatePaymentSales(Order $order, Collection $items, Collection $products, Collection $movements): void
+    {
+        foreach ($items as $item) {
+            $product = $products[$item->product_id] ?? throw new InvalidOrderTransition('Order product is missing.');
+            $this->assertMatchingReservation($item, $movements);
+
+            if (! $this->hasMatchingProof(collect([$item]), $movements, InventoryMovementType::Release, -1)) {
+                throw new InvalidOrderTransition('Released reservation proof is missing or mismatched.');
+            }
+
+            if (! $product->isPublicVisible() || $product->availableStock() < $item->quantity) {
+                throw new InsufficientStock('Ordered product no longer has valid available inventory.');
+            }
+
+            $stockBefore = $product->stock;
+            $product->decrement('stock', $item->quantity);
+            $product->refresh();
+            $becameUnavailable = $product->stock <= 0
+                || ($product->isCredentialManaged() && $product->availableStockItemCount() <= 0);
+            $sale = InventoryMovement::firstOrCreate(
+                ['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale],
+                [
+                    'quantity' => -$item->quantity,
+                    'stock_before' => $stockBefore,
+                    'became_unavailable' => $becameUnavailable,
+                    'notes' => 'Late payment manual fulfillment',
+                    'created_at' => now(),
+                ],
+            );
+
+            if ($sale->wasRecentlyCreated && $becameUnavailable) {
+                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue('notifications'));
+            }
+        }
+    }
+
+    /**
      * Callers must pass locked order items, product rows, and movement proof rows
      * from the active order-transition transaction.
      */

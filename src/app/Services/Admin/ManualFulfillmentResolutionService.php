@@ -2,19 +2,17 @@
 
 namespace App\Services\Admin;
 
-use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendTelegramReceipt;
-use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Models\Product;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +21,7 @@ class ManualFulfillmentResolutionService
 {
     public function __construct(
         private readonly AuditLogger $audit,
+        private readonly InventoryLedger $inventory,
         private readonly OrderLifecycle $orders,
         private readonly ProductCredentialAllocator $credentials,
     ) {}
@@ -52,20 +51,11 @@ class ManualFulfillmentResolutionService
             throw new InvalidOrderTransition('Only paid late-payment reviews can be fulfilled.');
         }
 
-        $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
-        $products = Product::withTrashed()->withAvailability()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
+        $this->inventory->recordLatePaymentSales($order, $items, $products, $movements);
         foreach ($items as $item) {
             $product = $products[$item->product_id] ?? throw new InsufficientStock('Ordered product is no longer available.');
-            if (! $product->isPublicVisible() || $product->availableStock() < $item->quantity) {
-                throw new InsufficientStock('Ordered product no longer has valid available inventory.');
-            }
             $this->credentials->allocate($item, $product, $item->quantity);
-            $before = $product->stock;
-            $product->decrement('stock', $item->quantity);
-            InventoryMovement::query()->firstOrCreate(
-                ['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale],
-                ['quantity' => -$item->quantity, 'stock_before' => $before, 'notes' => 'Late payment manual fulfillment', 'created_at' => now()],
-            );
         }
         $order->update(['order_status' => OrderStatus::Completed]);
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
@@ -88,7 +78,7 @@ class ManualFulfillmentResolutionService
             return $this->markRefundUncertain($review, $actor, $reason, $reference, $ip);
         }
 
-        $payment = Payment::query()->lockForUpdate()->findOrFail($review->payment_id);
+        $payment = Payment::query()->findOrFail($review->payment_id);
         $this->orders->applyPaymentRefunded($payment);
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, $reference, $result);
         $this->audit->log('manual_fulfillment_review.refunded', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'amount' => $review->amount, 'currency' => $review->currency, 'provider_reference' => $reference, 'provider_result' => $result], $actor, $ip);

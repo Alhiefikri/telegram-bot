@@ -30,5 +30,7 @@ interface InventoryLedger
 
     public function recordSales(Order $order, Collection $items, Collection $products, Collection $movements): void;
 
+    public function recordLatePaymentSales(Order $order, Collection $items, Collection $products, Collection $movements): void;
+
     public function releaseReservations(Order $order, Collection $items, Collection $products, Collection $movements): void;
 }

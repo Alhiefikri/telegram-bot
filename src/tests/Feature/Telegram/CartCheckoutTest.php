@@ -1077,6 +1077,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
                     'status' => 'pending',
                 ]]);
             },
+            'https://app.pakasir.test/api/transactioncancel*' => Http::response([
+                'transaction' => ['status' => 'cancelled'],
+            ]),
         ]);
         $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $otherBuyer = Customer::factory()->create(['telegram_id' => 67890, 'username' => 'other_buyer']);
