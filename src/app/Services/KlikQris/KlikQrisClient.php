@@ -4,6 +4,7 @@ namespace App\Services\KlikQris;
 
 use App\Enums\KlikQrisEnvironment;
 use App\Models\Payment;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -54,7 +55,7 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         $this->assertReady();
 
         $attempt = 0;
-        $maxAttempts = max(1, (int) config('services.klikqris.status_max_attempts', 3));
+        $maxAttempts = ProviderVerificationProfiles::budget()['max_attempts'];
 
         while (true) {
             $attempt++;
@@ -97,8 +98,8 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
     {
         return Http::asJson()
             ->acceptJson()
-            ->timeout((float) config('services.klikqris.http_timeout_seconds', 10))
-            ->connectTimeout((float) config('services.klikqris.http_connect_timeout_seconds', 3))
+            ->timeout(ProviderVerificationProfiles::budget()['timeout_seconds'])
+            ->connectTimeout(ProviderVerificationProfiles::budget()['connect_timeout_seconds'])
             ->withHeaders([
                 'x-api-key' => $this->apiKey(),
                 'id_merchant' => $this->merchantId(),
@@ -186,12 +187,13 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
 
     private function sleepBeforeStatusRetry(int $attempt): void
     {
-        $baseDelayMs = max(0, (int) config('services.klikqris.status_retry_delay_ms', 250));
+        $budget = ProviderVerificationProfiles::budget();
+        $baseDelayMs = $budget['retry_delay_ms'];
         if ($baseDelayMs === 0) {
             return;
         }
 
-        $delayMs = min($baseDelayMs * (2 ** max(0, $attempt - 1)), 1000);
+        $delayMs = min($baseDelayMs * (2 ** max(0, $attempt - 1)), $budget['retry_max_delay_ms']);
         usleep($delayMs * 1000);
     }
 

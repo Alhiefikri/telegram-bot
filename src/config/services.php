@@ -119,6 +119,36 @@ return [
         'reconciliation_command' => 'klikqris:reconcile --chunk=100',
     ],
 
+    // Verification budgets intentionally differ by caller. Interactive
+    // surfaces get one visible retry, webhook work is bounded before it is
+    // acknowledged, and reconciliation is allowed to be persistent.
+    'provider_verification' => [
+        'interactive' => [
+            'timeout_seconds' => (float) env('PROVIDER_VERIFY_INTERACTIVE_TIMEOUT_SECONDS', 3),
+            'connect_timeout_seconds' => (float) env('PROVIDER_VERIFY_INTERACTIVE_CONNECT_TIMEOUT_SECONDS', 1),
+            'max_attempts' => (int) env('PROVIDER_VERIFY_INTERACTIVE_MAX_ATTEMPTS', 2),
+            'retry_delay_ms' => (int) env('PROVIDER_VERIFY_INTERACTIVE_RETRY_DELAY_MS', 200),
+            'retry_max_delay_ms' => (int) env('PROVIDER_VERIFY_INTERACTIVE_RETRY_MAX_DELAY_MS', 200),
+            'lock_safety_margin_seconds' => (int) env('PROVIDER_VERIFY_INTERACTIVE_LOCK_SAFETY_MARGIN_SECONDS', 3),
+        ],
+        'webhook' => [
+            'timeout_seconds' => (float) env('PROVIDER_VERIFY_WEBHOOK_TIMEOUT_SECONDS', 3),
+            'connect_timeout_seconds' => (float) env('PROVIDER_VERIFY_WEBHOOK_CONNECT_TIMEOUT_SECONDS', 1),
+            'max_attempts' => (int) env('PROVIDER_VERIFY_WEBHOOK_MAX_ATTEMPTS', 2),
+            'retry_delay_ms' => (int) env('PROVIDER_VERIFY_WEBHOOK_RETRY_DELAY_MS', 200),
+            'retry_max_delay_ms' => (int) env('PROVIDER_VERIFY_WEBHOOK_RETRY_MAX_DELAY_MS', 200),
+            'lock_safety_margin_seconds' => (int) env('PROVIDER_VERIFY_WEBHOOK_LOCK_SAFETY_MARGIN_SECONDS', 3),
+        ],
+        'reconciliation' => [
+            'timeout_seconds' => (float) env('PROVIDER_VERIFY_RECONCILIATION_TIMEOUT_SECONDS', 10),
+            'connect_timeout_seconds' => (float) env('PROVIDER_VERIFY_RECONCILIATION_CONNECT_TIMEOUT_SECONDS', 3),
+            'max_attempts' => (int) env('PROVIDER_VERIFY_RECONCILIATION_MAX_ATTEMPTS', 3),
+            'retry_delay_ms' => (int) env('PROVIDER_VERIFY_RECONCILIATION_RETRY_DELAY_MS', 250),
+            'retry_max_delay_ms' => (int) env('PROVIDER_VERIFY_RECONCILIATION_RETRY_MAX_DELAY_MS', 1000),
+            'lock_safety_margin_seconds' => (int) env('PROVIDER_VERIFY_RECONCILIATION_LOCK_SAFETY_MARGIN_SECONDS', 8),
+        ],
+    ],
+
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),

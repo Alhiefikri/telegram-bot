@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\PaymentLifecycleCoordinator;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -24,8 +25,6 @@ use Throwable;
  */
 class KlikQrisNativeQrisService
 {
-    private const PAYMENT_LOCK_LEASE_SECONDS = 60;
-
     private const PAYMENT_LOCK_WAIT_SECONDS = 10;
 
     private const OWNER_ALERT_TERMINAL_STATE = 'terminal';
@@ -145,7 +144,7 @@ class KlikQrisNativeQrisService
         }
 
         try {
-            return Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS)
+            return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())
                 ->block(self::PAYMENT_LOCK_WAIT_SECONDS, fn (): KlikQrisNativeQrisLifecycleResult => $this->createOrRecover($payment));
         } catch (LockTimeoutException) {
             // Another attempt holds the single-flight lock; the QR is still being prepared.
@@ -164,7 +163,7 @@ class KlikQrisNativeQrisService
      */
     public function reconcile(Payment $payment, Closure $onAuthoritativeStatus): ?KlikQrisNativeQrisLifecycleResult
     {
-        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        $lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());
         if (! $lock->get()) {
             return null;
         }
@@ -210,7 +209,7 @@ class KlikQrisNativeQrisService
      */
     public function tryWithPaymentLock(Payment $payment, Closure $callback): mixed
     {
-        $lock = Cache::lock($this->paymentLockKey($payment), self::PAYMENT_LOCK_LEASE_SECONDS);
+        $lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());
         if (! $lock->get()) {
             return null;
         }
@@ -227,6 +226,13 @@ class KlikQrisNativeQrisService
         // Keep the established key so callback/reconciliation workers already
         // holding the old status lock continue to serialize with this module.
         return 'klikqris:callback-status:'.$payment->getKey();
+    }
+
+    private function paymentLockLeaseSeconds(): int
+    {
+        // The lease must cover the most aggressive (background) verification
+        // budget even when this caller is interactive or a webhook.
+        return max(60, ProviderVerificationProfiles::requiredLeaseSeconds());
     }
 
     private function createOrRecover(Payment $payment): KlikQrisNativeQrisLifecycleResult

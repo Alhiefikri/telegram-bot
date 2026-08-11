@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Models\Payment;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Support\Facades\Cache;
 
@@ -42,7 +43,11 @@ class StorefrontShopPaymentRefreshCoordinator
 
     private function leaseSeconds(): int
     {
-        return max(1, (int) config('services.pakasir.status_refresh_lock_lease_seconds', 15));
+        return max(
+            1,
+            (int) config('services.pakasir.status_refresh_lock_lease_seconds', 15),
+            ProviderVerificationProfiles::requiredLeaseSeconds(),
+        );
     }
 
     private function windowSeconds(): int

@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\KlikQrisEnvironment;
+use App\Jobs\VerifyKlikQrisWebhookPayment;
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
+use App\Services\ProviderVerification\ProviderVerificationProfile;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -51,9 +54,16 @@ class KlikQrisSandboxWebhookController extends Controller
         $payload = $this->validatedPayload($request);
 
         try {
-            $processor->processCallback($payload);
+            ProviderVerificationProfiles::using(ProviderVerificationProfile::Webhook, fn () => $processor->processCallback($payload));
         } catch (KlikQrisStatusUnavailableException $exception) {
             report($exception);
+            if (! app()->runningUnitTests()) {
+                // Webhooks must acknowledge after their bounded synchronous
+                // budget; force durable queueing so a sync queue cannot turn
+                // this follow-up into another request-time provider call.
+                // Replays are harmless because lifecycle transitions dedupe.
+                VerifyKlikQrisWebhookPayment::dispatch($payload)->onConnection('database')->onQueue('payments');
+            }
         }
 
         return response()->json(['success' => true]);

@@ -15,6 +15,8 @@ use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\ProviderVerification\ProviderVerificationProfile;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
 use Throwable;
 
@@ -127,7 +129,7 @@ class StorefrontShopPaymentStatusRefresh
             try {
                 if (! $skipProviderLookup && $this->isKlikQrisPayment($payment)) {
                     $lookupCompleted = $this->klikQrisNativeQris->tryWithPaymentLock($payment, function () use ($payment): bool {
-                        $this->processProviderReconciliation($payment);
+                        ProviderVerificationProfiles::using(ProviderVerificationProfile::Interactive, fn () => $this->processProviderReconciliation($payment));
 
                         return true;
                     });
@@ -155,7 +157,7 @@ class StorefrontShopPaymentStatusRefresh
                         );
                     }
 
-                    $this->processProviderReconciliation($payment);
+                    ProviderVerificationProfiles::using(ProviderVerificationProfile::Interactive, fn () => $this->processProviderReconciliation($payment));
                     $this->coordinator->markRecentlyRefreshed($payment);
                 }
             } catch (Throwable $exception) {
