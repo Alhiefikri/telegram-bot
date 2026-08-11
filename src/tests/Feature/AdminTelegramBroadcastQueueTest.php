@@ -173,4 +173,66 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $this->assertSame(2, TelegramBroadcastRecipient::query()->whereNotNull('sent_at')->count());
         $this->assertSame(2, TelegramBroadcastRecipient::query()->where('attempts', 1)->count());
     }
+
+    public function test_recover_outbound_redispatches_an_unmaterialized_broadcast_and_an_expired_claim(): void
+    {
+        Queue::fake();
+        $unmaterialized = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Awaiting snapshot',
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+        $expiredClaim = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Recover recipient',
+            'status' => TelegramBroadcast::STATUS_IN_PROGRESS,
+            'recipients_materialized_at' => now(),
+        ]);
+        TelegramBroadcastRecipient::create([
+            'broadcast_id' => $expiredClaim->id,
+            'customer_id' => Customer::factory()->create()->id,
+            'telegram_id' => '111111111',
+            'locale' => 'id',
+            'send_started_at' => now()->subMinutes(16),
+            'send_claim_token' => (string) Str::uuid(),
+            'attempts' => 1,
+        ]);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=2')
+            ->assertSuccessful();
+
+        Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
+        Queue::assertPushed(SendTelegramBroadcastBatch::class, fn (SendTelegramBroadcastBatch $job): bool => $job->broadcastId === $unmaterialized->id);
+        Queue::assertPushed(SendTelegramBroadcastBatch::class, fn (SendTelegramBroadcastBatch $job): bool => $job->broadcastId === $expiredClaim->id);
+    }
+
+    public function test_recover_outbound_leaves_a_broadcast_with_an_active_claim_to_its_worker(): void
+    {
+        Queue::fake();
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Already claimed',
+            'status' => TelegramBroadcast::STATUS_IN_PROGRESS,
+            'recipients_materialized_at' => now(),
+        ]);
+        TelegramBroadcastRecipient::create([
+            'broadcast_id' => $broadcast->id,
+            'customer_id' => Customer::factory()->create()->id,
+            'telegram_id' => '111111111',
+            'locale' => 'id',
+            'send_started_at' => now(),
+            'send_claim_token' => (string) Str::uuid(),
+            'attempts' => 1,
+        ]);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(SendTelegramBroadcastBatch::class);
+    }
 }

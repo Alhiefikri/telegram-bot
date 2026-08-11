@@ -51,7 +51,8 @@ class TelegramBroadcastService
         ]);
 
         SendTelegramBroadcastBatch::dispatch($broadcast->id, now()->toISOString())
-            ->onQueue('telegram-broadcast');
+            ->onQueue('telegram-broadcast')
+            ->afterCommit();
 
         return [
             'broadcast_id' => $broadcast->id,
