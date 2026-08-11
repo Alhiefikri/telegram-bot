@@ -6,12 +6,14 @@ use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Jobs\ProcessProviderCancellationAttempt;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\ProviderCancellationAttempt;
 use App\Providers\AppServiceProvider;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -24,6 +26,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\Support\QrisTestPayload;
 use Tests\TestCase;
@@ -104,9 +107,10 @@ class PakasirGatewayTest extends TestCase
             && $request['api_key'] === 'pakasir-secret');
     }
 
-    public function test_expire_pending_orders_releases_local_pakasir_order_without_provider_cancel(): void
+    public function test_expire_pending_orders_queues_provider_cancellation_after_releasing_local_pakasir_order(): void
     {
         config()->set('services.telegram.token', null);
+        Queue::fake();
         Http::fake();
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
         $payment = $order->payments()->firstOrFail();
@@ -117,7 +121,9 @@ class PakasirGatewayTest extends TestCase
 
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
-        Http::assertNothingSent();
+        $attempt = ProviderCancellationAttempt::query()->sole();
+        $this->assertSame(ProviderCancellationAttempt::STATE_PENDING, $attempt->state);
+        Queue::assertPushed(ProcessProviderCancellationAttempt::class, fn (ProcessProviderCancellationAttempt $job): bool => $job->attemptId === $attempt->id);
         $this->assertSame(0, PaymentEvent::query()->where('event_type', PaymentEventType::ProviderCancel)->count());
     }
 

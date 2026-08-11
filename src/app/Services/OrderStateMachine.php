@@ -23,6 +23,7 @@ class OrderStateMachine implements OrderLifecycle
     public function __construct(
         private readonly InventoryLedger $inventory,
         private readonly ?ProductCredentialAllocator $credentials = null,
+        private readonly ?ProviderCancellationAttempts $providerCancellationAttempts = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -403,6 +404,7 @@ class OrderStateMachine implements OrderLifecycle
 
         foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
             $payment->update(['status' => $paymentStatus]);
+            $this->providerCancellationAttempts()->schedule($payment);
         }
         $order->update([
             'order_status' => $orderStatus,
@@ -446,6 +448,11 @@ class OrderStateMachine implements OrderLifecycle
     private function credentials(): ProductCredentialAllocator
     {
         return $this->credentials ?? app(ProductCredentialAllocator::class);
+    }
+
+    private function providerCancellationAttempts(): ProviderCancellationAttempts
+    {
+        return $this->providerCancellationAttempts ?? app(ProviderCancellationAttempts::class);
     }
 
     private function dispatchAdminPendingNotificationDelete(Order $order): void

@@ -74,6 +74,11 @@ class Order extends Model
         return $this->hasMany(ManualFulfillmentReview::class);
     }
 
+    public function providerCancellationAttempts()
+    {
+        return $this->hasMany(ProviderCancellationAttempt::class);
+    }
+
     public function salesProofPost()
     {
         return $this->hasOne(SalesProofPost::class);

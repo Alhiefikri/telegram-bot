@@ -83,6 +83,11 @@ class Payment extends Model
         ];
     }
 
+    public function providerCancellationAttempt()
+    {
+        return $this->hasOne(ProviderCancellationAttempt::class);
+    }
+
     protected function paymentMethodLabel(): Attribute
     {
         return Attribute::make(
