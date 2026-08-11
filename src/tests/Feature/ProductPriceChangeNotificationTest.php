@@ -134,26 +134,23 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertStringNotContainsString('You save Rp', (string) $request['text']);
     }
 
-    public function test_transient_store_channel_failure_is_retried_without_duplicate_successful_posts(): void
+    public function test_transient_store_channel_failure_is_not_retried_or_recovered(): void
     {
         config()->set('services.telegram.token', 'bot-token');
-        $failStoreChannel = true;
+        Queue::fake();
         $sendAttempts = 0;
         Http::fake([
-            'https://api.telegram.org/*/sendMessage' => function () use (&$failStoreChannel, &$sendAttempts) {
+            'https://api.telegram.org/*/sendMessage' => function () use (&$sendAttempts) {
                 $sendAttempts++;
-                if ($failStoreChannel) {
-                    throw new RuntimeException('temporary Telegram Store Channel failure');
-                }
 
-                return Http::response(['ok' => true, 'result' => ['message_id' => 124]]);
+                throw new RuntimeException('temporary Telegram Store Channel failure');
             },
         ]);
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
             'telegram_chat_id' => '-100123',
         ]);
-        $product = Product::factory()->create(['name' => 'Retry Channel Product']);
+        $product = Product::factory()->create(['name' => 'No Retry Channel Product']);
         $event = ProductPriceChangeEvent::create([
             'event_key' => (string) str()->uuid(),
             'product_id' => $product->id,
@@ -165,21 +162,19 @@ class ProductPriceChangeNotificationTest extends TestCase
         ]);
 
         $firstBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
-        $this->assertSame(1, $firstBatch->transientFailures);
-        $this->assertTrue($firstBatch->hasMore);
-
-        $failStoreChannel = false;
-        $event->fresh()->forceFill(['store_channel_failed_at' => now()->subMinute()])->save();
         $secondBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
-        $storeChannelMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '-100123');
-
+        $this->assertSame(1, $firstBatch->transientFailures);
+        $this->assertFalse($firstBatch->hasMore);
         $this->assertFalse($secondBatch->hasMore);
-        $this->assertSame(2, $sendAttempts);
-        $this->assertCount(1, $storeChannelMessages);
-        $this->assertNotNull($event->fresh()->store_channel_sent_at);
-        $this->assertSame(2, $event->fresh()->store_channel_attempts);
+        $this->assertSame(1, $sendAttempts);
+        $this->assertNull($event->fresh()->store_channel_sent_at);
+        $this->assertSame(1, $event->fresh()->store_channel_attempts);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+        Queue::assertNotPushed(SendProductPriceChangeNotifications::class);
     }
 
     public function test_recover_outbound_redispatches_an_unsent_configured_store_channel_announcement(): void
@@ -207,6 +202,44 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         Queue::assertPushedOn('telegram-broadcast', SendProductPriceChangeNotifications::class);
         Queue::assertPushed(SendProductPriceChangeNotifications::class, fn (SendProductPriceChangeNotifications $job): bool => $job->eventId === $event->id);
+    }
+
+    public function test_backlog_finalization_migration_prevents_historical_price_notifications_from_recovery(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 9011]);
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+        ]);
+        $recipient = ProductPriceChangeNotificationRecipient::create([
+            'event_id' => $event->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => (string) $customer->telegram_id,
+            'locale' => 'id',
+        ]);
+
+        $migration = require database_path('migrations/2026_08_11_000005_finalize_existing_product_price_notifications.php');
+        $migration->up();
+
+        $this->assertNotNull($event->fresh()->recipients_materialized_at);
+        $this->assertSame(ProductPriceChangeNotificationService::MAX_STORE_CHANNEL_ATTEMPTS, $event->fresh()->store_channel_attempts);
+        $this->assertSame(ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS, $recipient->fresh()->attempts);
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(SendProductPriceChangeNotifications::class);
     }
 
     public function test_admin_price_update_persists_one_event_and_dispatches_after_commit_without_mutating_order_snapshots(): void

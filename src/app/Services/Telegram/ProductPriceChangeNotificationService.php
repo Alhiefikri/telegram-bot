@@ -25,7 +25,7 @@ class ProductPriceChangeNotificationService
 
     public const MAX_RECIPIENT_ATTEMPTS = 5;
 
-    public const MAX_STORE_CHANNEL_ATTEMPTS = 5;
+    public const MAX_STORE_CHANNEL_ATTEMPTS = 1;
 
     public function __construct(private readonly TelegramBotClient $bot) {}
 
