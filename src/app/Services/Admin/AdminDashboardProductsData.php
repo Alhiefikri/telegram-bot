@@ -36,7 +36,7 @@ final class AdminDashboardProductsData
             ->with('category:id,name')
             ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
             ->withExists('stockItems')
-            ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')])
+            ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
             ->latest()
             ->paginate(perPage: 20, pageName: 'products_page', page: max(1, $productsPage))
             ->withQueryString();
@@ -51,7 +51,7 @@ final class AdminDashboardProductsData
                 ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
                 ->select("{$stockItemsTable}.product_id")
                 ->selectRaw('count(*) as total')
-                ->selectRaw("sum(case when {$stockItemsTable}.order_item_id is null then 1 else 0 end) as available")
+                ->selectRaw("sum(case when {$stockItemsTable}.order_item_id is null and {$stockItemsTable}.retired_at is null then 1 else 0 end) as available")
                 ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
                 ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
                 ->groupBy("{$stockItemsTable}.product_id")

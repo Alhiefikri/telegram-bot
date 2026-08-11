@@ -435,9 +435,12 @@ class OrderStateMachine implements OrderLifecycle
     {
         if (! $this->inventory->hasSaleProofForOrder($order)) {
             $this->inventory->releaseOrderReservations($order);
+            $this->credentials()->release($order);
+
+            return;
         }
 
-        $this->credentials()->release($order);
+        $this->credentials()->retire($order);
     }
 
     private function credentials(): ProductCredentialAllocator

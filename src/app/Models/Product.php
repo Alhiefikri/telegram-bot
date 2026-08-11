@@ -56,6 +56,7 @@ class Product extends Model
                             FROM {$stockItemsTable}
                             WHERE {$stockItemsTable}.product_id = {$productsTable}.id
                                 AND {$stockItemsTable}.order_item_id IS NULL
+                                AND {$stockItemsTable}.retired_at IS NULL
                         )
                     )
                 THEN 0 ELSE 1 END"
@@ -74,7 +75,7 @@ class Product extends Model
             ->whereColumn('stock', '>', 'reserved_stock')
             ->where(fn (Builder $query) => $query
                 ->whereDoesntHave('stockItems')
-                ->orWhereHas('stockItems', fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')));
+                ->orWhereHas('stockItems', fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')->whereNull('retired_at')));
     }
 
     /**
@@ -87,7 +88,7 @@ class Product extends Model
     {
         return $query
             ->withExists('stockItems')
-            ->withCount(['stockItems as available_stock_items_count' => fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')]);
+            ->withCount(['stockItems as available_stock_items_count' => fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')->whereNull('retired_at')]);
     }
 
     public function availableStock(): int
@@ -126,10 +127,10 @@ class Product extends Model
         }
 
         if ($this->relationLoaded('stockItems')) {
-            return $this->stockItems->whereNull('order_item_id')->count();
+            return $this->stockItems->whereNull('order_item_id')->whereNull('retired_at')->count();
         }
 
-        return $this->stockItems()->whereNull('order_item_id')->count();
+        return $this->stockItems()->whereNull('order_item_id')->whereNull('retired_at')->count();
     }
 
     public function isPublicVisible(): bool

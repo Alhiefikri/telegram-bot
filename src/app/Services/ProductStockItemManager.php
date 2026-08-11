@@ -28,6 +28,7 @@ class ProductStockItemManager
                 ->whereKey($stockItem->getKey())
                 ->where('product_id', $lockedProduct->id)
                 ->whereNull('order_item_id')
+                ->whereNull('retired_at')
                 ->lockForUpdate()
                 ->firstOrFail();
 
@@ -60,6 +61,7 @@ class ProductStockItemManager
                 ->whereKey($stockItem->getKey())
                 ->where('product_id', $lockedProduct->id)
                 ->whereNull('order_item_id')
+                ->whereNull('retired_at')
                 ->lockForUpdate()
                 ->firstOrFail();
 

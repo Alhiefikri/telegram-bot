@@ -6,10 +6,17 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Services\Admin\ManualFulfillmentResolutionService;
+use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -96,5 +103,52 @@ class ManualFulfillmentReviewTest extends TestCase
         $this->actingAs(User::factory()->create(['role' => null]))
             ->get(route('admin.manual-fulfillment-reviews.index'))
             ->assertForbidden();
+    }
+
+    public function test_owner_can_fulfill_a_late_payment_once_and_allocate_available_credential(): void
+    {
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $credential = ProductStockItem::query()->create(['product_id' => $product->id, 'secret' => 'credential@example.test|password']);
+        $order = $this->latePaidOrder($product);
+        $review = $order->manualFulfillmentReviews()->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $resolved = app(ManualFulfillmentResolutionService::class)->resolve($review, $owner, 'fulfill', 'Stock checked and delivery approved.');
+        $replay = app(ManualFulfillmentResolutionService::class)->resolve($review->fresh(), $owner, 'fulfill', 'retry');
+
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $resolved->state);
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $replay->state);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertNotNull($credential->fresh()->order_item_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'manual_fulfillment_review.fulfilled', 'user_id' => $owner->id]);
+    }
+
+    public function test_successful_refund_retires_delivered_credential_and_never_reallocates_it(): void
+    {
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $credential = ProductStockItem::query()->create(['product_id' => $product->id, 'secret' => 'credential@example.test|password']);
+        $order = $this->latePaidOrder($product);
+        $review = $order->manualFulfillmentReviews()->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        app(ManualFulfillmentResolutionService::class)->resolve($review, $owner, 'fulfill', 'deliver');
+
+        app(OrderLifecycle::class)->applyPaymentRefunded($order->payments()->sole());
+
+        $this->assertSame(PaymentStatus::Refunded, $order->payments()->sole()->fresh()->status);
+        $this->assertNotNull($credential->fresh()->retired_at);
+        $this->assertSame('refunded_after_delivery', $credential->fresh()->retired_reason);
+        $this->assertSame(0, $product->fresh()->availableStockItemCount());
+    }
+
+    private function latePaidOrder(Product $product): Order
+    {
+        $cart = app(CartService::class)->activeCartFor(Customer::factory()->create());
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        app(OrderLifecycle::class)->applyPendingExpiry($order);
+        app(OrderLifecycle::class)->applyPaymentPaid($order->payments()->sole());
+
+        return $order->fresh(['manualFulfillmentReviews', 'payments']);
     }
 }

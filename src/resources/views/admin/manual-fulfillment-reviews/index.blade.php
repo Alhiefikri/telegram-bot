@@ -12,7 +12,7 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Antrean operasional</p>
             <h1 class="mt-1 text-2xl font-black">Manual Fulfillment Review</h1>
-            <p class="mt-2 text-sm font-semibold text-brand-muted">Late Payment tetap tercatat paid. Tidak ada stok atau kredensial yang dikirim otomatis dari antrean ini.</p>
+            <p class="mt-2 text-sm font-semibold text-brand-muted">Late Payment tetap tercatat paid. Tidak ada stok atau kredensial yang dikirim otomatis dari antrean ini. Riwayat resolusi juga ditampilkan.</p>
 
             <div class="mt-5 space-y-3">
                 @forelse ($reviews as $review)
@@ -22,7 +22,7 @@
                                 <p class="font-black">{{ $review->order->invoice_number }}</p>
                                 <p class="mt-1 text-sm font-semibold text-brand-muted">{{ strtoupper($review->payment->provider) }} · {{ $review->payment->method }} · {{ $review->currency }} {{ number_format($review->amount, 0, ',', '.') }}</p>
                             </div>
-                            <x-admin-dashboard.badge tone="warning">Menunggu review</x-admin-dashboard.badge>
+                            <x-admin-dashboard.badge tone="{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'warning' : 'success' }}">{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'Menunggu review' : $review->state }}</x-admin-dashboard.badge>
                         </div>
                     </a>
                 @empty

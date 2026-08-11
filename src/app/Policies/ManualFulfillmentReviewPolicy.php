@@ -16,4 +16,9 @@ class ManualFulfillmentReviewPolicy
     {
         return $this->viewAny($user);
     }
+
+    public function resolve(User $user, ManualFulfillmentReview $review): bool
+    {
+        return $user->role?->canManagePaymentSettings() ?? false;
+    }
 }

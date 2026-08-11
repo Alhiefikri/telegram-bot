@@ -114,6 +114,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::prefix('manual-fulfillment-reviews')->name('manual-fulfillment-reviews.')->group(function (): void {
                 Route::get('/', [AdminManualFulfillmentReviewController::class, 'index'])->name('index');
                 Route::get('{review}', [AdminManualFulfillmentReviewController::class, 'show'])->name('show');
+                Route::post('{review}/resolve', [AdminManualFulfillmentReviewController::class, 'resolve'])->name('resolve');
             });
 
             Route::prefix('products')->name('products.')->group(function (): void {

@@ -373,6 +373,7 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
         $this->assertSame(1, Product::first()->availableStock());
         $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertNull($stockItem->fresh()->retired_at);
     }
 
     public function test_expiry_command_releases_stock_when_configured_qris_deadline_is_due(): void
@@ -443,6 +444,7 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
         $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertNull($stockItem->fresh()->retired_at);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
     }
@@ -463,7 +465,8 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertNotNull($stockItem->fresh()->order_item_id);
+        $this->assertNotNull($stockItem->fresh()->retired_at);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
@@ -483,7 +486,8 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
-        $this->assertNull($stockItem->fresh()->order_item_id);
+        $this->assertNotNull($stockItem->fresh()->order_item_id);
+        $this->assertNotNull($stockItem->fresh()->retired_at);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
     }
