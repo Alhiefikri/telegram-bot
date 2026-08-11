@@ -14,6 +14,7 @@
             'paymentMethod' => old('payment_method'),
         ];
         $checkoutPayload = $isAvailable ? $presentation->modalPayload() : null;
+        $checkoutMaintenanceActive = $checkoutMaintenance->active;
     @endphp
 
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden"
@@ -22,6 +23,7 @@
          @if ($checkoutRequested && $checkoutPayload) data-checkout-product='@json($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' @endif>
         @include('storefront.partials.header')
 
+            @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
         <main class="flex-grow pb-20 pt-12">
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
@@ -72,7 +74,7 @@
                             </div>
 
                             <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-                                @if ($isAvailable)
+                                @if ($isAvailable && ! $checkoutMaintenanceActive)
                                     <x-storefront.button
                                         :href="$checkoutUrl"
                                         id="product-checkout-cta"
@@ -81,6 +83,10 @@
                                         data-product='@json($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'
                                     >
                                         Beli via Web QRIS
+                                    </x-storefront.button>
+                                @elseif ($checkoutMaintenanceActive)
+                                    <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
+                                        Checkout sedang maintenance
                                     </x-storefront.button>
                                 @else
                                     <x-storefront.button variant="danger" class="flex-1 cursor-not-allowed opacity-80" disabled>
@@ -99,7 +105,7 @@
                                 'supportClass' => 'mt-6',
                             ])
 
-                            @if ($isAvailable)
+                            @if ($isAvailable && ! $checkoutMaintenanceActive)
                                 <noscript>
                                     <form method="POST" action="{{ route('storefront.shop.checkout') }}" class="mt-6 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
                                         @csrf

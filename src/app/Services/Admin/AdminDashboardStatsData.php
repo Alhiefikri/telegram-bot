@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\PaymentReceiptReport;
@@ -24,6 +25,7 @@ final class AdminDashboardStatsData
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SalesProofPostNumbering $salesProofNumbers,
         private readonly PaymentReceiptReport $receiptReport,
+        private readonly CheckoutMaintenance $maintenance,
     ) {}
 
     /**
@@ -34,7 +36,10 @@ final class AdminDashboardStatsData
      */
     public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink): array
     {
-        return $this->forHeader($metrics, $storeLink) + [
+        $header = $this->forHeader($metrics, $storeLink);
+        $header['checkoutMaintenance'] = $this->checkoutMaintenance($user);
+
+        return $header + [
             'balance' => $this->balance($metrics['read_only_balance_amount']),
             'cards' => $this->statsCards($metrics),
             'paymentControl' => $this->paymentControl($user),
@@ -55,6 +60,7 @@ final class AdminDashboardStatsData
             'storeLink' => $storeLink,
             'summary' => $this->summaryCards($metrics),
             'storeStatus' => $this->storeStatus($metrics),
+            'checkoutMaintenance' => $this->checkoutMaintenance(),
             'actions' => [
                 'shop' => url('/#products'),
                 'share' => $storeLink['url'],
@@ -114,6 +120,30 @@ final class AdminDashboardStatsData
             'label' => $activeProductCount > 0 ? 'Toko aktif' : 'Toko belum aktif',
             'hint' => $ordersToProcess > 0 ? 'Ada order perlu tindak lanjut' : 'Tidak ada antrean proses',
             'tone' => $ordersToProcess > 0 ? 'amber' : ($activeProductCount > 0 ? 'emerald' : 'slate'),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function checkoutMaintenance(?User $user = null): array
+    {
+        $state = $this->maintenance->current();
+        $active = $state->active;
+
+        return [
+            'active' => $active,
+            'label' => $active ? 'Checkout Maintenance aktif' : 'Checkout normal',
+            'hint' => $active
+                ? 'Order baru ditahan. Katalog, keranjang, dan Order yang sudah ada tetap berjalan.'
+                : 'Customer dapat membuat Order baru seperti biasa.',
+            'tone' => $active ? 'rose' : 'emerald',
+            'status_badge' => [
+                'label' => $active ? 'CHECKOUT DITAHAN' : 'CHECKOUT TERBUKA',
+            ],
+            'public_note' => $state->publicNote,
+            'activated_at' => $state->activatedAt?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i'),
+            'version' => $state->version,
+            'update_url' => route('admin.checkout-maintenance.update'),
+            'can_manage' => (bool) $user?->role?->canManageStoreOperations(),
         ];
     }
 

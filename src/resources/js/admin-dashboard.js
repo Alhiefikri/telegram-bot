@@ -143,6 +143,10 @@ export default function adminDashboard(initialState = {}) {
     paymentSwitchForm: null,
     paymentSwitchOpener: null,
     paymentSwitchCurrentLabel: "",
+    checkoutMaintenanceOpen: false,
+    checkoutMaintenanceForm: null,
+    checkoutMaintenanceOpener: null,
+    checkoutMaintenanceConfirmationText: "",
     paymentSwitchTargetLabel: "",
 
     init() {
@@ -210,6 +214,54 @@ export default function adminDashboard(initialState = {}) {
       this.paymentSwitchOpen = false;
       this.paymentSwitchForm = null;
       this.paymentSwitchOpener = null;
+      HTMLFormElement.prototype.submit.call(form);
+    },
+
+    openCheckoutMaintenanceConfirmation(event) {
+      const form = event.currentTarget;
+      const target = form.dataset.checkoutMaintenanceTarget;
+      const active = form.querySelector('input[name="active"]')?.value === "1";
+
+      this.checkoutMaintenanceForm = form;
+      this.checkoutMaintenanceOpener = document.activeElement;
+      this.checkoutMaintenanceConfirmationText =
+        target === "activate"
+          ? "Aktifkan Checkout Maintenance dan tahan pembuatan Order baru?"
+          : target === "deactivate"
+            ? "Nonaktifkan Checkout Maintenance dan buka checkout baru?"
+            : active
+              ? "Simpan perubahan catatan Checkout Maintenance?"
+              : "Aktifkan Checkout Maintenance dan tahan pembuatan Order baru?";
+      this.checkoutMaintenanceOpen = true;
+      this.$nextTick(() => this.$refs.checkoutMaintenanceConfirm?.focus());
+    },
+
+    closeCheckoutMaintenanceConfirmation(restoreFocus = true) {
+      const opener = this.checkoutMaintenanceOpener;
+      this.checkoutMaintenanceOpen = false;
+      this.checkoutMaintenanceForm = null;
+      this.checkoutMaintenanceOpener = null;
+      this.checkoutMaintenanceConfirmationText = "";
+
+      if (restoreFocus) {
+        this.restoreModalFocus(opener);
+      }
+    },
+
+    submitCheckoutMaintenanceConfirmation() {
+      const form = this.checkoutMaintenanceForm;
+      if (!form) {
+        return;
+      }
+
+      const confirmed = form.querySelector('input[name="confirmed"]');
+      if (confirmed) {
+        confirmed.value = "1";
+      }
+
+      this.checkoutMaintenanceOpen = false;
+      this.checkoutMaintenanceForm = null;
+      this.checkoutMaintenanceOpener = null;
       HTMLFormElement.prototype.submit.call(form);
     },
 

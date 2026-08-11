@@ -78,3 +78,7 @@ _Avoid_: Binance payment proof (that means screenshot evidence)
 **Payment Provider Switch**:
 The owner-controlled store setting that selects Manual, Pakasir, or KlikQRIS for new checkouts without changing payments already created with another provider.
 _Avoid_: Customer provider choice, automatic provider fallback
+
+**Checkout Maintenance**:
+The Owner/Admin-controlled store state that temporarily prevents new customer Orders while catalog access, cart management, and existing Order lifecycles remain available.
+_Avoid_: Store Maintenance, Store Closure

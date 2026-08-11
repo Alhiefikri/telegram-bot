@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
@@ -16,6 +17,8 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
@@ -42,6 +45,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramCheckoutPaymentIntentSelector $paymentIntentSelector,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
+        private CheckoutMaintenance $maintenance,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -85,6 +89,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
                     return;
                 }
+                $maintenance = $this->maintenance->current();
+                if ($maintenance->active) {
+                    $this->bot->answerCallbackQuery($context->callbackQueryId);
+                    $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $maintenance));
+
+                    return;
+                }
 
                 $paymentMethod = $matches[1];
                 $productId = (int) $matches[2];
@@ -118,6 +129,20 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function choosePaymentMethod(TelegramCallbackContext $context, ?string $checkoutKey = null): void
     {
+
+        if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+
+        $maintenance = $this->maintenance->current();
+        if ($maintenance->active) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $maintenance));
+
+            return;
+        }
         $cart = $this->carts->currentActiveCartFor($context->customer);
         if (! $cart) {
             $this->checkout($context, false, true, $checkoutKey);
@@ -182,6 +207,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 'customer_correlation_id' => DogfoodTiming::correlation($context->customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
             ], fn () => $this->checkout->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey));
+        } catch (CheckoutMaintenanceActive $exception) {
+            $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $exception->state));
+
+            return;
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
 
@@ -214,11 +243,23 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void
     {
         match ($behavior) {
+
             CheckoutPostCreationBehavior::BinancePayInstructions,
             CheckoutPostCreationBehavior::PakasirInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions => null,
         };
+    }
+
+    private function maintenanceMessage(Customer $customer, CheckoutMaintenanceState $state): string
+    {
+        return $this->text(
+            $customer,
+            '⏸️ Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.'
+                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
+            '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed. Check status again in a little while.'
+                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
+        );
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string

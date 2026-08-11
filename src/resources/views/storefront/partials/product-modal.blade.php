@@ -9,6 +9,11 @@
     $buyerNameDescribedBy = 'storefront-buyer-name-help'.($buyerNameHasError ? ' storefront-buyer-name-error' : '');
     $supportContactHasError = $errors->has('support_contact_channel') || $errors->has('support_contact_value');
     $supportContactDescribedBy = 'storefront-support-contact-help'.($supportContactHasError ? ' storefront-support-contact-error' : '');
+    $checkoutMaintenanceState = $checkoutMaintenance
+        ?? (isset($catalogPage) ? $catalogPage->checkoutMaintenance : null);
+    $checkoutMaintenanceActive = (bool) ($checkoutMaintenanceState?->active);
+    $checkoutMaintenanceNotice = $checkoutMaintenanceNotice
+        ?? ($checkoutMaintenanceState ? \App\Storefront\StorefrontCheckoutMaintenanceCopy::notice($checkoutMaintenanceState) : '');
 @endphp
 
 <div class="relative z-50" x-show="productModalOpen" x-cloak>
@@ -88,6 +93,7 @@
                             </div>
 
                             <div class="grid gap-4 pt-2">
+                                @if (! $checkoutMaintenanceActive)
                                 <form method="POST"
                                       action="{{ route('storefront.shop.checkout') }}"
                                       x-bind:action="selectedProduct && selectedProduct.checkout.websiteQris ? selectedProduct.checkout.websiteQris.url : '{{ route('storefront.shop.checkout') }}'"
@@ -185,6 +191,12 @@
                                         <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
+                                @else
+                                    <div role="status" class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4 text-sm font-semibold leading-6 text-[var(--sf-ink)]">
+                                        <p class="font-black uppercase tracking-wide">Checkout sedang maintenance</p>
+                                        <p class="mt-2 whitespace-pre-line">{{ $checkoutMaintenanceNotice }}</p>
+                                    </div>
+                                @endif
 
                                 <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]" aria-labelledby="product-modal-support-title">
                                     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

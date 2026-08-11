@@ -8,11 +8,19 @@ use App\Models\Category;
 use App\Models\Customer;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use Illuminate\Support\Str;
 
 class TelegramCatalogIntents
 {
-    public function __construct(private TelegramBotClient $bot, private ProductBrandIconResolver $icons, private TelegramLocale $locale, private TelegramCheckoutIntents $checkout) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private ProductBrandIconResolver $icons,
+        private TelegramLocale $locale,
+        private TelegramCheckoutIntents $checkout,
+        private CheckoutMaintenance $maintenance,
+    ) {}
 
     public function sendCategoryCatalog(Customer $customer, string $chatId): void
     {
@@ -33,29 +41,47 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => $this->locale->text($customer, '📂 Lainnya', '📂 Other'), 'callback_data' => 'category:uncategorized']];
         }
 
-        $this->bot->sendMessage($chatId, $keyboard === [] ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\nBelum ada produk yang bisa ditampilkan sekarang.\n\nCek lagi nanti ya.", "🛍️ No products yet\nThere are no products to show right now.\n\nPlease check again later.") : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here."), ['inline_keyboard' => $keyboard]);
+        $message = $keyboard === []
+            ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\nBelum ada produk yang bisa ditampilkan sekarang.\n\nCek lagi nanti ya.", "🛍️ No products yet\nThere are no products to show right now.\n\nPlease check again later.")
+            : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here.");
+        $maintenance = $this->maintenance->current();
+        if ($maintenance->active) {
+            $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
+        }
+
+        $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
     }
 
     public function sendStockChoices(Customer $customer, string $chatId, Product $product, int $availableStock): void
     {
         $soldQuantity = $this->soldQuantity($product);
-        $binanceAvailable = $availableStock > 0
+        $maintenance = $this->maintenance->current();
+        $checkoutMaintenanceActive = $maintenance->active;
+        $binanceAvailable = ! $checkoutMaintenanceActive
+            && $availableStock > 0
             && $product->usdt_price_amount !== null
             && $this->checkout->binancePayEnabled();
         $keyboard = [];
         if ($availableStock > 0) {
-            $qrisButton = [[
-                'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
-                'callback_data' => 'buy:qris:'.$product->id,
-            ]];
-            if ($binanceAvailable) {
-                $binanceButton = [[
-                    'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
-                    'callback_data' => 'buy:binance:'.$product->id,
+            if ($checkoutMaintenanceActive) {
+                $keyboard[] = [[
+                    'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+                    'callback_data' => 'checkout-maintenance:status',
                 ]];
-                $keyboard = [$qrisButton, $binanceButton];
             } else {
-                $keyboard[] = $qrisButton;
+                $qrisButton = [[
+                    'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                    'callback_data' => 'buy:qris:'.$product->id,
+                ]];
+                if ($binanceAvailable) {
+                    $binanceButton = [[
+                        'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
+                        'callback_data' => 'buy:binance:'.$product->id,
+                    ]];
+                    $keyboard = [$qrisButton, $binanceButton];
+                } else {
+                    $keyboard[] = $qrisButton;
+                }
             }
         }
         $keyboard[] = [[
@@ -81,11 +107,13 @@ class TelegramCatalogIntents
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
         $lines[] = $availableStock > 0
-            ? $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
-                ."\n\n"
-                .$this->locale->qrisCrossBorderSupport($customer)
-                ."\n\n"
-                .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.')
+            ? ($checkoutMaintenanceActive
+                ? $this->maintenanceNotice($customer, $maintenance)
+                : $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
+                    ."\n\n"
+                    .$this->locale->qrisCrossBorderSupport($customer)
+                    ."\n\n"
+                    .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.'))
             : $this->locale->text($customer, 'Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -94,20 +122,29 @@ class TelegramCatalogIntents
     public function sendQuantityChoices(Customer $customer, string $chatId, Product $product, int $availableStock, ?string $paymentMethod = null): void
     {
         $quantityLimit = min($availableStock, 5);
+        $maintenance = $this->maintenance->current();
+        $checkoutMaintenanceActive = $maintenance->active;
         $directCheckout = in_array($paymentMethod, ['qris', 'binance'], true);
         $keyboard = [];
-        for ($quantity = 1; $quantity <= $quantityLimit; $quantity++) {
-            if ($paymentMethod === 'binance') {
-                $total = $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity).' USDT';
-            } elseif ($paymentMethod === 'qris') {
-                $total = 'Rp'.number_format($product->price_amount * $quantity, 0, ',', '.');
-            } else {
-                $total = null;
-            }
+        if ($checkoutMaintenanceActive) {
             $keyboard[] = [[
-                'text' => $total === null ? (string) $quantity : $quantity.' · '.$total,
-                'callback_data' => $directCheckout ? 'qty:'.$paymentMethod.':'.$product->id.':'.$quantity : 'qty:'.$product->id.':'.$quantity,
+                'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+                'callback_data' => 'checkout-maintenance:status',
             ]];
+        } else {
+            for ($quantity = 1; $quantity <= $quantityLimit; $quantity++) {
+                if ($paymentMethod === 'binance') {
+                    $total = $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity).' USDT';
+                } elseif ($paymentMethod === 'qris') {
+                    $total = 'Rp'.number_format($product->price_amount * $quantity, 0, ',', '.');
+                } else {
+                    $total = null;
+                }
+                $keyboard[] = [[
+                    'text' => $total === null ? (string) $quantity : $quantity.' · '.$total,
+                    'callback_data' => $directCheckout ? 'qty:'.$paymentMethod.':'.$product->id.':'.$quantity : 'qty:'.$product->id.':'.$quantity,
+                ]];
+            }
         }
         $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Detail Produk', '⬅️ Product Details'), 'callback_data' => 'product:'.$product->id]];
 
@@ -123,9 +160,11 @@ class TelegramCatalogIntents
             $lines[] = '💳 QRIS: Rp'.number_format($product->price_amount, 0, ',', '.').$this->locale->text($customer, ' per item', ' / item');
         }
         $lines[] = '';
-        $lines[] = $directCheckout
-            ? $this->locale->text($customer, 'Tekan jumlah yang kamu mau. Checkout langsung dibuat tanpa langkah tambahan.', 'Tap the quantity you want. Checkout will be created immediately with no extra step.')
-            : $this->locale->text($customer, 'Mau ambil berapa item?', 'How many items would you like?');
+        $lines[] = $checkoutMaintenanceActive
+            ? $this->maintenanceNotice($customer, $maintenance)
+            : ($directCheckout
+                ? $this->locale->text($customer, 'Tekan jumlah yang kamu mau. Checkout langsung dibuat tanpa langkah tambahan.', 'Tap the quantity you want. Checkout will be created immediately with no extra step.')
+                : $this->locale->text($customer, 'Mau ambil berapa item?', 'How many items would you like?'));
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -149,10 +188,15 @@ class TelegramCatalogIntents
         }
 
         $products = $query->withAvailability()->limit(12)->get();
+        $maintenance = $this->maintenance->current();
         $lines = [$this->locale->text($customer, '🛍️ Daftar Produk', '🛍️ Product List'), '━━━━━━━━━━━━━━', $this->locale->text($customer, 'Kategori: ', 'Category: ').$title];
         if ($category?->description) {
             $lines[] = '';
             $lines[] = $category->description;
+        }
+        if ($maintenance->active) {
+            $lines[] = '';
+            $lines[] = $this->maintenanceNotice($customer, $maintenance);
         }
         $lines[] = '';
         $lines[] = $this->locale->text($customer, 'Pilih produk untuk melihat detail.', 'Choose a product to view its details.');
@@ -162,7 +206,14 @@ class TelegramCatalogIntents
             $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Pilih Kategori', '⬅️ Choose Category'), 'callback_data' => 'back:categories']];
         }
 
-        $this->bot->sendMessage($chatId, $products->isEmpty() ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\nCoba cek kategori lain dulu ya.", "📂 No products in this category\nPlease check another category.") : implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $message = $products->isEmpty()
+            ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\nCoba cek kategori lain dulu ya.", "📂 No products in this category\nPlease check another category.")
+            : implode("\n", $lines);
+        if ($maintenance->active && $products->isEmpty()) {
+            $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
+        }
+
+        $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
     }
 
     public function sendSearchResults(Customer $customer, string $chatId, string $keyword): void
@@ -181,8 +232,13 @@ class TelegramCatalogIntents
             ->withAvailability()
             ->get();
 
+        $maintenance = $this->maintenance->current();
         if ($products->isEmpty()) {
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, "Produk dengan kata kunci \"{$keyword}\" belum ketemu.\n\nCoba kata kunci lain, atau buka /produk untuk lihat semua produk.", "No products matched \"{$keyword}\".\n\nTry another keyword or open /products to browse all products."), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']]]]);
+            $message = $this->locale->text($customer, "Produk dengan kata kunci \"{$keyword}\" belum ketemu.\n\nCoba kata kunci lain, atau buka /produk untuk lihat semua produk.", "No products matched \"{$keyword}\".\n\nTry another keyword or open /products to browse all products.");
+            if ($maintenance->active) {
+                $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
+            }
+            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => [[['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']]]]);
 
             return;
         }
@@ -190,6 +246,10 @@ class TelegramCatalogIntents
         $hasMore = $products->count() > $limit;
         $products = $products->take($limit)->values();
         $lines = [$this->locale->text($customer, '🔎 Hasil pencarian: ', '🔎 Search results: ').$keyword, '━━━━━━━━━━━━━━', ''];
+        if ($maintenance->active) {
+            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+            $lines[] = '';
+        }
         foreach ($products as $i => $product) {
             $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
             $lines[] = '   💰 Rp'.number_format($product->price_amount, 0, ',', '.');
@@ -204,6 +264,15 @@ class TelegramCatalogIntents
         $keyboard[] = [['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
+
+    private function maintenanceNotice(Customer $customer, CheckoutMaintenanceState $state): string
+    {
+        return $this->locale->text(
+            $customer,
+            '⏸️ Checkout sedang maintenance. Produk dan stok tetap bisa dilihat; Order baru sementara ditahan.',
+            '⏸️ Checkout is under maintenance. Products and stock remain available; new Orders are temporarily paused.',
+        ).$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
     }
 
     private function hasMultipleCategoryOptions(): bool

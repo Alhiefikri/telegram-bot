@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Models\Product;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 
 class StorefrontPresenter
 {
@@ -10,6 +11,7 @@ class StorefrontPresenter
         private readonly StorefrontProductPresenter $products,
         private readonly StorefrontSupport $support,
         private readonly StorefrontUrl $urls,
+        private readonly CheckoutMaintenance $maintenance,
     ) {}
 
     public function brand(): string
@@ -83,7 +85,8 @@ class StorefrontPresenter
     public function productPageViewData(Product $product, int $stock, bool $checkoutRequested = false, ?string $returnUrl = null): array
     {
         $brand = $this->brand();
-        $presentation = $this->products->present($product, $stock);
+        $maintenance = $this->maintenance->current();
+        $presentation = $this->products->present($product, $stock, maintenanceState: $maintenance);
         $returnUrl ??= $this->urls->catalogUrl((int) $product->id);
 
         return [
@@ -101,6 +104,8 @@ class StorefrontPresenter
             'product' => $product,
             'presentation' => $presentation,
             'stock' => $stock,
+            'checkoutMaintenance' => $maintenance,
+            'checkoutMaintenanceNotice' => StorefrontCheckoutMaintenanceCopy::notice($maintenance),
             'isAvailable' => $stock > 0,
             'checkoutRequested' => $checkoutRequested,
             'returnUrl' => $returnUrl,

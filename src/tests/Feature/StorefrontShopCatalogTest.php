@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Product;
 use App\Storefront\StorefrontCatalogSearch;
 use App\Storefront\StorefrontResponseCache;
@@ -74,24 +75,23 @@ class StorefrontShopCatalogTest extends TestCase
     {
         Product::factory()->create(['name' => 'Cached Homepage Product', 'stock' => 2, 'reserved_stock' => 0]);
 
-        $queryCount = 0;
-        DB::listen(static function () use (&$queryCount): void {
-            $queryCount++;
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Cached Homepage Product');
+
+        $cacheHitQueries = [];
+        DB::listen(static function ($query) use (&$cacheHitQueries): void {
+            $cacheHitQueries[] = strtolower($query->sql);
         });
 
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Cached Homepage Product');
-        $firstHomepageQueries = $queryCount;
 
-        $queryCount = 0;
-
-        $this->get(route('storefront.home'))
-            ->assertOk()
-            ->assertSee('Cached Homepage Product');
-
-        $this->assertGreaterThan(0, $firstHomepageQueries);
-        $this->assertSame(0, $queryCount, 'The unfiltered homepage should keep serving the cached HTML on a cache hit.');
+        $this->assertFalse(
+            collect($cacheHitQueries)->contains(fn (string $sql): bool => str_contains($sql, 'products')),
+            'A cache hit must not re-query the catalog.',
+        );
 
         Product::factory()->create(['name' => 'Invalidated Homepage Product', 'stock' => 2, 'reserved_stock' => 0]);
         app(StorefrontResponseCache::class)->invalidate();
@@ -100,6 +100,35 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertOk()
             ->assertSee('Cached Homepage Product')
             ->assertSee('Invalidated Homepage Product');
+    }
+
+    public function test_unfiltered_landing_cache_reflects_maintenance_version_changes(): void
+    {
+        Product::factory()->create(['name' => 'Maintenance Cache Product', 'stock' => 2, 'reserved_stock' => 0]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertDontSee('Checkout sedang maintenance');
+
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Checkout sedang maintenance');
+
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => false,
+            'version' => 2,
+            'activated_at' => null,
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertDontSee('Checkout sedang maintenance');
     }
 
     public function test_landing_renders_single_catalog_grid(): void

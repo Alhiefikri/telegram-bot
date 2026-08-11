@@ -29,6 +29,8 @@ final readonly class StorefrontProductPresentation
         public StorefrontProductCoverPresentation $cover,
         public array $checkoutChoices,
         public array $support,
+        public bool $checkoutMaintenanceActive = false,
+        public ?string $checkoutMaintenanceNotice = null,
     ) {}
 
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice
@@ -70,6 +72,10 @@ final readonly class StorefrontProductPresentation
             'checkout' => [
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
                 'websiteBinancePay' => $this->checkoutChoice('website_binance_pay')?->toModalPayload(),
+            ],
+            'maintenance' => [
+                'active' => $this->checkoutMaintenanceActive,
+                'notice' => $this->checkoutMaintenanceNotice,
             ],
             'support' => $this->support,
         ];

@@ -15,9 +15,14 @@
                     <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505" dot>
                         Telegram Mini App
                     </x-admin-dashboard.badge>
-                    <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505">
-                        {{ $storeStatus['label'] }}
-                    </x-admin-dashboard.badge>
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                        <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505">
+                            {{ $storeStatus['label'] }}
+                        </x-admin-dashboard.badge>
+                        <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505">
+                            {{ $checkoutMaintenance['status_badge']['label'] }}
+                        </x-admin-dashboard.badge>
+                    </div>
                 </div>
 
                 {{-- Name --}}

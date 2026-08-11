@@ -9,6 +9,7 @@
         @include('storefront.partials.header')
 
         <main class="flex-grow pb-32">
+            @include('storefront.partials.checkout-maintenance')
             @include('storefront.partials.shop.checkout-error')
             @include('storefront.partials.hero')
             @include('storefront.partials.marquee')

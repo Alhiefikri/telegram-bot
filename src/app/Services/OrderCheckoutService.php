@@ -17,6 +17,7 @@ use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -29,6 +30,7 @@ class OrderCheckoutService
         private readonly BinancePayClient $binance,
         private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
         private readonly PaymentProviderResolver $providerResolver,
+        private readonly CheckoutMaintenance $maintenance,
     ) {}
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
@@ -71,6 +73,7 @@ class OrderCheckoutService
         if ($lockedCart->status !== CartStatus::Active || ($lockedCart->expires_at && $lockedCart->expires_at->isPast())) {
             throw new InvalidCheckout('Cart is not active.');
         }
+        $this->maintenance->guardNewOrder();
 
         $items = $lockedCart->cartItems()->orderBy('product_id')->lockForUpdate()->get();
         if ($items->isEmpty()) {

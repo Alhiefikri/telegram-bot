@@ -20,6 +20,19 @@ class TelegramLocale
         return $this->code($customer) === 'en' ? $en : $id;
     }
 
+    public function checkoutMaintenanceNote(Customer $customer, ?string $publicNote): string
+    {
+        if ($publicNote === null) {
+            return '';
+        }
+
+        return $this->text(
+            $customer,
+            "\n\nCatatan admin:\n{$publicNote}",
+            "\n\nAdmin note:\n{$publicNote}",
+        );
+    }
+
     public function orderStatus(Customer $customer, OrderStatus $status): string
     {
         return match ($status) {

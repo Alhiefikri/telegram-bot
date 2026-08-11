@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Storefront\StorefrontProductPresenter;
@@ -95,6 +96,24 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNull($presentation->modalPayload());
     }
 
+    public function test_unavailable_product_keeps_stock_status_during_maintenance(): void
+    {
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+        $product = $this->unavailableProduct(['name' => 'Habis During Maintenance']);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame('Habis', $presentation->availabilityLabel);
+        $this->assertSame('Stok kosong', $presentation->stockLabel);
+        $this->assertSame('Restock segera', $presentation->statusLabel);
+        $this->assertSame('Stok kosong', $presentation->cardActionLabel);
+        $this->assertFalse($presentation->isBuyable);
+    }
+
     public function test_available_product_exposes_only_the_website_qris_checkout_choice(): void
     {
         $product = $this->availableProduct([
@@ -157,8 +176,11 @@ class StorefrontProductPresentationTest extends TestCase
             'availability',
             'cover',
             'checkout',
+            'maintenance',
             'support',
         ], array_keys($payload));
+        $this->assertFalse($payload['maintenance']['active']);
+        $this->assertSame('', $payload['maintenance']['notice']);
         $this->assertSame('Deskripsi produk segera dilengkapi.', $payload['descriptionSnippet']);
         $this->assertSame('', $payload['description']);
         $this->assertSame(['amount' => 42000], $payload['price']);
@@ -172,5 +194,22 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertArrayNotHasKey('telegram', $payload['checkout']);
         $this->assertSame('Butuh bantuan?', $payload['support']['title']);
         $this->assertSame('Tanya produk sebelum beli', $payload['support']['categories'][0]['label']);
+    }
+
+    public function test_modal_payload_contains_active_maintenance_notice(): void
+    {
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'public_note' => 'Admin sedang sinkronisasi.',
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+        $product = $this->availableProduct(['name' => 'Modal Maintenance Product']);
+
+        $payload = app(StorefrontProductPresenter::class)->present($product)->modalPayload();
+
+        $this->assertTrue($payload['maintenance']['active']);
+        $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload['maintenance']['notice']);
+        $this->assertStringContainsString('Admin sedang sinkronisasi.', $payload['maintenance']['notice']);
     }
 }

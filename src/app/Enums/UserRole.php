@@ -14,6 +14,11 @@ enum UserRole: string
         return in_array($this, [self::Owner, self::Admin], true);
     }
 
+    public function canManageStoreOperations(): bool
+    {
+        return in_array($this, [self::Owner, self::Admin], true);
+    }
+
     public function canViewOrdersAndPayments(): bool
     {
         return in_array($this, [self::Owner, self::Admin, self::Finance, self::Support], true);

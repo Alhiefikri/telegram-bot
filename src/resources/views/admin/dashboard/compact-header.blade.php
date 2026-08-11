@@ -22,7 +22,12 @@
         </h1>
     </div>
 
-    <x-admin-dashboard.badge :tone="$storeStatus['tone']" dot>
-        {{ $storeStatus['label'] }}
-    </x-admin-dashboard.badge>
+    <div class="flex flex-wrap items-center justify-end gap-2">
+        <x-admin-dashboard.badge :tone="$storeStatus['tone']" dot>
+            {{ $storeStatus['label'] }}
+        </x-admin-dashboard.badge>
+        <x-admin-dashboard.badge :tone="$checkoutMaintenance['tone']" dot>
+            {{ $checkoutMaintenance['status_badge']['label'] }}
+        </x-admin-dashboard.badge>
+    </div>
 </x-admin-dashboard.card>

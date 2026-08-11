@@ -156,6 +156,10 @@ Admin request melewati `AuthorizeAdminAccess`, yang menempelkan `adminUser` ke r
 
 `AdminPaymentModeController` hanya mengorkestrasi request. Validasi readiness dan optimistic version conflict berada di `UpdatePaymentModeRequest`/`PaymentProviderSwitcher`; switch dan audit log ditulis atomik dalam transaksi. Switch provider lama tidak mengubah Payment yang sudah ada.
 
+`CheckoutMaintenance` adalah module singleton untuk state **Checkout Maintenance**. `AdminCheckoutMaintenanceController` hanya mengorkestrasi request; role predicate `UserRole::canManageStoreOperations()` membatasi mutasi ke Owner/Admin, sedangkan `AdminDashboardStatsData` menyajikan status untuk semua role admin. Mutation memakai optimistic `version`, lock row PostgreSQL, no-op detection, dan `AuditLogger`. Storefront memakai `CheckoutMaintenanceState` pada cache identity dan CTA presentation; Store Bot mendaftarkan callback status pada `AfterCommunityGate` dan mengganti CTA checkout baru tanpa menghapus akses katalog atau keranjang.
+
+Entry point test terfokus adalah `tests/Feature/CheckoutMaintenanceTest.php`, `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, dan `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php` (lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`).
+
 ## 5. Checkout dan payment rails
 
 ### 5.1 Provider selection
@@ -179,13 +183,15 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 `OrderCheckoutService::checkout()` membungkus pembuatan checkout dalam database transaction dan retry conflict unique reference. Ia:
 
 1. dedupe berdasarkan `checkout_key` bila ada;
-2. lock Cart, CartItem, Product, dan active `ManualPaymentSetting`;
-3. validasi intent dan readiness;
-4. membuat Order + Payment pending;
-5. membuat OrderItem dengan snapshot delivery/usage guide;
-6. mengalokasikan credential stock bila relevan;
-7. merekam reservation inventory;
-8. menandai Cart `checked_out`.
+2. lock Cart dan reuse Order yang sudah ada untuk Cart `checked_out`;
+3. validasi Cart aktif dan belum kedaluwarsa;
+4. memanggil `CheckoutMaintenance::guardNewOrder()` sebelum side effect checkout baru;
+5. lock CartItem/Product/provider setting lalu validasi intent dan readiness;
+6. membuat Order + Payment pending;
+7. membuat OrderItem dengan snapshot delivery/usage guide;
+8. mengalokasikan credential stock bila relevan;
+9. merekam reservation inventory;
+10. menandai Cart `checked_out`.
 
 Payment amount untuk Binance `amount_unique` dialokasikan oleh `BinanceUniquePaymentAmount`; nominal IDR QRIS tidak boleh diperlakukan sebagai floating point.
 

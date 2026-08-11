@@ -2,6 +2,7 @@
 
 namespace App\Storefront;
 
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use Illuminate\Support\Collection;
 
 final readonly class StorefrontCatalogPage
@@ -43,6 +44,7 @@ final readonly class StorefrontCatalogPage
         public string $emptyCategoryBody,
         public string $emptyProductsTitle,
         public string $emptyProductsBody,
+        public CheckoutMaintenanceState $checkoutMaintenance,
         public ?string $popularEmptyMessage = null,
     ) {}
 
@@ -79,6 +81,8 @@ final readonly class StorefrontCatalogPage
             'supportHref' => $this->supportHref,
             'supportDestination' => $this->supportDestination,
             'supportContext' => $this->supportContext,
+            'checkoutMaintenance' => $this->checkoutMaintenance,
+            'checkoutMaintenanceNotice' => StorefrontCheckoutMaintenanceCopy::notice($this->checkoutMaintenance),
         ];
     }
 }

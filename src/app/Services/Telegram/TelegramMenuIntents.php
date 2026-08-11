@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Models\Customer;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
 class TelegramMenuIntents
@@ -14,6 +15,7 @@ class TelegramMenuIntents
         private TelegramAdminAccess $adminAccess,
         private TelegramLocale $locale,
         private TelegramSupportContact $supportContact,
+        private CheckoutMaintenance $maintenance,
     ) {}
 
     public function sendLanguagePicker(string $chatId): void
@@ -66,7 +68,14 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set.", "☰ Main menu\nWhat would you like to do?"), $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
+        $message = $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set.", "☰ Main menu\nWhat would you like to do?");
+        $maintenance = $this->maintenance->current();
+        if ($maintenance->active) {
+            $message .= "\n\n".$this->locale->text($customer, '⏸️ Checkout sedang maintenance. Produk dan keranjang tetap bisa diakses; Order baru sementara ditahan.', '⏸️ Checkout is under maintenance. Products and the cart remain available; new Orders are temporarily paused.')
+                .$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote);
+        }
+
+        $this->bot->sendMessage($chatId, $message, $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
 
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array

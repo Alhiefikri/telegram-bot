@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminCategoryCreateController;
+use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
@@ -93,6 +94,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');

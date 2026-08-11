@@ -7,6 +7,8 @@ use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 
 class StorefrontProductPresenter
 {
@@ -16,11 +18,15 @@ class StorefrontProductPresenter
 
     private ?bool $binanceAutomaticVerificationAvailable = null;
 
-    public function __construct(private readonly StorefrontSupport $support) {}
+    public function __construct(
+        private readonly StorefrontSupport $support,
+        private readonly CheckoutMaintenance $maintenance,
+    ) {}
 
-    public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null): StorefrontProductPresentation
+    public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null, ?CheckoutMaintenanceState $maintenanceState = null): StorefrontProductPresentation
     {
         $stockAvailable ??= $product->availableStock();
+        $maintenanceState ??= $this->maintenance->current();
         if ($soldQuantity === null) {
             $attributes = $product->getAttributes();
             $soldQuantity = array_key_exists('sold_quantity', $attributes)
@@ -28,7 +34,14 @@ class StorefrontProductPresenter
                 : $this->soldQuantity($product);
         }
         $isAvailable = $stockAvailable > 0;
+        $isBuyable = $isAvailable && ! $maintenanceState->active;
         $copy = config('storefront.shop');
+        $statusLabel = ! $isAvailable
+            ? 'Restock segera'
+            : ($isBuyable ? 'Siap dibeli' : 'Checkout maintenance');
+        $cardActionLabel = ! $isAvailable
+            ? 'Stok kosong'
+            : ($isBuyable ? 'Pilih Checkout' : 'Checkout maintenance');
 
         return new StorefrontProductPresentation(
             id: (int) $product->id,
@@ -40,20 +53,22 @@ class StorefrontProductPresenter
             stockAvailable: $stockAvailable,
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,
-            isBuyable: $isAvailable,
+            isBuyable: $isBuyable,
             canOpenModal: $isAvailable,
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
             stockLabel: $isAvailable ? 'Stok: '.$stockAvailable : 'Stok kosong',
             soldLabel: 'Terjual: '.$soldQuantity,
-            statusLabel: $isAvailable ? 'Siap dibeli' : 'Restock segera',
-            cardActionLabel: $isAvailable ? 'Pilih Checkout' : 'Stok kosong',
+            statusLabel: $statusLabel,
+            cardActionLabel: $cardActionLabel,
             productUrl: route('storefront.products.show', $product),
             cover: new StorefrontProductCoverPresentation(
                 theme: $this->coverForName($product->name),
                 imageUrl: $this->publicStorageUrl($product->image_path),
             ),
-            checkoutChoices: $isAvailable ? $this->checkoutChoices($product, $copy) : [],
+            checkoutChoices: $isBuyable ? $this->checkoutChoices($product, $copy) : [],
             support: $this->support->prePurchase($product),
+            checkoutMaintenanceActive: $maintenanceState->active,
+            checkoutMaintenanceNotice: StorefrontCheckoutMaintenanceCopy::notice($maintenanceState),
         );
     }
 

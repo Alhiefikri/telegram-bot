@@ -6,6 +6,8 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use Illuminate\Support\Collection;
 
 class StorefrontCatalogPageBuilder
@@ -14,6 +16,7 @@ class StorefrontCatalogPageBuilder
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontProductPresenter $products,
         private readonly StorefrontUrl $urls,
+        private readonly CheckoutMaintenance $maintenance,
     ) {}
 
     public function home(?string $rawSearch): StorefrontCatalogPage
@@ -45,12 +48,13 @@ class StorefrontCatalogPageBuilder
     private function build(string $context, ?string $rawSearch): StorefrontCatalogPage
     {
         $search = StorefrontCatalogSearch::normalize($rawSearch);
+        $maintenance = $this->maintenance->current();
         $categories = $this->publicCategories();
         $products = $this->publicProducts($search);
-        $catalogProducts = $this->catalogProducts($products);
+        $catalogProducts = $this->catalogProducts($products, $maintenance);
         $featuredProduct = $search === ''
             ? $this->featuredFromCatalog($catalogProducts)
-            : $this->featuredProduct();
+            : $this->featuredProduct($maintenance);
         $copy = config('storefront');
         $brand = $this->storefront->brand();
         $isShop = $context === StorefrontCatalogPage::CONTEXT_SHOP;
@@ -83,6 +87,7 @@ class StorefrontCatalogPageBuilder
             emptyCategoryBody: $copy['catalog']['empty_category_body'],
             emptyProductsTitle: $isShop ? $copy['shop']['empty_title'] : $copy['catalog']['empty_title'],
             emptyProductsBody: $isShop ? $copy['shop']['empty_body'] : $copy['catalog']['empty_body'],
+            checkoutMaintenance: $maintenance,
             popularEmptyMessage: $isShop ? null : $copy['hero']['popular_empty'],
         );
     }
@@ -124,10 +129,10 @@ class StorefrontCatalogPageBuilder
      * @param  Collection<int, Product>  $products
      * @return Collection<int, StorefrontCatalogProduct>
      */
-    private function catalogProducts(Collection $products): Collection
+    private function catalogProducts(Collection $products, CheckoutMaintenanceState $maintenance): Collection
     {
         $presentations = $products
-            ->map(fn (Product $product) => $this->products->present($product))
+            ->map(fn (Product $product) => $this->products->present($product, maintenanceState: $maintenance))
             ->values();
 
         $popularIds = $presentations
@@ -186,7 +191,7 @@ class StorefrontCatalogPageBuilder
             : null;
     }
 
-    private function featuredProduct(): ?StorefrontCatalogProduct
+    private function featuredProduct(CheckoutMaintenanceState $maintenance): ?StorefrontCatalogProduct
     {
         $product = Product::query()
             ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
@@ -202,7 +207,7 @@ class StorefrontCatalogPageBuilder
             ->first();
 
         return $product
-            ? new StorefrontCatalogProduct($this->products->present($product))
+            ? new StorefrontCatalogProduct($this->products->present($product, maintenanceState: $maintenance))
             : null;
     }
 }

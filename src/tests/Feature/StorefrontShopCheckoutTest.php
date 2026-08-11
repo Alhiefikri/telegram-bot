@@ -10,6 +10,7 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\AuditLog;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -711,6 +712,52 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, Order::count());
         $this->assertSame(1, Payment::count());
         $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+    }
+
+    public function test_repeated_web_checkout_reuses_a_completed_order_while_maintenance_is_active(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        $product = $this->availableProduct([
+            'name' => 'Completed Idempotent Web Checkout',
+            'price_amount' => 15000,
+            'stock' => 2,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        $this->providerQrisCreateSucceedsWithProviderTotal(
+            amount: 15000,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.COMPLETED99',
+        );
+
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'buyer_test',
+        ];
+        $session = ['storefront.checkout_client_key' => 'completed-browser-session'];
+        $first = $this->withSession($session)
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $payload);
+        $order = Order::sole();
+        $order->forceFill([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ])->save();
+        $order->payments()->sole()->update(['status' => PaymentStatus::Paid]);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $second = $this->withSession($session)
+            ->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), $payload);
+
+        $first->assertRedirect();
+        $second->assertRedirect($first->headers->get('Location'));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 

@@ -6,11 +6,17 @@ use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use Throwable;
 
 class TelegramCartIntents
 {
-    public function __construct(private TelegramBotClient $bot, private CartService $carts, private TelegramLocale $locale) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private CartService $carts,
+        private TelegramLocale $locale,
+        private CheckoutMaintenance $maintenance,
+    ) {}
 
     public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity, bool $forceConfirmation = false, bool $sendConfirmation = true): bool
     {
@@ -41,17 +47,26 @@ class TelegramCartIntents
             }
 
             $this->carts->setItemQuantity($cart, $product, $quantity);
+            $maintenance = $this->maintenance->current();
+            $checkoutMaintenanceActive = $maintenance->active;
             if (! $sendConfirmation) {
                 return true;
             }
 
             $subtotal = $product->price_amount * $quantity;
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nLooks right? Continue to checkout below."), [
-                'inline_keyboard' => [
+            $message = $checkoutMaintenanceActive
+                ? $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nCheckout sedang maintenance. Cek status untuk melihat kapan Order baru bisa dibuat.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nCheckout is under maintenance. Check the status to see when new Orders can be created.")
+                    .$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote)
+                : $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nLooks right? Continue to checkout below.");
+            $this->bot->sendMessage($chatId, $message, [
+                'inline_keyboard' => [[
                     [
-                        ['text' => $this->locale->text($customer, '💳 Lanjut Checkout', '💳 Continue to Checkout'), 'callback_data' => 'checkout'],
+                        'text' => $checkoutMaintenanceActive
+                            ? $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status')
+                            : $this->locale->text($customer, '💳 Lanjut Checkout', '💳 Continue to Checkout'),
+                        'callback_data' => $checkoutMaintenanceActive ? 'checkout-maintenance:status' : 'checkout',
                     ],
-                ],
+                ]],
             ]);
 
             return true;

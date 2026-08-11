@@ -19,6 +19,7 @@
             $actionableStatusCounts = $statsTab['actionableStatusCounts'] ?? [];
             $earnings = $statsTab['earnings'] ?? [];
             $paymentControl = $statsTab['paymentControl'] ?? [];
+            $checkoutMaintenance = $statsTab['checkoutMaintenance'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $products = $productsTab['products'];
             $productsPagination = $productsTab['pagination'];

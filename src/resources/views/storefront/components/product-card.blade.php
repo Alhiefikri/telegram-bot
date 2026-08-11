@@ -7,7 +7,7 @@
 @endphp
 
 @if ($presentation->canOpenModal)
-    <a href="{{ $productUrl }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($presentation->modalPayload(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $presentation->categoryKey }}">
+    <a href="{{ $productUrl }}" @unless ($presentation->checkoutMaintenanceActive) x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($presentation->modalPayload(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' @endunless id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block transition-all duration-500 w-full" data-category="{{ $presentation->categoryKey }}">
         <article class="neo-panel h-full overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover flex flex-col relative">
             @include('storefront.components.product-cover', [
                 'presentation' => $presentation,

@@ -2,6 +2,7 @@
 
 namespace App\Storefront;
 
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -20,7 +21,10 @@ class StorefrontResponseCache
 
     private const DESIGN_VERSION = 8;
 
-    public function __construct(private readonly StorefrontCatalogPageBuilder $catalogPages) {}
+    public function __construct(
+        private readonly StorefrontCatalogPageBuilder $catalogPages,
+        private readonly CheckoutMaintenance $maintenance,
+    ) {}
 
     public function get(string $search): string
     {
@@ -36,7 +40,8 @@ class StorefrontResponseCache
         }
 
         $version = $this->version();
-        $key = $this->key($version, $search);
+        $maintenanceVersion = $this->maintenance->current()->version;
+        $key = $this->key($version, $maintenanceVersion, $search);
 
         $cached = Cache::get($key);
         if (is_string($cached)) {
@@ -87,9 +92,10 @@ class StorefrontResponseCache
         return (int) Cache::get(self::VERSION_KEY, 1);
     }
 
-    private function key(int $version, string $search): string
+    private function key(int $version, int $maintenanceVersion, string $search): string
     {
         $context = [
+            'checkout_maintenance_version' => $maintenanceVersion,
             'search' => $search,
             'locale' => app()->getLocale(),
             'app_url' => config('app.url'),

@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -15,6 +16,7 @@ use App\Models\Product;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
@@ -23,6 +25,7 @@ use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class StorefrontShopCheckout
@@ -36,6 +39,7 @@ class StorefrontShopCheckout
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
         private readonly StorefrontFunnelEvents $events,
+        private readonly CheckoutMaintenance $maintenance,
     ) {}
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
@@ -55,31 +59,35 @@ class StorefrontShopCheckout
 
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
-        if ($checkoutKey !== null && ($existing = Order::query()
-            ->where('checkout_key', $checkoutKey)
-            ->where('order_status', OrderStatus::PendingPayment)
-            ->where('payment_status', PaymentStatus::Pending)
-            ->first()) !== null) {
+        if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->storeSupportContact($existing, $input);
             $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
-            $payment = $existing->payments()->latest('created_at')->first();
-            if ($this->usesNativeQris($payment)) {
-                try {
-                    $wasQrisReady = $this->hasPayableNativeQris($payment);
-                    $this->ensureNativeQrisCreated($payment);
-                    $payment->refresh();
-                    if ($this->hasPayableNativeQris($payment)) {
-                        $this->events->qrisCreated($existing, $payment, [
-                            'source' => 'checkout_reuse',
-                            'idempotent_reuse' => $wasQrisReady,
-                        ]);
+
+            if ($existing->order_status === OrderStatus::PendingPayment
+                && $existing->payment_status === PaymentStatus::Pending) {
+                $payment = $existing->payments()->latest('created_at')->first();
+                if ($this->usesNativeQris($payment)) {
+                    try {
+                        $wasQrisReady = $this->hasPayableNativeQris($payment);
+                        $this->ensureNativeQrisCreated($payment);
+                        $payment->refresh();
+                        if ($this->hasPayableNativeQris($payment)) {
+                            $this->events->qrisCreated($existing, $payment, [
+                                'source' => 'checkout_reuse',
+                                'idempotent_reuse' => $wasQrisReady,
+                            ]);
+                        }
+                    } catch (Throwable $exception) {
+                        report($exception);
                     }
-                } catch (Throwable $exception) {
-                    report($exception);
                 }
             }
 
             return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey(), recoveryKey: $recoveryKey);
+        }
+        $maintenanceState = $this->maintenance->current();
+        if ($maintenanceState->active) {
+            throw new CheckoutMaintenanceActive($maintenanceState);
         }
 
         $product = $this->product($input->productId);
@@ -90,16 +98,18 @@ class StorefrontShopCheckout
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
         }
 
-        $customer = Customer::create([
-            'telegram_id' => null,
-            'first_name' => $this->buyerName($input->buyerName),
-            'username' => null,
-        ]);
+        $order = DB::transaction(function () use ($input, $product, $paymentIntent, $checkoutKey): Order {
+            $customer = Customer::create([
+                'telegram_id' => null,
+                'first_name' => $this->buyerName($input->buyerName),
+                'username' => null,
+            ]);
 
-        $cart = $this->carts->activeCartFor($customer);
-        $this->carts->setItemQuantity($cart, $product, $input->quantity);
+            $cart = $this->carts->activeCartFor($customer);
+            $this->carts->setItemQuantity($cart, $product, $input->quantity);
 
-        $order = $this->orders->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey);
+            return $this->orders->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey);
+        });
         $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 

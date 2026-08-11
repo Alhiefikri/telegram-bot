@@ -420,4 +420,154 @@
                         </x-admin-dashboard.notice>
                     @endif
                 </x-admin-dashboard.card>
+
+                <x-admin-dashboard.card
+                    id="admin-checkout-maintenance"
+                    data-admin-return-target
+                    tabindex="-1"
+                    tone="{{ $checkoutMaintenance['active'] ? 'rose' : 'green' }}"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="Checkout Maintenance"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Checkout Maintenance</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">{{ $checkoutMaintenance['label'] }}</h2>
+                        </div>
+                        <x-admin-dashboard.badge :tone="$checkoutMaintenance['tone']" dot>
+                            {{ $checkoutMaintenance['status_badge']['label'] }}
+                        </x-admin-dashboard.badge>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">{{ $checkoutMaintenance['hint'] }}</p>
+                    @if ($checkoutMaintenance['activated_at'])
+                        <p class="mt-2 text-[11px] font-bold text-neo-ink">Aktif sejak {{ $checkoutMaintenance['activated_at'] }}</p>
+                    @endif
+                    @if ($checkoutMaintenance['public_note'])
+                        <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Catatan publik</p>
+                            <p class="mt-1 whitespace-pre-line text-sm font-semibold leading-6 text-neo-ink">{{ $checkoutMaintenance['public_note'] }}</p>
+                        </div>
+                    @endif
+
+                    @error('active', 'checkoutMaintenance')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('version', 'checkoutMaintenance')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('public_note', 'checkoutMaintenance')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+
+                    @if ($checkoutMaintenance['can_manage'])
+                        @if ($checkoutMaintenance['active'])
+                            <form
+                                method="POST"
+                                action="{{ $checkoutMaintenance['update_url'] }}"
+                                class="mt-4 space-y-3"
+                                data-checkout-maintenance-target="update"
+                                x-on:submit.prevent="openCheckoutMaintenanceConfirmation($event)"
+                            >
+                                @csrf
+                                <input type="hidden" name="active" value="1">
+                                <input type="hidden" name="confirmed" value="0">
+                                <input type="hidden" name="version" value="{{ $checkoutMaintenance['version'] }}">
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Catatan publik (opsional)
+                                    <textarea name="public_note" maxlength="500" rows="3" class="neo-input mt-1 min-h-24 w-full bg-white px-3 py-2 text-sm font-semibold" placeholder="Contoh: Checkout dibuka kembali pukul 14.00.">{{ old('public_note', $checkoutMaintenance['public_note']) }}</textarea>
+                                </label>
+                                <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                    Simpan catatan
+                                </x-admin-dashboard.button>
+                            </form>
+                            <form
+                                method="POST"
+                                action="{{ $checkoutMaintenance['update_url'] }}"
+                                class="mt-2"
+                                data-checkout-maintenance-target="deactivate"
+                                x-on:submit.prevent="openCheckoutMaintenanceConfirmation($event)"
+                            >
+                                @csrf
+                                <input type="hidden" name="active" value="0">
+                                <input type="hidden" name="confirmed" value="0">
+                                <input type="hidden" name="version" value="{{ $checkoutMaintenance['version'] }}">
+                                <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="w-full text-[11px]">
+                                    Nonaktifkan Checkout Maintenance
+                                </x-admin-dashboard.button>
+                            </form>
+                        @else
+                            <form
+                                method="POST"
+                                action="{{ $checkoutMaintenance['update_url'] }}"
+                                class="mt-4 space-y-3"
+                                data-checkout-maintenance-target="activate"
+                                x-on:submit.prevent="openCheckoutMaintenanceConfirmation($event)"
+                            >
+                                @csrf
+                                <input type="hidden" name="active" value="1">
+                                <input type="hidden" name="version" value="{{ $checkoutMaintenance['version'] }}">
+                                <input type="hidden" name="confirmed" value="0">
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Catatan publik (opsional)
+                                    <textarea name="public_note" maxlength="500" rows="3" class="neo-input mt-1 min-h-24 w-full bg-white px-3 py-2 text-sm font-semibold" placeholder="Contoh: Checkout dibuka kembali pukul 14.00.">{{ old('public_note', $checkoutMaintenance['public_note']) }}</textarea>
+                                </label>
+                                <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                    Aktifkan Checkout Maintenance
+                                </x-admin-dashboard.button>
+                            </form>
+                        @endif
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
+                            Finance dan Support dapat melihat status, tetapi tidak dapat mengubah Checkout Maintenance.
+                        </x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                @if ($checkoutMaintenance['can_manage'])
+                    <div
+                        x-cloak
+                        x-show="checkoutMaintenanceOpen"
+                        x-transition.opacity
+                        class="fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60 p-3 sm:p-4"
+                        x-on:keydown.escape.window="if (checkoutMaintenanceOpen) closeCheckoutMaintenanceConfirmation()"
+                    >
+                        <div class="absolute inset-0" x-on:click="closeCheckoutMaintenanceConfirmation()" aria-hidden="true"></div>
+                        <div
+                            id="admin-checkout-maintenance-dialog"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="admin-checkout-maintenance-title"
+                            aria-describedby="admin-checkout-maintenance-description"
+                            tabindex="-1"
+                            x-on:keydown.tab="trapModalFocus($event)"
+                            x-on:focusin.window="if (checkoutMaintenanceOpen) keepModalFocus($event, 'admin-checkout-maintenance-dialog')"
+                            class="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-[1.25rem] border-[4px] border-neo-ink bg-neo-paper p-4 text-neo-ink shadow-neo-xl sm:p-5"
+                        >
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 pr-8">
+                                    <p class="font-display text-[10px] font-black uppercase tracking-[0.18em] text-brand-muted">Checkout Maintenance</p>
+                                    <h2 id="admin-checkout-maintenance-title" class="mt-1 font-display text-xl font-black uppercase leading-tight">Konfirmasi perubahan Checkout Maintenance</h2>
+                                </div>
+                                <button type="button" class="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-[0.45rem] border-[3px] border-neo-ink bg-white text-lg font-black shadow-neo-sm" aria-label="Tutup dialog Checkout Maintenance" x-on:click="closeCheckoutMaintenanceConfirmation()">×</button>
+                            </div>
+                            <div id="admin-checkout-maintenance-description" class="mt-4 space-y-3 text-sm font-bold leading-6">
+                                <p x-text="checkoutMaintenanceConfirmationText"></p>
+                                <p class="rounded-xl border-2 border-neo-ink/20 bg-white/80 p-3 text-xs font-semibold leading-5">
+                                    Katalog, stok, keranjang, dan Order yang sudah ada tetap tersedia. Hanya pembuatan Order baru yang terpengaruh.
+                                </p>
+                            </div>
+                            <div class="mt-4 grid grid-cols-2 gap-2">
+                                <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeCheckoutMaintenanceConfirmation()">
+                                    Batal
+                                </x-admin-dashboard.button>
+                                <x-admin-dashboard.button type="button" variant="primary" x-ref="checkoutMaintenanceConfirm" x-on:click="submitCheckoutMaintenanceConfirmation()">
+                                    Konfirmasi
+                                </x-admin-dashboard.button>
+                            </div>
+                        </div>
+                    </div>
+                @endif
             </div>

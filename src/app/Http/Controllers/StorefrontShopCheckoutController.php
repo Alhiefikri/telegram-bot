@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Http\Requests\StorefrontShopCheckoutRequest;
 use App\Models\Order;
 use App\Models\Product;
+use App\Storefront\StorefrontCheckoutMaintenanceCopy;
 use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopCheckout;
@@ -36,6 +38,18 @@ class StorefrontShopCheckoutController extends Controller
                 StorefrontShopCheckoutInput::fromValidated($request->validated()),
                 $checkoutClientKey,
             );
+        } catch (CheckoutMaintenanceActive $exception) {
+            $message = StorefrontCheckoutMaintenanceCopy::notice($exception->state);
+            $events->checkoutSubmitted($product, null, [
+                'status_endpoint_result' => 'rejected',
+                'failure_kind' => $exception::class,
+            ]);
+
+            return redirect()
+                ->to($request->checkoutRecoveryUrl())
+                ->withInput()
+                ->with('storefront_checkout_error', $message)
+                ->withErrors(['product_id' => $message]);
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
