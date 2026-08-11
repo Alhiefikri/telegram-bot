@@ -271,6 +271,29 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->assertSame(0, AuditLog::where('action', 'order.pending_cancelled_released')->where('subject_id', (string) $order->id)->count());
     }
 
+    public function test_signed_cancel_endpoint_keeps_order_pending_when_provider_status_is_unavailable(): void
+    {
+        Queue::fake();
+        $this->pakasirConfigIsReady();
+        [$order, $payment] = $this->pendingNativeQrisOrder(
+            totalAmount: 99500,
+            providerFee: 700,
+            providerTotalPayment: 100200,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE224UNAVAILABLE99',
+        );
+        $productId = $order->orderItems->first()->product_id;
+        Http::preventStrayRequests();
+
+        $this->post(app(StorefrontInvoiceUrl::class)->cancel($order))
+            ->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertSessionHasErrors(['order' => 'Status pembayaran QRIS belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.']);
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(1, Product::findOrFail($productId)->reserved_stock);
+        $this->assertSame(0, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+    }
+
     public function test_signed_cancel_endpoint_rejects_pending_order_when_payment_proof_is_being_processed(): void
     {
         $this->pakasirConfigIsReady();

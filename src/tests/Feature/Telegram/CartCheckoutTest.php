@@ -1066,7 +1066,18 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
     public function test_buyer_cancel_callback_cancels_own_pending_native_pakasir_order_and_releases_stock(): void
     {
-        $this->fakeTelegramHttp();
+        $payment = null;
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => function () use (&$payment) {
+                return Http::response(['transaction' => [
+                    'project' => 'sedulur-digital',
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'payment_method' => 'qris',
+                    'status' => 'pending',
+                ]]);
+            },
+        ]);
         $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
         $otherBuyer = Customer::factory()->create(['telegram_id' => 67890, 'username' => 'other_buyer']);
         $product = Product::factory()->create(['name' => 'Cancelable Native QRIS', 'price_amount' => 15000, 'stock' => 1, 'reserved_stock' => 0]);
@@ -1076,7 +1087,15 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($buyer->carts()->firstOrFail(), CheckoutPaymentIntents::pakasir());
-        $order->payments()->firstOrFail()->update(['provider_payment_method' => 'qris']);
+        $payment = $order->payments()->firstOrFail();
+        $payment->update([
+            'provider_payment_method' => 'qris',
+            'provider_payment_number' => '00020101021226610016ID.CO.QRIS.CANCEL99',
+            'provider_payment_number_hash' => hash('sha256', 'cancel'),
+            'provider_created_at' => now(),
+            'provider_fee' => 0,
+            'provider_total_payment' => $payment->amount,
+        ]);
 
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($otherBuyer), $otherProduct, 1);
         $otherOrder = app(OrderCheckoutService::class)->checkout($otherBuyer->carts()->firstOrFail(), CheckoutPaymentIntents::pakasir());

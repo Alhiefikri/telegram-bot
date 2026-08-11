@@ -4,9 +4,9 @@ namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Exceptions\InvalidOrderTransition;
 use App\Models\Customer;
-use App\Services\OrderLifecycle;
+use App\Services\CustomerCancellationOutcome;
+use App\Services\CustomerPendingOrderCancellation;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -22,7 +22,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramOrderIntents $orders,
-        private OrderLifecycle $orderStates,
+        private CustomerPendingOrderCancellation $cancellation,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -88,14 +88,29 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        try {
-            $cancelled = $this->orderStates->applyPendingCancellation($order, requireNoPaymentProof: true)->order;
-        } catch (InvalidOrderTransition) {
+        $outcome = $this->cancellation->cancel($order);
+        if ($outcome === CustomerCancellationOutcome::VerificationUnavailable) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Status pembayaran belum dapat diverifikasi.', 'Payment status cannot be verified yet.'));
+            $this->bot->sendMessage($context->chatId, $this->text($context->customer, 'Status pembayaran belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.', 'Payment status cannot be verified yet. Your order was not cancelled; please try again shortly.'));
+
+            return;
+        }
+
+        if ($outcome === CustomerCancellationOutcome::Paid) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pembayaran sudah diterima.', 'Payment has already been received.'));
+            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pembayaran sudah diterima, jadi pesanan tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.", "Payment has already been received, so this order cannot be cancelled.\n\nCheck the latest status with /status."));
+
+            return;
+        }
+
+        if ($outcome !== CustomerCancellationOutcome::Cancelled) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pesanan sudah tidak bisa dibatalkan.', 'This order can no longer be cancelled.'));
             $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.", "This order has been processed or can no longer be cancelled.\n\nCheck the latest status with /status."));
 
             return;
         }
+
+        $cancelled = $order->fresh();
 
         if ($context->messageId !== null) {
             try {
