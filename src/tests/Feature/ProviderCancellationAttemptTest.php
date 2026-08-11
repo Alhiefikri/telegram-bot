@@ -27,6 +27,19 @@ class ProviderCancellationAttemptTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.pakasir', [
+            'slug' => 'warung-ai',
+            'api_key' => 'pakasir-secret',
+            'base_url' => 'https://app.pakasir.com',
+            'redirect_url' => 'https://example.test/payment/return',
+            'qris_only' => true,
+        ]);
+    }
+
     public function test_released_pakasir_payment_creates_a_durable_attempt_and_dispatches_only_after_commit(): void
     {
         Queue::fake();
