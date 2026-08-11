@@ -149,6 +149,15 @@ return [
         ],
     ],
 
+    // This is deliberately configuration-only during the expand phase: the
+    // current and previous workers continue to use the same database rows and
+    // cache keys. Operators promote the rollout after the report is clean.
+    'payment_lifecycle_rollout' => [
+        'mode' => env('PAYMENT_LIFECYCLE_ROLLOUT_MODE', 'enabled'),
+        'canary_percentage' => (int) env('PAYMENT_LIFECYCLE_ROLLOUT_CANARY_PERCENTAGE', 0),
+        'stale_claim_minutes' => (int) env('PAYMENT_LIFECYCLE_ROLLOUT_STALE_CLAIM_MINUTES', 15),
+    ],
+
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),
