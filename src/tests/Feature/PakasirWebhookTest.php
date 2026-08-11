@@ -618,17 +618,18 @@ class PakasirWebhookTest extends TestCase
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
         $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
         app(OrderStateMachine::class)->cancelPendingOrder($order);
         $payment->forceFill(['updated_at' => now()->subHours(73)])->save();
-        $this->fakeDetail($payment->merchant_ref, $payment->amount);
 
         $this->artisan('pakasir:reconcile')
             ->expectsOutputToContain('pakasir:reconcile completed cleanly: processed=0 skipped=0 failed=0')
             ->assertSuccessful();
 
         $this->assertSame(PaymentStatus::Failed, $payment->fresh()->status);
-        $this->assertSame(0, PaymentEvent::count());
-        Http::assertNothingSent();
+        $this->assertSame(0, PaymentEvent::where('event_type', PaymentEventType::Reconciliation->value)->count());
+        $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactioncancel')));
+        $this->assertCount(0, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
     }
 
     public function test_pakasir_reconciliation_is_scheduled_every_minute_ahead_of_pending_order_expiry(): void
@@ -777,6 +778,9 @@ class PakasirWebhookTest extends TestCase
         config()->set('services.telegram.token', 'bot-token');
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
+            'https://app.pakasir.com/api/transactioncancel' => Http::response([
+                'transaction' => ['status' => 'cancelled'],
+            ]),
         ]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);

@@ -16,8 +16,6 @@ class ReconcileCustomerCancellationPayment implements ShouldQueue
 
     public int $tries = 3;
 
-    public string $queue = 'payments';
-
     /** @var list<int> */
     public array $backoff = [30, 120];
 

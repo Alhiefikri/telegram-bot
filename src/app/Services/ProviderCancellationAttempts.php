@@ -30,6 +30,13 @@ final readonly class ProviderCancellationAttempts
             return;
         }
 
+        // A provider expiry is authoritative: there is no live transaction left to cancel.
+        if ($payment->provider === PaymentProvider::PAKASIR
+            && $payment->provider_expires_at !== null
+            && ! $payment->provider_expires_at->isFuture()) {
+            return;
+        }
+
         $attempt = ProviderCancellationAttempt::query()->firstOrCreate(
             ['payment_id' => $payment->id],
             [

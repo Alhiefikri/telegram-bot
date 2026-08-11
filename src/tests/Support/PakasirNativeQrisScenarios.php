@@ -178,6 +178,9 @@ trait PakasirNativeQrisScenarios
                     'status' => 'pending',
                 ],
             ], 200),
+            'https://app.pakasir.test/api/transactioncancel' => Http::response([
+                'transaction' => ['status' => 'cancelled'],
+            ], 200),
         ]);
     }
 

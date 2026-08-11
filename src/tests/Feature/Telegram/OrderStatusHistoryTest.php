@@ -474,7 +474,11 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     #[DataProvider('customerLocaleCases')]
     public function test_buyer_can_cancel_own_pending_order_with_localized_confirmation(array $copy): void
     {
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactioncancel' => Http::response([
+                'transaction' => ['status' => 'cancelled'],
+            ]),
+        ]);
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
         $order = Order::factory()->create([
             'customer_id' => $customer->id,

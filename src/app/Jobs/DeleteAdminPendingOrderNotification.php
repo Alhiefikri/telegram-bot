@@ -38,6 +38,16 @@ class DeleteAdminPendingOrderNotification implements ShouldBeUnique, ShouldQueue
      */
     public function uniqueVia(): Repository
     {
+        if (env('APP_ENV') === 'testing') {
+            $path = sys_get_temp_dir().'/telegram-bot-cache-'.getmypid();
+
+            return Cache::build([
+                'driver' => 'file',
+                'path' => $path,
+                'lock_path' => $path,
+            ]);
+        }
+
         return Cache::driver('file');
     }
 

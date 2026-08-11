@@ -40,6 +40,18 @@ class ProviderCancellationAttemptTest extends TestCase
         Queue::assertPushed(ProcessProviderCancellationAttempt::class, fn (ProcessProviderCancellationAttempt $job): bool => $job->attemptId === $attempt->id);
     }
 
+    public function test_expired_pakasir_payment_does_not_create_cancellation_attempt(): void
+    {
+        Queue::fake();
+        $payment = $this->pakasirPayment();
+        $payment->update(['provider_expires_at' => now()->subMinute()]);
+
+        app(OrderStateMachine::class)->applyPendingCancellation($payment->order);
+
+        $this->assertDatabaseCount('provider_cancellation_attempts', 0);
+        Queue::assertNotPushed(ProcessProviderCancellationAttempt::class);
+    }
+
     public function test_unsupported_klikqris_cancellation_is_observable_without_a_provider_job(): void
     {
         Queue::fake();

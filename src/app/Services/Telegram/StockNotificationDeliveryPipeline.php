@@ -3,10 +3,10 @@
 namespace App\Services\Telegram;
 
 use App\Enums\InventoryMovementType;
-use App\Jobs\SendProductStockNotifications;
 use App\Models\InventoryMovement;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
+use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -24,8 +24,20 @@ class StockNotificationDeliveryPipeline
     /** @return array{processed:int, transient_failures:int, has_more:bool} */
     public function deliver(int $movementId, int $batchSize = 100): array
     {
+        $startedAt = DogfoodTiming::now();
         $event = $this->snapshotEvent($movementId);
         if (! $event) {
+            $timingResult = [
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => true,
+                'recipient_count' => 0,
+                'telegram_total_duration_ms' => 0.0,
+                'per_recipient_telegram' => [],
+                'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            ];
+            DogfoodTiming::log('dogfood.telegram.broadcast_finished', $timingResult);
+
             return ['processed' => 0, 'transient_failures' => 0, 'has_more' => false];
         }
 
@@ -37,11 +49,34 @@ class StockNotificationDeliveryPipeline
             ->orderBy('id')->limit(max(1, $batchSize))->get();
 
         $processed = 0;
+        $sent = 0;
+        $failed = 0;
         $transientFailures = 0;
+        $telegramTotalMs = 0.0;
+        $perRecipient = [];
         foreach ($recipients as $recipient) {
+            $recipientStartedAt = DogfoodTiming::now();
             $outcome = $this->deliverRecipient($recipient);
+            $status = match ($outcome) {
+                'sent' => 'ok',
+                'skipped' => 'skipped',
+                default => 'error',
+            };
+            $sent += $outcome === 'sent' ? 1 : 0;
+            $failed += in_array($outcome, ['transient_failure', 'terminal_failure'], true) ? 1 : 0;
             $processed += $outcome === 'skipped' ? 0 : 1;
             $transientFailures += $outcome === 'transient_failure' ? 1 : 0;
+
+            $recipientLog = [
+                'recipient_correlation_id' => DogfoodTiming::correlation($recipient->telegram_id),
+                'status' => $status,
+                'duration_ms' => DogfoodTiming::elapsedMs($recipientStartedAt),
+            ];
+            $telegramTotalMs = round($telegramTotalMs + $recipientLog['duration_ms'], 2);
+            $perRecipient[] = $recipientLog;
+            DogfoodTiming::log('dogfood.telegram.broadcast_recipient', $recipientLog + [
+                'recipient_index' => count($perRecipient),
+            ]);
         }
 
         $hasMore = StockNotificationRecipient::query()->where('stock_notification_event_id', $event->id)
@@ -49,6 +84,16 @@ class StockNotificationDeliveryPipeline
         if (! $hasMore) {
             InventoryMovement::query()->whereKey($movementId)->update(['stock_notification_sent_at' => now()]);
         }
+
+        DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
+            'sent' => $sent,
+            'failed' => $failed,
+            'skipped' => false,
+            'recipient_count' => $recipients->count(),
+            'telegram_total_duration_ms' => $telegramTotalMs,
+            'per_recipient_telegram' => $perRecipient,
+            'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+        ]);
 
         return [
             'processed' => $processed,
