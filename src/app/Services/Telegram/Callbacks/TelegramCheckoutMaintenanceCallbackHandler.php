@@ -73,7 +73,7 @@ final class TelegramCheckoutMaintenanceCallbackHandler implements TelegramCallba
             $customer,
             '⏸️ Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.'
                 .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
-            '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed.'
+            '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed. Check status again in a little while.'
                 .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
         );
     }

@@ -9,6 +9,7 @@ use App\Services\Telegram\Callbacks\TelegramBroadcastCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCartCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCheckoutMaintenanceCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCommunityGateVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramLocaleCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
@@ -108,6 +109,7 @@ class TelegramCallbackHandlerPipelineTest extends TestCase
             'order' => [TelegramOrderCallbackHandler::class, 'order:INV-123', TelegramCallbackStage::AfterCommunityGate, false],
             'cart' => [TelegramCartCallbackHandler::class, 'buy:1', TelegramCallbackStage::AfterCommunityGate, false],
             'checkout' => [TelegramCheckoutCallbackHandler::class, 'checkout', TelegramCallbackStage::AfterCommunityGate, false],
+            'checkout maintenance status' => [TelegramCheckoutMaintenanceCallbackHandler::class, 'checkout-maintenance:status', TelegramCallbackStage::AfterCommunityGate, false],
             'payment proof' => [TelegramPaymentProofCallbackHandler::class, 'payment-proof:INV-123', TelegramCallbackStage::AfterCommunityGate, false],
         ];
     }

@@ -92,7 +92,11 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 $maintenance = $this->maintenance->current();
                 if ($maintenance->active) {
                     $this->bot->answerCallbackQuery($context->callbackQueryId);
-                    $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $maintenance));
+                    $this->bot->sendMessage(
+                        $context->chatId,
+                        $this->maintenanceMessage($context->customer, $maintenance),
+                        $this->maintenanceKeyboard($context->customer),
+                    );
 
                     return;
                 }
@@ -139,7 +143,11 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $maintenance = $this->maintenance->current();
         if ($maintenance->active) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $maintenance));
+            $this->bot->sendMessage(
+                $context->chatId,
+                $this->maintenanceMessage($context->customer, $maintenance),
+                $this->maintenanceKeyboard($context->customer),
+            );
 
             return;
         }
@@ -172,6 +180,19 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             if ($answerCallback) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId);
             }
+
+            return;
+        }
+        $maintenance = $this->maintenance->current();
+        if ($maintenance->active) {
+            if ($answerCallback) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+            }
+            $this->bot->sendMessage(
+                $context->chatId,
+                $this->maintenanceMessage($context->customer, $maintenance),
+                $this->maintenanceKeyboard($context->customer),
+            );
 
             return;
         }
@@ -208,7 +229,11 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
             ], fn () => $this->checkout->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey));
         } catch (CheckoutMaintenanceActive $exception) {
-            $this->bot->sendMessage($context->chatId, $this->maintenanceMessage($context->customer, $exception->state));
+            $this->bot->sendMessage(
+                $context->chatId,
+                $this->maintenanceMessage($context->customer, $exception->state),
+                $this->maintenanceKeyboard($context->customer),
+            );
 
             return;
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
@@ -260,6 +285,15 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed. Check status again in a little while.'
                 .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
         );
+    }
+
+    /** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
+    private function maintenanceKeyboard(Customer $customer): array
+    {
+        return ['inline_keyboard' => [[[
+            'text' => $this->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+            'callback_data' => 'checkout-maintenance:status',
+        ]]]];
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string

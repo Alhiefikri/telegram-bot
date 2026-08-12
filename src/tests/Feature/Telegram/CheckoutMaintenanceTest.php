@@ -173,4 +173,90 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'maintenance'));
         $this->assertCount(0, $maintenanceAnswers);
     }
+
+    public function test_stale_purchase_callbacks_return_maintenance_notice_before_stock_validation(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create(['name' => 'Sold Out Purchase', 'stock' => 0, 'reserved_stock' => 0]);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'public_note' => 'Admin sedang sinkronisasi payment provider.',
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50, 'stale-qris-buy', 'buy:qris:'.$product->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(51, 'stale-buy', 'buy:'.$product->id))->assertOk();
+
+        $this->assertSame(0, CartItem::query()->count());
+        $this->assertSame(0, Order::query()->count());
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $payload = json_encode($messages->map(fn (array $record): mixed => $record[0]->data())->all(), JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload);
+        $this->assertStringContainsString('Admin sedang sinkronisasi payment provider.', $payload);
+        $this->assertStringContainsString('checkout-maintenance:status', $payload);
+        $this->assertStringNotContainsString('Produk ini belum bisa dibeli sekarang', $payload);
+    }
+
+    public function test_stale_checkout_choice_returns_maintenance_notice_without_an_active_cart(): void
+    {
+        $this->fakeTelegramHttp();
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'public_note' => 'Admin sedang sinkronisasi payment provider.',
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(52, 'stale-qris-choice', 'checkout:current'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(53, 'stale-binance-choice', 'checkout:binance'))->assertOk();
+
+        $this->assertSame(0, Order::query()->count());
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $payload = json_encode($messages->map(fn (array $record): mixed => $record[0]->data())->all(), JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload);
+        $this->assertStringContainsString('checkout-maintenance:status', $payload);
+        $this->assertStringNotContainsString('Checkout belum berhasil', $payload);
+    }
+
+    public function test_sold_out_product_detail_keeps_maintenance_status_action_visible(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create(['name' => 'Sold Out Detail', 'stock' => 0, 'reserved_stock' => 0]);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(54, 'sold-out-detail', 'product:'.$product->id))->assertOk();
+
+        $message = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Sold Out Detail'))
+            ->last()[0];
+        $payload = json_encode($message->data(), JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Checkout sedang maintenance', (string) $message['text']);
+        $this->assertStringContainsString('checkout-maintenance:status', $payload);
+    }
+
+    public function test_english_status_copy_keeps_plain_admin_note(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'public_note' => '<b>Admin note</b>',
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(55, 'english-status', 'checkout-maintenance:status'))->assertOk();
+
+        $message = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Checkout is under maintenance'))
+            ->last()[0];
+        $this->assertStringContainsString('Check status again in a little while.', (string) $message['text']);
+        $this->assertStringContainsString('<b>Admin note</b>', (string) $message['text']);
+        $this->assertArrayNotHasKey('parse_mode', $message->data());
+    }
 }

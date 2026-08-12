@@ -62,26 +62,24 @@ class TelegramCatalogIntents
             && $product->usdt_price_amount !== null
             && $this->checkout->binancePayEnabled();
         $keyboard = [];
-        if ($availableStock > 0) {
-            if ($checkoutMaintenanceActive) {
-                $keyboard[] = [[
-                    'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
-                    'callback_data' => 'checkout-maintenance:status',
+        if ($checkoutMaintenanceActive) {
+            $keyboard[] = [[
+                'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+                'callback_data' => 'checkout-maintenance:status',
+            ]];
+        } elseif ($availableStock > 0) {
+            $qrisButton = [[
+                'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'callback_data' => 'buy:qris:'.$product->id,
+            ]];
+            if ($binanceAvailable) {
+                $binanceButton = [[
+                    'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
+                    'callback_data' => 'buy:binance:'.$product->id,
                 ]];
+                $keyboard = [$qrisButton, $binanceButton];
             } else {
-                $qrisButton = [[
-                    'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
-                    'callback_data' => 'buy:qris:'.$product->id,
-                ]];
-                if ($binanceAvailable) {
-                    $binanceButton = [[
-                        'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
-                        'callback_data' => 'buy:binance:'.$product->id,
-                    ]];
-                    $keyboard = [$qrisButton, $binanceButton];
-                } else {
-                    $keyboard[] = $qrisButton;
-                }
+                $keyboard[] = $qrisButton;
             }
         }
         $keyboard[] = [[
@@ -106,15 +104,15 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->text($customer, '📝 Detail produk', '📝 Product details');
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
-        $lines[] = $availableStock > 0
-            ? ($checkoutMaintenanceActive
-                ? $this->maintenanceNotice($customer, $maintenance)
-                : $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
+        $lines[] = $checkoutMaintenanceActive
+            ? $this->maintenanceNotice($customer, $maintenance)
+            : ($availableStock > 0
+                ? $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
                     ."\n\n"
                     .$this->locale->qrisCrossBorderSupport($customer)
                     ."\n\n"
-                    .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.'))
-            : $this->locale->text($customer, 'Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.');
+                    .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.')
+                : $this->locale->text($customer, 'Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.'));
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
