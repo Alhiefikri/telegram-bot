@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Production via SSH"
+  short_description: "Read-only production checks over SSH"
+  default_prompt: "Use $audit-production-ssh to perform a read-only production health audit."
