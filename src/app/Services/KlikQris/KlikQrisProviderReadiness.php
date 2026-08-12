@@ -215,7 +215,6 @@ final class KlikQrisProviderReadiness
         return $this->reportWithoutSchedule($this->forEnvironment($environment))->isReady();
     }
 
-
     /** @return array<string, string> */
     private function invalidOperationalConfiguration(KlikQrisEnvironment $environment): array
     {
