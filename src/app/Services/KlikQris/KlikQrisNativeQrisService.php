@@ -2,6 +2,7 @@
 
 namespace App\Services\KlikQris;
 
+use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
@@ -248,6 +249,17 @@ class KlikQrisNativeQrisService
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Persist signature evidence returned by the authoritative status endpoint.
+     */
+    public function persistAuthoritativeTransactionSignature(Payment $payment, KlikQrisTransaction $transaction): bool
+    {
+        return $this->lifecycleCoordinator->withLockedOrderPayment(
+            $payment,
+            fn (Order $order, Payment $lockedPayment): bool => $this->persistTransactionSignature($lockedPayment, $transaction),
+        );
     }
 
     /**
@@ -526,7 +538,7 @@ class KlikQrisNativeQrisService
             }
 
             if ($this->hasPayablePersistedQris($lockedPayment)) {
-                return true;
+                return $this->persistTransactionSignature($lockedPayment, $transaction);
             }
 
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
@@ -536,8 +548,12 @@ class KlikQrisNativeQrisService
                 // Never persist untrusted provider media references.
                 $providerPayload = $this->withoutQrisUrlKeys($providerPayload);
             }
-            $isPayableCreated = $this->isPayableProviderTransaction($transaction, $lockedPayment, $providerExpiresAt);
-            $nonPayableState = $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt);
+            $signaturePersisted = $this->persistTransactionSignature($lockedPayment, $transaction);
+            $isPayableCreated = $signaturePersisted
+                && $this->isPayableProviderTransaction($transaction, $lockedPayment, $providerExpiresAt);
+            $nonPayableState = $signaturePersisted
+                ? $this->nonPayableState($transaction, $lockedPayment, $providerExpiresAt)
+                : 'provider_signature_missing';
 
             // Untrusted, missing, or invalid provider QR data is persisted as a
             // non-payable state; it must never become Payable later.
@@ -569,6 +585,28 @@ class KlikQrisNativeQrisService
 
             return true;
         });
+    }
+
+    private function persistTransactionSignature(Payment $payment, KlikQrisTransaction $transaction): bool
+    {
+        $signature = $transaction->signature();
+        if (blank($signature)) {
+            return $transaction->environment() !== KlikQrisEnvironment::Production;
+        }
+
+        if (blank($payment->klikqris_transaction_signature)) {
+            $payment->update(['klikqris_transaction_signature' => $signature]);
+
+            return true;
+        }
+
+        if (hash_equals((string) $payment->klikqris_transaction_signature, $signature)) {
+            return true;
+        }
+
+        report(new RuntimeException('KlikQRIS transaction signature changed.'));
+
+        return false;
     }
 
     private function markCreationAttempted(Payment $payment, bool $hardened): bool

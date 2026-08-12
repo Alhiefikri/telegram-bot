@@ -47,11 +47,11 @@ class KlikQrisSandboxWebhookController extends Controller
             throw new NotFoundHttpException;
         }
 
-        if ($environment === KlikQrisEnvironment::Production && ! $this->signatureMatches($request, $readiness)) {
+        $payload = $this->validatedPayload($request, $environment);
+
+        if ($environment === KlikQrisEnvironment::Production && ! $processor->authenticatesCallback($payload)) {
             throw new UnauthorizedHttpException('KlikQRIS', 'Invalid KlikQRIS callback signature.');
         }
-
-        $payload = $this->validatedPayload($request);
 
         try {
             ProviderVerificationProfiles::using(ProviderVerificationProfile::Webhook, fn () => $processor->processCallback($payload));
@@ -69,22 +69,8 @@ class KlikQrisSandboxWebhookController extends Controller
         return response()->json(['success' => true]);
     }
 
-    private function signatureMatches(Request $request, KlikQrisProviderReadiness $readiness): bool
-    {
-        $secret = $readiness->webhookSecret(KlikQrisEnvironment::Production);
-        $provided = (string) ($request->header('X-KLIKQRIS-SIGNATURE') ?: $request->header('X-Signature'));
-        if ($secret === null || $provided === '') {
-            return false;
-        }
-
-        $provided = str_starts_with($provided, 'sha256=') ? substr($provided, 7) : $provided;
-        $expected = hash_hmac('sha256', $request->getContent(), $secret);
-
-        return hash_equals($expected, $provided);
-    }
-
     /** @return array<mixed> */
-    private function validatedPayload(Request $request): array
+    private function validatedPayload(Request $request, KlikQrisEnvironment $environment): array
     {
         if (! $request->isJson()) {
             throw new BadRequestHttpException('Invalid KlikQRIS callback request.');
@@ -114,16 +100,19 @@ class KlikQrisSandboxWebhookController extends Controller
             'amount' => ['required'],
             'total_amount' => ['required'],
             'status' => ['required', 'string'],
+            'signature' => ['nullable', 'string'],
         ]);
 
         if ($validator->fails()) {
             throw new UnprocessableEntityHttpException('Invalid KlikQRIS callback payload.');
         }
 
-        try {
-            KlikQrisCallback::fromPayload($payload);
-        } catch (UnexpectedValueException) {
-            throw new UnprocessableEntityHttpException('Invalid KlikQRIS callback payload.');
+        if ($environment === KlikQrisEnvironment::Sandbox) {
+            try {
+                KlikQrisCallback::fromPayload($payload);
+            } catch (UnexpectedValueException) {
+                throw new UnprocessableEntityHttpException('Invalid KlikQRIS callback payload.');
+            }
         }
 
         return $payload;

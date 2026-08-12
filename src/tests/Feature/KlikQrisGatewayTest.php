@@ -44,7 +44,11 @@ class KlikQrisGatewayTest extends TestCase
         $this->assertSame(KlikQrisEnvironment::Production, $transaction->environment());
         Http::assertSent(fn ($request) => $request->url() === 'https://api.klikqris.example/qris/create'
             && $request->hasHeader('x-api-key', 'production-test-key')
-            && $request->hasHeader('id_merchant', 'production-merchant-test'));
+            && $request->hasHeader('id_merchant', 'production-merchant-test')
+            && $request['id_merchant'] === 'production-merchant-test'
+            && $request['callback_url'] === 'https://store.example.test/api/webhook/klikqris'
+            && ! $request->hasHeader('X-KLIKQRIS-SIGNATURE')
+            && ! $request->hasHeader('X-Signature'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'klikqris.com/api/sandbox'));
     }
 

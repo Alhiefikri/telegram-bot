@@ -254,6 +254,7 @@ class KlikQrisWebhookTest extends TestCase
             'amount' => 10000,
             'total_amount' => 10016,
             'status' => 'REVIEW_REQUIRED',
+            'signature' => 'UNKNOWN_SIGNATURE',
         ];
 
         $this->postJson('/api/webhook/klikqris/sandbox', $payload)->assertOk();
@@ -536,12 +537,29 @@ class KlikQrisWebhookTest extends TestCase
         KlikQrisSandboxScenarios::configureReadyProduction();
         $payment = $this->payableKlikQrisPayment();
         Http::fake();
-        $body = json_encode($this->callbackPayload($payment), JSON_THROW_ON_ERROR);
 
         $this->call('POST', '/api/webhook/klikqris', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_KLIKQRIS_SIGNATURE' => 'sha256=invalid-production-signature',
-        ], $body)->assertUnauthorized();
+        ], json_encode($this->callbackPayload($payment, [
+            'signature' => 'invalid-production-signature',
+        ]), JSON_THROW_ON_ERROR))->assertUnauthorized();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_production_webhook_rejects_missing_signature_before_event_or_status_request(): void
+    {
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        $payment = $this->payableKlikQrisPayment();
+        Http::fake();
+        $payload = $this->callbackPayload($payment);
+        unset($payload['signature']);
+
+        $this->call('POST', '/api/webhook/klikqris', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+        ], json_encode($payload, JSON_THROW_ON_ERROR))->assertUnauthorized();
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(0, PaymentEvent::query()->where('provider', 'klikqris')->count());
@@ -556,12 +574,10 @@ class KlikQrisWebhookTest extends TestCase
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
 
         $payload = $this->callbackPayload($payment);
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
 
         $this->call('POST', '/api/webhook/klikqris', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_KLIKQRIS_SIGNATURE' => hash_hmac('sha256', $body, 'production-test-secret'),
-        ], $body)->assertOk()->assertExactJson(['success' => true]);
+        ], json_encode($payload, JSON_THROW_ON_ERROR))->assertOk()->assertExactJson(['success' => true]);
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
@@ -578,12 +594,10 @@ class KlikQrisWebhookTest extends TestCase
         ]), 200));
 
         $payload = $this->callbackPayload($payment);
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
 
         $this->call('POST', '/api/webhook/klikqris', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_KLIKQRIS_SIGNATURE' => hash_hmac('sha256', $body, 'production-test-secret'),
-        ], $body)->assertOk()->assertExactJson(['success' => true]);
+        ], json_encode($payload, JSON_THROW_ON_ERROR))->assertOk()->assertExactJson(['success' => true]);
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
@@ -598,16 +612,14 @@ class KlikQrisWebhookTest extends TestCase
         $payment = $this->payableKlikQrisPayment();
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
 
-        $firstBody = json_encode($this->callbackPayload($payment, ['signature' => 'first-production-signature']), JSON_THROW_ON_ERROR);
-        $secondBody = json_encode($this->callbackPayload($payment, ['signature' => 'second-production-signature']), JSON_THROW_ON_ERROR);
+        $firstBody = json_encode($this->callbackPayload($payment), JSON_THROW_ON_ERROR);
+        $secondBody = json_encode($this->callbackPayload($payment), JSON_THROW_ON_ERROR);
 
         $this->call('POST', '/api/webhook/klikqris', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_KLIKQRIS_SIGNATURE' => hash_hmac('sha256', $firstBody, 'production-test-secret'),
         ], $firstBody)->assertOk();
         $this->call('POST', '/api/webhook/klikqris', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
-            'HTTP_X_KLIKQRIS_SIGNATURE' => hash_hmac('sha256', $secondBody, 'production-test-secret'),
         ], $secondBody)->assertOk();
 
         $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
@@ -638,8 +650,8 @@ class KlikQrisWebhookTest extends TestCase
             'provider_fee' => 16,
             'provider_expires_at' => now()->addMinutes(10),
             'expired_at' => now()->addMinutes(10),
+            'klikqris_transaction_signature' => 'opaque-callback-signature',
         ]);
-        $payment->update(['provider_payload' => KlikQrisSandboxScenarios::createPayload($payment)]);
         $payment->order->update(['expires_at' => now()->addMinutes(10)]);
 
         return $payment->fresh(['order']);

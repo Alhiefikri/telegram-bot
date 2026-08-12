@@ -20,6 +20,7 @@ use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -94,6 +95,26 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame(1, $fresh->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
         $this->assertArrayNotHasKey('signature', $fresh->paymentEvents()->first()->raw_payload['data']);
         Http::assertSentCount(1);
+    }
+
+    public function test_create_signature_is_encrypted_hidden_and_absent_from_generic_payloads(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment), 200));
+
+        $this->lifecycle($payment);
+
+        $fresh = $payment->fresh();
+        $this->assertSame('opaque-test-signature', $fresh->klikqris_transaction_signature);
+        $this->assertNotSame(
+            'opaque-test-signature',
+            DB::table('payments')->whereKey($payment->id)->value('klikqris_transaction_signature'),
+        );
+        $this->assertArrayNotHasKey('klikqris_transaction_signature', $fresh->toArray());
+        $this->assertStringNotContainsString(
+            'opaque-test-signature',
+            json_encode($fresh->provider_payload, JSON_THROW_ON_ERROR),
+        );
     }
 
     public function test_lifecycle_does_not_call_provider_for_cancelled_order(): void

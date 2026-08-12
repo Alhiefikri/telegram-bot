@@ -88,7 +88,6 @@ return [
         'sandbox_base_url' => env('KLIKQRIS_SANDBOX_BASE_URL', 'https://klikqris.com/api/sandbox'),
         'sandbox_api_key' => env('KLIKQRIS_SANDBOX_API_KEY'),
         'sandbox_merchant_id' => env('KLIKQRIS_SANDBOX_MERCHANT_ID'),
-        'sandbox_webhook_secret' => env('KLIKQRIS_SANDBOX_WEBHOOK_SECRET'),
         'sandbox_callback_url' => env('KLIKQRIS_SANDBOX_CALLBACK_URL'),
         'sandbox_callback_allowed_hosts' => array_values(array_filter(array_map(
             static fn (string $host): string => strtolower(trim($host)),
@@ -99,7 +98,6 @@ return [
         'production_api_key' => env('KLIKQRIS_PRODUCTION_API_KEY'),
         'production_merchant_id' => env('KLIKQRIS_PRODUCTION_MERCHANT_ID'),
         'production_callback_url' => env('KLIKQRIS_PRODUCTION_CALLBACK_URL'),
-        'production_webhook_secret' => env('KLIKQRIS_PRODUCTION_WEBHOOK_SECRET'),
         'production_allowed_hosts' => array_values(array_filter(array_map(
             static fn (string $host): string => strtolower(trim($host)),
             explode(',', (string) env('KLIKQRIS_PRODUCTION_ALLOWED_HOSTS', '')),

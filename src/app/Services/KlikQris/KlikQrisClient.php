@@ -33,12 +33,18 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         }
 
         try {
-            $response = $this->request()->post($this->endpoint('/qris/create'), [
+            $body = [
                 'order_id' => $payment->merchant_ref,
                 'id_merchant' => $this->merchantId(),
                 'amount' => (int) $payment->amount,
                 'keterangan' => 'Payment '.$payment->merchant_ref,
-            ]);
+            ];
+            $callbackUrl = config($this->environment->configKey('callback_url'));
+            if (is_string($callbackUrl) && filled($callbackUrl)) {
+                $body['callback_url'] = $callbackUrl;
+            }
+
+            $response = $this->request()->post($this->endpoint('/qris/create'), $body);
         } catch (ConnectionException $exception) {
             throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: connection error.', $exception);
         } catch (Throwable $exception) {

@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Model;
     'merchant_ref',
     'provider_reference',
     'provider_payload',
+    'klikqris_transaction_signature',
     'provider_fee',
     'provider_total_payment',
     'provider_payment_method',
@@ -56,6 +57,10 @@ class Payment extends Model
     /** @use HasFactory<PaymentFactory> */
     use HasFactory, HasUuids;
 
+    protected $hidden = [
+        'klikqris_transaction_signature',
+    ];
+
     protected function casts(): array
     {
         return [
@@ -72,6 +77,7 @@ class Payment extends Model
             'provider_created_at' => 'datetime',
             'provider_expires_at' => 'datetime',
             'provider_payment_number' => 'encrypted',
+            'klikqris_transaction_signature' => 'encrypted',
             'provider_create_attempted_at' => 'datetime',
             'status' => PaymentStatus::class,
             'paid_at' => 'datetime',

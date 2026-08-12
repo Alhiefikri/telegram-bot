@@ -35,7 +35,6 @@ final class KlikQrisSandboxScenarios
             'production_api_key' => 'production-test-key',
             'production_merchant_id' => 'production-merchant-test',
             'production_callback_url' => 'https://store.example.test/api/webhook/klikqris',
-            'production_webhook_secret' => 'production-test-secret',
             'production_allowed_hosts' => ['api.klikqris.example'],
             'production_callback_allowed_hosts' => ['store.example.test'],
         ]));

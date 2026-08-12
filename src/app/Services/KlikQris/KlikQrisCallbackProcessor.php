@@ -22,6 +22,22 @@ class KlikQrisCallbackProcessor
     ) {}
 
     /** @param array<mixed> $payload */
+    public function authenticatesCallback(array $payload): bool
+    {
+        try {
+            $callback = KlikQrisCallback::fromPayload($payload);
+        } catch (UnexpectedValueException) {
+            return false;
+        }
+
+        $payment = $this->findPayment($callback->orderId());
+
+        return $payment !== null
+            && filled($payment->klikqris_transaction_signature)
+            && hash_equals((string) $payment->klikqris_transaction_signature, $callback->signature());
+    }
+
+    /** @param array<mixed> $payload */
     public function processCallback(array $payload): PaymentEvent
     {
         $callback = KlikQrisCallback::fromPayload($payload);
@@ -81,10 +97,10 @@ class KlikQrisCallbackProcessor
     public function processReconciliationForPayment(Payment $payment, KlikQrisTransaction $transaction): PaymentEvent
     {
         $transaction->assertMatches($payment);
-
+        $signaturePersisted = $this->nativeQris->persistAuthoritativeTransactionSignature($payment, $transaction);
         $event = $this->events->logReconciliation($transaction, $payment);
 
-        return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
+        return $signaturePersisted ? $this->applyAuthoritativeTransaction($payment, $transaction, $event) : $event->fresh();
     }
 
     public function reconcilePayment(Payment $payment): PaymentEvent

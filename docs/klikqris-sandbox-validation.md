@@ -28,8 +28,8 @@ Confirm the non-production `.env` contains values for these labels only. Do not 
 - `KLIKQRIS_SANDBOX_BASE_URL`
 - `KLIKQRIS_SANDBOX_API_KEY`
 - `KLIKQRIS_SANDBOX_MERCHANT_ID`
+- `KLIKQRIS_SANDBOX_CALLBACK_URL` (only when callbacks are exercised)
 - `KLIKQRIS_QRIS_TTL_MINUTES`
-- `KLIKQRIS_SANDBOX_WEBHOOK_SECRET`
 
 ## 3. Confirm the Telegram bot is the testing bot
 

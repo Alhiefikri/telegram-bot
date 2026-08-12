@@ -24,7 +24,6 @@ class KlikQrisProductionReadinessTest extends TestCase
         config()->set('services.klikqris.production_allowed_hosts', ['klikqris.com']);
         config()->set('services.klikqris.production_api_key', config('services.klikqris.sandbox_api_key'));
         config()->set('services.klikqris.production_merchant_id', config('services.klikqris.sandbox_merchant_id'));
-        config()->set('services.klikqris.production_webhook_secret', config('services.klikqris.sandbox_webhook_secret'));
 
         $report = app(KlikQrisProviderReadiness::class)->production();
 

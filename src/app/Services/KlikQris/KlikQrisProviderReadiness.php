@@ -57,7 +57,6 @@ final class KlikQrisProviderReadiness
                 'api_key' => 'API_KEY',
                 'merchant_id' => 'MERCHANT_ID',
                 'callback_url' => 'CALLBACK_URL',
-                'webhook_secret' => 'WEBHOOK_SECRET',
             ],
         } as $field => $label) {
             if (! is_string($this->value($environment, $field)) || blank($this->value($environment, $field))) {
@@ -159,7 +158,7 @@ final class KlikQrisProviderReadiness
             $invalid[$this->label($environment, 'BASE_URL_PRODUCTION')] = 'KlikQRIS sandbox must not use the production API endpoint.';
         }
 
-        foreach (['api_key' => 'API_KEY', 'merchant_id' => 'MERCHANT_ID', 'webhook_secret' => 'WEBHOOK_SECRET'] as $field => $label) {
+        foreach (['api_key' => 'API_KEY', 'merchant_id' => 'MERCHANT_ID'] as $field => $label) {
             $value = $this->value($environment, $field);
             $otherValue = $this->value($other, $field);
             if (filled($value) && filled($otherValue) && hash_equals((string) $value, (string) $otherValue)) {
@@ -216,17 +215,6 @@ final class KlikQrisProviderReadiness
         return $this->reportWithoutSchedule($this->forEnvironment($environment))->isReady();
     }
 
-    public function webhookSecret(KlikQrisEnvironment|string $environment): ?string
-    {
-        $environment = is_string($environment) ? KlikQrisEnvironment::tryFrom($environment) : $environment;
-        if ($environment === null) {
-            return null;
-        }
-
-        $secret = $this->value($environment, 'webhook_secret');
-
-        return filled($secret) ? (string) $secret : null;
-    }
 
     /** @return array<string, string> */
     private function invalidOperationalConfiguration(KlikQrisEnvironment $environment): array

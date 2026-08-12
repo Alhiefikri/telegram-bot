@@ -16,6 +16,7 @@ final readonly class KlikQrisCallback
         private KlikQrisAmount $amount,
         private KlikQrisAmount $totalAmount,
         private string $status,
+        private string $signature,
         private array $sanitizedPayload,
     ) {}
 
@@ -32,11 +33,12 @@ final readonly class KlikQrisCallback
             throw new UnexpectedValueException('KlikQRIS callback status is invalid.');
         }
 
+        $signature = self::requiredString($payload, 'signature', 'KlikQRIS callback signature is required.');
         $sanitizedPayload = in_array($status, self::SUPPORTED_STATUSES, true)
             ? KlikQrisPayloadSanitizer::sanitize($payload)
             : KlikQrisPayloadSanitizer::unknownCallbackStatus($status, $orderId);
 
-        return new self($orderId, $amount, $totalAmount, $status, $sanitizedPayload);
+        return new self($orderId, $amount, $totalAmount, $status, $signature, $sanitizedPayload);
     }
 
     public function orderId(): string
@@ -57,6 +59,11 @@ final readonly class KlikQrisCallback
     public function status(): string
     {
         return $this->status;
+    }
+
+    public function signature(): string
+    {
+        return $this->signature;
     }
 
     public function isSupportedStatus(): bool
