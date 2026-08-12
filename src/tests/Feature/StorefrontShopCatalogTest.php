@@ -131,6 +131,41 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('Checkout sedang maintenance');
     }
 
+    public function test_maintenance_renders_escaped_notice_and_disables_catalog_purchase_surfaces(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Maintenance Surface Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $note = '<strong>Provider sedang disinkronkan.</strong>';
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'public_note' => $note,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        foreach ([
+            route('storefront.home'),
+            route('storefront.home', ['q' => 'maintenance surface']),
+        ] as $url) {
+            $this->get($url)
+                ->assertOk()
+                ->assertSee('Checkout sedang maintenance')
+                ->assertSee($note)
+                ->assertDontSee($note, false)
+                ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false);
+        }
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('Checkout sedang maintenance')
+            ->assertSee($note)
+            ->assertDontSee($note, false)
+            ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false);
+    }
+
     public function test_landing_renders_single_catalog_grid(): void
     {
         $category = Category::factory()->create(['name' => 'AI Tools', 'sort_order' => 1, 'is_active' => true]);
