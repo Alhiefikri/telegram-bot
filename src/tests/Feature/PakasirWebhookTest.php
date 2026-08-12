@@ -13,6 +13,7 @@ use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Payment;
@@ -108,6 +109,38 @@ class PakasirWebhookTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_existing_pakasir_callback_and_paid_effects_continue_during_maintenance(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $this->cartWithProduct(stock: 2),
+            CheckoutPaymentIntents::pakasir(),
+        );
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeProviderDetail($payment->merchant_ref, $payment->amount);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))
+            ->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
+        Queue::assertPushed(SendAdminOrderPaidNotification::class, 1);
+        $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
     }
 
     public function test_verified_completed_callback_after_local_expiry_marks_late_paid_without_fulfillment(): void
@@ -572,6 +605,30 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame('completed', $event->provider_status);
         $this->assertSame('completed', $event->raw_payload['transaction']['status']);
         $this->assertNotNull($event->processed_at);
+    }
+
+    public function test_reconcile_command_continues_existing_orders_during_maintenance(): void
+    {
+        Queue::fake();
+        $order = app(OrderCheckoutService::class)->checkout(
+            $this->cartWithProduct(stock: 2),
+            CheckoutPaymentIntents::pakasir(),
+        );
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeDetail($payment->merchant_ref, $payment->amount);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->artisan('pakasir:reconcile')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentEventType::Reconciliation, PaymentEvent::firstOrFail()->event_type);
+        $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
+        $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
     }
 
     public function test_reconcile_command_marks_cancelled_payment_late_paid_without_fulfillment(): void

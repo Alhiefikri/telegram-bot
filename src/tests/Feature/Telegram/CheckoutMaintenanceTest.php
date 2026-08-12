@@ -7,6 +7,7 @@ use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
 use Illuminate\Support\Facades\Http;
@@ -94,6 +95,66 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $this->assertStringContainsString('katalog', $reopenedPayload);
         $this->assertStringContainsString('status', $reopenedPayload);
         $this->assertStringNotContainsString('checkout-maintenance:status', $reopenedPayload);
+    }
+
+    public function test_store_bot_creates_a_fresh_order_after_maintenance_reopens(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12347, 'username' => 'reopened-buyer']);
+        $product = Product::factory()->create(['name' => 'Reopened Telegram Product', 'stock' => 1, 'reserved_stock' => 0]);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            60,
+            'cart-during-maintenance',
+            'qty:'.$product->id.':1',
+            ['id' => 12347, 'username' => 'reopened-buyer'],
+            12347,
+            'private',
+            99060,
+        ))->assertOk();
+        $cart = CartItem::query()->firstOrFail()->cart;
+        $this->assertEqualsWithDelta(86_400, abs($cart->expires_at->diffInSeconds(now())), 5);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            61,
+            'blocked-checkout',
+            'checkout',
+            ['id' => 12347, 'username' => 'reopened-buyer'],
+            12347,
+            'private',
+            99061,
+        ))->assertOk();
+        $this->assertSame(0, Order::query()->count());
+
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => false,
+            'public_note' => null,
+            'version' => 2,
+            'activated_at' => null,
+        ]);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            62,
+            'reopened-checkout',
+            'checkout',
+            ['id' => 12347, 'username' => 'reopened-buyer'],
+            12347,
+            'private',
+            99062,
+        ))->assertOk();
+
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
     }
 
     public function test_stale_checkout_callback_returns_full_maintenance_notice_with_public_note(): void

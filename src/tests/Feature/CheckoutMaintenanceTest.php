@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\CartStatus;
+use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
@@ -22,14 +23,18 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
+use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Storefront\StorefrontShopPaymentStatusRefresh;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
 class CheckoutMaintenanceTest extends TestCase
 {
+    use PakasirNativeQrisScenarios;
     use RefreshDatabase;
 
     public function test_owner_can_activate_and_deactivate_checkout_maintenance_with_audited_versioning(): void
@@ -258,6 +263,74 @@ class CheckoutMaintenanceTest extends TestCase
         $this->assertSame(OrderStatus::Completed, $result->order->order_status);
         $this->assertSame(PaymentStatus::Paid, $result->payment->status);
         $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
+    }
+
+    public function test_existing_native_qris_order_can_recover_instructions_and_refresh_paid_during_maintenance(): void
+    {
+        $this->pakasirNativeQrisIsReady();
+        Queue::fake();
+
+        $customer = Customer::factory()->create();
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS),
+        );
+        $payment = $order->payments()->sole();
+
+        $this->providerQrisCreateSucceedsWithProviderTotal($payment->amount, 'unused-payment-number');
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        app(PakasirNativeQrisService::class)->ensureCreated($payment);
+        $payment->refresh();
+        $this->assertTrue($payment->isPayableNativePakasirQris());
+        $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
+
+        $this->providerTransactionDetailCompletesPayment($payment);
+        $status = app(StorefrontShopPaymentStatusRefresh::class)->execute($order->fresh());
+
+        $this->assertTrue($status->payload()['is_paid']);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
+    }
+
+    public function test_existing_orders_can_cancel_and_expire_during_maintenance(): void
+    {
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        $firstCustomer = Customer::factory()->create();
+        $firstCart = app(CartService::class)->activeCartFor($firstCustomer);
+        app(CartService::class)->setItemQuantity($firstCart, $product, 1);
+        $cancelOrder = app(OrderCheckoutService::class)->checkout($firstCart, CheckoutPaymentIntents::manualQris());
+
+        $secondProduct = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $secondCustomer = Customer::factory()->create();
+        $secondCart = app(CartService::class)->activeCartFor($secondCustomer);
+        app(CartService::class)->setItemQuantity($secondCart, $secondProduct, 1);
+        $expireOrder = app(OrderCheckoutService::class)->checkout($secondCart, CheckoutPaymentIntents::manualQris());
+
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $cancelled = app(OrderLifecycle::class)->applyPendingCancellation($cancelOrder);
+        $this->assertSame(OrderStatus::Cancelled, $cancelled->order->order_status);
+        $this->assertSame(PaymentStatus::Failed, $cancelled->payment->status);
+
+        $expireOrder->update(['expires_at' => now()->subMinute()]);
+        $expired = app(OrderLifecycle::class)->applyPendingExpiry($expireOrder->fresh());
+        $this->assertSame(OrderStatus::Expired, $expired->order->order_status);
+        $this->assertSame(PaymentStatus::Expired, $expired->payment->status);
         $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
     }
 

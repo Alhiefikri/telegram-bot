@@ -761,6 +761,50 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
+    public function test_fresh_web_checkout_succeeds_after_deactivation_with_revalidated_stock(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        $product = $this->availableProduct([
+            'name' => 'Reopened Checkout Product',
+            'price_amount' => 15000,
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
+        $this->pakasirNativeQrisIsReady();
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $blocked = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
+        $blocked
+            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertSessionHas('storefront_checkout_error', 'Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.');
+        $this->assertNoLocalCheckoutRowsCreated('active maintenance before reopening');
+
+        $product->forceFill(['stock' => 1, 'reserved_stock' => 0])->save();
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => false,
+            'public_note' => null,
+            'version' => 2,
+            'activated_at' => null,
+        ]);
+        $this->qrisRendererReturnsDeterministicPng();
+        $this->providerQrisCreateSucceedsWithProviderTotal(
+            amount: $product->price_amount,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.REOPENED99',
+        );
+
+        $reopened = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
+
+        $reopened->assertRedirect();
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+    }
+
     public function test_repeated_checkout_updates_optional_support_contact_without_creating_a_new_order(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);

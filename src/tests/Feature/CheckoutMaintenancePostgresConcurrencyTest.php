@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CartStatus;
+use App\Enums\InventoryMovementType;
 use App\Enums\UserRole;
 use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\CheckoutMaintenanceConflict;
@@ -9,7 +11,9 @@ use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
@@ -70,6 +74,9 @@ class CheckoutMaintenancePostgresConcurrencyTest extends TestCase
         $this->assertSame(2, $this->successfulResultCount($results));
         $this->assertSame([], $this->failedResultClasses($results));
         $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Reservation)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertTrue((bool) $this->resultValues($results)[1]);
         $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
     }
@@ -107,6 +114,10 @@ class CheckoutMaintenancePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, $this->successfulResultCount($results));
         $this->assertSame([CheckoutMaintenanceActive::class], $this->failedResultClasses($results));
         $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+        $this->assertSame(CartStatus::Active, $cart->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
     }
 
