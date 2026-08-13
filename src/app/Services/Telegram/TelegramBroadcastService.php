@@ -7,7 +7,10 @@ use App\Models\Customer;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Support\DogfoodTiming;
+use Illuminate\Bus\UniqueLock;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -29,7 +32,7 @@ class TelegramBroadcastService
      * @param  array<string, mixed>  $replyMarkup
      * @return array{broadcast_id:int|null, sent:int, failed:int, skipped:bool, queued:bool, recipient_count:int, telegram_total_duration_ms:float, per_recipient_telegram:list<array{}>}
      */
-    public function queueAdminBroadcast(string $message, array $replyMarkup = []): array
+    public function queueAdminBroadcast(string $message, array $replyMarkup = [], ?string $idempotencyKey = null): array
     {
         if (blank(config('services.telegram.token'))) {
             return [
@@ -44,17 +47,25 @@ class TelegramBroadcastService
             ];
         }
 
-        $broadcast = TelegramBroadcast::create([
-            'broadcast_key' => (string) Str::uuid(),
-            'source' => 'admin',
-            'message' => $message,
-            'reply_markup' => $replyMarkup === [] ? null : $replyMarkup,
-            'status' => TelegramBroadcast::STATUS_QUEUED,
-        ]);
+        $broadcastKey = $idempotencyKey === null
+            ? (string) Str::uuid()
+            : $this->stableBroadcastKey($idempotencyKey);
 
-        SendTelegramBroadcastBatch::dispatch($broadcast->id, now()->toISOString())
-            ->onQueue('telegram-broadcast')
-            ->afterCommit();
+        $broadcast = DB::transaction(function () use ($broadcastKey, $message, $replyMarkup): TelegramBroadcast {
+            DB::table('telegram_broadcasts')->insertOrIgnore([
+                'broadcast_key' => $broadcastKey,
+                'source' => 'admin',
+                'message' => $message,
+                'reply_markup' => $replyMarkup === [] ? null : json_encode($replyMarkup, JSON_THROW_ON_ERROR),
+                'status' => TelegramBroadcast::STATUS_QUEUED,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return TelegramBroadcast::query()->where('broadcast_key', $broadcastKey)->firstOrFail();
+        });
+
+        $this->dispatchAdminBroadcast($broadcast);
 
         return [
             'broadcast_id' => $broadcast->id,
@@ -301,7 +312,7 @@ class TelegramBroadcastService
             // duplicate or retried jobs from resending successful recipients.
             $this->bot->sendMessage(
                 $claimed->telegram_id,
-                $this->adminBroadcastText($broadcast->message, $claimed->locale === 'en'),
+                $broadcast->message,
                 $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale === 'en'),
             );
         } catch (Throwable $e) {
@@ -424,17 +435,6 @@ class TelegramBroadcastService
         return $retryableCount > 0;
     }
 
-    private function adminBroadcastText(string $message, bool $english): string
-    {
-        return implode("\n", [
-            $english ? '📣 Info from Admin' : '📣 Info dari Admin',
-            '━━━━━━━━━━━━━━',
-            $message,
-            '',
-            $english ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.',
-        ]);
-    }
-
     /**
      * Broadcast buttons may be stored either as one Telegram reply markup or
      * as an `id` / `en` map when the button label is localized per recipient.
@@ -460,5 +460,46 @@ class TelegramBroadcastService
     private function isPermanentRecipientFailure(Throwable $e): bool
     {
         return $e instanceof RequestException && in_array($e->response?->status(), [400, 403], true);
+    }
+
+    private function dispatchAdminBroadcast(TelegramBroadcast $broadcast): void
+    {
+        Cache::lock('telegram:admin-broadcast-dispatch:'.$broadcast->id, 30)
+            ->block(5, function () use ($broadcast): void {
+                $current = TelegramBroadcast::query()->findOrFail($broadcast->id);
+                if ($current->queue_dispatched_at !== null) {
+                    return;
+                }
+
+                $job = new SendTelegramBroadcastBatch($current->id, now()->toISOString());
+                try {
+                    $pendingDispatch = $job::dispatch($current->id, $job->jobEnqueuedAt)
+                        ->onQueue('telegram-broadcast')
+                        ->afterCommit();
+                    unset($pendingDispatch);
+                } catch (Throwable $exception) {
+                    (new UniqueLock(app(CacheRepository::class)))->release($job);
+
+                    throw $exception;
+                }
+
+                TelegramBroadcast::query()
+                    ->whereKey($current->id)
+                    ->whereNull('queue_dispatched_at')
+                    ->update(['queue_dispatched_at' => now()]);
+            });
+    }
+
+    private function stableBroadcastKey(string $idempotencyKey): string
+    {
+        $hex = hash('sha256', 'telegram-admin-broadcast:'.$idempotencyKey);
+
+        return implode('-', [
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12),
+        ]);
     }
 }

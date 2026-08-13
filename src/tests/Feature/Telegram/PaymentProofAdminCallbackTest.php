@@ -20,6 +20,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramBroadcast;
 use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -950,9 +951,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && in_array((string) ($r['chat_id'] ?? ''), ['111', '222'], true)
             && str_contains((string) ($r['text'] ?? ''), 'Stok Canva ready malam ini.'));
 
-        $this->postTelegramWebhook($this->callbackUpdate(225, 'broadcast-picker', 'broadcast:pick:1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', 'broadcast:select:'.$product->id.':1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        $preview = Http::recorded(fn ($record): bool => str_contains((string) ($record['text'] ?? ''), 'Preview broadcast'))->last()[0];
+        $pickCallback = $preview['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(225, 'broadcast-picker', $pickCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $picker = Http::recorded(fn ($record): bool => ($record['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last()[0];
+        $selectCallback = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', $selectCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $selectedPreview = Http::recorded(fn ($record): bool => str_contains((string) ($record['text'] ?? ''), 'Tombol produk: Canva Pro'))->last()[0];
+        $sendCallback = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', $sendCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
         $queuedBroadcast = Bus::dispatched(SendTelegramBroadcastBatch::class)->sole();
         $queuedBroadcast->handle(app(TelegramBroadcastService::class));
@@ -964,12 +973,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertCount(2, $localizedRecipientMessages);
         $this->assertSame([
             '111' => [
-                'text' => "📣 Info dari Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nButuh bantuan? Balas /support ya.",
+                'text' => 'Stok Canva ready malam ini.',
                 'button_text' => '🛍️ Beli: Canva Pro',
                 'callback_data' => 'product:'.$product->id,
             ],
             '222' => [
-                'text' => "📣 Info from Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nNeed help? Reply with /support.",
+                'text' => 'Stok Canva ready malam ini.',
                 'button_text' => '🛍️ Buy: Canva Pro',
                 'callback_data' => 'product:'.$product->id,
             ],
@@ -992,13 +1001,15 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && str_contains((string) $r['text'], "✅ Broadcast masuk antrean\n━━━━━━━━━━━━━━")
             && str_contains((string) $r['text'], 'Pengiriman berjalan di background.'));
 
-        $this->postTelegramWebhook($this->callbackUpdate(228, 'broadcast-send-again', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(228, 'broadcast-send-again', $sendCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
         $recipientMessages = collect(Http::recorded())
             ->filter(fn (array $record): bool => str_ends_with($record[0]->url(), '/sendMessage')
                 && in_array((string) ($record[0]['chat_id'] ?? ''), ['111', '222'], true)
                 && str_contains((string) ($record[0]['text'] ?? ''), 'Stok Canva ready malam ini.'));
         $this->assertCount(2, $recipientMessages);
+        $this->assertSame(1, TelegramBroadcast::query()->count());
+        $this->assertCount(1, Bus::dispatched(SendTelegramBroadcastBatch::class));
     }
 
     public function test_non_admin_cannot_approve_manual_payment_callback(): void

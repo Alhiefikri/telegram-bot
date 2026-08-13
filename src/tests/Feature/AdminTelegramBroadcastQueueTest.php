@@ -9,11 +9,13 @@ use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\User;
 use App\Services\Telegram\TelegramBroadcastService;
+use Illuminate\Contracts\Bus\Dispatcher as DispatcherContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 class AdminTelegramBroadcastQueueTest extends TestCase
@@ -65,6 +67,9 @@ class AdminTelegramBroadcastQueueTest extends TestCase
 
         $broadcast->refresh();
         $this->assertCount(10, $sentChatIds);
+        Http::assertSentCount(10);
+        Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['text'] === 'Batch me');
         $this->assertSame(50, $broadcast->recipient_count);
         $this->assertSame(10, $broadcast->sent_count);
         $this->assertSame(40, $broadcast->pending_count);
@@ -117,6 +122,64 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $this->assertSame(TelegramBroadcast::STATUS_COMPLETED, $broadcast->status);
         $this->assertSame(1, $attemptsByChat['111111111']);
         $this->assertSame(2, $attemptsByChat['222222222']);
+    }
+
+    public function test_same_confirmation_key_reuses_one_durable_intent_and_dispatch(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Queue::fake();
+
+        $first = app(TelegramBroadcastService::class)->queueAdminBroadcast(
+            'Idempotent broadcast',
+            [],
+            'draft-confirmation-token',
+        );
+        $second = app(TelegramBroadcastService::class)->queueAdminBroadcast(
+            'Idempotent broadcast',
+            [],
+            'draft-confirmation-token',
+        );
+
+        $this->assertSame($first['broadcast_id'], $second['broadcast_id']);
+        $this->assertSame(1, TelegramBroadcast::query()->count());
+        $this->assertNotNull(TelegramBroadcast::query()->firstOrFail()->queue_dispatched_at);
+        Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
+        Queue::assertPushedTimes(SendTelegramBroadcastBatch::class, 1);
+    }
+
+    public function test_queue_dispatch_failure_keeps_the_durable_intent_retryable(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        $dispatcher = Mockery::mock(DispatcherContract::class);
+        $this->app->instance(DispatcherContract::class, $dispatcher);
+        $dispatchAttempts = 0;
+        $dispatcher->shouldReceive('dispatch')
+            ->twice()
+            ->andReturnUsing(function () use (&$dispatchAttempts): null {
+                $dispatchAttempts++;
+                if ($dispatchAttempts === 1) {
+                    throw new \RuntimeException('queue unavailable');
+                }
+
+                return null;
+            });
+
+        $firstException = null;
+        try {
+            app(TelegramBroadcastService::class)->queueAdminBroadcast('Retry dispatch', [], 'retry-dispatch-token');
+        } catch (\RuntimeException $exception) {
+            $firstException = $exception;
+        }
+
+        $this->assertNotNull($firstException);
+        $this->assertSame('queue unavailable', $firstException?->getMessage());
+        $broadcast = TelegramBroadcast::query()->firstOrFail();
+        $this->assertNull($broadcast->queue_dispatched_at);
+
+        app(TelegramBroadcastService::class)->queueAdminBroadcast('Retry dispatch', [], 'retry-dispatch-token');
+
+        $this->assertNotNull($broadcast->fresh()->queue_dispatched_at);
+        $this->assertSame(1, TelegramBroadcast::query()->count());
     }
 
     public function test_permanent_recipient_failure_becomes_terminal_without_blocking_other_recipients(): void

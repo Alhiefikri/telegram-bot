@@ -2,12 +2,19 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramBroadcast;
+use App\Services\Telegram\TelegramBroadcastDrafts;
+use App\Services\Telegram\TelegramBroadcastIntents;
+use App\Services\Telegram\TelegramBroadcastService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -141,8 +148,10 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(313, '/broadcast Promo terbatas', ['id' => 999], 999))->assertOk();
+        $preview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Promo terbatas'))->last()[0];
+        $send = $preview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
         Cache::forget('telegram:broadcast-draft:999');
-        $this->postTelegramWebhook($this->callbackUpdate(314, 'expired-broadcast', 'broadcast:send', ['id' => 999], 999))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(314, 'expired-broadcast', $send, ['id' => 999], 999))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && $request['callback_query_id'] === 'expired-broadcast'
@@ -150,6 +159,127 @@ class AdminMenuTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Promo terbatas')
             && (string) ($request['chat_id'] ?? '') !== '999');
+    }
+
+    public function test_broadcast_preview_controls_are_bound_to_an_unpredictable_draft_identity(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $intents = app(TelegramBroadcastIntents::class);
+
+        $intents->handleCommand($customer, '999', '/broadcast Preview me');
+
+        $previewRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'))->last()[0];
+        $buttons = $previewRequest['reply_markup']['inline_keyboard'];
+        $callbacks = array_values(array_filter(array_map(
+            fn (array $button): ?string => $button['callback_data'] ?? null,
+            array_merge(...$buttons),
+        )));
+
+        $this->assertCount(3, $callbacks);
+        $this->assertCount(count($callbacks), array_unique($callbacks));
+        foreach ($callbacks as $callback) {
+            $this->assertLessThanOrEqual(64, strlen($callback));
+            $this->assertMatchesRegularExpression('/^broadcast:[a-z]+:[A-Za-z0-9]{16}(?::[1-9][0-9]*)?$/', $callback);
+        }
+    }
+
+    public function test_product_picker_and_confirmation_keep_the_same_draft_identity_and_localized_action(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $product = Product::factory()->create([
+            'name' => 'Premium Product',
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $intents = app(TelegramBroadcastIntents::class);
+
+        $intents->handleCommand($customer, '999', '/broadcast Literal product note');
+        $preview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Literal product note'))->last()[0];
+        $pick = $preview['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        preg_match('/^broadcast:pick:([A-Za-z0-9]{16}):1$/', $pick, $pickMatches);
+        $draftId = $pickMatches[1] ?? null;
+        $this->assertNotNull($draftId);
+
+        $intents->handleCallback($customer, '999', 'pick-product', $pick);
+        $picker = Http::recorded(fn ($request): bool => ($request['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last()[0];
+        $select = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+
+        $this->assertLessThanOrEqual(64, strlen($select));
+        $this->assertMatchesRegularExpression('/^broadcast:select:'.preg_quote($draftId, '/').':'.$product->id.'$/', $select);
+
+        $intents->handleCallback($customer, '999', 'select-product', $select);
+        $selectedPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: Premium Product'))->last()[0];
+        $send = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+        $this->assertLessThanOrEqual(64, strlen($send));
+        $this->assertSame('broadcast:send:'.$draftId, $send);
+
+        $intents->handleCallback($customer, '999', 'send-product', $send);
+
+        $broadcast = TelegramBroadcast::query()->firstOrFail();
+        $this->assertSame('Literal product note', $broadcast->message);
+        $this->assertSame('product:'.$product->id, $broadcast->reply_markup['id']['inline_keyboard'][0][0]['callback_data']);
+        Queue::assertPushedTimes(SendTelegramBroadcastBatch::class, 1);
+    }
+
+    public function test_stale_confirmation_cannot_send_the_replacement_draft(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $intents = app(TelegramBroadcastIntents::class);
+
+        $intents->handleCommand($customer, '999', '/broadcast First draft');
+        $firstPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'First draft'))->last()[0];
+        $firstSend = $firstPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+        $intents->handleCommand($customer, '999', '/broadcast Replacement draft');
+        $secondPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Replacement draft'))->last()[0];
+        $secondSend = $secondPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+        $this->assertNotSame($firstSend, $secondSend);
+        $intents->handleCallback($customer, '999', 'stale-confirmation', $firstSend);
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'stale-confirmation'
+            && str_contains((string) ($request['text'] ?? ''), 'tidak berlaku'));
+        $this->assertSame(0, TelegramBroadcast::query()->count());
+        Queue::assertNothingPushed();
+        $this->assertSame('Replacement draft', app(TelegramBroadcastDrafts::class)->get($customer)['message']);
+    }
+
+    public function test_confirmation_persistence_failure_leaves_the_draft_retryable(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $service = Mockery::mock(TelegramBroadcastService::class);
+        $service->shouldReceive('queueAdminBroadcast')
+            ->once()
+            ->andThrow(new \RuntimeException('persistence failed'));
+        $this->app->instance(TelegramBroadcastService::class, $service);
+        $intents = app(TelegramBroadcastIntents::class);
+
+        $intents->handleCommand($customer, '999', '/broadcast Retry me');
+        $preview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Retry me'))->last()[0];
+        $send = $preview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+        $intents->handleCallback($customer, '999', 'persistence-failure', $send);
+
+        $draft = app(TelegramBroadcastDrafts::class)->get($customer);
+        $this->assertIsArray($draft);
+        $this->assertSame('Retry me', $draft['message']);
+        $this->assertNull(TelegramBroadcast::query()->first());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && str_contains((string) ($request['text'] ?? ''), 'gagal disimpan'));
     }
 
     public function test_start_welcome_shows_mini_app_dashboard_only_to_admin(): void
