@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductRequest;
+use App\Models\Category;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductImageOptimizer;
@@ -12,6 +13,8 @@ use App\Services\Telegram\TelegramProductNotificationService;
 use App\Support\AdminTelegramDogfoodTiming;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class AdminProductCreateController extends Controller
 {
@@ -22,31 +25,51 @@ class AdminProductCreateController extends Controller
 
         $validated = $request->validated();
 
-        $product = new Product([
-            'category_id' => $validated['category_id'] ?? null,
-            'name' => $validated['name'],
-            'description' => $validated['description'],
-            'delivery_note' => $validated['delivery_note'] ?? null,
-            'usage_guide_title' => $validated['usage_guide_title'] ?? null,
-            'usage_guide_url' => $validated['usage_guide_url'] ?? null,
-            'price_amount' => (int) $validated['price_amount'],
-            'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
-            'currency' => 'IDR',
-            'image_path' => $request->hasFile('image') ? $images->store($request->file('image')) : null,
-            'is_active' => true,
-        ]);
-        $product->stock = 0;
-        $product->reserved_stock = 0;
-        $product->save();
+        $imagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
 
-        $auditLogger->log(
-            'product.created',
-            $product,
-            null,
-            $product->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
-            $user,
-            $request->ip(),
-        );
+        try {
+            $product = DB::transaction(function () use ($validated, $imagePath, $auditLogger, $user, $request): Product {
+                $categoryId = $validated['category_id'] ?? null;
+
+                if ($categoryId !== null) {
+                    Category::query()->whereKey($categoryId)->lockForUpdate()->firstOrFail();
+                }
+
+                $product = new Product([
+                    'category_id' => $categoryId,
+                    'name' => $validated['name'],
+                    'description' => $validated['description'],
+                    'delivery_note' => $validated['delivery_note'] ?? null,
+                    'usage_guide_title' => $validated['usage_guide_title'] ?? null,
+                    'usage_guide_url' => $validated['usage_guide_url'] ?? null,
+                    'price_amount' => (int) $validated['price_amount'],
+                    'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
+                    'currency' => 'IDR',
+                    'image_path' => $imagePath,
+                    'is_active' => true,
+                ]);
+                $product->stock = 0;
+                $product->reserved_stock = 0;
+                $product->save();
+
+                $auditLogger->log(
+                    'product.created',
+                    $product,
+                    null,
+                    $product->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']),
+                    $user,
+                    $request->ip(),
+                );
+
+                return $product;
+            }, 5);
+        } catch (Throwable $exception) {
+            if ($imagePath !== null) {
+                $images->deleteManagedImage($imagePath);
+            }
+
+            throw $exception;
+        }
 
         $result = $notifications->notifyProductCreated($product);
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_create', $startedAt, $result);

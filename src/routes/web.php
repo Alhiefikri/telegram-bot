@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminCategoryCreateController;
+use App\Http\Controllers\Admin\AdminCategoryDeleteController;
+use App\Http\Controllers\Admin\AdminCategoryUpdateController;
 use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
@@ -98,6 +100,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
+            Route::patch('categories/{category}', AdminCategoryUpdateController::class)->name('categories.update');
+            Route::delete('categories/{category}', AdminCategoryDeleteController::class)->name('categories.destroy');
 
             Route::prefix('store-channel')->name('store-channel.')->group(function (): void {
                 Route::post('/', AdminStoreChannelController::class)->name('update');

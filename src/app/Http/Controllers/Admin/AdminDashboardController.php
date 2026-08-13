@@ -22,12 +22,16 @@ class AdminDashboardController extends Controller
             (string) $request->query('sales_filter', 'all'),
             max(1, (int) $request->query('products_page', 1)),
         );
+        $dashboardErrors = $request->session()->get('errors', new ViewErrorBag);
         $viewData['dashboardState'] = $dashboardState->build(
             $viewData['productsTab'],
             $viewData['statsTab'],
             $viewData['navigation'],
-            $request->session()->get('errors', new ViewErrorBag),
+            $dashboardErrors,
+            $request->query('category_form') !== null ? (string) $request->query('category_form') : null,
+            $request->query('category_id') !== null ? (int) $request->query('category_id') : null,
         );
+
         if ($viewData['navigation']['activeTab'] === 'produk' && $request->query('product_form') === 'create') {
             $viewData['dashboardState']['productModalOpen'] = true;
         }

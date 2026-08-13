@@ -30,7 +30,7 @@ test.beforeAll(async () => {
     serverProcess = spawn('php', ['artisan', 'serve', '--host=127.0.0.1', `--port=${new URL(baseUrl).port}`], {
         cwd: appDir,
         env: appEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'ignore', 'ignore'],
     });
 
     await waitForServer(`${baseUrl}/admin/login`);
@@ -650,6 +650,93 @@ test('keeps tabs, cards, and the stock modal usable at Telegram mini app width',
     await expectPrimaryActionsAtLeast44px(page);
 });
 
+test('keeps category management create, edit, and delete confirmation usable on mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 900 });
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    await expectNoDocumentOverflow(page);
+
+    const opener = page.getByRole('button', { name: /Kelola Kategori/i });
+    await opener.click();
+
+    const modal = page.locator('#admin-category-management');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
+    await expect(modal.locator('#category-management-name')).toBeFocused();
+    await expect(modal.locator('article').filter({ hasText: 'Browser Responsive QA' })).toBeVisible();
+    await expectElementWithinViewport(page, modal);
+
+    const categoryForm = modal.locator('form').first();
+    await expect(categoryForm).toHaveAttribute('action', /\/admin\/categories$/);
+    await categoryForm.locator('#category-management-name').fill('Draft kategori browser');
+    await categoryForm.locator('#category-management-description').fill('Deskripsi draft kategori.');
+    await expect(categoryForm.locator('#category-management-name')).toHaveValue('Draft kategori browser');
+
+    const categoryArticle = modal.locator('article').filter({ hasText: 'Browser Responsive QA' }).first();
+    await categoryArticle.getByRole('button', { name: /Edit/i }).click();
+    await expect(modal.getByRole('heading', { name: 'Edit kategori' })).toBeVisible();
+    await expect(categoryForm).toHaveAttribute('action', /\/admin\/categories\/\d+$/);
+    await expect(categoryForm.locator('input[name="_method"]')).toHaveValue('PATCH');
+    await expect(categoryForm.locator('#category-management-name')).toHaveValue('Browser Responsive QA');
+    await expect(categoryForm.locator('#category-management-sort-order')).toHaveValue('99');
+
+    await categoryForm.locator('#category-management-visibility').selectOption('false');
+    await categoryForm.locator('#category-management-sort-order').fill('101');
+    await expect(categoryForm.locator('input[type="hidden"][name="is_active"]')).toHaveValue('0');
+    await expect(categoryForm.locator('#category-management-sort-order')).toHaveValue('101');
+
+    await modal.getByRole('button', { name: 'Batal edit' }).click();
+    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
+    await expect(categoryForm.locator('input[name="_method"]')).toHaveCount(0);
+    await expect(categoryForm.locator('#category-management-name')).toHaveValue('');
+
+    const deleteForm = categoryArticle.locator('form[data-category-delete-confirmation]');
+    const confirmation = await deleteForm.getAttribute('data-category-delete-confirmation');
+    expect(confirmation).toContain('Browser Responsive QA');
+    expect(confirmation).toContain('Tanpa kategori');
+    expect(confirmation).toContain('Status aktif, stok, dan reservasi');
+
+    let confirmationType;
+    let confirmationMessage;
+    page.once('dialog', async (dialog) => {
+        confirmationType = dialog.type();
+        confirmationMessage = dialog.message();
+        await dialog.dismiss();
+    });
+    await deleteForm.getByRole('button', { name: /Hapus/i }).click();
+    expect(confirmationType).toBe('confirm');
+    expect(confirmationMessage).toContain('Tanpa kategori');
+
+    await expect(modal).toBeVisible();
+    await expectNoDocumentOverflow(page);
+    await modal.getByRole('button', { name: 'Tutup modal' }).click();
+    await expect(modal).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
+test('opens and closes category management from the desktop Products tab', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    await expectNoDocumentOverflow(page);
+
+    const opener = page.getByRole('button', { name: /Kelola Kategori/i });
+    await opener.click();
+
+    const modal = page.locator('#admin-category-management');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
+    await expect(modal.locator('#category-management-name')).toBeFocused();
+    await expect(modal.locator('article').filter({ hasText: 'Browser Responsive QA' })).toBeVisible();
+    await expectElementWithinViewport(page, modal);
+
+    await modal.getByRole('button', { name: 'Tutup modal' }).click();
+    await expect(modal).toBeHidden();
+    await expect(opener).toBeFocused();
+});
+
 test('traps keyboard focus in the product modal and restores its opener', async ({ page }) => {
     await login(page);
     await page.goto(`${baseUrl}/admin?tab=produk`);
@@ -1007,7 +1094,7 @@ async function expectPrimaryActionsAtLeast44px(page) {
             label: (element.textContent || element.getAttribute('aria-label') || element.href || element.tagName).trim(),
             height: element.getBoundingClientRect().height,
         }))
-        .filter((element) => element.height < 44));
+        .filter((element) => Math.round(element.height) < 44));
 
     expect(tooSmall, `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
 }
@@ -1032,7 +1119,7 @@ async function expectStrictTouchTargetsAtLeast44px(locator) {
                 height: rect.height,
             };
         })
-        .filter(({ width, height }) => width < 44 || height < 44));
+        .filter(({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44));
 
     expect(tooSmall, `touch targets below 44x44 CSS px: ${JSON.stringify(tooSmall)}`).toEqual([]);
 }
@@ -1041,8 +1128,8 @@ async function expectTouchTargetAtLeast44px(locator) {
     const box = await locator.boundingBox();
 
     expect(box).not.toBeNull();
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {

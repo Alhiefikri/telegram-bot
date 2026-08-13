@@ -78,6 +78,7 @@ final class AdminDashboardData
                 'products' => [],
                 'pagination' => [],
                 'categoryOptions' => [],
+                'categoryManagement' => ['createUrl' => route('admin.categories.store'), 'categories' => []],
             ],
             'salesTab' => [
                 'orders' => [],

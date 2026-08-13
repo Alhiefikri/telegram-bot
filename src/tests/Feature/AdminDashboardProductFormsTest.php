@@ -439,7 +439,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'category_name' => 'Akun Premium',
                 'category_description' => 'Akun siap jual',
             ])
-            ->assertRedirect('/admin?tab=produk#admin-category-create')
+            ->assertRedirect('/admin?tab=produk&category_form=create#admin-category-management')
             ->assertSessionHas('status', 'Kategori Akun Premium berhasil dibuat.');
 
         $this->assertDatabaseHas('categories', [
@@ -461,7 +461,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->post(route('admin.categories.store'), [
                 'category_name' => '!!!',
             ])
-            ->assertRedirect('/admin?tab=produk#admin-category-create');
+            ->assertRedirect('/admin?tab=produk&category_form=create#admin-category-management');
 
         $this->assertDatabaseHas('categories', ['slug' => 'kategori']);
     }
@@ -472,7 +472,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->from('/admin?tab=produk')
             ->post(route('admin.categories.store'), ['category_name' => ''])
-            ->assertRedirect('/admin?tab=produk')
+            ->assertRedirect('/admin?tab=produk&category_form=create#admin-category-management')
             ->assertSessionHasErrors(['category_name'], null, 'categoryCreate');
 
         $this->followingRedirects()
@@ -481,6 +481,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertOk()
             ->assertSee('Nama kategori maksimal 120 karakter.')
             ->assertSee('\u0022productModalOpen\u0022:false', false)
+            ->assertSee('\u0022categoryModalOpen\u0022:true', false)
             ->assertDontSee('Periksa kembali field produk yang ditandai.');
     }
 

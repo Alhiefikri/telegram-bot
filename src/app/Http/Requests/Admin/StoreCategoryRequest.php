@@ -19,6 +19,14 @@ class StoreCategoryRequest extends FormRequest
         return Gate::allows('create', Category::class);
     }
 
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'category_name' => $this->trimmedStringOrOriginal('category_name'),
+            'category_description' => $this->nullableTrimmedString('category_description'),
+        ]);
+    }
+
     /**
      * @return array<string, list<string>>
      */
@@ -45,5 +53,25 @@ class StoreCategoryRequest extends FormRequest
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
     {
         return app(AdminProductDashboardFormProtocol::class)->categoryCreateValidationErrors($this, $validator);
+    }
+
+    private function trimmedStringOrOriginal(string $key): mixed
+    {
+        $value = $this->input($key);
+
+        return is_string($value) ? trim($value) : $value;
+    }
+
+    private function nullableTrimmedString(string $key): mixed
+    {
+        $value = $this->input($key);
+
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
     }
 }

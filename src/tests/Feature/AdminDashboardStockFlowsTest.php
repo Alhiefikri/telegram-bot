@@ -20,6 +20,7 @@ use App\Services\Admin\AdminDashboardProductsData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class AdminDashboardStockFlowsTest extends TestCase
@@ -46,7 +47,9 @@ class AdminDashboardStockFlowsTest extends TestCase
         $claimedOrderItem = OrderItem::factory()->create(['order_id' => $claimedOrder->id, 'product_id' => $product->id]);
         ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $claimedOrderItem->id, 'secret' => 'claimed@example.test|pass']);
 
-        $this->get('/admin?tab=produk')
+        $response = $this->get('/admin?tab=produk');
+
+        $response
             ->assertOk()
             ->assertSee('Produk Saya')
             ->assertSee('Netflix 1 Bulan')
@@ -65,7 +68,6 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('aria-expanded="false"', false)
             ->assertSee('aria-controls="product-more-actions-'.$product->id.'"', false)
             ->assertSeeInOrder(['Bagikan', 'Pause', 'Arsipkan'])
-            ->assertDontSee('🗑️ Hapus')
             ->assertSee('Tambah kategori')
             ->assertSee('Kelola stok')
             ->assertSee('available@example.test|pass')
@@ -76,6 +78,13 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertDontSee('@js(', false)
             ->assertDontSee('fi-form', false)
             ->assertDontSee('fi-modal', false);
+
+        $productCardHtml = Str::before(
+            Str::after($response->getContent(), 'id="product-'.$product->id.'"'),
+            '</article>'
+        );
+
+        $this->assertStringNotContainsString('🗑️ Hapus', $productCardHtml);
     }
 
     public function test_manage_stock_data_orders_mixed_rows_by_status_group_with_paid_history_last(): void

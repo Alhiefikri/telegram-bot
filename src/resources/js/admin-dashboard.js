@@ -27,6 +27,16 @@ const emptyProductForm = () => ({
   productImageFileName: EMPTY_IMAGE_FILE_NAME,
 });
 
+const emptyCategoryForm = () => ({
+  categoryFormMode: "create",
+  categoryFormMethod: "",
+  categoryId: null,
+  categoryName: "",
+  categoryDescription: "",
+  categoryIsActive: true,
+  categorySortOrder: 0,
+});
+
 const STOCK_GROUPS = [
   {
     key: "ready",
@@ -111,6 +121,12 @@ export default function adminDashboard(initialState = {}) {
     copied: false,
     storeLink: initialState.storeLink ?? "",
     copyState: "Salin",
+    categoryModalOpen: Boolean(initialState.categoryModalOpen),
+    categoryFormSubmitting: false,
+    categoryFormAction: initialState.categoryCreateUrl ?? "",
+    categoryCreateUrl: initialState.categoryCreateUrl ?? "",
+    ...emptyCategoryForm(),
+    ...(initialState.categoryForm ?? {}),
     productModalOpen: Boolean(initialState.productModalOpen),
     productFormSubmitting: false,
     productFormAction: initialState.productStoreUrl ?? "",
@@ -119,6 +135,7 @@ export default function adminDashboard(initialState = {}) {
     productDeliveryNoteOpen: Boolean(
       initialState.productForm?.productDeliveryNoteOpen
     ),
+    categoryModalOpener: null,
     stockModalOpen: Boolean(initialState.stockModalOpen),
     stockFormAction: initialState.stockForm?.stockFormAction ?? "",
     stockProductId: initialState.stockForm?.stockProductId ?? null,
@@ -158,6 +175,11 @@ export default function adminDashboard(initialState = {}) {
 
         if (this.stockModalOpen) {
           this.$refs.stockItems?.focus();
+          return;
+        }
+
+        if (this.categoryModalOpen) {
+          this.$refs.categoryName?.focus();
           return;
         }
 
@@ -399,6 +421,61 @@ export default function adminDashboard(initialState = {}) {
       this.$nextTick(() => this.$refs.productName?.focus());
     },
 
+    openCategoryManagement() {
+      this.categoryModalOpener = document.activeElement;
+      Object.assign(this, {
+        activeTab: "produk",
+        categoryModalOpen: true,
+        categoryFormSubmitting: false,
+        categoryFormAction: this.categoryCreateUrl,
+        ...emptyCategoryForm(),
+      });
+      this.$nextTick(() => this.$refs.categoryName?.focus());
+    },
+
+    openCategoryEditModal(category) {
+      Object.assign(this, {
+        activeTab: "produk",
+        categoryModalOpen: true,
+        categoryFormSubmitting: false,
+        categoryFormMode: "edit",
+        categoryFormAction: category.updateUrl,
+        categoryFormMethod: "PATCH",
+        categoryId: category.id,
+        categoryName: category.name,
+        categoryDescription: category.description ?? "",
+        categoryIsActive: Boolean(category.isActive),
+        categorySortOrder: category.sortOrder ?? 0,
+      });
+      this.$nextTick(() => this.$refs.categoryName?.focus());
+    },
+
+    resetCategoryForm() {
+      Object.assign(this, {
+        categoryFormSubmitting: false,
+        categoryFormAction: this.categoryCreateUrl,
+        ...emptyCategoryForm(),
+      });
+      this.$nextTick(() => this.$refs.categoryName?.focus());
+    },
+
+    closeCategoryManagement() {
+      const opener = this.categoryModalOpener;
+      this.categoryFormSubmitting = false;
+      this.categoryModalOpen = false;
+      this.categoryModalOpener = null;
+      this.restoreModalFocus(opener);
+    },
+
+    submitCategoryForm(event) {
+      if (!event.target.checkValidity()) {
+        return;
+      }
+
+      this.categoryFormSubmitting = true;
+      this.categoryModalOpen = false;
+    },
+
     openProductEditModal(product) {
       this.productModalOpener = document.activeElement;
       Object.assign(this, {
@@ -536,6 +613,10 @@ export default function adminDashboard(initialState = {}) {
 
       if (event.detail?.modal === "product-modal") {
         this.closeProductModal();
+      }
+
+      if (event.detail?.modal === "admin-category-management") {
+        this.closeCategoryManagement();
       }
 
       if (event.detail?.modal === "manage-stock-modal") {

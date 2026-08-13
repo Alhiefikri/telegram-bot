@@ -27,6 +27,10 @@ final class AdminDashboardProductsData
             'products' => $productPage['products'],
             'pagination' => $productPage['pagination'],
             'categoryOptions' => $this->categoryOptions(),
+            'categoryManagement' => [
+                'createUrl' => route('admin.categories.store'),
+                'categories' => $canManageProducts ? $this->categoryManagementCategories() : [],
+            ],
         ];
     }
 
@@ -266,5 +270,45 @@ final class AdminDashboardProductsData
                 'name' => $category->name,
             ])
             ->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function categoryManagementCategories(): array
+    {
+        return Category::query()
+            ->withCount(['products' => fn ($query) => $query->withTrashed()])
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Category $category): array => [
+                'id' => $category->id,
+                'name' => $category->name,
+                'description' => $category->description,
+                'is_active' => $category->is_active,
+                'sort_order' => $category->sort_order,
+                'product_count' => (int) $category->products_count,
+                'status_label' => $category->is_active ? 'Tampil' : 'Disembunyikan',
+                'status_color' => $category->is_active ? '#166534' : '#991b1b',
+                'update_url' => route('admin.categories.update', ['category' => $category]),
+                'delete_url' => route('admin.categories.destroy', ['category' => $category]),
+                'delete_confirmation' => $this->deleteConfirmation($category->name, (int) $category->products_count),
+                'edit_payload' => [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'description' => $category->description,
+                    'isActive' => $category->is_active,
+                    'sortOrder' => $category->sort_order,
+                    'updateUrl' => route('admin.categories.update', ['category' => $category]),
+                ],
+            ])
+            ->all();
+    }
+
+    private function deleteConfirmation(string $name, int $productCount): string
+    {
+        return "Hapus kategori {$name}? {$productCount} produk akan menjadi Tanpa kategori. Status aktif, stok, dan reservasi produk tetap dipertahankan.";
     }
 }

@@ -76,7 +76,7 @@ class AdminDashboardReturnTargetsTest extends TestCase
         $this->post(route('admin.categories.store'), [
             'category_name' => 'Return Target Category',
             'category_description' => 'Kategori target redirect.',
-        ])->assertRedirect('/admin?tab=produk#admin-category-create');
+        ])->assertRedirect('/admin?tab=produk&category_form=create#admin-category-management');
 
         $this->post(route('admin.payment-mode.update'), [
             'update_scope' => 'provider_switch',
@@ -160,7 +160,7 @@ class AdminDashboardReturnTargetsTest extends TestCase
         ];
         $tabMarkup = [
             'stats' => ['id="admin-section-stats"', 'id="admin-payment-settings"', 'id="admin-support-settings"'],
-            'produk' => ['id="admin-section-products"', 'id="admin-category-create"', 'id="product-'.$product->id.'"'],
+            'produk' => ['id="admin-section-products"', 'id="admin-category-management"', 'id="product-'.$product->id.'"'],
             'penjualan' => ['id="admin-section-sales"', 'id="sales-proof-'.$order->id.'"'],
             'broadcast' => ['id="admin-section-broadcast"'],
             'telegram-channel' => ['id="admin-section-store-channel"'],

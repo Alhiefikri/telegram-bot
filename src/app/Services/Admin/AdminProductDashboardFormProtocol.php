@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Models\Category;
 use App\Models\Product;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\RedirectResponse;
@@ -21,6 +22,8 @@ class AdminProductDashboardFormProtocol
 
     private const CATEGORY_CREATE_BAG = 'categoryCreate';
 
+    private const CATEGORY_UPDATE_BAG = 'categoryUpdate';
+
     public function __construct(private readonly AdminDashboardRedirector $redirector) {}
 
     public function productCreateValidationErrors(Validator $validator): RedirectResponse
@@ -32,9 +35,22 @@ class AdminProductDashboardFormProtocol
 
     public function categoryCreateValidationErrors(Request $request, Validator $validator): RedirectResponse
     {
-        return $this->productTabRedirect()
+        return $this->categoryManagementRedirect('create')
             ->withErrors($validator, self::CATEGORY_CREATE_BAG)
             ->withInput($request->only(['category_name', 'category_description']));
+    }
+
+    public function categoryUpdateValidationErrors(Request $request, Validator $validator, Category $category): RedirectResponse
+    {
+        return $this->categoryManagementRedirect('edit', $category->id)
+            ->withErrors($validator->errors()->messages(), self::CATEGORY_UPDATE_BAG)
+            ->withInput([
+                'category_id' => $category->id,
+                'name' => $request->input('name'),
+                'description' => $request->input('description'),
+                'is_active' => $request->input('is_active'),
+                'sort_order' => $request->input('sort_order'),
+            ]);
     }
 
     public function productUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
@@ -104,12 +120,29 @@ class AdminProductDashboardFormProtocol
 
     public function categoryCreated(string $categoryName): RedirectResponse
     {
-        return $this->redirector->categoryCreate()
+        return $this->categoryManagementRedirect('create')
             ->with('status', "Kategori {$categoryName} berhasil dibuat.");
+    }
+
+    public function categoryUpdated(Category $category): RedirectResponse
+    {
+        return $this->categoryManagementRedirect('edit', $category->id)
+            ->with('status', "Kategori {$category->name} berhasil diperbarui.");
+    }
+
+    public function categoryDeleted(string $categoryName, int $productCount): RedirectResponse
+    {
+        return $this->categoryManagementRedirect('create')
+            ->with('status', "Kategori {$categoryName} dihapus. {$productCount} produk menjadi Tanpa kategori; status aktif, stok, dan reservasi tetap dipertahankan.");
     }
 
     private function productTabRedirect(): RedirectResponse
     {
         return redirect()->route('admin.dashboard', ['tab' => self::PRODUCT_TAB]);
+    }
+
+    private function categoryManagementRedirect(?string $form = null, ?int $categoryId = null): RedirectResponse
+    {
+        return $this->redirector->categoryManagement($form, $categoryId);
     }
 }

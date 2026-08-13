@@ -54,9 +54,16 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_PRODUCTS, self::TAB_FALLBACK_TARGETS[self::TAB_PRODUCTS]);
     }
 
-    public function categoryCreate(): RedirectResponse
+    public function categoryManagement(?string $form = null, ?int $categoryId = null): RedirectResponse
     {
-        return $this->dashboard(self::TAB_PRODUCTS, 'admin-category-create');
+        return $this->dashboard(
+            self::TAB_PRODUCTS,
+            'admin-category-management',
+            [
+                'category_form' => $form,
+                'category_id' => $categoryId,
+            ],
+        );
     }
 
     public function paymentSettings(): RedirectResponse

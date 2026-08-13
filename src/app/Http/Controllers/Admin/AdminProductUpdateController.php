@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Jobs\SendProductPriceChangeNotifications;
+use App\Models\Category;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\ProductImageOptimizer;
@@ -26,6 +27,12 @@ class AdminProductUpdateController extends Controller
 
         try {
             $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, &$oldImagePath) {
+                $categoryId = $validated['category_id'] ?? null;
+
+                if ($categoryId !== null) {
+                    Category::query()->whereKey($categoryId)->lockForUpdate()->firstOrFail();
+                }
+
                 $locked = Product::query()->whereKey($product->getKey())->lockForUpdate()->firstOrFail();
                 $oldValues = $locked->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
                 $oldImagePath = $oldValues['image_path'] ?? null;

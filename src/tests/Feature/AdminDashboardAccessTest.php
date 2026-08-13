@@ -169,6 +169,16 @@ class AdminDashboardAccessTest extends TestCase
                 'methods' => ['POST'],
                 'middleware' => ['web', 'admin.no-cache', 'admin.access'],
             ],
+            'admin.categories.update' => [
+                'uri' => 'admin/categories/{category}',
+                'methods' => ['PATCH'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.categories.destroy' => [
+                'uri' => 'admin/categories/{category}',
+                'methods' => ['DELETE'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
         ];
 
         foreach ($expectedRoutes as $name => $expected) {
