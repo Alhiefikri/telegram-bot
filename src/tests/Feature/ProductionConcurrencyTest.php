@@ -9,6 +9,7 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -23,6 +24,8 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\ProductStockItem;
+use App\Models\TelegramBroadcast;
+use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
@@ -40,6 +43,7 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramUpdateReplayGuard;
 use App\Support\PaymentProvider;
@@ -47,6 +51,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -116,6 +121,87 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, PaymentEvent::count());
         $this->assertNull($order->telegram_receipt_sent_at);
         $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_admin_broadcast_text_workers_share_one_database_cache_window(): void
+    {
+        $this->assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(false);
+    }
+
+    public function test_concurrent_admin_broadcast_photo_workers_share_one_database_cache_window(): void
+    {
+        $this->assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(true);
+    }
+
+    private function assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(bool $photo): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        config()->set('services.telegram.broadcast_rate_limit_per_second', 1);
+        Cache::flush();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 77]]));
+
+        Customer::factory()->count(2)->sequence(fn ($sequence) => [
+            'telegram_id' => 970000 + $sequence->index,
+        ])->create();
+        $broadcasts = [];
+        for ($index = 0; $index < 2; $index++) {
+            $broadcasts[] = TelegramBroadcast::create([
+                'broadcast_key' => (string) Str::uuid(),
+                'source' => 'admin',
+                'message' => $photo ? 'Concurrent photo caption' : 'Concurrent text broadcast',
+                'photo_file_id' => $photo ? 'bot-owned-photo-reference' : null,
+                'status' => TelegramBroadcast::STATUS_QUEUED,
+            ]);
+        }
+
+        $results = $this->runConcurrently(array_map(
+            fn (TelegramBroadcast $broadcast): callable => fn () => app(TelegramBroadcastService::class)
+                ->processAdminBroadcastBatch($broadcast->id, 2)
+                ->sent,
+            $broadcasts,
+        ));
+
+        $this->assertSame(2, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, array_sum(array_map(
+            fn (array $result): int => (int) ($result['value'] ?? 0),
+            $results,
+        )));
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->whereNotNull('sent_at')->count());
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->where('attempts', 1)->count());
+        $this->assertSame(3, TelegramBroadcastRecipient::query()->where('attempts', 0)->count());
+    }
+
+    public function test_postgres_admin_broadcast_deferral_schedules_next_window_without_claiming_recipient(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        config()->set('services.telegram.broadcast_rate_limit_per_second', 1);
+        Cache::flush();
+        Queue::fake();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 77]]));
+
+        Customer::factory()->count(2)->sequence(fn ($sequence) => [
+            'telegram_id' => 980000 + $sequence->index,
+        ])->create();
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'PostgreSQL deferred batch',
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+        $before = now();
+
+        (new SendTelegramBroadcastBatch($broadcast->id, $before->toISOString()))
+            ->handle(app(TelegramBroadcastService::class));
+
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->whereNotNull('sent_at')->count());
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->where('attempts', 0)->count());
+        Queue::assertPushed(SendTelegramBroadcastBatch::class, function (SendTelegramBroadcastBatch $job) use ($broadcast, $before): bool {
+            return $job->broadcastId === $broadcast->id
+                && $job->delay instanceof \DateTimeInterface
+                && $job->delay->getTimestamp() >= $before->copy()->addSecond()->getTimestamp();
+        });
     }
 
     public function test_concurrent_provider_switch_and_checkout_serialize_on_the_shared_setting_lock(): void

@@ -7,13 +7,14 @@ use App\Models\Customer;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Support\DogfoodTiming;
+use Carbon\CarbonInterface;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -21,7 +22,7 @@ class TelegramBroadcastService
 {
     private const CLAIM_TTL_MINUTES = 15;
 
-    private const RETRY_DELAY_SECONDS = 30;
+    public const RECIPIENT_RETRY_DELAY_SECONDS = 30;
 
     private const MAX_PROVIDER_RETRY_AFTER_SECONDS = 300;
 
@@ -29,7 +30,10 @@ class TelegramBroadcastService
 
     public const MAX_RECIPIENT_ATTEMPTS = 5;
 
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(
+        private TelegramBotClient $bot,
+        private TelegramBroadcastRateLimiter $rateLimiter,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $replyMarkup
@@ -109,13 +113,11 @@ class TelegramBroadcastService
                 $query->whereNull('send_started_at')
                     ->orWhere('send_started_at', '<=', now()->subMinutes(self::CLAIM_TTL_MINUTES));
             })
-            ->where(function ($query): void {
-                $query->whereNull('failed_at')
-                    ->orWhere('failed_at', '<=', now()->subSeconds(self::RETRY_DELAY_SECONDS))
-                    ->orWhere('retry_at', '<=', now());
+            ->where(function (Builder $query): void {
+                $this->constrainRecipientDue($query, now());
             })
             ->orderBy('id')
-            ->limit(max(1, $batchSize))
+            ->limit(min(self::ADMIN_BATCH_SIZE, max(1, $batchSize)))
             ->get();
 
         if ($recipients->isNotEmpty()) {
@@ -125,15 +127,20 @@ class TelegramBroadcastService
         $sent = 0;
         $transientFailures = 0;
         $terminalFailures = 0;
+        $processed = 0;
         $retryAfterSeconds = null;
 
         foreach ($recipients as $recipient) {
+            $rateLimit = $this->rateLimiter->tryAcquire();
+            if (! $rateLimit->allowed) {
+                $retryAfterSeconds = max($retryAfterSeconds ?? 0, $rateLimit->retryAfterSeconds);
+                break;
+            }
+
             $outcome = $this->sendAdminBroadcastRecipient($broadcast, $recipient);
+            $processed++;
             if (isset($outcome['retry_after_seconds'])) {
                 $retryAfterSeconds = max($retryAfterSeconds ?? 0, $outcome['retry_after_seconds']);
-            }
-            if ($outcome['status'] === 'rate_limited') {
-                continue;
             }
             $sent += $outcome['status'] === 'sent' ? 1 : 0;
             $transientFailures += $outcome['status'] === 'transient_failure' ? 1 : 0;
@@ -141,15 +148,46 @@ class TelegramBroadcastService
         }
 
         $hasMore = $this->refreshAdminBroadcastStatus($broadcast->id);
+        if ($hasMore
+            && $retryAfterSeconds === null
+            && $transientFailures === 0
+            && $processed >= $this->rateLimiter->maxMessagesPerWindow()) {
+            $retryAfterSeconds = 1;
+        }
 
         return new TelegramBroadcastBatchResult(
-            processed: $recipients->count(),
+            processed: $processed,
             sent: $sent,
             transientFailures: $transientFailures,
             terminalFailures: $terminalFailures,
             hasMore: $hasMore,
             retryAfterSeconds: $retryAfterSeconds,
         );
+    }
+
+    public function recoverableBroadcastsQuery(CarbonInterface $claimCutoff, CarbonInterface $at): Builder
+    {
+        return TelegramBroadcast::query()
+            ->whereNotIn('status', [
+                TelegramBroadcast::STATUS_COMPLETED,
+                TelegramBroadcast::STATUS_PARTIALLY_FAILED,
+                TelegramBroadcast::STATUS_FAILED,
+                TelegramBroadcast::STATUS_SKIPPED,
+            ])
+            ->where(function ($query) use ($claimCutoff, $at): void {
+                $query->whereNull('recipients_materialized_at')
+                    ->orWhereHas('recipients', function ($recipients) use ($claimCutoff, $at): void {
+                        $recipients
+                            ->whereNull('sent_at')
+                            ->whereNull('terminal_failed_at')
+                            ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
+                            ->where(function ($claim) use ($claimCutoff): void {
+                                $claim->whereNull('send_started_at')
+                                    ->orWhere('send_started_at', '<=', $claimCutoff);
+                            });
+                        $this->constrainRecipientDue($recipients, $at);
+                    });
+            });
     }
 
     /**
@@ -275,17 +313,32 @@ class TelegramBroadcastService
         $this->refreshAdminBroadcastStatus($broadcast->id, true);
     }
 
+    private function constrainRecipientDue(Builder $query, CarbonInterface $at): void
+    {
+        $query->where(function (Builder $due) use ($at): void {
+            $due
+                ->where(function (Builder $withoutProviderRetry) use ($at): void {
+                    $withoutProviderRetry
+                        ->whereNull('retry_at')
+                        ->where(function (Builder $failed) use ($at): void {
+                            $failed
+                                ->whereNull('failed_at')
+                                ->orWhere('failed_at', '<=', $at->copy()->subSeconds(self::RECIPIENT_RETRY_DELAY_SECONDS));
+                        });
+                })
+                ->orWhere(function (Builder $providerRetry) use ($at): void {
+                    $providerRetry
+                        ->whereNotNull('retry_at')
+                        ->where('retry_at', '<=', $at);
+                });
+        });
+    }
+
     /**
-     * @return array{status: 'skipped'|'sent'|'transient_failure'|'terminal_failure'|'rate_limited', retry_after_seconds?: int}
+     * @return array{status: 'skipped'|'sent'|'transient_failure'|'terminal_failure', retry_after_seconds?: int}
      */
     private function sendAdminBroadcastRecipient(TelegramBroadcast $broadcast, TelegramBroadcastRecipient $recipient): array
     {
-        $rateLimitKey = 'telegram:admin-broadcast:send-rate';
-        $rateLimit = max(1, (int) config('services.telegram.broadcast_rate_limit_per_second', 25));
-        if (RateLimiter::increment($rateLimitKey, 1) > $rateLimit) {
-            return ['status' => 'rate_limited', 'retry_after_seconds' => 1];
-        }
-
         $token = (string) Str::uuid();
         $claimed = DB::transaction(function () use ($recipient, $token): ?TelegramBroadcastRecipient {
             $locked = TelegramBroadcastRecipient::query()
@@ -326,6 +379,7 @@ class TelegramBroadcastService
             'broadcast_id' => $broadcast->id,
             'recipient_id' => $claimed->id,
             'recipient_correlation_id' => DogfoodTiming::correlation($claimed->telegram_id),
+            'operation' => filled($broadcast->photo_file_id) ? 'sendPhotoReference' : 'sendMessage',
             'status' => 'ok',
             'duration_ms' => 0.0,
         ];
@@ -369,6 +423,7 @@ class TelegramBroadcastService
             DogfoodTiming::log('dogfood.telegram.broadcast_recipient', $recipientLog);
 
             Log::warning('telegram.admin_broadcast_recipient_failed', [
+                'operation' => filled($broadcast->photo_file_id) ? 'sendPhotoReference' : 'sendMessage',
                 'broadcast_id' => $broadcast->id,
                 'recipient_id' => $claimed->id,
                 'customer_id' => $claimed->customer_id,
@@ -460,6 +515,7 @@ class TelegramBroadcastService
         TelegramBroadcast::query()->whereKey($broadcastId)->update($updates);
 
         DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
+            'operation' => 'admin_broadcast',
             'broadcast_id' => $broadcastId,
             'recipient_count' => $recipientCount,
             'sent' => $sentCount,

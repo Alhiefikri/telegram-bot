@@ -38,6 +38,7 @@ class SendTelegramBroadcastBatch implements ShouldBeUniqueUntilProcessing, Shoul
         DogfoodTiming::resetQueries();
 
         DogfoodTiming::log('dogfood.telegram.admin_broadcast_job_picked_up', [
+            'operation' => 'admin_broadcast_batch',
             'broadcast_id' => $this->broadcastId,
             'job_enqueued_at' => $this->jobEnqueuedAt,
             'job_picked_up_at' => now()->toISOString(),
@@ -58,12 +59,14 @@ class SendTelegramBroadcastBatch implements ShouldBeUniqueUntilProcessing, Shoul
             }
         } finally {
             DogfoodTiming::log('dogfood.telegram.admin_broadcast_job_finished', DogfoodTiming::queryStats() + [
+                'operation' => 'admin_broadcast_batch',
                 'broadcast_id' => $this->broadcastId,
                 'handler_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
                 'processed_recipients' => $result?->processed,
                 'sent' => $result?->sent,
                 'transient_failures' => $result?->transientFailures,
                 'terminal_failures' => $result?->terminalFailures,
+                'retry_after_seconds' => $result?->retryAfterSeconds,
                 'has_more' => $result?->hasMore,
                 'memory_before_bytes' => $memoryBefore,
                 'memory_after_bytes' => memory_get_usage(true),

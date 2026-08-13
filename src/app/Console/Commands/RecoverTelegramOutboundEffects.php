@@ -17,8 +17,8 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\StoreChannelSetting;
-use App\Models\TelegramBroadcast;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\TelegramBroadcastService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 
@@ -155,25 +155,8 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
-        TelegramBroadcast::query()
-            ->whereNotIn('status', [
-                TelegramBroadcast::STATUS_COMPLETED,
-                TelegramBroadcast::STATUS_PARTIALLY_FAILED,
-                TelegramBroadcast::STATUS_FAILED,
-                TelegramBroadcast::STATUS_SKIPPED,
-            ])
-            ->where(function ($query) use ($cutoff): void {
-                $query->whereNull('recipients_materialized_at')
-                    ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
-                        $recipients
-                            ->whereNull('sent_at')
-                            ->whereNull('terminal_failed_at')
-                            ->where(function ($claim) use ($cutoff): void {
-                                $claim->whereNull('send_started_at')
-                                    ->orWhere('send_started_at', '<=', $cutoff);
-                            });
-                    });
-            })
+        app(TelegramBroadcastService::class)
+            ->recoverableBroadcastsQuery($cutoff, now())
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($broadcasts) use (&$dispatched): void {
                 foreach ($broadcasts as $broadcast) {
