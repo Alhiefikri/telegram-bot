@@ -24,6 +24,8 @@ class AdminProductDashboardFormProtocol
 
     private const CATEGORY_UPDATE_BAG = 'categoryUpdate';
 
+    private const CATEGORY_DELETE_BAG = 'categoryDelete';
+
     public function __construct(private readonly AdminDashboardRedirector $redirector) {}
 
     public function productCreateValidationErrors(Validator $validator): RedirectResponse
@@ -51,6 +53,12 @@ class AdminProductDashboardFormProtocol
                 'is_active' => $request->input('is_active'),
                 'sort_order' => $request->input('sort_order'),
             ]);
+    }
+
+    public function categoryDeleteValidationErrors(Validator $validator): RedirectResponse
+    {
+        return $this->categoryManagementRedirect('create')
+            ->withErrors($validator, self::CATEGORY_DELETE_BAG);
     }
 
     public function productUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse

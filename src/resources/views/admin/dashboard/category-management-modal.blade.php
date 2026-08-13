@@ -10,9 +10,13 @@
             tabindex="-1"
             class="max-h-[92vh] w-full max-w-3xl overflow-y-auto !bg-[#fff3a3]"
         >
-            @if ($errors->categoryCreate->any() || $errors->categoryUpdate->any())
+            @if ($errors->categoryCreate->any() || $errors->categoryUpdate->any() || $errors->categoryDelete->any())
                 <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">
-                    Periksa kembali field kategori yang ditandai.
+                    @if ($errors->categoryDelete->any())
+                        {{ $errors->categoryDelete->first('confirm_delete') }}
+                    @else
+                        Periksa kembali field kategori yang ditandai.
+                    @endif
                 </x-admin-dashboard.notice>
             @endif
 

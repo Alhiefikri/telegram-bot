@@ -270,7 +270,8 @@ class AdminCategoryCrudTest extends TestCase
 
         $this->actingAs($admin)
             ->delete(route('admin.categories.destroy', $category))
-            ->assertSessionHasErrors('confirm_delete');
+            ->assertRedirect('/admin?tab=produk&category_form=create#admin-category-management')
+            ->assertSessionHasErrors(['confirm_delete'], null, 'categoryDelete');
 
         $this->assertDatabaseHas('categories', ['id' => $category->id, 'deleted_at' => null]);
     }

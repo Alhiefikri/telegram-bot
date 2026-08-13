@@ -20,6 +20,8 @@ class AdminProductDashboardState
 
     private const CATEGORY_UPDATE_BAG = 'categoryUpdate';
 
+    private const CATEGORY_DELETE_BAG = 'categoryDelete';
+
     /**
      * @param  array<string, mixed>  $productsTab
      * @param  array<string, mixed>  $statsTab
@@ -41,6 +43,7 @@ class AdminProductDashboardState
         $stockAdjustmentErrors = $errors->getBag(self::STOCK_ADJUSTMENT_BAG);
         $categoryCreateErrors = $errors->getBag(self::CATEGORY_CREATE_BAG);
         $categoryUpdateErrors = $errors->getBag(self::CATEGORY_UPDATE_BAG);
+        $categoryDeleteErrors = $errors->getBag(self::CATEGORY_DELETE_BAG);
         $stockItemUpdateErrors = $errors->getBag(self::STOCK_ITEM_UPDATE_BAG);
 
         $hasProductErrors = $productCreateErrors->count() > 0 || $productUpdateErrors->count() > 0;
@@ -52,6 +55,7 @@ class AdminProductDashboardState
             || $stockAdjustmentErrors->count() > 0
             || $categoryCreateErrors->count() > 0
             || $categoryUpdateErrors->count() > 0
+            || $categoryDeleteErrors->count() > 0
             || $stockItemUpdateErrors->count() > 0;
 
         return [
@@ -60,7 +64,7 @@ class AdminProductDashboardState
             'productStoreUrl' => $productStoreUrl,
             'categoryCreateUrl' => $categoryManagement['createUrl'],
             'productModalOpen' => $hasProductErrors,
-            'categoryModalOpen' => $hasCategoryFormState || $categoryCreateErrors->count() > 0 || $hasCategoryUpdateErrors,
+            'categoryModalOpen' => $hasCategoryFormState || $categoryCreateErrors->count() > 0 || $hasCategoryUpdateErrors || $categoryDeleteErrors->count() > 0,
             'categoryForm' => [
                 'categoryFormMode' => $isCategoryEdit ? 'edit' : 'create',
                 'categoryFormAction' => $isCategoryEdit ? ($editingCategory['update_url'] ?? $categoryManagement['createUrl']) : $categoryManagement['createUrl'],
