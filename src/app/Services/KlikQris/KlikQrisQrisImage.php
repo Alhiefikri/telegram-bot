@@ -11,9 +11,22 @@ class KlikQrisQrisImage
 {
     private const MAX_BYTES = 2_000_000;
 
-    public function contents(KlikQrisPayableNativeQris $payable): string
+    public function contents(KlikQrisPayableNativeQris $payable, bool $preferFallback = false): string
     {
-        return $this->download($payable->qrisUrl(), KlikQrisEnvironment::runtime());
+        $fallback = $payable->fallbackImageContents();
+        if ($preferFallback && $fallback !== null) {
+            return $fallback;
+        }
+
+        try {
+            return $this->download($payable->qrisUrl(), KlikQrisEnvironment::runtime());
+        } catch (InvalidArgumentException $exception) {
+            if ($fallback !== null) {
+                return $fallback;
+            }
+
+            throw $exception;
+        }
     }
 
     private function download(string $url, KlikQrisEnvironment $environment): string

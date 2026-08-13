@@ -143,6 +143,118 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
     }
 
+    public function test_production_create_uses_qris_image_when_qris_url_returns_invalid_png(): void
+    {
+        $this->travelTo('2026-08-13 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        app()->detectEnvironment(fn (): string => 'production');
+        $qrisUrl = 'https://api.klikqris.example/storage/qris_api/qris_INV-KLIK-PROD.png';
+        $fallbackImage = KlikQrisSandboxScenarios::pngDataUri('production-fallback');
+
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-PROD',
+            'order_status' => OrderStatus::PendingPayment,
+            'manual_checkout_customer_notification_started_at' => null,
+            'manual_checkout_customer_notified_at' => null,
+            'expires_at' => now()->addMinutes(14),
+        ]);
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-PROD',
+            'amount' => 1000,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654321]]),
+            'https://api.klikqris.example/qris/create' => function (Request $request) use ($fallbackImage, $qrisUrl) {
+                return Http::response(['data' => [
+                    'order_id' => $request['order_id'],
+                    'amount' => 1000,
+                    'total_amount' => 1016,
+                    'status' => 'PENDING',
+                    'qris_url' => $qrisUrl,
+                    'qris_image' => $fallbackImage,
+                    'signature' => 'production-signature',
+                    'expired_at' => now()->addMinutes(15)->toISOString(),
+                ]], 200);
+            },
+            $qrisUrl => Http::response('not-a-png-body', 200, ['Content-Type' => 'image/png']),
+        ]);
+
+        (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $this->assertStringContainsString("\x89PNG\r\n\x1A\nproduction-fallback", $sendPhotos->first()[0]->body());
+        $this->assertSame('created', $payment->fresh()->provider_create_state);
+        $this->assertStringNotContainsString($fallbackImage, json_encode($payment->fresh()->provider_payload, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_existing_production_payable_recovers_qris_image_from_status_after_bad_qris_url(): void
+    {
+        $this->travelTo('2026-08-13 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        app()->detectEnvironment(fn (): string => 'production');
+        $qrisUrl = 'https://api.klikqris.example/storage/qris_api/qris_INV-KLIK-PROD-RETRY.png';
+        $fallbackImage = KlikQrisSandboxScenarios::pngDataUri('production-retry-fallback');
+        $expiresAt = now()->addMinutes(15)->startOfSecond();
+
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-PROD-RETRY',
+            'order_status' => OrderStatus::PendingPayment,
+            'manual_checkout_customer_notification_started_at' => null,
+            'manual_checkout_customer_notified_at' => null,
+            'expires_at' => $expiresAt->copy()->subMinute(),
+        ]);
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-PROD-RETRY',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_expires_at' => $expiresAt,
+            'expired_at' => $expiresAt,
+            'status' => PaymentStatus::Pending,
+            'provider_create_state' => 'created',
+            'provider_payload' => ['data' => [
+                'order_id' => 'INV-KLIK-PROD-RETRY',
+                'amount' => 1000,
+                'total_amount' => '1016.00',
+                'status' => 'PENDING',
+                'qris_url' => $qrisUrl,
+                'expired_at' => $expiresAt->toISOString(),
+            ]],
+        ]);
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654322]]),
+            $qrisUrl => Http::response('not-a-png-body', 200, ['Content-Type' => 'image/png']),
+            'https://api.klikqris.example/qris/status/INV-KLIK-PROD-RETRY' => Http::response(['data' => [
+                'order_id' => 'INV-KLIK-PROD-RETRY',
+                'amount' => 1000,
+                'total_amount' => '1016.00',
+                'status' => 'PENDING',
+                'qris_url' => $qrisUrl,
+                'qris_image' => $fallbackImage,
+                'expired_at' => $expiresAt->toISOString(),
+                'signature' => 'production-signature',
+            ]], 200),
+        ]);
+
+        (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $this->assertStringContainsString("\x89PNG\r\n\x1A\nproduction-retry-fallback", $sendPhotos->first()[0]->body());
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/qris/status/INV-KLIK-PROD-RETRY'));
+        $this->assertStringNotContainsString($fallbackImage, json_encode($payment->fresh()->provider_payload, JSON_THROW_ON_ERROR));
+    }
+
     public function test_base64_only_create_is_never_sent_and_job_sends_retry_state_until_recovery(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');

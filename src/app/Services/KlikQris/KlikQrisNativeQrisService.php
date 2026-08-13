@@ -158,6 +158,42 @@ class KlikQrisNativeQrisService
     }
 
     /**
+     * Recover a provider-supplied QR image for a payable Payment when its
+     * trusted URL cannot be rendered. The image stays transient and is never
+     * added to the persisted provider payload.
+     */
+    public function recoverPresentationImage(Payment $payment): ?KlikQrisPayableNativeQris
+    {
+        $result = $this->tryWithPaymentLock($payment, function () use ($payment): ?KlikQrisPayableNativeQris {
+            $payment->refresh();
+            if (! $this->hasReusablePersistedQris($payment)) {
+                return null;
+            }
+
+            try {
+                $transaction = $this->provider->transactionStatus($payment);
+                $transaction->assertMatches($payment);
+                if (! $transaction->isPending() || blank($transaction->qrisImageBase64())) {
+                    return null;
+                }
+
+                $payment->refresh();
+
+                $payable = KlikQrisPayableNativeQris::fromPaymentWithTransientImage(
+                    $payment,
+                    $transaction->qrisImageBase64(),
+                );
+
+                return $payable->fallbackImageContents() === null ? null : $payable;
+            } catch (Throwable) {
+                return null;
+            }
+        });
+
+        return $result instanceof KlikQrisPayableNativeQris ? $result : null;
+    }
+
+    /**
      * Reconcile one Payment while holding the same lock used by customer
      * refreshes and callback verification.
      *
@@ -389,7 +425,7 @@ class KlikQrisNativeQrisService
         }
 
         return [
-            'result' => $this->postWorkResult($payment),
+            'result' => $this->postWorkResult($payment, $transaction),
             'authoritativeTransaction' => null,
         ];
     }
@@ -425,17 +461,17 @@ class KlikQrisNativeQrisService
         }
 
         return [
-            'result' => $this->postWorkResult($payment),
+            'result' => $this->postWorkResult($payment, $transaction),
             'authoritativeTransaction' => $transaction,
         ];
     }
 
-    private function postWorkResult(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    private function postWorkResult(Payment $payment, ?KlikQrisTransaction $transaction = null): KlikQrisNativeQrisLifecycleResult
     {
         $payment->refresh();
 
         if ($this->hasReusablePersistedQris($payment)) {
-            return $this->payableResult($payment);
+            return $this->payableResult($payment, $transaction?->qrisImageBase64());
         }
 
         return $this->classifyPersisted($payment);
@@ -519,10 +555,10 @@ class KlikQrisNativeQrisService
         return $payment->order?->expires_at !== null && $payment->order->expires_at->isPast();
     }
 
-    private function payableResult(Payment $payment): KlikQrisNativeQrisLifecycleResult
+    private function payableResult(Payment $payment, ?string $qrisImageBase64 = null): KlikQrisNativeQrisLifecycleResult
     {
         try {
-            $payable = KlikQrisPayableNativeQris::fromPayment($payment);
+            $payable = KlikQrisPayableNativeQris::fromPaymentWithTransientImage($payment, $qrisImageBase64);
         } catch (RuntimeException) {
             return $this->classifyPersisted($payment);
         }

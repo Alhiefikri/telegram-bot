@@ -15,11 +15,14 @@ use RuntimeException;
  */
 final readonly class KlikQrisPayableNativeQris
 {
+    private const MAX_TRANSIENT_IMAGE_BYTES = 2_000_000;
+
     private function __construct(
         private string $qrisUrl,
         private int $totalAmount,
         private string $totalAmountDisplay,
         private CarbonImmutable $effectiveExpiresAt,
+        private ?string $fallbackImageContents,
     ) {}
 
     /**
@@ -28,6 +31,20 @@ final readonly class KlikQrisPayableNativeQris
      */
     public static function fromPayment(Payment $payment, ?KlikQrisEnvironment $environment = null): self
     {
+        return self::fromPaymentWithTransientImage($payment, null, $environment);
+    }
+
+    /**
+     * Build the Payable payload with an optional provider image held only for
+     * the current presentation attempt. The base64 input is decoded and
+     * validated before it crosses the presentation boundary and is never
+     * persisted.
+     */
+    public static function fromPaymentWithTransientImage(
+        Payment $payment,
+        ?string $qrisImageBase64,
+        ?KlikQrisEnvironment $environment = null,
+    ): self {
         $environment ??= KlikQrisEnvironment::runtime();
 
         // Full integrity gate: payload columns must match, QRIS media must be
@@ -63,7 +80,13 @@ final readonly class KlikQrisPayableNativeQris
             throw new RuntimeException('KlikQRIS payable transaction has no presentation-safe QR media.');
         }
 
-        return new self($qrisUrl, $totalAmount, $display, $effectiveExpiresAt);
+        return new self(
+            $qrisUrl,
+            $totalAmount,
+            $display,
+            $effectiveExpiresAt,
+            self::decodeTransientImage($qrisImageBase64),
+        );
     }
 
     public function qrisUrl(): string
@@ -84,5 +107,26 @@ final readonly class KlikQrisPayableNativeQris
     public function effectiveExpiresAt(): CarbonImmutable
     {
         return $this->effectiveExpiresAt;
+    }
+
+    public function fallbackImageContents(): ?string
+    {
+        return $this->fallbackImageContents;
+    }
+
+    private static function decodeTransientImage(?string $value): ?string
+    {
+        if ($value === null || ! preg_match('/^data:image\/png;base64,([A-Za-z0-9+\/]+=*)$/', $value, $matches)) {
+            return null;
+        }
+
+        $decoded = base64_decode($matches[1], true);
+        if (! is_string($decoded)
+            || strlen($decoded) > self::MAX_TRANSIENT_IMAGE_BYTES
+            || ! str_starts_with($decoded, "\x89PNG\r\n\x1A\n")) {
+            return null;
+        }
+
+        return $decoded;
     }
 }

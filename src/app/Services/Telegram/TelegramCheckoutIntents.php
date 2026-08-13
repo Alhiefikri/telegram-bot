@@ -17,6 +17,7 @@ use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
+use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
 
@@ -91,13 +92,23 @@ class TelegramCheckoutIntents
         }
 
         $payment->refresh();
+        try {
+            $imageContents = $this->klikQrisImages->contents($payable);
+        } catch (InvalidArgumentException $exception) {
+            $recoveredPayable = $this->klikQris->recoverPresentationImage($payment);
+            if ($recoveredPayable === null) {
+                throw $exception;
+            }
+
+            $imageContents = $this->klikQrisImages->contents($recoveredPayable, preferFallback: true);
+        }
 
         return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->klikQris(
                 $order,
                 $payable,
-                $this->klikQrisImages->contents($payable),
+                $imageContents,
                 $locale,
             ),
         );
