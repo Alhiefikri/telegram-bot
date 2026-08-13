@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -19,6 +20,8 @@ abstract class TelegramBotTestSupport extends TestCase
             'token' => 'bot-token',
             'webhook_secret' => 'secret',
             'api_base_url' => 'https://api.telegram.org',
+            'webhook_fast_callback_ack' => false,
+            'community_gate_cache_seconds' => 15,
             'default_payment_method' => 'BRIVA',
         ]);
         config()->set('services.pakasir', [
@@ -49,6 +52,22 @@ abstract class TelegramBotTestSupport extends TestCase
         return $this->postJson('/api/webhook/telegram', $payload, [
             'X-Telegram-Bot-Api-Secret-Token' => $secret,
         ]);
+    }
+
+    protected function telegramRequestField(Request $request, string $field): mixed
+    {
+        $data = $request->data();
+        if (array_key_exists($field, $data)) {
+            return $data[$field];
+        }
+
+        foreach ($data as $part) {
+            if (is_array($part) && ($part['name'] ?? null) === $field) {
+                return $part['contents'] ?? null;
+            }
+        }
+
+        return null;
     }
 
     protected function messageUpdate(int $id, string $text, array $from = [], int $chatId = 12345, string $chatType = 'private'): array

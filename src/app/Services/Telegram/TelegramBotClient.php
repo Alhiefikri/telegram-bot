@@ -77,6 +77,12 @@ class TelegramBotClient
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
+        // The webhook response already stops Telegram's spinner. Keep a later
+        // text/alert answer because handlers use it for user-visible feedback.
+        if ($text === null && app(TelegramCallbackAckState::class)->isAcknowledged($callbackQueryId)) {
+            return;
+        }
+
         try {
             $this->timed('answerCallbackQuery', fn () => $this->requests->request()->post($this->requests->url('answerCallbackQuery'), array_filter([
                 'callback_query_id' => $callbackQueryId,

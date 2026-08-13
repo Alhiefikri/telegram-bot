@@ -49,18 +49,20 @@ class TelegramMenuIntents
         $bannerReference = config('services.telegram.welcome_banner_url');
 
         if (is_string($bannerReference) && trim($bannerReference) !== '') {
-            $this->bot->sendPhotoReference($chatId, trim($bannerReference));
-            $this->bot->sendMessage($chatId, $caption, $replyMarkup);
+            $this->bot->sendPhotoReference($chatId, trim($bannerReference), $caption, $replyMarkup);
 
             return;
         }
 
         $bannerPath = resource_path('images/banner-welcome.jpg');
         if (is_file($bannerPath) && is_readable($bannerPath)) {
-            $this->bot->sendPhoto($chatId, file_get_contents($bannerPath), 'banner-welcome.jpg');
-            $this->bot->sendMessage($chatId, $caption, $replyMarkup);
+            $contents = file_get_contents($bannerPath);
+            if ($contents !== false) {
+                $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.jpg', $caption, $replyMarkup);
 
-            return;
+                return;
+            }
+
         }
 
         $this->bot->sendMessage($chatId, $caption, $replyMarkup);

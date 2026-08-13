@@ -49,9 +49,11 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('queue:work database', $contents);
         $this->assertStringContainsString('[program:laravel-update-worker]', $contents);
         $this->assertStringContainsString('--queue=default', $contents);
+        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_UPDATE_WORKER_SLEEP)s', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_UPDATE_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-outbound', $contents);
+        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_OUTBOUND_WORKER_SLEEP)s', $contents);
         $this->assertStringNotContainsString('--queue=telegram-outbound,notifications', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_OUTBOUND_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-notification-worker]', $contents);
@@ -59,10 +61,16 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_NOTIFICATION_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
+        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_BROADCAST_WORKER_SLEEP)s', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_BROADCAST_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('--queue=%(ENV_BINANCE_VERIFICATION_QUEUE)s', $contents);
 
         foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES', 'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES'] as $variable) {
+            $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
+            $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
+        }
+
+        foreach (['LARAVEL_UPDATE_WORKER_SLEEP', 'LARAVEL_OUTBOUND_WORKER_SLEEP', 'LARAVEL_BROADCAST_WORKER_SLEEP'] as $variable) {
             $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
             $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
         }

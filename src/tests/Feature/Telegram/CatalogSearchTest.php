@@ -41,8 +41,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(110, '/start from_channel'))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], 'selamat datang di LHIE STORE'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Aku belum paham perintah itu'));
     }
@@ -82,19 +82,19 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $recorded = Http::recorded();
         $welcomePhotoIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
             && $record[0]['photo'] === 'banner-file-id');
-        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendMessage')
-            && str_contains((string) ($record[0]['text'] ?? ''), 'Tempat belanja produk digital'));
+        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
+            && str_contains((string) ($record[0]['caption'] ?? ''), 'Tempat belanja produk digital'));
 
         $this->assertIsInt($welcomePhotoIndex);
         $this->assertIsInt($welcomeMessageIndex);
-        $welcomeText = (string) ($recorded->get($welcomeMessageIndex)[0]['text'] ?? '');
+        $welcomeText = (string) ($recorded->get($welcomeMessageIndex)[0]['caption'] ?? '');
         $this->assertStringContainsString('Selamat pagi, Kak — selamat datang di LHIE STORE', $welcomeText);
         $this->assertStringNotContainsString('👋', $welcomeText);
         $this->assertStringNotContainsString('welcome', strtolower($welcomeText));
         $this->assertStringNotContainsString('there', strtolower($welcomeText));
         $this->assertStringNotContainsString('BANNER PLACEHOLDER', $welcomeText);
         $this->assertStringNotContainsString('[BANNER:', $welcomeText);
-        $this->assertLessThan($welcomeMessageIndex, $welcomePhotoIndex);
+        $this->assertSame($welcomePhotoIndex, $welcomeMessageIndex);
     }
 
     public function test_english_start_sends_the_welcome_banner_and_english_actions(): void
@@ -105,10 +105,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(111, '/start', ['first_name' => 'Ayu']))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto') && $request['photo'] === 'banner-file-id');
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], 'Browse products')
-            && ($request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products');
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && $request['photo'] === 'banner-file-id'
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Browse products')
+            && ($request->data()['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products');
     }
 
     public function test_english_catalog_product_and_quantity_choices_use_english_customer_copy(): void

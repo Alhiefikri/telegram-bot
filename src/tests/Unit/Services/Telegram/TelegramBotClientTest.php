@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\Telegram;
 
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramCallbackAckState;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 use Throwable;
@@ -78,6 +79,20 @@ class TelegramBotClientTest extends TestCase
         $this->assertTrue($response['ok']);
         $this->assertIsInt($response['result']['message_id']);
         $this->assertSame(12345, $response['result']['chat']['id']);
+    }
+
+    public function test_fast_webhook_ack_skips_empty_worker_ack_but_preserves_callback_notification(): void
+    {
+        Http::fake();
+        app(TelegramCallbackAckState::class)->acknowledge('callback-query-id');
+
+        $client = app(TelegramBotClient::class);
+        $client->answerCallbackQuery('callback-query-id');
+        $client->answerCallbackQuery('callback-query-id', 'Done');
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['text'] === 'Done');
     }
 
     public function test_transport_failures_surface_sanitized_client_visible_errors(): void

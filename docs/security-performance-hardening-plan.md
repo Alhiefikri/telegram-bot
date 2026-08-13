@@ -78,11 +78,13 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
   - **(B)** restore `product.stock` in the same transaction and re-pool — cheaper on inventory, but the refunded buyer still holds the credential.
 - **Verify:** feature test for the refund action (state transitions + revenue exclusion) and for the chosen credential behavior.
 
-### B4 — Synchronous Telegram fan-out on request/inline paths (CRITICAL/HIGH perf)
+### B4 — Synchronous Telegram fan-out on request/inline paths (CRITICAL/HIGH perf) — ✅ bot broadcast path fixed 2026-08-13
+
+> **✅ APPLIED for the live bot-admin path.** `TelegramBroadcastIntents` now materializes a broadcast snapshot (including localized reply markup) and dispatches `SendTelegramBroadcastBatch` on `telegram-broadcast`. The `ProcessTelegramUpdate` worker acknowledges and queues the work without looping over customers; the existing per-recipient claim, retry, and idempotency pipeline is reused.
 
 - **Where:** `TelegramBroadcastService::sendToActiveUsers` (line 134) sends to every customer serially with a blocking `sendMessage` (10s timeout each). Callers:
   - **Live:** `SendProductStockNotifications` job (`tries=1`, no `$timeout`) → `TelegramProductNotificationService::notifyStockAdded` → `sendToActiveUsers`. Truncates & is unrecoverable on timeout.
-  - **Live:** `TelegramBroadcastIntents.php:241` (bot-initiated admin broadcast) — runs inside `ProcessTelegramUpdate` on the `default` queue → freezes all bot interactions during the broadcast.
+  - **Fixed:** `TelegramBroadcastIntents` (bot-initiated admin broadcast) now queues the durable batch pipeline instead of running inside `ProcessTelegramUpdate` on the `default` queue.
   - **Latent:** `AdminProductCreateController.php:49` → `notifyProductCreated` (currently a no-op because products are created with `stock=0`; becomes live if that changes).
 - **Fix:** route all three through the durable batched pipeline that the **dashboard broadcast already uses correctly** — copy the shape of `TelegramBroadcastService::queueAdminBroadcast` (line 31), `SendTelegramBroadcastBatch`, and `ProductPriceChangeNotificationService` / `SendProductPriceChangeNotifications`: materialize recipients, batch 25, per-recipient claim tokens + attempts, self-requeue with backoff, on the `telegram-broadcast` queue. Reply "queued" immediately from the bot path.
 - **Verify:** assert the request/job enqueues batches instead of sending inline; assert a mid-run failure resumes without duplicate sends (claim tokens).

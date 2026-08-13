@@ -15,7 +15,7 @@ class TelegramCommunityGate
 
     public function __construct(private TelegramBotClient $bot, private TelegramMenuIntents $menu, private TelegramLocale $locale) {}
 
-    public function allows(Customer $customer): bool
+    public function allows(Customer $customer, bool $forceRefresh = false): bool
     {
         $setting = StoreChannelSetting::current();
         if (! $setting->community_gate_enabled) {
@@ -26,7 +26,7 @@ class TelegramCommunityGate
             return false;
         }
 
-        return $this->isMember((string) $setting->telegram_chat_id, (int) $customer->telegram_id);
+        return $this->isMember((string) $setting->telegram_chat_id, (int) $customer->telegram_id, $forceRefresh);
     }
 
     public function ensureAllowedOrPrompt(Customer $customer, string $chatId): bool
@@ -42,7 +42,7 @@ class TelegramCommunityGate
 
     public function verify(Customer $customer, string $chatId): bool
     {
-        if (! $this->allows($customer)) {
+        if (! $this->allows($customer, forceRefresh: true)) {
             $this->sendOrReusePrompt($customer, $chatId);
 
             return false;
@@ -79,11 +79,21 @@ class TelegramCommunityGate
             && $setting->last_test_success === true;
     }
 
-    private function isMember(string $channelChatId, int $telegramUserId): bool
+    private function isMember(string $channelChatId, int $telegramUserId, bool $forceRefresh = false): bool
     {
+        $cacheSeconds = max(0, (int) config('services.telegram.community_gate_cache_seconds', 15));
+        $cacheKey = 'telegram:community-gate:member:'.sha1($channelChatId.'|'.$telegramUserId);
+
+        // Cache only a positive result. A newly joined user can retry immediately,
+        // while the explicit "I have joined" callback always bypasses this lease.
+        if (! $forceRefresh && $cacheSeconds > 0 && Cache::get($cacheKey) === true) {
+            return true;
+        }
+
         try {
             $member = $this->bot->getChatMember($channelChatId, $telegramUserId);
         } catch (Throwable $e) {
+            Cache::forget($cacheKey);
             Log::warning('telegram.community_gate_membership_check_failed', [
                 'exception' => $e::class,
                 'error' => TelegramBotApiRedactor::redactText($e->getMessage()),
@@ -94,11 +104,16 @@ class TelegramCommunityGate
         }
 
         $status = (string) ($member['result']['status'] ?? '');
-        if (in_array($status, ['creator', 'administrator', 'member'], true)) {
-            return true;
+        $allowed = in_array($status, ['creator', 'administrator', 'member'], true)
+            || ($status === 'restricted' && ($member['result']['is_member'] ?? false) === true);
+
+        if ($allowed && $cacheSeconds > 0) {
+            Cache::put($cacheKey, true, now()->addSeconds($cacheSeconds));
+        } else {
+            Cache::forget($cacheKey);
         }
 
-        return $status === 'restricted' && ($member['result']['is_member'] ?? false) === true;
+        return $allowed;
     }
 
     private function sendOrReusePrompt(Customer $customer, string $chatId): void

@@ -9,6 +9,7 @@ use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
@@ -26,10 +27,12 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
@@ -932,6 +935,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_admin_can_broadcast_message_from_bot_to_active_users(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
+        Bus::fake([SendTelegramBroadcastBatch::class]);
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 222, 'locale' => 'en']);
@@ -949,6 +953,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(225, 'broadcast-picker', 'broadcast:pick:1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', 'broadcast:select:'.$product->id.':1', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+        $queuedBroadcast = Bus::dispatched(SendTelegramBroadcastBatch::class)->sole();
+        $queuedBroadcast->handle(app(TelegramBroadcastService::class));
 
         $localizedRecipientMessages = collect(Http::recorded())
             ->map(fn (array $record) => $record[0])
@@ -982,7 +989,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
-            && str_contains((string) $r['text'], "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: 3\nGagal: 0"));
+            && str_contains((string) $r['text'], "✅ Broadcast masuk antrean\n━━━━━━━━━━━━━━")
+            && str_contains((string) $r['text'], 'Pengiriman berjalan di background.'));
 
         $this->postTelegramWebhook($this->callbackUpdate(228, 'broadcast-send-again', 'broadcast:send', ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 

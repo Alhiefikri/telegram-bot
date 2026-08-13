@@ -34,6 +34,7 @@ use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
@@ -57,6 +58,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
+        $this->app->singleton(TelegramCallbackAckState::class);
         $this->app->bind(TelegramCheckoutPaymentIntentSelector::class, TelegramConfiguredCheckoutPaymentIntentSelector::class);
         $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([
             $app->make(TelegramLocaleCallbackHandler::class),

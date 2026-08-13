@@ -26,9 +26,10 @@ class TelegramBroadcastService
     public function __construct(private TelegramBotClient $bot) {}
 
     /**
+     * @param  array<string, mixed>  $replyMarkup
      * @return array{broadcast_id:int|null, sent:int, failed:int, skipped:bool, queued:bool, recipient_count:int, telegram_total_duration_ms:float, per_recipient_telegram:list<array{}>}
      */
-    public function queueAdminBroadcast(string $message): array
+    public function queueAdminBroadcast(string $message, array $replyMarkup = []): array
     {
         if (blank(config('services.telegram.token'))) {
             return [
@@ -47,6 +48,7 @@ class TelegramBroadcastService
             'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
             'message' => $message,
+            'reply_markup' => $replyMarkup === [] ? null : $replyMarkup,
             'status' => TelegramBroadcast::STATUS_QUEUED,
         ]);
 
@@ -300,6 +302,7 @@ class TelegramBroadcastService
             $this->bot->sendMessage(
                 $claimed->telegram_id,
                 $this->adminBroadcastText($broadcast->message, $claimed->locale === 'en'),
+                $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale === 'en'),
             );
         } catch (Throwable $e) {
             $terminal = $this->isPermanentRecipientFailure($e) || $claimed->attempts >= self::MAX_RECIPIENT_ATTEMPTS;
@@ -430,6 +433,28 @@ class TelegramBroadcastService
             '',
             $english ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.',
         ]);
+    }
+
+    /**
+     * Broadcast buttons may be stored either as one Telegram reply markup or
+     * as an `id` / `en` map when the button label is localized per recipient.
+     *
+     * @param  array<string, mixed>|null  $replyMarkup
+     * @return array<string, mixed>
+     */
+    private function adminBroadcastReplyMarkup(?array $replyMarkup, bool $english): array
+    {
+        if ($replyMarkup === null || $replyMarkup === []) {
+            return [];
+        }
+
+        if (array_key_exists('id', $replyMarkup) || array_key_exists('en', $replyMarkup)) {
+            $localized = $replyMarkup[$english ? 'en' : 'id'] ?? [];
+
+            return is_array($localized) ? $localized : [];
+        }
+
+        return $replyMarkup;
     }
 
     private function isPermanentRecipientFailure(Throwable $e): bool

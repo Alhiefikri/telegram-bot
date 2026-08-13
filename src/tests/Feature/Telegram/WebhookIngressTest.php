@@ -42,6 +42,32 @@ class WebhookIngressTest extends TelegramBotTestSupport
         Bus::assertDispatched(ProcessTelegramUpdate::class);
     }
 
+    public function test_callback_webhook_uses_telegram_response_method_for_fast_ack(): void
+    {
+        config()->set('services.telegram.webhook_fast_callback_ack', true);
+        Bus::fake();
+
+        $response = $this->postTelegramWebhook($this->callbackUpdate(303, 'callback-fast-ack', 'katalog'));
+
+        $response->assertOk()->assertExactJson([
+            'method' => 'answerCallbackQuery',
+            'callback_query_id' => 'callback-fast-ack',
+        ]);
+        $this->assertTrue(TelegramUpdate::firstOrFail()->payload['callback_query']['_acknowledged_via_webhook']);
+    }
+
+    public function test_worker_skips_duplicate_callback_ack_after_webhook_response_ack(): void
+    {
+        config()->set('services.telegram.webhook_fast_callback_ack', true);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $this->fakeTelegramHttp();
+
+        $this->postTelegramWebhook($this->callbackUpdate(304, 'callback-worker-ack', 'katalog'))->assertOk();
+
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+    }
+
     public function test_webhook_persists_minimized_message_payload(): void
     {
         Bus::fake();
@@ -147,7 +173,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, TelegramUpdate::first()->processed_at);
-        Http::assertSentCount(3);
+        Http::assertSentCount(2);
     }
 
     #[Group('postgres-release')]
@@ -163,7 +189,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, $update->fresh()->processed_at);
-        Http::assertSentCount(3);
+        Http::assertSentCount(2);
     }
 
     public function test_recovery_command_redispatches_only_unprocessed_stored_updates(): void
@@ -507,12 +533,12 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $recorded = Http::recorded();
         $welcomePhotoIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
             && $record[0]->data()['photo'] === 'telegram-banner-file-id');
-        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendMessage')
-            && str_contains((string) ($record[0]->data()['text'] ?? ''), '🌙 Selamat malam, Fikri'));
+        $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
+            && str_contains((string) ($record[0]->data()['caption'] ?? ''), '🌙 Selamat malam, Fikri'));
 
         $this->assertIsInt($welcomePhotoIndex);
         $this->assertIsInt($welcomeMessageIndex);
-        $this->assertLessThan($welcomeMessageIndex, $welcomePhotoIndex);
+        $this->assertSame($welcomePhotoIndex, $welcomeMessageIndex);
     }
 
     public function test_start_welcome_uses_local_banner_when_banner_url_is_not_configured(): void

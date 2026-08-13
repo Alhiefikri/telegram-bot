@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['broadcast_key', 'source', 'message', 'status', 'recipients_materialized_at', 'completed_at', 'recipient_count', 'sent_count', 'failed_count', 'pending_count', 'terminal_failed_count'])]
+#[Fillable(['broadcast_key', 'source', 'message', 'reply_markup', 'status', 'recipients_materialized_at', 'completed_at', 'recipient_count', 'sent_count', 'failed_count', 'pending_count', 'terminal_failed_count'])]
 class TelegramBroadcast extends Model
 {
     public const STATUS_QUEUED = 'queued';
@@ -26,6 +26,7 @@ class TelegramBroadcast extends Model
         return [
             'recipients_materialized_at' => 'datetime',
             'completed_at' => 'datetime',
+            'reply_markup' => 'array',
             'recipient_count' => 'integer',
             'sent_count' => 'integer',
             'failed_count' => 'integer',

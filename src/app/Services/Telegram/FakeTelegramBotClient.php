@@ -59,6 +59,10 @@ class FakeTelegramBotClient extends TelegramBotClient
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
+        if ($text === null && app(TelegramCallbackAckState::class)->isAcknowledged($callbackQueryId)) {
+            return;
+        }
+
         $this->record('answerCallbackQuery');
     }
 

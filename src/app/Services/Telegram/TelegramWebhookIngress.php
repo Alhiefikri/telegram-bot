@@ -34,6 +34,7 @@ class TelegramWebhookIngress
         }
 
         $payload = $this->minimizedPayload($payload);
+        $callbackResponse = $this->callbackResponse($payload);
 
         $inserted = DB::table('telegram_updates')->insertOrIgnore([
             'update_id' => (int) $validated['update_id'],
@@ -59,7 +60,7 @@ class TelegramWebhookIngress
             'duplicate' => $duplicate,
         ]);
 
-        return new TelegramWebhookIngressResult(['ok' => true]);
+        return new TelegramWebhookIngressResult($callbackResponse ?? ['ok' => true]);
     }
 
     private function minimizedPayload(array $payload): array
@@ -74,6 +75,7 @@ class TelegramWebhookIngress
             'update_id' => $payload['update_id'],
             'callback_query' => [
                 'id' => $callback['id'],
+                '_acknowledged_via_webhook' => (bool) config('services.telegram.webhook_fast_callback_ack', false),
                 'from' => Arr::only((array) $callback['from'], ['id', 'first_name', 'username']),
                 'message' => [
                     'message_id' => Arr::get($callback, 'message.message_id'),
@@ -106,6 +108,20 @@ class TelegramWebhookIngress
         }
 
         return $minimized;
+    }
+
+    /** @return array{method: string, callback_query_id: string}|null */
+    private function callbackResponse(array $payload): ?array
+    {
+        $callbackQuery = $payload['callback_query'] ?? null;
+        if (! is_array($callbackQuery) || ! ($callbackQuery['_acknowledged_via_webhook'] ?? false)) {
+            return null;
+        }
+
+        return [
+            'method' => 'answerCallbackQuery',
+            'callback_query_id' => (string) $callbackQuery['id'],
+        ];
     }
 
     private function dispatchProcessor(int $telegramUpdateId, string $jobEnqueuedAt): void

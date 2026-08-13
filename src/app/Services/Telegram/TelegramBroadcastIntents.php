@@ -231,17 +231,24 @@ class TelegramBroadcastIntents
             return;
         }
 
-        $replyMarkup = $product ? fn (Customer $recipient): array => [
-            'inline_keyboard' => [[
-                ['text' => ($recipient->locale === 'en' ? '🛍️ Buy: ' : '🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
-            ]],
+        $replyMarkup = $product ? [
+            'id' => [
+                'inline_keyboard' => [[
+                    ['text' => '🛍️ Beli: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                ]],
+            ],
+            'en' => [
+                'inline_keyboard' => [[
+                    ['text' => '🛍️ Buy: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                ]],
+            ],
         ] : [];
 
         $this->bot->answerCallbackQuery($callbackId, 'Broadcast sedang dikirim.');
-        $result = $this->broadcast->sendToActiveUsers($draft['message'], replyMarkup: $replyMarkup);
+        $result = $this->broadcast->queueAdminBroadcast($draft['message'], $replyMarkup);
         $this->bot->sendMessage($chatId, $result['skipped']
             ? 'Broadcast dilewati karena token Telegram belum dikonfigurasi.'
-            : "✅ Broadcast selesai\n━━━━━━━━━━━━━━\nTerkirim: {$result['sent']}\nGagal: {$result['failed']}");
+            : "✅ Broadcast masuk antrean\n━━━━━━━━━━━━━━\nID: {$result['broadcast_id']}\nPengiriman berjalan di background. Progres bisa dipantau dari dashboard.");
     }
 
     private function eligibleProduct(int $productId): ?Product
