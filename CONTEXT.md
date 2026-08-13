@@ -75,6 +75,14 @@ _Avoid_: In-stock item
 A product that remains visible in the catalog but cannot currently be bought because it has no available stock.
 _Avoid_: Hidden product, deleted product
 
+**Product Category**:
+An admin-managed catalog grouping used to organize products for customer browsing. Its name, description, customer visibility, and display order can be changed. It can be soft-deleted without deleting its products; its slug is system-managed.
+_Avoid_: Product type, product collection
+
+**Uncategorized Product**:
+An active product that is not assigned to a Product Category. Deleting a Product Category moves its products into this state without changing their active status or sale availability.
+_Avoid_: Deleted product, inactive product
+
 **Binance Payment Verification**:
 The process of checking a Binance Pay transfer against a pending payment before the order is completed, using the expected amount, currency, configured receiver, and, when required, the Binance Order ID. It can confirm the payment, leave it awaiting more evidence, or send it for manual review.
 _Avoid_: Binance payment proof (that means screenshot evidence)
