@@ -12,6 +12,10 @@ _Avoid_: Testimonial, review
 The Telegram bot customers use to browse products and place orders.
 _Avoid_: Channel
 
+**Admin Broadcast**:
+A message intentionally confirmed by an authorized admin and delivered through the Store Bot to eligible Telegram customers. Its customer-visible content is the admin-authored text or one photo with an optional caption, optionally paired with a product action.
+_Avoid_: Info from Admin, automatic product notification
+
 **Web Storefront**:
 The public website where customers browse the catalog, check out with QRIS, and access paid digital-account data without a Telegram dependency.
 _Avoid_: Telegram checkout
