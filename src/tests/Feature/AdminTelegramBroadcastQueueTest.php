@@ -13,9 +13,11 @@ use App\Services\Telegram\TelegramBroadcastService;
 use Illuminate\Contracts\Bus\Dispatcher as DispatcherContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Mockery;
@@ -277,6 +279,57 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         }
     }
 
+    public function test_provider_flood_control_stops_the_current_batch_before_the_next_recipient(): void
+    {
+        config()->set('services.telegram.token', 'SENSITIVE_TELEGRAM_TOKEN');
+        $attemptsByChat = [];
+        Http::fake(function (HttpRequest $request) use (&$attemptsByChat) {
+            $chatId = (string) $request['chat_id'];
+            $attemptsByChat[$chatId] = ($attemptsByChat[$chatId] ?? 0) + 1;
+
+            if ($chatId === '222222222') {
+                return Http::response([
+                    'ok' => false,
+                    'description' => 'Too Many Requests',
+                    'parameters' => ['retry_after' => 45],
+                ], 429);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => array_sum($attemptsByChat)]]);
+        });
+        Customer::factory()->create(['telegram_id' => 111111111]);
+        Customer::factory()->create(['telegram_id' => 222222222]);
+        Customer::factory()->create(['telegram_id' => 333333333]);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'SENSITIVE_BROADCAST_TEXT',
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+
+        $now = Carbon::parse('2026-08-13 10:00:00');
+        Carbon::setTestNow($now);
+
+        try {
+            $result = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+            $this->assertSame(1, $result->sent);
+            $this->assertSame(1, $result->transientFailures);
+            $this->assertSame(45, $result->retryAfterSeconds);
+            $this->assertSame(2, Http::recorded()->count());
+            $this->assertSame(1, $attemptsByChat['111111111']);
+            $this->assertSame(1, $attemptsByChat['222222222']);
+            $this->assertArrayNotHasKey('333333333', $attemptsByChat);
+
+            $this->assertSame(1, TelegramBroadcastRecipient::query()->where('telegram_id', '111111111')->value('attempts'));
+            $this->assertNotNull(TelegramBroadcastRecipient::query()->where('telegram_id', '111111111')->value('sent_at'));
+            $this->assertSame(1, TelegramBroadcastRecipient::query()->where('telegram_id', '222222222')->value('attempts'));
+            $this->assertSame(0, TelegramBroadcastRecipient::query()->where('telegram_id', '333333333')->value('attempts'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_transient_failures_retry_without_resending_successful_recipients(): void
     {
         config()->set('services.telegram.token', 'bot-token');
@@ -434,6 +487,53 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $this->assertSame(['111111111', '222222222'], $sentChatIds);
         $this->assertSame(2, TelegramBroadcastRecipient::query()->whereNotNull('sent_at')->count());
         $this->assertSame(2, TelegramBroadcastRecipient::query()->where('attempts', 1)->count());
+    }
+
+    public function test_admin_broadcast_operational_logs_keep_diagnostics_but_redact_sensitive_values(): void
+    {
+        config()->set('services.telegram.token', 'SENSITIVE_TELEGRAM_TOKEN');
+        config()->set('services.dogfood_timing.enabled', true);
+        $logs = [];
+        Log::listen(function (MessageLogged $event) use (&$logs): void {
+            $logs[] = ['message' => $event->message, 'context' => $event->context];
+        });
+        Http::fake(function (HttpRequest $request) {
+            if ((string) ($request['chat_id'] ?? '') === '987654322') {
+                return Http::response([
+                    'ok' => false,
+                    'description' => 'SENSITIVE_PROVIDER_DESCRIPTION',
+                ], 500);
+            }
+
+            return Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 123],
+            ]);
+        });
+        Customer::factory()->create(['telegram_id' => 987654321]);
+        Customer::factory()->create(['telegram_id' => 987654322]);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'SENSITIVE_CAPTION',
+            'photo_file_id' => 'SENSITIVE_PHOTO_FILE_ID',
+            'reply_markup' => [
+                'id' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'broadcast:send:SENSITIVE_DRAFT_ID']]]],
+            ],
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+
+        app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+        $serializedLogs = json_encode($logs, JSON_THROW_ON_ERROR);
+        foreach (['SENSITIVE_BROADCAST_TEXT', 'SENSITIVE_CAPTION', 'SENSITIVE_PHOTO_FILE_ID', 'SENSITIVE_TELEGRAM_TOKEN', 'SENSITIVE_DRAFT_ID', 'SENSITIVE_PROVIDER_DESCRIPTION', '987654321', '987654322'] as $sensitiveValue) {
+            $this->assertStringNotContainsString($sensitiveValue, $serializedLogs);
+        }
+        $this->assertStringContainsString('broadcast_id', $serializedLogs);
+        $this->assertStringContainsString('recipient_correlation_id', $serializedLogs);
+        $this->assertStringContainsString((string) $broadcast->id, $serializedLogs);
+        $this->assertStringContainsString('exception', $serializedLogs);
+        $this->assertStringContainsString('500', $serializedLogs);
     }
 
     public function test_recover_outbound_redispatches_an_unmaterialized_broadcast_and_an_expired_claim(): void

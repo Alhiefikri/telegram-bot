@@ -145,6 +145,10 @@ class TelegramBroadcastService
             $sent += $outcome['status'] === 'sent' ? 1 : 0;
             $transientFailures += $outcome['status'] === 'transient_failure' ? 1 : 0;
             $terminalFailures += $outcome['status'] === 'terminal_failure' ? 1 : 0;
+
+            if (isset($outcome['retry_after_seconds'])) {
+                break;
+            }
         }
 
         $hasMore = $this->refreshAdminBroadcastStatus($broadcast->id);
@@ -426,7 +430,7 @@ class TelegramBroadcastService
                 'operation' => filled($broadcast->photo_file_id) ? 'sendPhotoReference' : 'sendMessage',
                 'broadcast_id' => $broadcast->id,
                 'recipient_id' => $claimed->id,
-                'customer_id' => $claimed->customer_id,
+                'recipient_correlation_id' => $recipientLog['recipient_correlation_id'],
                 'attempts' => $claimed->attempts,
                 'terminal' => $terminal,
                 'status' => $e instanceof RequestException ? $e->response?->status() : null,

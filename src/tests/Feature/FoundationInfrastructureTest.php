@@ -169,6 +169,17 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('QUEUE_CONNECTION=database', $contents);
     }
 
+    public function test_broadcast_rate_limit_is_consistent_across_runtime_environment_and_documentation(): void
+    {
+        $environment = file_get_contents(base_path('.env.example'));
+        $documentation = file_get_contents(base_path('README.md'));
+
+        $this->assertSame(25, config('services.telegram.broadcast_rate_limit_per_second'));
+        $this->assertStringContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND=25', $environment);
+        $this->assertStringContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND', $documentation);
+        $this->assertStringContainsString('(default `25` pesan/detik)', $documentation);
+    }
+
     public function test_binance_order_id_canary_configuration_is_removed_from_runtime_surfaces(): void
     {
         $this->assertNull(config('services.binance.canary_max_age_hours'));

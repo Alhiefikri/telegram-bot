@@ -28,7 +28,7 @@ class TelegramMessageRouter
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
     {
-        $text = trim((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
+        $text = TelegramBroadcastCommand::normalize((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
             $this->session->forget($customer);

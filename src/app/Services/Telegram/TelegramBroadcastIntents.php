@@ -26,7 +26,10 @@ class TelegramBroadcastIntents
             return;
         }
 
-        $content = $this->broadcastContent($text, $message);
+        $normalizedText = TelegramBroadcastCommand::normalize(
+            array_key_exists('caption', $message) ? (string) $message['caption'] : $text,
+        );
+        $content = $this->broadcastContent($normalizedText, $message);
         if ($content['error'] !== null) {
             $this->bot->sendMessage($chatId, $content['error']);
 
@@ -428,7 +431,7 @@ class TelegramBroadcastIntents
             }
 
             return [
-                'message' => TelegramBroadcastCommand::strip((string) ($message['caption'] ?? $text)),
+                'message' => TelegramBroadcastCommand::strip($text),
                 'photo_file_id' => $photoFileId,
                 'error' => null,
             ];

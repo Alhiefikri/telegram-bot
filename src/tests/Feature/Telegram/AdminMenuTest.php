@@ -11,6 +11,7 @@ use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramBroadcastDrafts;
 use App\Services\Telegram\TelegramBroadcastIntents;
 use App\Services\Telegram\TelegramBroadcastService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -135,7 +136,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
 
         $payload = $this->messageUpdate(310, '', ['id' => 999], 999);
-        $payload['message']['caption'] = "/broadcast\nPromo foto literal";
+        $payload['message']['caption'] = "  \n /broadcast\nPromo foto literal";
         $payload['message']['photo'] = [
             ['file_id' => 'small-photo-id', 'width' => 100, 'height' => 100, 'file_size' => 1000],
             ['file_id' => 'large-photo-id', 'width' => 1200, 'height' => 800, 'file_size' => 5000],
@@ -415,6 +416,50 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->assertSame(0, TelegramBroadcast::query()->count());
         Queue::assertNothingPushed();
         $this->assertSame('Replacement draft', app(TelegramBroadcastDrafts::class)->get($customer)['message']);
+    }
+
+    public function test_replacing_a_broadcast_draft_preserves_the_original_expiry_for_stale_and_expired_confirmation(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $intents = app(TelegramBroadcastIntents::class);
+        $createdAt = Carbon::parse('2026-08-13 10:00:00');
+        Carbon::setTestNow($createdAt);
+
+        try {
+            $intents->handleCommand($customer, '999', '/broadcast First draft');
+            $firstDraft = app(TelegramBroadcastDrafts::class)->get($customer);
+            $firstPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'First draft'))->last()[0];
+            $firstSend = $firstPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+            Carbon::setTestNow($createdAt->copy()->addMinutes(14));
+            $intents->handleCommand($customer, '999', '/broadcast Replacement draft');
+            $replacementDraft = app(TelegramBroadcastDrafts::class)->get($customer);
+            $secondPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Replacement draft'))->last()[0];
+            $secondSend = $secondPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+            $this->assertNotNull($firstDraft);
+            $this->assertNotNull($replacementDraft);
+            $this->assertSame($firstDraft['expires_at'], $replacementDraft['expires_at']);
+
+            $intents->handleCallback($customer, '999', 'stale-before-expiry', $firstSend);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && $request['callback_query_id'] === 'stale-before-expiry'
+                && str_contains((string) ($request['text'] ?? ''), 'tidak berlaku'));
+
+            Carbon::setTestNow($createdAt->copy()->addMinutes(15)->addSecond());
+            $intents->handleCallback($customer, '999', 'expired-replacement', $secondSend);
+
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && $request['callback_query_id'] === 'expired-replacement'
+                && $request['text'] === 'Draft sudah kedaluwarsa.');
+            $this->assertSame(0, TelegramBroadcast::query()->count());
+            Queue::assertNothingPushed();
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_confirmation_persistence_failure_leaves_the_draft_retryable(): void

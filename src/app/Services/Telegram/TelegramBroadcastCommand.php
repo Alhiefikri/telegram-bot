@@ -8,11 +8,16 @@ final class TelegramBroadcastCommand
 
     public static function matches(string $text): bool
     {
-        return preg_match(self::PATTERN, $text) === 1;
+        return preg_match(self::PATTERN, self::normalize($text)) === 1;
     }
 
     public static function strip(string $text): string
     {
-        return trim((string) preg_replace(self::PATTERN, '', $text, 1));
+        return trim((string) preg_replace(self::PATTERN, '', self::normalize($text), 1));
+    }
+
+    public static function normalize(string $text): string
+    {
+        return trim($text);
     }
 }
