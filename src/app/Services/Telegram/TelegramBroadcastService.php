@@ -13,6 +13,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -21,6 +22,8 @@ class TelegramBroadcastService
     private const CLAIM_TTL_MINUTES = 15;
 
     private const RETRY_DELAY_SECONDS = 30;
+
+    private const MAX_PROVIDER_RETRY_AFTER_SECONDS = 300;
 
     public const ADMIN_BATCH_SIZE = 25;
 
@@ -32,7 +35,7 @@ class TelegramBroadcastService
      * @param  array<string, mixed>  $replyMarkup
      * @return array{broadcast_id:int|null, sent:int, failed:int, skipped:bool, queued:bool, recipient_count:int, telegram_total_duration_ms:float, per_recipient_telegram:list<array{}>}
      */
-    public function queueAdminBroadcast(string $message, array $replyMarkup = [], ?string $idempotencyKey = null): array
+    public function queueAdminBroadcast(string $message, array $replyMarkup = [], ?string $idempotencyKey = null, ?string $photoFileId = null): array
     {
         if (blank(config('services.telegram.token'))) {
             return [
@@ -51,11 +54,12 @@ class TelegramBroadcastService
             ? (string) Str::uuid()
             : $this->stableBroadcastKey($idempotencyKey);
 
-        $broadcast = DB::transaction(function () use ($broadcastKey, $message, $replyMarkup): TelegramBroadcast {
+        $broadcast = DB::transaction(function () use ($broadcastKey, $message, $replyMarkup, $photoFileId): TelegramBroadcast {
             DB::table('telegram_broadcasts')->insertOrIgnore([
                 'broadcast_key' => $broadcastKey,
                 'source' => 'admin',
                 'message' => $message,
+                'photo_file_id' => $photoFileId,
                 'reply_markup' => $replyMarkup === [] ? null : json_encode($replyMarkup, JSON_THROW_ON_ERROR),
                 'status' => TelegramBroadcast::STATUS_QUEUED,
                 'created_at' => now(),
@@ -107,7 +111,8 @@ class TelegramBroadcastService
             })
             ->where(function ($query): void {
                 $query->whereNull('failed_at')
-                    ->orWhere('failed_at', '<=', now()->subSeconds(self::RETRY_DELAY_SECONDS));
+                    ->orWhere('failed_at', '<=', now()->subSeconds(self::RETRY_DELAY_SECONDS))
+                    ->orWhere('retry_at', '<=', now());
             })
             ->orderBy('id')
             ->limit(max(1, $batchSize))
@@ -120,12 +125,19 @@ class TelegramBroadcastService
         $sent = 0;
         $transientFailures = 0;
         $terminalFailures = 0;
+        $retryAfterSeconds = null;
 
         foreach ($recipients as $recipient) {
             $outcome = $this->sendAdminBroadcastRecipient($broadcast, $recipient);
-            $sent += $outcome === 'sent' ? 1 : 0;
-            $transientFailures += $outcome === 'transient_failure' ? 1 : 0;
-            $terminalFailures += $outcome === 'terminal_failure' ? 1 : 0;
+            if (isset($outcome['retry_after_seconds'])) {
+                $retryAfterSeconds = max($retryAfterSeconds ?? 0, $outcome['retry_after_seconds']);
+            }
+            if ($outcome['status'] === 'rate_limited') {
+                continue;
+            }
+            $sent += $outcome['status'] === 'sent' ? 1 : 0;
+            $transientFailures += $outcome['status'] === 'transient_failure' ? 1 : 0;
+            $terminalFailures += $outcome['status'] === 'terminal_failure' ? 1 : 0;
         }
 
         $hasMore = $this->refreshAdminBroadcastStatus($broadcast->id);
@@ -136,6 +148,7 @@ class TelegramBroadcastService
             transientFailures: $transientFailures,
             terminalFailures: $terminalFailures,
             hasMore: $hasMore,
+            retryAfterSeconds: $retryAfterSeconds,
         );
     }
 
@@ -262,8 +275,17 @@ class TelegramBroadcastService
         $this->refreshAdminBroadcastStatus($broadcast->id, true);
     }
 
-    private function sendAdminBroadcastRecipient(TelegramBroadcast $broadcast, TelegramBroadcastRecipient $recipient): string
+    /**
+     * @return array{status: 'skipped'|'sent'|'transient_failure'|'terminal_failure'|'rate_limited', retry_after_seconds?: int}
+     */
+    private function sendAdminBroadcastRecipient(TelegramBroadcast $broadcast, TelegramBroadcastRecipient $recipient): array
     {
+        $rateLimitKey = 'telegram:admin-broadcast:send-rate';
+        $rateLimit = max(1, (int) config('services.telegram.broadcast_rate_limit_per_second', 25));
+        if (RateLimiter::increment($rateLimitKey, 1) > $rateLimit) {
+            return ['status' => 'rate_limited', 'retry_after_seconds' => 1];
+        }
+
         $token = (string) Str::uuid();
         $claimed = DB::transaction(function () use ($recipient, $token): ?TelegramBroadcastRecipient {
             $locked = TelegramBroadcastRecipient::query()
@@ -287,6 +309,7 @@ class TelegramBroadcastService
                 'send_started_at' => now(),
                 'send_claim_token' => $token,
                 'failed_at' => null,
+                'retry_at' => null,
                 'last_error' => null,
                 'attempts' => $locked->attempts + 1,
             ])->save();
@@ -295,7 +318,7 @@ class TelegramBroadcastService
         }, 5);
 
         if (! $claimed) {
-            return 'skipped';
+            return ['status' => 'skipped'];
         }
 
         $startedAt = DogfoodTiming::now();
@@ -310,13 +333,20 @@ class TelegramBroadcastService
         try {
             // Telegram sendMessage has no idempotency key. A stored sent_at prevents normal
             // duplicate or retried jobs from resending successful recipients.
-            $this->bot->sendMessage(
-                $claimed->telegram_id,
-                $broadcast->message,
-                $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale === 'en'),
-            );
+            $replyMarkup = $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale === 'en');
+            if (filled($broadcast->photo_file_id)) {
+                $this->bot->sendPhotoReference(
+                    $claimed->telegram_id,
+                    $broadcast->photo_file_id,
+                    $broadcast->message === '' ? null : $broadcast->message,
+                    $replyMarkup,
+                );
+            } else {
+                $this->bot->sendMessage($claimed->telegram_id, $broadcast->message, $replyMarkup);
+            }
         } catch (Throwable $e) {
             $terminal = $this->isPermanentRecipientFailure($e) || $claimed->attempts >= self::MAX_RECIPIENT_ATTEMPTS;
+            $retryAfterSeconds = $this->providerRetryAfterSeconds($e);
             TelegramBroadcastRecipient::query()
                 ->whereKey($claimed->id)
                 ->where('send_claim_token', $token)
@@ -325,14 +355,16 @@ class TelegramBroadcastService
                     'send_started_at' => null,
                     'send_claim_token' => null,
                     'failed_at' => now(),
+                    'retry_at' => $retryAfterSeconds === null ? null : now()->addSeconds($retryAfterSeconds),
                     'terminal_failed_at' => $terminal ? now() : null,
-                    'last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
+                    'last_error' => $this->recipientError($e),
                     'attempts' => $terminal ? self::MAX_RECIPIENT_ATTEMPTS : $claimed->attempts,
                 ]);
 
             $recipientLog['status'] = 'error';
             $recipientLog['exception'] = $e::class;
             $recipientLog['terminal'] = $terminal;
+            $recipientLog['retry_after_seconds'] = $retryAfterSeconds;
             $recipientLog['duration_ms'] = DogfoodTiming::elapsedMs($startedAt);
             DogfoodTiming::log('dogfood.telegram.broadcast_recipient', $recipientLog);
 
@@ -344,10 +376,13 @@ class TelegramBroadcastService
                 'terminal' => $terminal,
                 'status' => $e instanceof RequestException ? $e->response?->status() : null,
                 'exception' => $e::class,
-                'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
             ]);
 
-            return $terminal ? 'terminal_failure' : 'transient_failure';
+            if ($retryAfterSeconds !== null) {
+                return ['status' => 'transient_failure', 'retry_after_seconds' => $retryAfterSeconds];
+            }
+
+            return ['status' => $terminal ? 'terminal_failure' : 'transient_failure'];
         }
 
         TelegramBroadcastRecipient::query()
@@ -359,6 +394,7 @@ class TelegramBroadcastService
                 'send_started_at' => null,
                 'send_claim_token' => null,
                 'failed_at' => null,
+                'retry_at' => null,
                 'terminal_failed_at' => null,
                 'last_error' => null,
             ]);
@@ -366,7 +402,7 @@ class TelegramBroadcastService
         $recipientLog['duration_ms'] = DogfoodTiming::elapsedMs($startedAt);
         DogfoodTiming::log('dogfood.telegram.broadcast_recipient', $recipientLog);
 
-        return 'sent';
+        return ['status' => 'sent'];
     }
 
     private function refreshAdminBroadcastStatus(int $broadcastId, bool $materialized = false): bool
@@ -460,6 +496,28 @@ class TelegramBroadcastService
     private function isPermanentRecipientFailure(Throwable $e): bool
     {
         return $e instanceof RequestException && in_array($e->response?->status(), [400, 403], true);
+    }
+
+    private function recipientError(Throwable $e): string
+    {
+        $status = $e instanceof RequestException ? $e->response?->status() : null;
+
+        return $status === null ? $e::class : $e::class.' HTTP '.$status;
+    }
+
+    private function providerRetryAfterSeconds(Throwable $e): ?int
+    {
+        if (! $e instanceof RequestException || $e->response?->status() !== 429) {
+            return null;
+        }
+
+        $retryAfter = data_get($e->response?->json(), 'parameters.retry_after')
+            ?? $e->response?->header('Retry-After');
+        if (! is_numeric($retryAfter)) {
+            return 1;
+        }
+
+        return min(self::MAX_PROVIDER_RETRY_AFTER_SECONDS, max(1, (int) $retryAfter));
     }
 
     private function dispatchAdminBroadcast(TelegramBroadcast $broadcast): void

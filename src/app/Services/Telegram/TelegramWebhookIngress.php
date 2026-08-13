@@ -52,9 +52,8 @@ class TelegramWebhookIngress
         }
 
         DogfoodTiming::log('dogfood.telegram.webhook_ack', [
-            'update_id' => (int) $validated['update_id'],
             'telegram_update_id' => $update->id,
-            'correlation_id' => DogfoodTiming::correlation($validated['update_id']),
+            'update_correlation_id' => DogfoodTiming::correlation($validated['update_id']),
             'ack_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
             'job_enqueued_at' => $jobEnqueuedAt?->toISOString(),
             'duplicate' => $duplicate,
@@ -92,19 +91,49 @@ class TelegramWebhookIngress
         $minimized['from'] = Arr::only((array) $message['from'], ['id', 'first_name', 'username']);
         $minimized['chat'] = Arr::only((array) $message['chat'], ['id', 'type']);
 
+        $mediaKind = TelegramMessageMedia::kind($message);
+        if ($mediaKind !== null) {
+            $minimized['media_kind'] = $mediaKind;
+        }
+
+        $mediaGroupId = $message['media_group_id'] ?? null;
+        if ((is_string($mediaGroupId) || is_int($mediaGroupId)) && trim((string) $mediaGroupId) !== '') {
+            $minimized['media_group_id'] = trim((string) $mediaGroupId);
+        }
+
         if (isset($message['photo']) && is_array($message['photo'])) {
             $minimized['photo'] = array_values(array_filter(array_map(
-                fn (mixed $photo): ?array => is_array($photo) ? Arr::only($photo, ['file_id', 'file_size', 'width', 'height']) : null,
+                fn (mixed $photo): ?array => $this->minimizedPhotoSize($photo),
                 $message['photo']
             )));
         }
         if (isset($message['reply_to_message']['photo']) && is_array($message['reply_to_message']['photo'])) {
             $minimized['reply_to_message'] = [
                 'photo' => array_values(array_filter(array_map(
-                    fn (mixed $photo): ?array => is_array($photo) ? Arr::only($photo, ['file_id', 'file_size', 'width', 'height']) : null,
+                    fn (mixed $photo): ?array => $this->minimizedPhotoSize($photo),
                     $message['reply_to_message']['photo']
                 ))),
             ];
+        }
+
+        return $minimized;
+    }
+
+    /** @return array{file_id: string, file_size?: int, width?: int, height?: int}|null */
+    private function minimizedPhotoSize(mixed $photo): ?array
+    {
+        if (! is_array($photo) || ! is_string($photo['file_id'] ?? null) || trim($photo['file_id']) === '') {
+            return null;
+        }
+
+        $minimized = ['file_id' => trim($photo['file_id'])];
+        foreach (['file_size', 'width', 'height'] as $field) {
+            $value = $photo[$field] ?? null;
+            if (is_int($value) && $value >= 0) {
+                $minimized[$field] = $value;
+            } elseif (is_string($value) && preg_match('/^[0-9]+$/', $value) === 1) {
+                $minimized[$field] = (int) $value;
+            }
         }
 
         return $minimized;

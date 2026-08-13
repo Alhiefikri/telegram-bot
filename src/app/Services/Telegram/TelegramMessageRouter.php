@@ -127,9 +127,9 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '/broadcast' || str_starts_with($text, '/broadcast ')) {
+        if ($this->isBroadcastCommand($text)) {
             $this->session->forget($customer);
-            $this->broadcasts->handleCommand($customer, $chatId, $text);
+            $this->broadcasts->handleCommand($customer, $chatId, $text, $message);
 
             return;
         }
@@ -253,7 +253,7 @@ class TelegramMessageRouter
         return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
-            || str_starts_with($text, '/broadcast ');
+            || $this->isBroadcastCommand($text);
     }
 
     private function text(Customer $customer, string $id, string $en): string
@@ -268,5 +268,10 @@ class TelegramMessageRouter
         }
 
         return (int) $matches[1];
+    }
+
+    private function isBroadcastCommand(string $text): bool
+    {
+        return TelegramBroadcastCommand::matches($text);
     }
 }

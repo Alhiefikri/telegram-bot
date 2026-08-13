@@ -16,7 +16,7 @@ class TelegramBroadcastDrafts
     private const LOCK_WAIT_SECONDS = 3;
 
     /**
-     * @param  array{message: string, product_id: ?int, draft_id?: string}  $draft
+     * @param  array{message: string, photo_file_id: ?string, product_id: ?int, draft_id?: string}  $draft
      */
     public function put(Customer $customer, array $draft): void
     {
@@ -28,13 +28,19 @@ class TelegramBroadcastDrafts
     }
 
     /**
-     * @return array{message: string, product_id: ?int, draft_id: string}|null
+     * @return array{message: string, photo_file_id: ?string, product_id: ?int, draft_id: string}|null
      */
     public function get(Customer $customer): ?array
     {
         $draft = Cache::get($this->key($customer));
 
-        return $this->validDraft($draft) ? $draft : null;
+        if (! $this->validDraft($draft)) {
+            return null;
+        }
+
+        $draft['photo_file_id'] ??= null;
+
+        return $draft;
     }
 
     public function forget(Customer $customer, ?string $draftId = null): bool
@@ -62,7 +68,7 @@ class TelegramBroadcastDrafts
      *
      * The callback must return an action of keep, replace, or remove.
      *
-     * @param  Closure(array{message: string, product_id: ?int, draft_id: string}): array{action: 'keep'|'replace'|'remove', draft?: array{message: string, product_id: ?int, draft_id: string}, value?: mixed}  $mutation
+     * @param  Closure(array{message: string, photo_file_id: ?string, product_id: ?int, draft_id: string}): array{action: 'keep'|'replace'|'remove', draft?: array{message: string, photo_file_id: ?string, product_id: ?int, draft_id: string}, value?: mixed}  $mutation
      * @return array{locked: bool, matched: bool, value: mixed}
      */
     public function mutate(Customer $customer, string $draftId, Closure $mutation): array
@@ -92,7 +98,7 @@ class TelegramBroadcastDrafts
     }
 
     /**
-     * @return array{message: string, product_id: ?int, draft_id: string}|null
+     * @return array{message: string, photo_file_id: ?string, product_id: ?int, draft_id: string}|null
      */
     public function consume(Customer $customer, ?string $draftId = null): ?array
     {
@@ -128,6 +134,9 @@ class TelegramBroadcastDrafts
             && is_string($draft['message'] ?? null)
             && array_key_exists('product_id', $draft)
             && (is_int($draft['product_id']) || $draft['product_id'] === null)
+            && (! array_key_exists('photo_file_id', $draft)
+                || $draft['photo_file_id'] === null
+                || (is_string($draft['photo_file_id']) && $draft['photo_file_id'] !== ''))
             && is_string($draft['draft_id'] ?? null)
             && preg_match('/^[A-Za-z0-9]{16}$/', $draft['draft_id']) === 1;
     }

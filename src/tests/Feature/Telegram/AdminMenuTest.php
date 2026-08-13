@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramBroadcast;
+use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramBroadcastDrafts;
 use App\Services\Telegram\TelegramBroadcastIntents;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -126,6 +127,166 @@ class AdminMenuTest extends TelegramBotTestSupport
             && $request['text'] === 'Akses admin diperlukan.');
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'));
+    }
+
+    public function test_admin_photo_broadcast_keeps_the_largest_photo_reference_and_shows_a_separate_exact_preview(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $payload = $this->messageUpdate(310, '', ['id' => 999], 999);
+        $payload['message']['caption'] = "/broadcast\nPromo foto literal";
+        $payload['message']['photo'] = [
+            ['file_id' => 'small-photo-id', 'width' => 100, 'height' => 100, 'file_size' => 1000],
+            ['file_id' => 'large-photo-id', 'width' => 1200, 'height' => 800, 'file_size' => 5000],
+        ];
+        unset($payload['message']['text']);
+
+        $this->postTelegramWebhook($payload)->assertOk();
+
+        $stored = TelegramUpdate::firstOrFail()->payload['message'];
+        $this->assertSame('photo', $stored['media_kind']);
+        $this->assertSame([
+            ['file_id' => 'small-photo-id', 'file_size' => 1000, 'width' => 100, 'height' => 100],
+            ['file_id' => 'large-photo-id', 'file_size' => 5000, 'width' => 1200, 'height' => 800],
+        ], $stored['photo']);
+
+        $previewPhoto = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
+        $this->assertSame('large-photo-id', $previewPhoto['photo']);
+        $this->assertSame('Promo foto literal', $previewPhoto['caption']);
+
+        $controlPanel = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'))->last()[0];
+        $this->assertStringNotContainsString('Promo foto literal', $controlPanel['text']);
+        $this->assertNotEmpty($controlPanel['reply_markup']['inline_keyboard'] ?? []);
+
+        $draft = app(TelegramBroadcastDrafts::class)->get(Customer::query()->where('telegram_id', 999)->firstOrFail());
+        $this->assertSame('Promo foto literal', $draft['message']);
+        $this->assertSame('large-photo-id', $draft['photo_file_id']);
+        $this->assertSame(0, TelegramBroadcast::query()->count());
+    }
+
+    public function test_broadcast_rejects_albums_and_nonphoto_media_before_creating_a_draft(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+
+        $album = $this->messageUpdate(321, '', ['id' => 999], 999);
+        $album['message']['caption'] = '/broadcast Album promo';
+        $album['message']['media_group_id'] = 'album-321';
+        $album['message']['photo'] = [
+            ['file_id' => 'album-photo', 'width' => 800, 'height' => 600],
+        ];
+        unset($album['message']['text']);
+
+        $video = $this->messageUpdate(322, '', ['id' => 999], 999);
+        $video['message']['caption'] = '/broadcast Video promo';
+        $video['message']['video'] = ['file_id' => 'video-file-id', 'width' => 800, 'height' => 600];
+        unset($video['message']['text']);
+
+        $unknown = $this->messageUpdate(323, '', ['id' => 999], 999);
+        $unknown['message']['caption'] = '/broadcast Future media promo';
+        $unknown['message']['future_media'] = ['file_id' => 'future-media-file-id'];
+        unset($unknown['message']['text']);
+
+        $this->postTelegramWebhook($album)->assertOk();
+        $this->postTelegramWebhook($video)->assertOk();
+        $this->postTelegramWebhook($unknown)->assertOk();
+
+        $stored = TelegramUpdate::query()->orderBy('update_id')->get()->map(fn (TelegramUpdate $update): array => $update->payload['message'])->all();
+        $this->assertSame('photo', $stored[0]['media_kind']);
+        $this->assertSame('album-321', $stored[0]['media_group_id']);
+        $this->assertSame('video', $stored[1]['media_kind']);
+        $this->assertStringNotContainsString('video-file-id', json_encode($stored[1], JSON_THROW_ON_ERROR));
+        $this->assertSame('unsupported', $stored[2]['media_kind']);
+        $this->assertStringNotContainsString('future-media-file-id', json_encode($stored[2], JSON_THROW_ON_ERROR));
+        $this->assertNull(app(TelegramBroadcastDrafts::class)->get(Customer::query()->where('telegram_id', 999)->firstOrFail()));
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        Http::assertNotSent(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'));
+    }
+
+    public function test_photo_caption_contract_allows_photo_only_rejects_overlong_caption_and_never_arms_a_later_photo(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+
+        $photoOnly = $this->messageUpdate(323, '', ['id' => 999], 999);
+        $photoOnly['message']['caption'] = '/broadcast';
+        $photoOnly['message']['photo'] = [
+            ['file_id' => 'photo-only-file-id', 'width' => 800, 'height' => 800],
+        ];
+        unset($photoOnly['message']['text']);
+
+        $tooLong = $this->messageUpdate(324, '', ['id' => 999], 999);
+        $tooLong['message']['caption'] = '/broadcast '.str_repeat('x', 1025);
+        $tooLong['message']['photo'] = [
+            ['file_id' => 'too-long-file-id', 'width' => 800, 'height' => 800],
+        ];
+        unset($tooLong['message']['text']);
+
+        $unarmed = $this->messageUpdate(325, '', ['id' => 999], 999);
+        $unarmed['message']['caption'] = 'ordinary photo caption';
+        $unarmed['message']['photo'] = [
+            ['file_id' => 'unarmed-file-id', 'width' => 800, 'height' => 800],
+        ];
+        unset($unarmed['message']['text']);
+
+        $this->postTelegramWebhook($photoOnly)->assertOk();
+        $this->assertSame('', app(TelegramBroadcastDrafts::class)->get($customer)['message']);
+        $photoPreview = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
+        $this->assertSame('photo-only-file-id', $photoPreview['photo']);
+        $this->assertArrayNotHasKey('caption', $photoPreview);
+
+        $this->postTelegramWebhook($tooLong)->assertOk();
+        $this->postTelegramWebhook($unarmed)->assertOk();
+
+        $this->assertSame('', app(TelegramBroadcastDrafts::class)->get($customer)['message']);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && ($request['text'] ?? null) === 'Caption foto broadcast maksimal 1024 karakter.');
+        $photoRequests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoRequests);
+    }
+
+    public function test_photo_confirmation_persists_the_literal_caption_and_product_action_in_the_durable_intent(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 999]);
+        $product = Product::factory()->create([
+            'name' => 'Photo Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $intents = app(TelegramBroadcastIntents::class);
+
+        $intents->handleCommand($customer, '999', '/broadcast Caption from caller', [
+            'media_kind' => 'photo',
+            'caption' => '/broadcast Caption from photo',
+            'photo' => [
+                ['file_id' => 'photo-small', 'width' => 100, 'height' => 100],
+                ['file_id' => 'photo-large', 'width' => 1000, 'height' => 1000],
+            ],
+        ]);
+        $preview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Preview broadcast'))->last()[0];
+        $pick = $preview['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $intents->handleCallback($customer, '999', 'photo-pick', $pick);
+        $picker = Http::recorded(fn ($request): bool => ($request['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last()[0];
+        $select = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $intents->handleCallback($customer, '999', 'photo-select', $select);
+        $selectedPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: Photo Product'))->last()[0];
+        $send = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+
+        $intents->handleCallback($customer, '999', 'photo-send', $send);
+
+        $broadcast = TelegramBroadcast::firstOrFail();
+        $this->assertSame('Caption from photo', $broadcast->message);
+        $this->assertSame('photo-large', $broadcast->photo_file_id);
+        $this->assertSame('product:'.$product->id, $broadcast->reply_markup['id']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertNull(app(TelegramBroadcastDrafts::class)->get($customer));
+        Queue::assertPushed(SendTelegramBroadcastBatch::class);
     }
 
     public function test_broadcast_command_is_private_only(): void

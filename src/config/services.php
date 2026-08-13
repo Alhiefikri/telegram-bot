@@ -196,6 +196,7 @@ return [
         'claim_lease_seconds' => (int) env('TELEGRAM_CLAIM_LEASE_SECONDS', 600),
         'processing_max_attempts' => (int) env('TELEGRAM_PROCESSING_MAX_ATTEMPTS', 3),
         'processing_retry_delay_seconds' => (int) env('TELEGRAM_PROCESSING_RETRY_DELAY_SECONDS', 60),
+        'broadcast_rate_limit_per_second' => (int) env('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND', 25),
     ],
 
     'dogfood_timing' => [

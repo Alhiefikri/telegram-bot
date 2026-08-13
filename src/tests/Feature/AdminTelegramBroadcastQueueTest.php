@@ -12,8 +12,10 @@ use App\Services\Telegram\TelegramBroadcastService;
 use Illuminate\Contracts\Bus\Dispatcher as DispatcherContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
@@ -21,6 +23,13 @@ use Tests\TestCase;
 class AdminTelegramBroadcastQueueTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.telegram.broadcast_rate_limit_per_second', 25);
+    }
 
     public function test_admin_broadcast_submission_persists_intent_and_enqueues_without_sending_to_recipients(): void
     {
@@ -79,6 +88,114 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         app(SendTelegramBroadcastBatch::class, ['broadcastId' => $broadcast->id])->handle(app(TelegramBroadcastService::class));
 
         Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
+    }
+
+    public function test_photo_broadcast_delivery_uses_send_photo_with_the_stored_reference_and_literal_caption(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 123],
+        ])]);
+        Customer::factory()->create(['telegram_id' => 111111111, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 222222222, 'locale' => 'en']);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Promo foto literal',
+            'photo_file_id' => 'bot-owned-photo-file-id',
+            'reply_markup' => [
+                'id' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'product:1']]]],
+                'en' => ['inline_keyboard' => [[['text' => 'Buy', 'callback_data' => 'product:1']]]],
+            ],
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+
+        $result = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+        $this->assertSame(2, $result->sent);
+        $requests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(2, $requests);
+        $this->assertSame(['111111111', '222222222'], $requests->map(fn (array $record): string => (string) $record[0]['chat_id'])->all());
+        $this->assertSame('bot-owned-photo-file-id', $requests->first()[0]['photo']);
+        $this->assertSame('Promo foto literal', $requests->first()[0]['caption']);
+        $this->assertSame('Beli', $requests->first()[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Buy', $requests->last()[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+    }
+
+    public function test_shared_broadcast_rate_limit_leaves_unclaimed_recipients_pending(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.broadcast_rate_limit_per_second', 1);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 123],
+        ])]);
+        Customer::factory()->create(['telegram_id' => 111111111]);
+        Customer::factory()->create(['telegram_id' => 222222222]);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Rate limited',
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+
+        $result = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+        $broadcast->refresh();
+        $this->assertSame(1, $result->sent);
+        $this->assertSame(1, $result->retryAfterSeconds);
+        $this->assertSame(1, $broadcast->sent_count);
+        $this->assertSame(1, $broadcast->pending_count);
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->where('attempts', 1)->count());
+        $this->assertSame(1, TelegramBroadcastRecipient::query()->where('attempts', 0)->count());
+        Http::assertSentCount(1);
+    }
+
+    public function test_provider_retry_after_is_bounded_and_allows_retry_after_the_provider_window(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+
+            return $attempts === 1
+                ? Http::response([
+                    'ok' => false,
+                    'description' => 'Too Many Requests',
+                    'parameters' => ['retry_after' => 4],
+                ], 429)
+                : Http::response(['ok' => true, 'result' => ['message_id' => 123]]);
+        });
+        Customer::factory()->create(['telegram_id' => 111111111]);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Provider retry',
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+        $now = Carbon::parse('2026-08-13 10:00:00');
+        Carbon::setTestNow($now);
+
+        try {
+            $first = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+            $recipient = TelegramBroadcastRecipient::query()->firstOrFail();
+            $this->assertSame(4, $first->retryAfterSeconds);
+            $this->assertSame(1, $recipient->attempts);
+            $this->assertNotNull($recipient->retry_at);
+            $this->assertTrue($recipient->retry_at->equalTo($now->copy()->addSeconds(4)));
+
+            RateLimiter::clear('telegram:admin-broadcast:send-rate');
+            Carbon::setTestNow($now->copy()->addSeconds(5));
+            $second = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+            $this->assertSame(1, $second->sent);
+            $this->assertSame(2, $attempts);
+            $this->assertNotNull($broadcast->fresh()->completed_at);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_transient_failures_retry_without_resending_successful_recipients(): void

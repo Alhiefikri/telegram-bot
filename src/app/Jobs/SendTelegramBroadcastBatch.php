@@ -48,9 +48,13 @@ class SendTelegramBroadcastBatch implements ShouldBeUniqueUntilProcessing, Shoul
             $result = $broadcasts->processAdminBroadcastBatch($this->broadcastId);
 
             if ($result->hasMore) {
+                $delay = $result->retryAfterSeconds !== null
+                    ? now()->addSeconds($result->retryAfterSeconds)
+                    : ($result->transientFailures > 0 || $result->processed === 0 ? now()->addSeconds(30) : now());
+
                 self::dispatch($this->broadcastId, now()->toISOString())
                     ->onQueue('telegram-broadcast')
-                    ->delay($result->transientFailures > 0 || $result->processed === 0 ? now()->addSeconds(30) : now());
+                    ->delay($delay);
             }
         } finally {
             DogfoodTiming::log('dogfood.telegram.admin_broadcast_job_finished', DogfoodTiming::queryStats() + [

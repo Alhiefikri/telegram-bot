@@ -60,7 +60,7 @@ class TelegramBotClient
         return $response;
     }
 
-    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): void
+    public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $payload = array_merge(['chat_id' => $chatId, 'photo' => $photoFileId], $options);
 
@@ -72,7 +72,12 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        $this->timed('sendPhotoReference', fn () => $this->requests->request()->post($this->requests->url('sendPhoto'), $payload)->throw());
+        $response = $this->timed('sendPhotoReference', fn () => $this->requests->request()->post($this->requests->url('sendPhoto'), $payload)->throw()->json());
+        if (($response['ok'] ?? false) !== true) {
+            throw new \RuntimeException('Telegram Bot API sendPhoto response was not successful.');
+        }
+
+        return $response;
     }
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void

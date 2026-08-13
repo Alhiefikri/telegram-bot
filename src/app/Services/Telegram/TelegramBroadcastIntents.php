@@ -18,7 +18,7 @@ class TelegramBroadcastIntents
         private readonly TelegramAdminAccess $adminAccess,
     ) {}
 
-    public function handleCommand(Customer $customer, string $chatId, string $text): void
+    public function handleCommand(Customer $customer, string $chatId, string $text, array $message = []): void
     {
         if (! $this->adminAccess->isAdmin($customer, $chatId)) {
             $this->bot->sendMessage($chatId, 'Akses admin diperlukan.');
@@ -26,21 +26,35 @@ class TelegramBroadcastIntents
             return;
         }
 
-        $message = trim(substr($text, strlen('/broadcast')));
-        if ($message === '') {
+        $content = $this->broadcastContent($text, $message);
+        if ($content['error'] !== null) {
+            $this->bot->sendMessage($chatId, $content['error']);
+
+            return;
+        }
+
+        $cleanedMessage = $content['message'];
+        if ($content['photo_file_id'] === null && $cleanedMessage === '') {
             $this->sendHelp($chatId);
 
             return;
         }
 
-        if (mb_strlen($message) > 3500) {
-            $this->bot->sendMessage($chatId, 'Pesan broadcast maksimal 3500 karakter.');
+        $maxLength = $content['photo_file_id'] === null ? 3500 : 1024;
+        if (mb_strlen($cleanedMessage) > $maxLength) {
+            $this->bot->sendMessage($chatId, $content['photo_file_id'] === null
+                ? 'Pesan broadcast maksimal 3500 karakter.'
+                : 'Caption foto broadcast maksimal 1024 karakter.');
 
             return;
         }
 
         try {
-            $this->drafts->put($customer, ['message' => $message, 'product_id' => null]);
+            $this->drafts->put($customer, [
+                'message' => $cleanedMessage,
+                'photo_file_id' => $content['photo_file_id'],
+                'product_id' => null,
+            ]);
         } catch (Throwable) {
             $this->bot->sendMessage($chatId, 'Draft broadcast sedang diproses. Coba lagi sebentar.');
 
@@ -208,17 +222,34 @@ class TelegramBroadcastIntents
             }
         }
 
-        $lines = [
-            '📣 Preview broadcast',
-            '━━━━━━━━━━━━━━',
-            'Pesan:',
-            $draft['message'],
-            '',
-            $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
-            '',
-            'Pesan belum dikirim. Pilih tindakan di bawah.',
-        ];
+        $photoFileId = $draft['photo_file_id'] ?? null;
+        $lines = $photoFileId !== null
+            ? [
+                '📣 Preview broadcast',
+                '━━━━━━━━━━━━━━',
+                $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
+                '',
+                'Foto di atas belum dikirim. Pilih tindakan di bawah.',
+            ]
+            : [
+                '📣 Preview broadcast',
+                '━━━━━━━━━━━━━━',
+                'Pesan:',
+                $draft['message'],
+                '',
+                $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
+                '',
+                'Pesan belum dikirim. Pilih tindakan di bawah.',
+            ];
         $productAction = $product ? '🔁 Ganti produk' : '➕ Tambahkan produk';
+
+        if ($photoFileId !== null) {
+            $this->bot->sendPhotoReference(
+                $chatId,
+                $photoFileId,
+                $draft['message'] === '' ? null : $draft['message'],
+            );
+        }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), [
             'inline_keyboard' => [
@@ -302,10 +333,13 @@ class TelegramBroadcastIntents
             ] : [];
 
             try {
-                $queued = $this->broadcast->queueAdminBroadcast($draft['message'], $replyMarkup, $draft['draft_id']);
-            } catch (Throwable $exception) {
-                report($exception);
-
+                $queued = $this->broadcast->queueAdminBroadcast(
+                    $draft['message'],
+                    $replyMarkup,
+                    $draft['draft_id'],
+                    $draft['photo_file_id'] ?? null,
+                );
+            } catch (Throwable) {
                 return ['action' => 'keep', 'value' => 'persistence_failure'];
             }
 
@@ -359,6 +393,93 @@ class TelegramBroadcastIntents
     private function eligibleProduct(int $productId): ?Product
     {
         return Product::query()->publicVisible()->availableForPurchase()->whereKey($productId)->first(['id', 'name', 'price_amount']);
+    }
+
+    /**
+     * @return array{message: string, photo_file_id: ?string, error: ?string}
+     */
+    private function broadcastContent(string $text, array $message): array
+    {
+        $mediaKind = TelegramMessageMedia::kind($message);
+        if (($message['media_group_id'] ?? null) !== null) {
+            return [
+                'message' => '',
+                'photo_file_id' => null,
+                'error' => 'Album/media group belum didukung. Kirim satu foto saja dengan caption /broadcast.',
+            ];
+        }
+
+        if ($mediaKind !== null && $mediaKind !== TelegramMessageMedia::PHOTO) {
+            return [
+                'message' => '',
+                'photo_file_id' => null,
+                'error' => 'Media ini belum didukung untuk broadcast. Kirim satu foto atau teks dengan /broadcast.',
+            ];
+        }
+
+        if ($mediaKind === TelegramMessageMedia::PHOTO) {
+            $photoFileId = $this->largestPhotoFileId($message['photo'] ?? null);
+            if ($photoFileId === null) {
+                return [
+                    'message' => '',
+                    'photo_file_id' => null,
+                    'error' => 'Foto broadcast tidak bisa diproses. Coba kirim ulang fotonya.',
+                ];
+            }
+
+            return [
+                'message' => TelegramBroadcastCommand::strip((string) ($message['caption'] ?? $text)),
+                'photo_file_id' => $photoFileId,
+                'error' => null,
+            ];
+        }
+
+        return [
+            'message' => TelegramBroadcastCommand::strip($text),
+            'photo_file_id' => null,
+            'error' => null,
+        ];
+    }
+
+    private function largestPhotoFileId(mixed $photos): ?string
+    {
+        if (! is_array($photos)) {
+            return null;
+        }
+
+        $selected = null;
+        $selectedScore = -1;
+        foreach ($photos as $photo) {
+            if (! is_array($photo) || ! is_string($photo['file_id'] ?? null) || $photo['file_id'] === '') {
+                continue;
+            }
+
+            $width = $this->nonNegativeInteger($photo['width'] ?? null);
+            $height = $this->nonNegativeInteger($photo['height'] ?? null);
+            $fileSize = $this->nonNegativeInteger($photo['file_size'] ?? null);
+            $score = $width * $height;
+            if ($score === 0) {
+                $score = $fileSize;
+            }
+
+            if ($score >= $selectedScore) {
+                $selected = $photo['file_id'];
+                $selectedScore = $score;
+            }
+        }
+
+        return $selected;
+    }
+
+    private function nonNegativeInteger(mixed $value): int
+    {
+        if (is_int($value)) {
+            return max(0, $value);
+        }
+
+        return is_string($value) && preg_match('/^[0-9]+$/', $value) === 1
+            ? (int) $value
+            : 0;
     }
 
     /**

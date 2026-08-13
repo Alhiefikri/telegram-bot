@@ -10,5 +10,6 @@ final readonly class TelegramBroadcastBatchResult
         public int $transientFailures,
         public int $terminalFailures,
         public bool $hasMore,
+        public ?int $retryAfterSeconds = null,
     ) {}
 }

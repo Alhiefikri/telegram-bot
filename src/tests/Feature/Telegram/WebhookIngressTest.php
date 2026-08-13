@@ -494,7 +494,8 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(131, '/start', from: ['id' => 987654], chatId: 123456))->assertOk();
 
-        $this->assertLog($logs, 'dogfood.telegram.webhook_ack', fn (array $context) => $context['update_id'] === 131
+        $this->assertLog($logs, 'dogfood.telegram.webhook_ack', fn (array $context) => ! array_key_exists('update_id', $context)
+            && $context['update_correlation_id'] === DogfoodTiming::correlation(131)
             && array_key_exists('ack_duration_ms', $context)
             && array_key_exists('job_enqueued_at', $context)
             && $context['duplicate'] === false
