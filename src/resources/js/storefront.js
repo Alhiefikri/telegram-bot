@@ -347,7 +347,7 @@ function initVerifiedPurchaseActivity() {
     "(prefers-reduced-motion: reduce)"
   ).matches;
   const render = (item, announce = false) => {
-    message.textContent = `${item.buyer} membeli ${item.product} · ${item.relative_time} · ${item.origin}`;
+    message.textContent = `${item.buyer} membeli ${item.product} · ${item.relative_time}`;
     renderedId = item.id;
     container.classList.remove("hidden");
     if (announce)

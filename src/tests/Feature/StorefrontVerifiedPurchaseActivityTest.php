@@ -31,18 +31,16 @@ class StorefrontVerifiedPurchaseActivityTest extends TestCase
             ->assertJsonCount(2, 'items')
             ->json('items');
 
-        $this->assertSame(['id', 'buyer', 'product', 'origin', 'occurred_at', 'relative_time'], array_keys($items[0]));
+        $this->assertSame(['id', 'buyer', 'product', 'occurred_at', 'relative_time'], array_keys($items[0]));
         $this->assertSame('A***', $items[0]['buyer']);
         $this->assertSame('Produk aman', $items[0]['product']);
-        $this->assertSame('Telegram', $items[0]['origin']);
         $this->assertSame('B***', $items[1]['buyer']);
-        $this->assertSame('Website', $items[1]['origin']);
         $this->assertNotContains($telegramOrder->invoice_number, $items);
         $this->assertNotContains($websiteOrder->invoice_number, $items);
         $this->assertNotContains(1234, $items);
     }
 
-    public function test_it_rejects_mismatched_sale_proof_and_uses_website_origin_for_guest_orders(): void
+    public function test_it_rejects_mismatched_sale_proof_for_a_website_order(): void
     {
         $order = $this->orderWithItem('Budi', null, OrderStatus::Completed, PaymentStatus::Paid, true, 2);
         InventoryMovement::query()->where('order_id', $order->id)->update(['quantity' => -1]);
