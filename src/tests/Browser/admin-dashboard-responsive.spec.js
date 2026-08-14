@@ -1573,11 +1573,25 @@ async function exerciseProductManagementModals(page) {
 }
 
 async function expectNoDocumentOverflow(page) {
-  const metrics = await page.evaluate(() => ({
-    bodyScrollWidth: document.body.scrollWidth,
-    documentScrollWidth: document.documentElement.scrollWidth,
-    viewportWidth: window.innerWidth,
-  }));
+  const metrics = await page.evaluate(() => {
+    const roots = [
+      document.documentElement,
+      document.body,
+      ...document.querySelectorAll(
+        ".admin-page, .admin-dashboard-page, .admin-mini-shell"
+      ),
+    ];
+
+    roots.forEach((root) => {
+      root.style.setProperty("overflow-x", "visible", "important");
+    });
+
+    return {
+      bodyScrollWidth: document.body.scrollWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    };
+  });
 
   expect(
     metrics.documentScrollWidth,
@@ -1766,7 +1780,8 @@ function appEnv() {
     CACHE_STORE: "array",
     QUEUE_CONNECTION: "database",
     MAIL_MAILER: "log",
-    DOGFOOD_FAKE_TELEGRAM_OUTBOUND: "true",
+    // prettier-ignore
+    DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true',
     KLIKQRIS_SANDBOX_ENABLED: "true",
     KLIKQRIS_SANDBOX_API_KEY: "test-only-browser-key",
     KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",

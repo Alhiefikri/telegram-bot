@@ -256,7 +256,6 @@
 @layer utilities {
   .admin-page {
     min-height: 100vh;
-    overflow-x: hidden;
     background-color: var(--color-neo-admin-paper);
     background-image:
       radial-gradient(
