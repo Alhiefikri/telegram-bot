@@ -79,6 +79,7 @@ Route::prefix('akun')->name('customer.')->group(function (): void {
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
+        Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware('throttle:automatic-payment-status-refresh')->name('orders.status');
         Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->name('orders.show');
         Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
         Route::post('klaim-pesanan', [CustomerAccountController::class, 'claim'])->middleware('throttle:customer-order-claim')->name('claim.store');

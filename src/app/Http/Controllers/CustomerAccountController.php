@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\PaymentStatus;
 use App\Http\Requests\CustomerLoginLinkRequest;
 use App\Http\Requests\CustomerOrderClaimRequest;
 use App\Models\Order;
@@ -11,6 +10,8 @@ use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontShopOrderPresenter;
+use App\Storefront\StorefrontShopPaymentStatusRefresh;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -75,12 +76,24 @@ class CustomerAccountController extends Controller
     public function orders(Request $request, StorefrontPresenter $storefront, CustomerOwnedOrderQuery $ordersQuery): Response
     {
         $customer = $request->user('customer');
-        $orders = $ordersQuery->paginatePaid($customer);
+        $activeFilter = $ordersQuery->normalizeFilter($request->query('status'));
+        $orders = $ordersQuery->paginateHistory($customer, $activeFilter);
+        $filters = collect([
+            ['key' => 'all', 'label' => 'Semua'],
+            ['key' => 'waiting', 'label' => 'Menunggu'],
+            ['key' => 'processing', 'label' => 'Diproses'],
+            ['key' => 'completed', 'label' => 'Selesai'],
+            ['key' => 'issue', 'label' => 'Masalah'],
+        ])->map(fn (array $filter): array => $filter + [
+            'active' => $filter['key'] === $activeFilter,
+            'url' => route('customer.orders.index', ['status' => $filter['key']]),
+        ])->all();
 
         return $this->view($request, 'customer.orders', [
             'storefront' => $storefront, 'brand' => $storefront->brand(), 'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'), 'orders' => $orders, 'customer' => $customer,
-            'pageTitle' => 'Pesanan Saya | '.$storefront->brand(), 'pageDescription' => 'Pesanan paid milik Anda.',
+            'filters' => $filters, 'activeFilter' => $activeFilter,
+            'pageTitle' => 'Pesanan Saya | '.$storefront->brand(), 'pageDescription' => 'Riwayat semua pesanan milik Anda.',
             'canonicalUrl' => route('customer.orders.index'),
         ]);
     }
@@ -88,15 +101,26 @@ class CustomerAccountController extends Controller
     public function show(Request $request, string $order, StorefrontShopOrderPresenter $presenter, StorefrontPresenter $storefront): Response
     {
         $ownedOrder = Order::query()->whereKey($order)->where('customer_id', $request->user('customer')->getKey())->firstOrFail();
-        abort_unless($ownedOrder->payment_status === PaymentStatus::Paid, 403);
 
         $data = $presenter->viewData($ownedOrder, canRevealCredentials: true, accessKey: null);
         $accountOrderUrl = route('customer.orders.show', $ownedOrder);
         $data['canonicalUrl'] = $accountOrderUrl;
-        $data['statusUrl'] = $accountOrderUrl;
+        $data['statusUrl'] = route('customer.orders.status', $ownedOrder);
         $data['redirectUrl'] = $accountOrderUrl;
 
         return $this->view($request, 'storefront.shop-order', $data);
+    }
+
+    public function status(Request $request, string $order, StorefrontShopPaymentStatusRefresh $refresh): JsonResponse
+    {
+        $ownedOrder = Order::query()->whereKey($order)->where('customer_id', $request->user('customer')->getKey())->firstOrFail();
+        $result = $refresh->execute($ownedOrder);
+        $payload = $result->payload();
+        if ($result->ok) {
+            $payload['redirect_url'] = route('customer.orders.show', $ownedOrder);
+        }
+
+        return response()->json($payload, $result->statusCode());
     }
 
     public function claimForm(Request $request, StorefrontPresenter $storefront): Response
