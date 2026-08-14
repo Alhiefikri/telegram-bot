@@ -18,22 +18,28 @@ class StorefrontVerifiedPurchaseActivityTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_projects_only_paid_orders_with_matching_inventory_sale_proof(): void
+    public function test_it_projects_paid_processable_orders_with_matching_inventory_sale_proof_without_sensitive_order_data(): void
     {
-        $eligible = $this->orderWithItem('Alya', 1234, OrderStatus::Completed, PaymentStatus::Paid, true);
+        $telegramOrder = $this->orderWithItem('Alya', 1234, OrderStatus::Completed, PaymentStatus::Paid, true);
+        $websiteOrder = $this->orderWithItem('Budi', null, OrderStatus::Processing, PaymentStatus::Paid, true);
         $this->orderWithItem('Pending', null, OrderStatus::PendingPayment, PaymentStatus::Pending, true);
+        $this->orderWithItem('Cancelled', null, OrderStatus::Cancelled, PaymentStatus::Paid, true);
         $this->orderWithItem('No proof', null, OrderStatus::Completed, PaymentStatus::Paid, false);
 
-        $response = $this->getJson(route('storefront.verified-purchase-activity'));
+        $items = $this->getJson(route('storefront.verified-purchase-activity'))
+            ->assertOk()
+            ->assertJsonCount(2, 'items')
+            ->json('items');
 
-        $response->assertOk()
-            ->assertJsonCount(1, 'items')
-            ->assertJsonPath('items.0.buyer', 'A***')
-            ->assertJsonPath('items.0.product', 'Produk aman')
-            ->assertJsonPath('items.0.amount', 'Rp10.000')
-            ->assertJsonPath('items.0.origin', 'Telegram')
-            ->assertJsonMissing(['invoice_number' => $eligible->invoice_number])
-            ->assertJsonMissing(['telegram_id' => 1234]);
+        $this->assertSame(['id', 'buyer', 'product', 'origin', 'occurred_at', 'relative_time'], array_keys($items[0]));
+        $this->assertSame('A***', $items[0]['buyer']);
+        $this->assertSame('Produk aman', $items[0]['product']);
+        $this->assertSame('Telegram', $items[0]['origin']);
+        $this->assertSame('B***', $items[1]['buyer']);
+        $this->assertSame('Website', $items[1]['origin']);
+        $this->assertNotContains($telegramOrder->invoice_number, $items);
+        $this->assertNotContains($websiteOrder->invoice_number, $items);
+        $this->assertNotContains(1234, $items);
     }
 
     public function test_it_rejects_mismatched_sale_proof_and_uses_website_origin_for_guest_orders(): void
@@ -45,6 +51,30 @@ class StorefrontVerifiedPurchaseActivityTest extends TestCase
         $this->getJson(route('storefront.verified-purchase-activity'))
             ->assertOk()
             ->assertJsonCount(0, 'items');
+    }
+
+    public function test_it_bounds_the_public_history(): void
+    {
+        foreach (range(1, 9) as $number) {
+            $this->orderWithItem('Buyer '.$number, null, OrderStatus::Processing, PaymentStatus::Paid, true);
+        }
+        Cache::forget('storefront.verified-purchase-activity.v1');
+
+        $this->getJson(route('storefront.verified-purchase-activity'))
+            ->assertOk()
+            ->assertJsonCount(8, 'items');
+    }
+
+    public function test_it_uses_a_bounded_cacheable_rate_limited_public_read_endpoint(): void
+    {
+        for ($request = 0; $request < 12; $request++) {
+            $this->getJson(route('storefront.verified-purchase-activity'))
+                ->assertOk()
+                ->assertHeader('Cache-Control', 'max-age=45, public');
+        }
+
+        $this->getJson(route('storefront.verified-purchase-activity'))
+            ->assertTooManyRequests();
     }
 
     private function orderWithItem(string $buyer, ?int $telegramId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $saleProof, int $quantity = 1): Order

@@ -16,14 +16,14 @@ class VerifiedPurchaseActivity
 
     public const MAX_ITEMS = 8;
 
-    /** @return Collection<int, array{id:string,buyer:string,product:string,amount:string,origin:string,occurred_at:string,relative_time:string}> */
+    /** @return Collection<int, array{id:string,buyer:string,product:string,origin:string,occurred_at:string,relative_time:string}> */
     public function recent(): Collection
     {
         return Cache::remember(self::CACHE_KEY, now()->addSeconds(45), function (): Collection {
             return Order::query()
-                ->select(['id', 'customer_id', 'order_status', 'payment_status', 'total_amount', 'created_at'])
+                ->select(['id', 'customer_id', 'order_status', 'payment_status', 'created_at'])
                 ->with(['customer:id,telegram_id,first_name', 'orderItems:id,order_id,product_name,product_id,quantity', 'inventoryMovements:id,order_id,product_id,type,quantity,created_at'])
-                ->where('order_status', OrderStatus::Completed)
+                ->whereIn('order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value])
                 ->where('payment_status', PaymentStatus::Paid)
                 ->whereHas('inventoryMovements', fn ($query) => $query->where('type', InventoryMovementType::Sale))
                 ->latest('updated_at')
@@ -46,7 +46,7 @@ class VerifiedPurchaseActivity
         });
     }
 
-    /** @return array{id:string,buyer:string,product:string,amount:string,origin:string,occurred_at:string,relative_time:string} */
+    /** @return array{id:string,buyer:string,product:string,origin:string,occurred_at:string,relative_time:string} */
     private function project(Order $order): array
     {
         $occurredAt = $order->inventoryMovements
@@ -58,7 +58,6 @@ class VerifiedPurchaseActivity
             'id' => hash_hmac('sha256', (string) $order->getKey(), (string) config('app.key')),
             'buyer' => $this->mask($buyer),
             'product' => (string) $order->orderItems->first()->product_name,
-            'amount' => 'Rp'.number_format((int) $order->total_amount, 0, ',', '.'),
             'origin' => $order->customer?->telegram_id === null ? 'Website' : 'Telegram',
             'occurred_at' => $occurredAt->toIso8601String(),
             'relative_time' => $occurredAt->locale('id')->diffForHumans(),

@@ -347,11 +347,11 @@ function initVerifiedPurchaseActivity() {
     "(prefers-reduced-motion: reduce)"
   ).matches;
   const render = (item, announce = false) => {
-    message.textContent = `${item.buyer} membeli ${item.product} · ${item.amount} · ${item.relative_time} · ${item.origin}`;
+    message.textContent = `${item.buyer} membeli ${item.product} · ${item.relative_time} · ${item.origin}`;
     renderedId = item.id;
     container.classList.remove("hidden");
     if (announce)
-      live.textContent = `Aktivitas pembelian baru: ${item.buyer} membeli ${item.product} seharga ${item.amount}.`;
+      live.textContent = `Aktivitas pembelian baru: ${item.buyer} membeli ${item.product}.`;
   };
   const show = (announce = false) => {
     const item = items[position];
@@ -380,12 +380,17 @@ function initVerifiedPurchaseActivity() {
       const next = (await response.json()).items || [];
       const known = new Set(items.map((item) => item.id));
       items = next;
-      position = Math.min(position, Math.max(0, items.length - 1));
+      const newItem = initialized
+        ? items.find((item) => !known.has(item.id))
+        : null;
+      position = newItem
+        ? items.indexOf(newItem)
+        : Math.min(position, Math.max(0, items.length - 1));
       if (!items.length) {
         container.classList.add("hidden");
         return;
       }
-      show(initialized && items.some((item) => !known.has(item.id)));
+      show(newItem !== null);
       initialized = true;
     } catch {
       /* Public trust UI must fail silently. */
