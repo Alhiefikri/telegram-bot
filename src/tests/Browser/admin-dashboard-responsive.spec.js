@@ -105,7 +105,194 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   );
   await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
   await expect(dialog.locator("#storefront-checkout-error")).toBeVisible();
+  await expect(
+    dialog.locator("[data-storefront-optional-support]")
+  ).not.toHaveAttribute("open");
   await expectNoDocumentOverflow(page);
+});
+
+test("keeps customer checkout QRIS-first across browser locales", async ({
+  browser,
+}) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    "App\\Models\\ManualPaymentSetting::query()->updateOrCreate(['id' => 1], ['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'binance_verification_mode' => 'order_id', 'binance_order_id_compatibility_ready_at' => now(), 'is_active' => true]);",
+  ]);
+
+  for (const locale of ["id-ID", "en-US"]) {
+    const context = await browser.newContext({
+      locale,
+      extraHTTPHeaders: { "Accept-Language": locale },
+      viewport: { width: 390, height: 900 },
+    });
+    const page = await context.newPage();
+
+    try {
+      await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+      const productCard = page
+        .locator("a[data-product]")
+        .filter({ hasText: "Browser QA Produk A" })
+        .first();
+      await productCard.click();
+
+      const dialog = page.getByRole("dialog", {
+        name: "Browser QA Produk A",
+      });
+      const paymentMethods = dialog.locator(
+        'input[type="radio"][name="payment_method"]'
+      );
+      const qris = dialog.locator(
+        'input[type="radio"][name="payment_method"][value="qris"]'
+      );
+      const binance = dialog.locator(
+        'input[type="radio"][name="payment_method"][value="binance_pay"]'
+      );
+      const scrollRegion = dialog.locator("[data-storefront-checkout-scroll]");
+      const optionalSupport = dialog.locator(
+        "[data-storefront-optional-support]"
+      );
+      const prepurchaseSupport = dialog.locator(
+        "[data-storefront-prepurchase-support]"
+      );
+      const submitButton = dialog.locator("[data-storefront-checkout-submit]");
+
+      await expect(paymentMethods).toHaveCount(2);
+      expect(
+        await paymentMethods.evaluateAll((inputs) =>
+          inputs.map((input) => input.value)
+        )
+      ).toEqual(["qris", "binance_pay"]);
+      await expect(qris).toBeChecked();
+      await expect(binance).not.toBeChecked();
+      await expect(scrollRegion).toHaveCSS("overflow-y", "auto");
+      await expect(scrollRegion).toHaveCSS("overscroll-behavior-y", "contain");
+      await expect(optionalSupport).not.toHaveAttribute("open");
+      await expect(prepurchaseSupport).not.toHaveAttribute("open");
+      await expectElementWithinViewport(page, submitButton);
+      await expect(
+        dialog.getByRole("button", { name: "Bayar QRIS di Website" })
+      ).toBeVisible();
+      await expect(
+        dialog.getByText(
+          "Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS."
+        )
+      ).toBeVisible();
+
+      await dialog
+        .locator('label[for="storefront-payment-method-binance_pay"]')
+        .click();
+      await expect(binance).toBeChecked();
+      await expect(qris).not.toBeChecked();
+      await expect(
+        dialog.getByRole("button", { name: /Binance Pay/ })
+      ).toBeVisible();
+      await expect(
+        dialog.getByText(
+          "Binance Pay dibayar dalam USDT dan diverifikasi manual. Instruksi serta nomor invoice tersedia setelah checkout."
+        )
+      ).toBeVisible();
+
+      await dialog
+        .locator('label[for="storefront-payment-method-qris"]')
+        .click();
+      await expect(qris).toBeChecked();
+      await expect(
+        dialog.getByRole("button", { name: "Bayar QRIS di Website" })
+      ).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test("respects reduced motion in the customer checkout modal", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  await page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first()
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  const motion = await dialog.evaluate((element) => {
+    const duration = getComputedStyle(element).transitionDuration;
+    const durations = duration.split(",").map((value) => value.trim());
+
+    return {
+      prefersReducedMotion: window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      ).matches,
+      maxDurationMs: Math.max(
+        ...durations.map((value) =>
+          value.endsWith("ms")
+            ? Number.parseFloat(value)
+            : Number.parseFloat(value) * 1000
+        )
+      ),
+    };
+  });
+
+  expect(motion.prefersReducedMotion).toBe(true);
+  expect(motion.maxDurationMs).toBeLessThanOrEqual(1);
+});
+
+test("restores QRIS for customer checkout when Binance becomes unavailable", async ({
+  page,
+}) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    "App\\Models\\ManualPaymentSetting::query()->updateOrCreate(['id' => 1], ['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'binance_verification_mode' => 'order_id', 'binance_order_id_compatibility_ready_at' => now(), 'is_active' => true]);",
+  ]);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const productCard = page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  await productCard.click();
+
+  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  const binance = dialog.locator(
+    'input[type="radio"][name="payment_method"][value="binance_pay"]'
+  );
+  await expect(binance).toBeVisible();
+  await dialog
+    .locator('label[for="storefront-payment-method-binance_pay"]')
+    .click();
+  await dialog.getByLabel("Nama pembeli").fill("Browser Buyer");
+
+  runArtisan([
+    "tinker",
+    "--execute",
+    "App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);",
+  ]);
+
+  await dialog.getByRole("button", { name: /Binance Pay/ }).click();
+  await page.waitForLoadState("domcontentloaded");
+
+  const restoredDialog = page.getByRole("dialog", {
+    name: "Browser QA Produk A",
+  });
+  const qris = restoredDialog.locator(
+    'input[type="radio"][name="payment_method"][value="qris"]'
+  );
+
+  await expect(restoredDialog).toBeVisible();
+  await expect(qris).toBeChecked();
+  await expect(qris).toBeEnabled();
+  await expect(
+    restoredDialog.getByRole("button", { name: "Bayar QRIS di Website" })
+  ).toBeEnabled();
 });
 
 test("opens the selected product checkout from the landing catalog", async ({
@@ -1786,6 +1973,7 @@ function appEnv() {
     KLIKQRIS_SANDBOX_API_KEY: "test-only-browser-key",
     KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",
     KLIKQRIS_REPORTING_CACHE_SECONDS: "0",
+    BINANCE_PAY_ID: "987654321",
   };
 }
 
@@ -1877,6 +2065,7 @@ $productA = Product::factory()->create([
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,
+    'usdt_price_amount' => 2000000,
     'stock' => 9,
     'reserved_stock' => 1,
     'is_active' => true,

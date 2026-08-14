@@ -453,6 +453,46 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringNotContainsString($paymentNumber, json_encode($metadata, JSON_THROW_ON_ERROR));
     }
 
+    public function test_explicit_qris_checkout_stays_on_the_active_provider_when_binance_is_available(): void
+    {
+        Queue::fake([SendAdminOrderPendingNotification::class]);
+        config()->set('services.binance.pay_id', '987654321');
+        $this->pakasirConfigIsReady();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
+            'binance_pay_enabled' => true,
+            'binance_verification_mode' => 'order_id',
+            'binance_order_id_compatibility_ready_at' => now(),
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'name' => 'QRIS First With Binance Available',
+            'price_amount' => 15000,
+            'usdt_price_amount' => 1000000,
+            'stock' => 1,
+        ]);
+        $this->providerQrisCreateSucceedsWithProviderTotal(
+            amount: 15000,
+            paymentNumber: QrisTestPayload::forAmount(15310),
+        );
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'qris_first_buyer',
+            'payment_method' => 'qris',
+        ]);
+
+        $response->assertRedirect();
+        $payment = Payment::query()->sole();
+
+        $this->assertSame('pakasir', $payment->provider);
+        $this->assertSame(PakasirCheckoutFlow::API_QRIS, $payment->method);
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame(0, Payment::query()->where('method', 'BINANCE_PAY_ID')->count());
+    }
+
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);

@@ -66,7 +66,13 @@
         <div class="payment-qris-stage relative mt-6 overflow-hidden rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-5 shadow-[6px_6px_0_var(--sf-shadow)]">
             <div class="payment-qris-poster mx-auto max-w-sm">
                 <div class="qris-frame relative mx-auto max-w-[300px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[7px_7px_0_var(--sf-shadow)]">
-                    <img src="{{ $qrisImageSource ?? $qrisImageDataUri }}" alt="QRIS invoice {{ $order->invoice_number }}" class="relative z-10 aspect-square w-full object-contain">
+                    @if ($qrisImageSource !== null)
+                        <div class="relative z-10 aspect-square w-full overflow-hidden" data-native-qris-crop="top-square">
+                            <img src="{{ $qrisImageSource }}" alt="QRIS invoice {{ $order->invoice_number }}" class="block h-auto w-full max-w-none">
+                        </div>
+                    @else
+                        <img src="{{ $qrisImageDataUri }}" alt="QRIS invoice {{ $order->invoice_number }}" class="relative z-10 aspect-square w-full object-contain">
+                    @endif
                     <div class="qris-scan-line" aria-hidden="true"></div>
                 </div>
                 <div class="payment-qris-corners" aria-hidden="true"></div>

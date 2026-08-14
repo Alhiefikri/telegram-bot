@@ -53,7 +53,7 @@
                             </button>
                         </div>
 
-                        <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+                        <div data-storefront-checkout-scroll class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-6">
                             <div class="flex flex-wrap items-center gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
                                 <div class="flex items-center gap-2">
                                     <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]" x-text="formatIdr(selectedProduct.price.amount)"></span>
@@ -113,7 +113,7 @@
                                         @enderror
                                     </div>
 
-                                    <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" :open="supportContactOpen" @toggle="supportContactOpen = $event.target.open">
+                                    <details data-storefront-optional-support class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" :open="supportContactOpen" @toggle="supportContactOpen = $event.target.open">
                                         <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }} <span class="normal-case text-[var(--sf-muted)]">(opsional)</span></summary>
                                         <div class="mt-3 grid gap-2">
                                         <div class="grid gap-2 sm:grid-cols-[150px_1fr]">
@@ -175,7 +175,7 @@
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <button type="submit" data-storefront-checkout-submit x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
                                         <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
@@ -186,7 +186,7 @@
                                     </div>
                                 @endif
 
-                                <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
+                                <details data-storefront-prepurchase-support class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
                                     <summary id="product-modal-support-title" class="cursor-pointer font-display text-lg font-black text-[var(--sf-ink)]">Butuh bantuan sebelum membeli?</summary>
                                     <div class="mt-3" aria-labelledby="product-modal-support-title">
                                     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

@@ -844,11 +844,9 @@ export function storefrontModal() {
       this.supportContactChannel = options.supportContactChannel || "";
       this.supportContactValue = options.supportContactValue || "";
       this.supportContactOpen = Boolean(
-        this.supportContactChannel ||
-        this.supportContactValue ||
-        options.focusInvalid
+        this.supportContactChannel || this.supportContactValue
       );
-      this.paymentMethod = options.paymentMethod || "qris";
+      this.paymentMethod = this.normalizePaymentMethod(options.paymentMethod);
       this.productModalOpen = true;
       trackStorefrontEvent("storefront.checkout_opened", {
         product_id: product?.checkout?.websiteQris?.productId || product?.id,
@@ -917,6 +915,22 @@ export function storefrontModal() {
         this.selectedProduct.checkout.websiteQris,
         this.selectedProduct.checkout.websiteBinancePay,
       ].filter(Boolean);
+    },
+    normalizePaymentMethod(method) {
+      const requestedMethod = method === "binance_pay" ? "binance_pay" : "qris";
+      const availableChoices = this.orderedCheckoutChoices().filter(
+        (choice) => choice.enabled
+      );
+
+      if (
+        availableChoices.some(
+          (choice) => this.paymentMethodForChoice(choice) === requestedMethod
+        )
+      ) {
+        return requestedMethod;
+      }
+
+      return this.paymentMethodForChoice(availableChoices[0]) || "qris";
     },
     selectedCheckoutChoice() {
       return this.paymentMethod === "binance_pay"
