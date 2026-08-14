@@ -33,7 +33,13 @@ test.beforeAll(async () => {
 
   serverProcess = spawn(
     "php",
-    ["artisan", "serve", "--host=127.0.0.1", `--port=${new URL(baseUrl).port}`],
+    [
+      "-S",
+      `127.0.0.1:${new URL(baseUrl).port}`,
+      "-t",
+      path.join(appDir, "public"),
+      path.join(__dirname, "laravel-browser-router.php"),
+    ],
     {
       cwd: appDir,
       env: appEnv(),
@@ -796,6 +802,68 @@ for (const width of [768, 1024, 1280, 1440, 1920]) {
     if (width >= 1024) {
       expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
       expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+    }
+    await expectNoDocumentOverflow(page);
+  });
+}
+
+for (const width of [320, 390, 768, 1280, 1440, 1920]) {
+  test(`renders KlikQRIS reporting cards and tables without overflow at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await login(page);
+
+    await page.goto(`${baseUrl}/admin?tab=riwayat`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const history = page.locator("#admin-section-history");
+    await expect(
+      history.getByRole("heading", { name: "Riwayat KlikQRIS" })
+    ).toBeVisible();
+    await expect(history.getByText("KLIK-BROWSER-MATCH")).toHaveCount(2);
+    await expect(history.getByText("Mismatch lokal")).toHaveCount(1);
+    await expect(
+      history.getByText(
+        "Tidak ada Order lokal yang cocok dengan provider order ID ini."
+      )
+    ).toHaveCount(1);
+
+    if (width < 768) {
+      await expect(history.locator("article").first()).toBeVisible();
+      await expect(history.locator("table")).toBeHidden();
+    } else {
+      await expect(history.locator("article").first()).toBeHidden();
+      await expect(history.locator("article").last()).toBeHidden();
+      await expect(history.locator("table")).toBeVisible();
+    }
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(`${baseUrl}/admin?tab=withdraw`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const withdraw = page.locator("#admin-section-withdraw");
+    await expect(
+      withdraw.getByRole("heading", { name: "Withdraw Order Status" })
+    ).toBeVisible();
+    await expect(withdraw.getByLabel("Order ID")).toBeVisible();
+    await expect(withdraw.getByText("WD-BROWSER-1")).toHaveCount(2);
+    await expect(
+      withdraw.getByRole("link", { name: "Buka bukti transfer" })
+    ).toHaveCount(1);
+    await expect(
+      withdraw.getByRole("link", { name: "Buka bukti transfer" }).first()
+    ).toHaveAttribute("href", "https://klikqris.com/proofs/WD-BROWSER-1.png");
+
+    if (width < 768) {
+      await expect(withdraw.locator("article").first()).toBeVisible();
+      await expect(withdraw.locator("table")).toBeHidden();
+    } else {
+      await expect(withdraw.locator("article").first()).toBeHidden();
+      await expect(withdraw.locator("article").last()).toBeHidden();
+      await expect(withdraw.locator("table")).toBeVisible();
     }
     await expectNoDocumentOverflow(page);
   });
@@ -1696,9 +1764,13 @@ function appEnv() {
     DB_DATABASE: dbPath,
     SESSION_DRIVER: "file",
     CACHE_STORE: "array",
-    QUEUE_CONNECTION: "sync",
+    QUEUE_CONNECTION: "database",
     MAIL_MAILER: "log",
     DOGFOOD_FAKE_TELEGRAM_OUTBOUND: "true",
+    KLIKQRIS_SANDBOX_ENABLED: "true",
+    KLIKQRIS_SANDBOX_API_KEY: "test-only-browser-key",
+    KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",
+    KLIKQRIS_REPORTING_CACHE_SECONDS: "0",
   };
 }
 
@@ -1831,6 +1903,8 @@ OrderItem::factory()->create([
 
 Payment::factory()->create([
     'order_id' => $firstOrder->id,
+    'provider' => 'klikqris',
+    'merchant_ref' => 'KLIK-BROWSER-MATCH',
     'status' => PaymentStatus::Paid,
     'amount' => 45000,
     'paid_at' => now()->subMinutes(45),
