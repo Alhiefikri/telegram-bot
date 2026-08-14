@@ -107,6 +107,12 @@ class ApplicationRateLimiterRegistrar
             ];
         });
 
+        $this->rateLimiter->for('storefront-verified-purchase-activity', function (Request $request) {
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute(12)->by('storefront:verified-purchase-activity:'.$source);
+        });
+
         $this->rateLimiter->for('storefront-binance-order-id', function (Request $request) {
             $limit = max(1, (int) $this->config->get('services.storefront.binance_order_id_rate_limit_per_minute', 5));
             $source = $request->ip() ?: 'unknown';

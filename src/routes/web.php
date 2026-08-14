@@ -32,6 +32,7 @@ use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
+use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
 use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
@@ -51,6 +52,9 @@ Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->n
 Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
 Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->name('storefront.policies.recovery');
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
+Route::get('/aktivitas-pembelian-terverifikasi', StorefrontVerifiedPurchaseActivityController::class)
+    ->middleware('throttle:storefront-verified-purchase-activity')
+    ->name('storefront.verified-purchase-activity');
 Route::post('/storefront/events', StorefrontFunnelEventController::class)->middleware('throttle:120,1')->name('storefront.events.store');
 Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
 Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');

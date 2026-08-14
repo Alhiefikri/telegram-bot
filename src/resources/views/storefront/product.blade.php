@@ -142,6 +142,7 @@
 
         @include('storefront.partials.footer')
         @include('storefront.partials.product-modal')
+        @include('storefront.partials.verified-purchase-activity')
     </div>
 </body>
 </html>

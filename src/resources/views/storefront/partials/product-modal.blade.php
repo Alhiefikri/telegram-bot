@@ -27,8 +27,8 @@
          class="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
          @click="closeProductModal()"></div>
 
-    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
-        <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+    <div class="fixed inset-0 z-10 flex w-screen items-end overflow-hidden sm:items-center">
+        <div class="flex max-h-full w-full items-end justify-center text-center sm:min-h-full sm:items-center sm:p-0">
             <div x-show="productModalOpen"
                  x-ref="dialogPanel"
                  tabindex="-1"
@@ -42,10 +42,10 @@
                  x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
                  x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
                  @keydown="handleModalKeydown($event)"
-                 class="neo-panel relative transform overflow-hidden bg-[var(--sf-surface)] text-left shadow-[8px_8px_0_var(--sf-shadow)] transition-all focus:outline-none sm:my-8 sm:w-full sm:max-w-lg">
+                 class="neo-panel relative flex max-h-[calc(100dvh-1rem)] w-full transform flex-col overflow-hidden bg-[var(--sf-surface)] text-left shadow-[8px_8px_0_var(--sf-shadow)] transition-all focus:outline-none sm:my-8 sm:max-h-[calc(100dvh-4rem)] sm:max-w-lg">
 
                 <template x-if="selectedProduct">
-                    <div>
+                    <div class="flex min-h-0 flex-1 flex-col">
                         <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">
                             <h3 id="modal-title" class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct.name"></h3>
                             <button type="button" @click="closeProductModal()" class="grid h-12 w-12 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none" aria-label="Tutup detail produk">
@@ -53,27 +53,13 @@
                             </button>
                         </div>
 
-                        <div class="space-y-6 p-6">
-                            <div class="relative flex aspect-[2/1] w-full flex-col items-center justify-center overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] shadow-[4px_4px_0_var(--sf-shadow)]" :class="selectedProduct.cover.imageUrl ? '' : selectedProduct.cover.theme.bg">
-                                <template x-if="selectedProduct.cover.imageUrl">
-                                    <img :src="selectedProduct.cover.imageUrl" :alt="selectedProduct.name" class="absolute inset-0 h-full w-full bg-white object-contain object-center">
-                                </template>
-                                <template x-if="!selectedProduct.cover.imageUrl">
-                                    <div class="relative z-10 flex flex-col items-center justify-center space-y-2 text-center text-white">
-                                        <div x-html="selectedProduct.cover.theme.logo"></div>
-                                        <div :class="selectedProduct.cover.theme.accent" class="font-display text-xl font-black uppercase tracking-tight" x-text="selectedProduct.cover.theme.desc"></div>
-                                    </div>
-                                </template>
-                            </div>
-
+                        <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
                             <div class="flex flex-wrap items-center gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
                                 <div class="flex items-center gap-2">
                                     <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 font-display text-sm font-black text-[var(--sf-ink)]" x-text="formatIdr(selectedProduct.price.amount)"></span>
                                 </div>
                                 <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct.stock.label"></span>
                             </div>
-
-                            <div class="whitespace-pre-line text-base font-semibold leading-7 text-[var(--sf-muted)]" x-text="selectedProduct.description"></div>
 
                             <div class="grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
                                 <div>
@@ -127,8 +113,9 @@
                                         @enderror
                                     </div>
 
-                                    <div class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3">
-                                        <label for="storefront-support-contact-channel" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }}</label>
+                                    <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" :open="supportContactOpen" @toggle="supportContactOpen = $event.target.open">
+                                        <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }} <span class="normal-case text-[var(--sf-muted)]">(opsional)</span></summary>
+                                        <div class="mt-3 grid gap-2">
                                         <div class="grid gap-2 sm:grid-cols-[150px_1fr]">
                                             <select id="storefront-support-contact-channel"
                                                     name="support_contact_channel"
@@ -155,7 +142,8 @@
                                         @if ($supportContactHasError)
                                             <p id="storefront-support-contact-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $errors->first('support_contact_channel') ?: $errors->first('support_contact_value') }}</p>
                                         @endif
-                                    </div>
+                                        </div>
+                                    </details>
 
                                     <fieldset class="grid gap-2" x-show="selectedProduct?.checkout?.websiteBinancePay || selectedProduct?.checkout?.websiteQris" @if ($errors->has('payment_method')) aria-describedby="storefront-payment-method-error" @endif>
                                         <legend class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Metode pembayaran</legend>
@@ -187,7 +175,7 @@
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <button type="submit" x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
                                         <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>
@@ -198,10 +186,12 @@
                                     </div>
                                 @endif
 
-                                <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]" aria-labelledby="product-modal-support-title">
+                                <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
+                                    <summary id="product-modal-support-title" class="cursor-pointer font-display text-lg font-black text-[var(--sf-ink)]">Butuh bantuan sebelum membeli?</summary>
+                                    <div class="mt-3" aria-labelledby="product-modal-support-title">
                                     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                         <div>
-                                            <h4 id="product-modal-support-title" class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct?.support?.title || 'Butuh bantuan?'">Butuh bantuan?</h4>
+                                            <h4 class="font-display text-lg font-black text-[var(--sf-ink)]" x-text="selectedProduct?.support?.title || 'Butuh bantuan?'">Butuh bantuan?</h4>
                                             <p class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]" x-text="selectedProduct?.support?.body || 'Tanya admin sebelum membeli.'">Tanya admin sebelum membeli.</p>
                                         </div>
                                         <span class="inline-flex w-fit rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-2.5 py-1 text-[11px] font-black text-[var(--sf-ink)]">Support</span>
@@ -235,7 +225,8 @@
                                             </div>
                                         </div>
                                     </template>
-                                </section>
+                                    </div>
+                                </details>
                             </div>
                         </div>
                     </div>
