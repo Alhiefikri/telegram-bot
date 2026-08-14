@@ -629,6 +629,16 @@
     box-shadow: 0px 0px 0 var(--sf-shadow);
   }
 
+  .neo-button-stable:hover {
+    transform: none;
+    box-shadow: 5px 5px 0 var(--sf-shadow);
+  }
+
+  .neo-button-stable:active {
+    transform: translate(2px, 2px);
+    box-shadow: 3px 3px 0 var(--sf-shadow);
+  }
+
   .hover-rubber-band:hover {
     animation: rubber-band 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
   }

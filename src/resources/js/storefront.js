@@ -337,39 +337,75 @@ function initVerifiedPurchaseActivity() {
   const live = container?.querySelector("[data-activity-live]");
   if (!container || !endpoint || !message) return;
 
+  const DISPLAY_MS = 4_500;
+  const TRANSITION_MS = 300;
+  const NEXT_GAP_MS = 700;
   let items = [];
   let position = 0;
   let paused = false;
   let initialized = false;
-  let renderedId = null;
-  let transitionToken = 0;
+  let hideTimer = null;
+  let nextTimer = null;
   const reducedMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)"
   ).matches;
+  const clearTimers = () => {
+    if (hideTimer !== null) {
+      window.clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    if (nextTimer !== null) {
+      window.clearTimeout(nextTimer);
+      nextTimer = null;
+    }
+  };
   const render = (item, announce = false) => {
     message.textContent = `${item.buyer} membeli ${item.product} · ${item.relative_time}`;
-    renderedId = item.id;
-    container.classList.remove("hidden");
+    container.dataset.activityState = "visible";
+    container.setAttribute("aria-hidden", "false");
     if (announce)
       live.textContent = `Aktivitas pembelian baru: ${item.buyer} membeli ${item.product}.`;
+  };
+  const hide = () => {
+    if (container.dataset.activityState !== "visible") return;
+    container.dataset.activityState = "hidden";
+    container.setAttribute("aria-hidden", "true");
+    container.classList.add(
+      "opacity-0",
+      "translate-x-6",
+      "pointer-events-none"
+    );
+    nextTimer = window.setTimeout(() => {
+      container.classList.add("hidden");
+      nextTimer = null;
+      if (!paused && !reducedMotion && items.length > 1) {
+        position = (position + 1) % items.length;
+        show();
+      }
+    }, TRANSITION_MS + NEXT_GAP_MS);
+  };
+  const scheduleHide = () => {
+    clearTimers();
+    if (reducedMotion || paused || items.length === 0) return;
+    hideTimer = window.setTimeout(() => {
+      hideTimer = null;
+      hide();
+    }, DISPLAY_MS);
   };
   const show = (announce = false) => {
     const item = items[position];
     if (!item) return;
-    const changed = renderedId !== null && renderedId !== item.id;
-    if (reducedMotion || !changed) {
-      render(item, announce);
-      return;
-    }
-    const token = ++transitionToken;
-    message.classList.add("opacity-0", "translate-y-1");
-    window.setTimeout(() => {
-      if (token !== transitionToken) return;
-      render(item, announce);
-      window.requestAnimationFrame(() =>
-        message.classList.remove("opacity-0", "translate-y-1")
+    clearTimers();
+    container.classList.remove("hidden");
+    render(item, announce);
+    window.requestAnimationFrame(() => {
+      container.classList.remove(
+        "opacity-0",
+        "translate-x-6",
+        "pointer-events-none"
       );
-    }, 180);
+    });
+    scheduleHide();
   };
   const refresh = async () => {
     try {
@@ -387,7 +423,15 @@ function initVerifiedPurchaseActivity() {
         ? items.indexOf(newItem)
         : Math.min(position, Math.max(0, items.length - 1));
       if (!items.length) {
-        container.classList.add("hidden");
+        clearTimers();
+        container.dataset.activityState = "hidden";
+        container.setAttribute("aria-hidden", "true");
+        container.classList.add(
+          "hidden",
+          "opacity-0",
+          "translate-x-6",
+          "pointer-events-none"
+        );
         return;
       }
       show(newItem !== null);
@@ -401,6 +445,10 @@ function initVerifiedPurchaseActivity() {
       event,
       () => {
         paused = true;
+        if (hideTimer !== null) {
+          window.clearTimeout(hideTimer);
+          hideTimer = null;
+        }
       },
       { passive: true }
     )
@@ -410,18 +458,33 @@ function initVerifiedPurchaseActivity() {
       event,
       () => {
         paused = false;
+        if (container.dataset.activityState === "visible") {
+          scheduleHide();
+        }
       },
       { passive: true }
     )
   );
-  window.setInterval(() => {
-    if (!paused && !reducedMotion && items.length > 1) {
-      position = (position + 1) % items.length;
-      show();
-    }
-  }, 7000);
   window.setInterval(refresh, 60000);
   refresh();
+}
+
+function initNativeQrisImageFallback() {
+  document.querySelectorAll("[data-qris-image]").forEach((image) => {
+    const fallback = image.getAttribute("data-qris-fallback-src");
+    if (!fallback) return;
+
+    const useFallback = () => {
+      if (image.dataset.qrisFallbackAttempted === "true") return;
+      image.dataset.qrisFallbackAttempted = "true";
+      image.src = fallback;
+    };
+
+    image.addEventListener("error", useFallback, { once: true });
+    if (image.complete && image.naturalWidth === 0) {
+      useFallback();
+    }
+  });
 }
 
 function initRevealStagger() {
@@ -1074,6 +1137,7 @@ export default function initStorefront() {
     initPaymentActions();
     initSupportFunnelEvents();
     initShopPaymentStatus();
+    initNativeQrisImageFallback();
   };
 
   if (document.readyState === "loading") {

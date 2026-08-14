@@ -78,7 +78,7 @@
                                     <x-storefront.button
                                         :href="$checkoutUrl"
                                         id="product-checkout-cta"
-                                        class="flex-1"
+                                        class="neo-button-stable flex-1"
                                         x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product), { opener: $el })"
                                         data-product='@json($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'
                                     >

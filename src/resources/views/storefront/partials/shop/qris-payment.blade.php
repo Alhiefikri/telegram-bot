@@ -68,7 +68,11 @@
                 <div class="qris-frame relative mx-auto max-w-[300px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[7px_7px_0_var(--sf-shadow)]">
                     @if ($qrisImageSource !== null)
                         <div class="relative z-10 aspect-square w-full overflow-hidden" data-native-qris-crop="top-square">
-                            <img src="{{ $qrisImageSource }}" alt="QRIS invoice {{ $order->invoice_number }}" class="block h-auto w-full max-w-none">
+                            <img src="{{ $qrisImageSource }}"
+                                 alt="QRIS invoice {{ $order->invoice_number }}"
+                                 class="block h-auto w-full max-w-none"
+                                 data-qris-image
+                                 data-qris-fallback-src="{{ $qrisImageFallbackUrl ?? '' }}">
                         </div>
                     @else
                         <img src="{{ $qrisImageDataUri }}" alt="QRIS invoice {{ $order->invoice_number }}" class="relative z-10 aspect-square w-full object-contain">

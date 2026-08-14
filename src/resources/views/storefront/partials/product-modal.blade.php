@@ -175,7 +175,7 @@
                                         Stok kosong
                                     </p>
 
-                                    <button type="submit" data-storefront-checkout-submit x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button hover-rubber-band sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+                                    <button type="submit" data-storefront-checkout-submit x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button neo-button-stable sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
                                         <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
                                     </button>
                                 </form>

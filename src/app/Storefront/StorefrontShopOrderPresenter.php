@@ -14,6 +14,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontShopSignedInvoice $signedInvoices,
         private readonly StorefrontSupport $support,
         private readonly StorefrontUrl $urls,
+        private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
@@ -39,6 +40,11 @@ class StorefrontShopOrderPresenter
             'supportDestination' => $this->storefront->supportDestination(),
             'supportContext' => $this->support->order($invoice->order),
             'statusUrl' => $invoice->statusUrl,
+            'qrisImageFallbackUrl' => $invoice->isPendingPayment()
+                && $invoice->isQrisPayable
+                && strtolower((string) $invoice->payment?->provider) === 'klikqris'
+                ? $this->invoiceUrls->qrisImage($invoice->order)
+                : null,
             'binanceOrderIdUrl' => $invoice->binanceOrderIdUrl,
             'redirectUrl' => $invoice->redirectUrl,
             'cancelUrl' => $invoice->cancelUrl,

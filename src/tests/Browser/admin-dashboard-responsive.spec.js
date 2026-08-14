@@ -207,6 +207,53 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
   }
 });
 
+test("keeps the customer QRIS submit button stable while hovering", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  await page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first()
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  const submitButton = dialog.locator("[data-storefront-checkout-submit]");
+
+  await expect(submitButton).toBeVisible();
+  await submitButton.hover();
+
+  await expect
+    .poll(() =>
+      submitButton.evaluate(
+        (button) => window.getComputedStyle(button).animationName
+      )
+    )
+    .toBe("none");
+  await expect
+    .poll(() =>
+      submitButton.evaluate(
+        (button) => window.getComputedStyle(button).transform
+      )
+    )
+    .toBe("none");
+
+  const firstBox = await submitButton.boundingBox();
+  await page.waitForTimeout(600);
+  const secondBox = await submitButton.boundingBox();
+
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  expect(
+    Math.abs((secondBox?.x ?? 0) - (firstBox?.x ?? 0))
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs((secondBox?.y ?? 0) - (firstBox?.y ?? 0))
+  ).toBeLessThanOrEqual(1);
+});
+
 test("respects reduced motion in the customer checkout modal", async ({
   page,
 }) => {

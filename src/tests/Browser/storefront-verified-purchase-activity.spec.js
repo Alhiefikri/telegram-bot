@@ -45,7 +45,7 @@ test.afterAll(async () => {
   if (dbPath) rmSync(path.dirname(dbPath), { recursive: true, force: true });
 });
 
-test("shows safe verified activity and pauses rotation during inspection", async ({
+test("shows verified activity as a temporary toast and pauses exit during inspection", async ({
   page,
 }) => {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
@@ -58,6 +58,7 @@ test("shows safe verified activity and pauses rotation during inspection", async
   await expect(
     activity.getByText("Aktivitas pembelian terverifikasi")
   ).toBeVisible();
+  await expect(activity).toHaveAttribute("data-activity-state", "visible");
   await expect(message).toContainText(/[AB]\*\*\* membeli Produk Aktivitas/);
   await expect(message).not.toContainText("Rp");
   await expect
@@ -71,13 +72,24 @@ test("shows safe verified activity and pauses rotation during inspection", async
 
   const initialMessage = await message.textContent();
   await activity.hover();
-  await page.waitForTimeout(7_200);
+  await page.waitForTimeout(5_200);
+  await expect(activity).toHaveAttribute("data-activity-state", "visible");
   await expect(message).toHaveText(initialMessage ?? "");
 
   await activity.dispatchEvent("mouseleave");
-  await expect
-    .poll(() => message.textContent(), { timeout: 8_000 })
-    .not.toBe(initialMessage);
+  await page.waitForFunction(
+    () =>
+      document.getElementById("verified-purchase-activity")?.dataset
+        .activityState === "hidden",
+    { timeout: 6_000 }
+  );
+  await page.waitForFunction(
+    () =>
+      document.getElementById("verified-purchase-activity")?.dataset
+        .activityState === "visible",
+    { timeout: 5_000 }
+  );
+  await expect(message).not.toHaveText(initialMessage ?? "");
 });
 
 test("does not rotate verified activity for reduced-motion users", async ({
@@ -93,6 +105,10 @@ test("does not rotate verified activity for reduced-motion users", async ({
   const initialMessage = await message.textContent();
 
   await page.waitForTimeout(7_200);
+  await expect(page.locator("#verified-purchase-activity")).toHaveAttribute(
+    "data-activity-state",
+    "visible"
+  );
   await expect(message).toHaveText(initialMessage ?? "");
 });
 

@@ -36,6 +36,7 @@ use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
+use App\Http\Controllers\StorefrontShopOrderQrisController;
 use App\Http\Controllers\StorefrontShopOrderStatusController;
 use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
 use App\Storefront\StorefrontCatalogSearch;
@@ -69,6 +70,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
+    Route::get('orders/{order}/qris', StorefrontShopOrderQrisController::class)->middleware('storefront.signed')->name('orders.qris');
     Route::post('orders/{order}/binance-order-id', StorefrontShopBinanceOrderIdController::class)->middleware(['storefront.signed', 'throttle:storefront-binance-order-id'])->name('orders.binance-order-id');
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:automatic-payment-status-refresh'])->name('orders.status');
     Route::post('orders/{order}/cancel', StorefrontShopOrderCancelController::class)->middleware('storefront.signed')->name('orders.cancel');

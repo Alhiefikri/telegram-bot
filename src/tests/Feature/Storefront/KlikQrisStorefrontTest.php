@@ -7,6 +7,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Storefront\StorefrontShopSignedInvoice;
@@ -134,6 +135,64 @@ class KlikQrisStorefrontTest extends TestCase
         $this->assertNull($invoice->qrisImageSource);
         $this->assertNull($invoice->payableAmount);
         $this->assertNull($invoice->payableAmountDisplay);
+    }
+
+    public function test_storefront_renders_provider_qris_image_fallback_when_klikqris_url_cannot_be_used(): void
+    {
+        $this->travelTo('2026-08-13 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        app()->detectEnvironment(fn (): string => 'production');
+
+        $qrisUrl = 'https://api.klikqris.example/storage/qris_api/qris_INV-KLIK-STOREFRONT.png';
+        $fallbackImage = KlikQrisSandboxScenarios::pngDataUri('storefront-fallback');
+        $expiresAt = now()->addMinutes(15)->startOfSecond();
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment([
+            'merchant_ref' => 'INV-KLIK-STOREFRONT',
+            'amount' => 1000,
+            'provider_total_payment' => 1016,
+            'provider_fee' => 16,
+            'provider_expires_at' => $expiresAt,
+            'expired_at' => $expiresAt,
+            'provider_create_state' => 'created',
+            'provider_payload' => ['data' => [
+                'order_id' => 'INV-KLIK-STOREFRONT',
+                'amount' => 1000,
+                'total_amount' => '1016.00',
+                'status' => 'PENDING',
+                'qris_url' => $qrisUrl,
+                'expired_at' => $expiresAt->toISOString(),
+            ]],
+        ]);
+
+        Http::fake([
+            $qrisUrl => Http::response('not-a-png-body', 200, ['Content-Type' => 'image/png']),
+            'https://api.klikqris.example/qris/status/INV-KLIK-STOREFRONT' => Http::response(['data' => [
+                'order_id' => 'INV-KLIK-STOREFRONT',
+                'amount' => 1000,
+                'total_amount' => '1016.00',
+                'status' => 'PENDING',
+                'qris_url' => $qrisUrl,
+                'qris_image' => $fallbackImage,
+                'expired_at' => $expiresAt->toISOString(),
+                'signature' => 'provider-signature',
+            ]]),
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($payment->order);
+        $fallbackUrl = app(StorefrontInvoiceUrl::class)->qrisImage($payment->order);
+
+        $this->assertTrue($invoice->isQrisPayable);
+        $this->assertSame($qrisUrl, $invoice->qrisImageSource);
+
+        $this->assertStringContainsString('/qris', $fallbackUrl);
+
+        $this->get($invoice->redirectUrl)
+            ->assertOk()
+            ->assertSee('data-qris-fallback-src="'.e($fallbackUrl).'"', false);
+
+        $imageResponse = $this->get($fallbackUrl);
+        $this->assertSame(200, $imageResponse->status());
+        $this->assertSame("\x89PNG\r\n\x1A\nstorefront-fallback", $imageResponse->getContent());
     }
 
     public function test_status_route_uses_provider_neutral_limiter_and_keeps_old_alias_registered(): void
