@@ -345,15 +345,6 @@ final readonly class KlikQrisTransaction
             return null;
         }
 
-        $string = self::optionalString($data[$key]);
-        if ($string === null) {
-            throw new UnexpectedValueException('KlikQRIS timestamp is invalid.');
-        }
-
-        try {
-            return CarbonImmutable::parse($string, 'Asia/Jakarta');
-        } catch (\Throwable) {
-            throw new UnexpectedValueException('KlikQRIS timestamp is invalid.');
-        }
+        return KlikQrisTimestamp::parse($data[$key]);
     }
 }

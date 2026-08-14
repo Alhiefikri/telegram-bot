@@ -5,9 +5,12 @@ namespace App\Services\KlikQris;
 use App\Enums\KlikQrisEnvironment;
 use App\Models\Payment;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
+use Closure;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
@@ -87,6 +90,195 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
                 $this->sleepBeforeStatusRetry($attempt);
             }
         }
+    }
+
+    public function historyPage(int $page = 1): KlikQrisHistoryPage
+    {
+        if ($page < 1) {
+            throw KlikQrisReportingException::validation();
+        }
+
+        $this->assertReportingReady();
+        $parameters = ['page' => $page];
+        $result = $this->rememberReporting(
+            $this->reportingCacheKey('history', $parameters),
+            fn (): KlikQrisHistoryPage => $this->fetchHistoryPage($page),
+        );
+
+        if (! $result instanceof KlikQrisHistoryPage) {
+            throw KlikQrisReportingException::schema();
+        }
+
+        return $result;
+    }
+
+    public function withdrawalOrdersPage(KlikQrisWithdrawalQuery $query): KlikQrisWithdrawalPage
+    {
+        $this->assertReportingReady();
+
+        try {
+            $parameters = $query->toArray();
+        } catch (Throwable) {
+            throw KlikQrisReportingException::validation();
+        }
+
+        $result = $this->rememberReporting(
+            $this->reportingCacheKey('withdrawal-orders', $parameters),
+            fn (): KlikQrisWithdrawalPage => $this->fetchWithdrawalOrdersPage($parameters),
+        );
+
+        if (! $result instanceof KlikQrisWithdrawalPage) {
+            throw KlikQrisReportingException::schema();
+        }
+
+        return $result;
+    }
+
+    private function fetchHistoryPage(int $page): KlikQrisHistoryPage
+    {
+        $payload = $this->reportingPayload(
+            $this->reportingResponse('/qris/history', ['page' => $page]),
+        );
+
+        try {
+            return KlikQrisHistoryPage::fromPayload($payload);
+        } catch (Throwable) {
+            throw KlikQrisReportingException::schema();
+        }
+    }
+
+    /** @param array<string, int|string> $parameters */
+    private function fetchWithdrawalOrdersPage(array $parameters): KlikQrisWithdrawalPage
+    {
+        $payload = $this->reportingPayload(
+            $this->reportingResponse('/withdraw/orders', $parameters),
+        );
+
+        try {
+            return KlikQrisWithdrawalPage::fromPayload($payload, $this->environment);
+        } catch (Throwable) {
+            throw KlikQrisReportingException::schema();
+        }
+    }
+
+    private function assertReportingReady(): void
+    {
+        try {
+            $this->assertReady();
+        } catch (Throwable) {
+            throw KlikQrisReportingException::readiness();
+        }
+    }
+
+    /**
+     * @param  array<string, int|string>  $parameters
+     */
+    private function reportingResponse(string $path, array $parameters): Response
+    {
+        try {
+            $budget = ProviderVerificationProfiles::budget();
+            $response = $this->request()
+                ->retry(
+                    $budget['max_attempts'],
+                    fn (int $attempt): int => $this->reportingRetryDelay($attempt),
+                    fn (Throwable $exception): bool => $this->shouldRetryReporting($exception),
+                )
+                ->get($this->endpoint($path), $parameters);
+
+            if ($response->failed()) {
+                throw KlikQrisReportingException::http($response->status());
+            }
+
+            return $response;
+        } catch (KlikQrisReportingException $exception) {
+            throw $exception;
+        } catch (ConnectionException) {
+            throw KlikQrisReportingException::connection();
+        } catch (RequestException $exception) {
+            $status = $exception->response?->status();
+            if ($status === null) {
+                throw KlikQrisReportingException::transport();
+            }
+
+            throw KlikQrisReportingException::http($status);
+        } catch (Throwable) {
+            throw KlikQrisReportingException::transport();
+        }
+    }
+
+    /** @return array<mixed> */
+    private function reportingPayload(Response $response): array
+    {
+        try {
+            $payload = $response->json();
+        } catch (Throwable) {
+            throw KlikQrisReportingException::json();
+        }
+
+        if (! is_array($payload)) {
+            throw KlikQrisReportingException::json();
+        }
+
+        return KlikQrisPayloadSanitizer::sanitize($payload);
+    }
+
+    private function shouldRetryReporting(Throwable $exception): bool
+    {
+        if ($exception instanceof ConnectionException) {
+            return true;
+        }
+
+        if (! $exception instanceof RequestException) {
+            return false;
+        }
+
+        $status = $exception->response?->status();
+
+        return $status === 408
+            || $status === 429
+            || ($status !== null && $status >= 500 && $status <= 599);
+    }
+
+    private function reportingRetryDelay(int $attempt): int
+    {
+        $budget = ProviderVerificationProfiles::budget();
+
+        return min(
+            $budget['retry_delay_ms'] * (2 ** max(0, $attempt - 1)),
+            $budget['retry_max_delay_ms'],
+        );
+    }
+
+    private function reportingCacheSeconds(): int
+    {
+        $value = config('services.klikqris.reporting_cache_seconds', 15);
+        if (! is_numeric($value)) {
+            return 15;
+        }
+
+        return min(300, max(0, (int) $value));
+    }
+
+    /** @param array<string, int|string> $parameters */
+    private function reportingCacheKey(string $operation, array $parameters): string
+    {
+        try {
+            $hash = hash('sha256', json_encode($parameters, JSON_THROW_ON_ERROR));
+        } catch (\JsonException) {
+            throw KlikQrisReportingException::validation();
+        }
+
+        return 'klikqris:reporting:'.$operation.':'.$this->environment->value.':'.$hash;
+    }
+
+    private function rememberReporting(string $key, Closure $callback): mixed
+    {
+        $seconds = $this->reportingCacheSeconds();
+        if ($seconds === 0) {
+            return $callback();
+        }
+
+        return Cache::remember($key, $seconds, $callback);
     }
 
     private function assertReady(): void

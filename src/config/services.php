@@ -115,6 +115,8 @@ return [
         'webhook_rate_limit_per_minute' => (int) env('KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
         'status_refresh_rate_limit_per_minute' => (int) env('KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
         'reconciliation_command' => 'klikqris:reconcile --chunk=100',
+        'reporting_cache_seconds' => (int) env('KLIKQRIS_REPORTING_CACHE_SECONDS', 15),
+        'reporting_max_limit' => (int) env('KLIKQRIS_REPORTING_MAX_LIMIT', 100),
     ],
 
     // Verification budgets intentionally differ by caller. Interactive
