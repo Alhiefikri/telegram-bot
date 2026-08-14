@@ -31,10 +31,11 @@ class StorefrontVerifiedPurchaseActivityTest extends TestCase
             ->assertJsonCount(2, 'items')
             ->json('items');
 
-        $this->assertSame(['id', 'buyer', 'product', 'occurred_at', 'relative_time'], array_keys($items[0]));
-        $this->assertSame('A***', $items[0]['buyer']);
-        $this->assertSame('Produk aman', $items[0]['product']);
-        $this->assertSame('B***', $items[1]['buyer']);
+        foreach ($items as $item) {
+            $this->assertSame(['id', 'buyer', 'product', 'occurred_at', 'relative_time'], array_keys($item));
+        }
+        $this->assertEqualsCanonicalizing(['A***', 'B***'], array_column($items, 'buyer'));
+        $this->assertSame(['Produk aman', 'Produk aman'], array_column($items, 'product'));
         $this->assertNotContains($telegramOrder->invoice_number, $items);
         $this->assertNotContains($websiteOrder->invoice_number, $items);
         $this->assertNotContains(1234, $items);

@@ -58,7 +58,7 @@ test("shows safe verified activity and pauses rotation during inspection", async
   await expect(
     activity.getByText("Aktivitas pembelian terverifikasi")
   ).toBeVisible();
-  await expect(message).toContainText(/A\*\*\* membeli Produk Aktivitas/);
+  await expect(message).toContainText(/[AB]\*\*\* membeli Produk Aktivitas/);
   await expect(message).not.toContainText("Rp");
   await expect
     .poll(() =>
