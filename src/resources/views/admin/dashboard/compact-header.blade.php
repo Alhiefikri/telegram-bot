@@ -4,6 +4,8 @@
         'penjualan' => 'Pesanan',
         'broadcast' => 'Siaran',
         'telegram-channel' => 'Store Channel',
+        'riwayat' => 'Riwayat KlikQRIS',
+        'withdraw' => 'Withdraw Order Status',
     ];
     $internalTabLabel = $internalTabLabels[$navigation['activeTab']] ?? 'Dashboard';
 @endphp

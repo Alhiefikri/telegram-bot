@@ -21,6 +21,14 @@ class AdminDashboardController extends Controller
             (string) $request->query('tab', 'stats'),
             (string) $request->query('sales_filter', 'all'),
             max(1, (int) $request->query('products_page', 1)),
+            [
+                'page' => $request->query('page'),
+                'status' => $request->query('status'),
+                'order_id' => $request->query('order_id'),
+                'start_date' => $request->query('start_date'),
+                'end_date' => $request->query('end_date'),
+                'limit' => $request->query('limit'),
+            ],
         );
         $dashboardErrors = $request->session()->get('errors', new ViewErrorBag);
         $viewData['dashboardState'] = $dashboardState->build(

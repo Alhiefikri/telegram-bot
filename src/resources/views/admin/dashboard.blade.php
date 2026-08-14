@@ -29,6 +29,9 @@
             $orders = $salesTab['orders'];
             $salesPagination = $salesTab['pagination'];
             $storeChannel = $storeChannelTab;
+            $historyTab = $historyTab ?? [];
+            $withdrawTab = $withdrawTab ?? [];
+            $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
         @endphp
 
         <main
@@ -57,6 +60,10 @@
                 @include('admin.dashboard.broadcast-tab')
             @elseif ($navigation['activeTab'] === 'telegram-channel')
                 @include('admin.dashboard.store-channel-tab')
+            @elseif ($navigation['activeTab'] === 'riwayat')
+                @include('admin.dashboard.history-tab')
+            @elseif ($navigation['activeTab'] === 'withdraw')
+                @include('admin.dashboard.withdraw-tab')
             @endif
             @include('admin.dashboard.mobile-navigation')
         </main>

@@ -73,6 +73,37 @@
                     </svg>
                     <span class="text-[11px] font-black uppercase tracking-wide">Channel</span>
                 </x-admin-dashboard.button>
+                <x-admin-dashboard.button
+                    type="button"
+                    variant="neutral"
+                    size="sm"
+                    x-on:click="goToTab('riwayat')"
+                    class="py-3"
+                    x-bind:class="activeTab === 'riwayat' ? 'bottom-nav-active' : ''"
+                    x-bind:aria-current="activeTab === 'riwayat' ? 'page' : null"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0Z" />
+                    </svg>
+                    <span class="text-[11px] font-black uppercase tracking-wide">Riwayat</span>
+                </x-admin-dashboard.button>
+
+                @if ($canViewWithdraw)
+                <x-admin-dashboard.button
+                    type="button"
+                    variant="neutral"
+                    size="sm"
+                    x-on:click="goToTab('withdraw')"
+                    class="py-3"
+                    x-bind:class="activeTab === 'withdraw' ? 'bottom-nav-active' : ''"
+                    x-bind:aria-current="activeTab === 'withdraw' ? 'page' : null"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h2m-6 4h18a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2Z" />
+                    </svg>
+                    <span class="text-[11px] font-black uppercase tracking-wide">Withdraw</span>
+                </x-admin-dashboard.button>
+                @endif
 
                 @if ($canManageProducts)
                 <x-admin-dashboard.button

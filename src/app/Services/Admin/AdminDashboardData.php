@@ -20,6 +20,7 @@ final class AdminDashboardData
         private readonly AdminDashboardSalesData $salesData,
         private readonly FakeSalesProofPostPublisher $fakeSalesProof,
         private readonly PaymentReceiptReport $receiptReport,
+        private readonly AdminDashboardReportingData $reportingData,
     ) {}
 
     /**
@@ -31,25 +32,45 @@ final class AdminDashboardData
      *     navigation: array{activeTab: string, tabs: list<array{id: string, label: string}>},
      *     statsTab: array<string, mixed>,
      *     productsTab: array<string, mixed>,
-     *     salesTab: array<string, mixed>
+     *     salesTab: array<string, mixed>,
+     *     historyTab: array<string, mixed>,
+     *     withdrawTab: array<string, mixed>
      * }
      */
-    public function forAdmin(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1): array
-    {
+    public function forAdmin(
+        User $user,
+        ?string $requestedTab = null,
+        ?string $salesFilter = null,
+        int $productsPage = 1,
+        array $reportingFilters = [],
+    ): array {
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
         $storeLink = $this->storeLink();
+        $navigation = $this->navigation($requestedTab);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
+        $historyTab = $this->reportingData->emptyHistory();
+        $withdrawTab = $this->reportingData->emptyWithdraw($user);
+
+        if ($navigation['activeTab'] === 'riwayat') {
+            $historyTab = $this->reportingData->forHistory($reportingFilters['page'] ?? 1);
+        }
+
+        if ($navigation['activeTab'] === 'withdraw') {
+            $withdrawTab = $this->reportingData->forWithdraw($user, $reportingFilters);
+        }
 
         return [
             'admin' => $this->adminIdentity($user),
             'metrics' => $metrics,
-            'navigation' => $this->navigation($requestedTab),
+            'navigation' => $navigation,
             'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
             'productsTab' => $this->productsData->forProducts($canManageProducts, $productsPage),
             'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),
+            'historyTab' => $historyTab,
+            'withdrawTab' => $withdrawTab,
         ];
     }
 
@@ -59,14 +80,18 @@ final class AdminDashboardData
      *
      * @return array<string, mixed>
      */
-    public function forActiveTab(User $user, ?string $requestedTab = null, ?string $salesFilter = null, int $productsPage = 1): array
-    {
+    public function forActiveTab(
+        User $user,
+        ?string $requestedTab = null,
+        ?string $salesFilter = null,
+        int $productsPage = 1,
+        array $reportingFilters = [],
+    ): array {
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
         $storeLink = $this->storeLink();
         $navigation = $this->navigation($requestedTab);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
-
         $data = [
             'admin' => $this->adminIdentity($user),
             'metrics' => $metrics,
@@ -89,6 +114,8 @@ final class AdminDashboardData
             ],
             'broadcastTab' => ['recent' => []],
             'storeChannelTab' => [],
+            'historyTab' => $this->reportingData->emptyHistory(),
+            'withdrawTab' => $this->reportingData->emptyWithdraw($user),
         ];
 
         match ($navigation['activeTab']) {
@@ -97,6 +124,8 @@ final class AdminDashboardData
             'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcast' => $data['broadcastTab'] = $this->broadcastTab(),
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
+            'riwayat' => $data['historyTab'] = $this->reportingData->forHistory($reportingFilters['page'] ?? 1),
+            'withdraw' => $data['withdrawTab'] = $this->reportingData->forWithdraw($user, $reportingFilters),
             default => null,
         };
 
@@ -144,7 +173,6 @@ final class AdminDashboardData
             ['id' => 'telegram-channel', 'label' => 'Telegram Channel'],
             ['id' => 'withdraw', 'label' => 'Withdraw'],
             ['id' => 'riwayat', 'label' => 'Riwayat'],
-            ['id' => 'affiliate', 'label' => 'Affiliate'],
         ];
         $tabIds = array_column($tabs, 'id');
         $requestedTab = (string) ($requestedTab ?: 'stats');
