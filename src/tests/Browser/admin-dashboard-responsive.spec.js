@@ -1,1211 +1,1741 @@
-import { expect, test } from '@playwright/test';
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, openSync, closeSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import net from 'node:net';
+import { expect, test } from "@playwright/test";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, openSync, closeSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import net from "node:net";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const appDir = path.resolve(__dirname, '../..');
+const appDir = path.resolve(__dirname, "../..");
 
 let baseUrl;
 let dbPath;
 let invoiceFixtures;
 let serverProcess;
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
-    const tempDir = mkdtempSync(path.join(tmpdir(), 'telegram-bot-admin-responsive-'));
-    dbPath = path.join(tempDir, 'database.sqlite');
-    closeSync(openSync(dbPath, 'w'));
+  const tempDir = mkdtempSync(
+    path.join(tmpdir(), "telegram-bot-admin-responsive-")
+  );
+  dbPath = path.join(tempDir, "database.sqlite");
+  closeSync(openSync(dbPath, "w"));
 
-    baseUrl = `http://127.0.0.1:${await findAvailablePort()}`;
+  baseUrl = `http://127.0.0.1:${await findAvailablePort()}`;
 
-    runArtisan(['optimize:clear']);
-    runArtisan(['migrate:fresh', '--force']);
-    invoiceFixtures = JSON.parse(runArtisan(['tinker', '--execute', responsiveSeedScript]));
+  runArtisan(["optimize:clear"]);
+  runArtisan(["migrate:fresh", "--force"]);
+  invoiceFixtures = JSON.parse(
+    runArtisan(["tinker", "--execute", responsiveSeedScript])
+  );
 
-    serverProcess = spawn('php', ['artisan', 'serve', '--host=127.0.0.1', `--port=${new URL(baseUrl).port}`], {
-        cwd: appDir,
-        env: appEnv(),
-        stdio: ['ignore', 'ignore', 'ignore'],
-    });
+  serverProcess = spawn(
+    "php",
+    ["artisan", "serve", "--host=127.0.0.1", `--port=${new URL(baseUrl).port}`],
+    {
+      cwd: appDir,
+      env: appEnv(),
+      stdio: ["ignore", "ignore", "ignore"],
+    }
+  );
 
-    await waitForServer(`${baseUrl}/admin/login`);
+  await waitForServer(`${baseUrl}/admin/login`);
 });
 
 test.afterAll(async () => {
-    if (serverProcess && !serverProcess.killed) {
-        serverProcess.kill();
-    }
+  if (serverProcess && !serverProcess.killed) {
+    serverProcess.kill();
+  }
 
-    if (dbPath) {
-        rmSync(path.dirname(dbPath), { recursive: true, force: true });
-    }
+  if (dbPath) {
+    rmSync(path.dirname(dbPath), { recursive: true, force: true });
+  }
 });
 
-test('keeps customer checkout modal keyboard accessible and restores failed state', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+test("keeps customer checkout modal keyboard accessible and restores failed state", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
-    const productCard = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
-    await productCard.scrollIntoViewIfNeeded();
-    await productCard.focus();
-    await page.keyboard.press('Enter');
+  const productCard = page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  await productCard.scrollIntoViewIfNeeded();
+  await productCard.focus();
+  await page.keyboard.press("Enter");
 
-    let dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('input[type="radio"][name="payment_method"]').first()).toBeAttached();
-    await expectTouchTargetAtLeast44px(dialog.getByLabel('Tutup detail produk'));
-    await expectTouchTargetAtLeast44px(dialog.getByLabel('Tambah jumlah'));
+  let dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.locator('input[type="radio"][name="payment_method"]').first()
+  ).toBeAttached();
+  await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
+  await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
 
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(productCard).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(productCard).toBeFocused();
 
-    await page.keyboard.press('Enter');
-    dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
-    await dialog.getByLabel('Tambah jumlah').click();
-    await expect(dialog.locator('[aria-live="polite"]')).toHaveText('Jumlah 2. Total produk Rp90.000.');
-    await dialog.locator('#storefront-buyer-name').fill('Browser Buyer');
-    await dialog.getByRole('button', { name: /Bayar/i }).click();
-    await page.waitForLoadState('domcontentloaded');
+  await page.keyboard.press("Enter");
+  dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
+  await dialog.getByLabel("Tambah jumlah").click();
+  await expect(dialog.locator('[aria-live="polite"]')).toHaveText(
+    "Jumlah 2. Total produk Rp90.000."
+  );
+  await dialog.locator("#storefront-buyer-name").fill("Browser Buyer");
+  await dialog.getByRole("button", { name: /Bayar/i }).click();
+  await page.waitForLoadState("domcontentloaded");
 
-    dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('#storefront-buyer-name')).toHaveValue('Browser Buyer');
-    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
-    await expect(dialog.locator('#storefront-checkout-error')).toBeVisible();
-    await expectNoDocumentOverflow(page);
+  dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
+    "Browser Buyer"
+  );
+  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
+  await expect(dialog.locator("#storefront-checkout-error")).toBeVisible();
+  await expectNoDocumentOverflow(page);
 });
 
-test('opens the selected product checkout from the landing catalog', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+test("opens the selected product checkout from the landing catalog", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
-    const productCard = page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
-    await productCard.scrollIntoViewIfNeeded();
-    await productCard.click();
+  const productCard = page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  await productCard.scrollIntoViewIfNeeded();
+  await productCard.click();
 
-    const dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
-    await expect(dialog.locator('#storefront-buyer-name')).toBeFocused();
-    await expectNoDocumentOverflow(page);
+  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
+  await expectNoDocumentOverflow(page);
 });
 
-test('opens the selected product checkout from a direct product URL', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+test("opens the selected product checkout from a direct product URL", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
-    const productHref = await page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first().getAttribute('href');
+  const productHref = await page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first()
+    .getAttribute("href");
+  const productUrl = new URL(productHref, baseUrl);
+  productUrl.searchParams.set("checkout", "1");
+
+  await page.goto(productUrl.toString(), { waitUntil: "domcontentloaded" });
+
+  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+  await expect(
+    page.getByRole("link", { name: "Kembali ke katalog" })
+  ).toHaveAttribute("href", /#product-\d+$/);
+  await expectNoDocumentOverflow(page);
+});
+
+test("keeps the direct product fallback usable without the checkout modal", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 390, height: 900 },
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    const productHref = await page
+      .locator("a[data-product]")
+      .filter({ hasText: "Browser QA Produk A" })
+      .first()
+      .getAttribute("href");
     const productUrl = new URL(productHref, baseUrl);
-    productUrl.searchParams.set('checkout', '1');
+    productUrl.searchParams.set("checkout", "1");
 
-    await page.goto(productUrl.toString(), { waitUntil: 'domcontentloaded' });
+    await page.goto(productUrl.toString(), { waitUntil: "domcontentloaded" });
 
-    const dialog = page.getByRole('dialog', { name: 'Browser QA Produk A' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
-    await expect(page.getByRole('link', { name: 'Kembali ke katalog' })).toHaveAttribute('href', /#product-\d+$/);
+    await expect(
+      page.getByRole("heading", { name: "Browser QA Produk A" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Bayar QRIS di Website" })
+    ).toBeVisible();
+    await expect(page.getByLabel("Jumlah")).toHaveValue("1");
+    await expect(page.getByLabel("Nama pembeli")).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Browser QA Produk A" })
+    ).toHaveCount(0);
     await expectNoDocumentOverflow(page);
+  } finally {
+    await context.close();
+  }
 });
 
-test('keeps the direct product fallback usable without the checkout modal', async ({ browser }) => {
-    const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 900 } });
-    const page = await context.newPage();
+test("announces terminal QRIS status and exposes buyer next steps", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`${baseUrl}${invoiceFixtures.pendingStatusRefresh.showUrl}`, {
+    waitUntil: "domcontentloaded",
+  });
 
-    try {
-        await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
-        const productHref = await page.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first().getAttribute('href');
-        const productUrl = new URL(productHref, baseUrl);
-        productUrl.searchParams.set('checkout', '1');
+  const statusCard = page.locator("[data-shop-payment-status]");
+  await expect(
+    statusCard.getByText("Sedang membuat QRIS", { exact: true }).first()
+  ).toBeVisible();
 
-        await page.goto(productUrl.toString(), { waitUntil: 'domcontentloaded' });
-
-        await expect(page.getByRole('heading', { name: 'Browser QA Produk A' })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Bayar QRIS di Website' })).toBeVisible();
-        await expect(page.getByLabel('Jumlah')).toHaveValue('1');
-        await expect(page.getByLabel('Nama pembeli')).toBeVisible();
-        await expect(page.getByRole('dialog', { name: 'Browser QA Produk A' })).toHaveCount(0);
-        await expectNoDocumentOverflow(page);
-    } finally {
-        await context.close();
-    }
-});
-
-test('announces terminal QRIS status and exposes buyer next steps', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 900 });
-    await page.goto(`${baseUrl}${invoiceFixtures.pendingStatusRefresh.showUrl}`, { waitUntil: 'domcontentloaded' });
-
-    const statusCard = page.locator('[data-shop-payment-status]');
-    await expect(statusCard.getByText('Sedang membuat QRIS', { exact: true }).first()).toBeVisible();
-
-    runArtisan(['tinker', '--execute', `
+  runArtisan([
+    "tinker",
+    "--execute",
+    `
         $order = App\\Models\\Order::findOrFail('${invoiceFixtures.pendingStatusRefresh.orderId}');
         $order->update([
             'order_status' => App\\Enums\\OrderStatus::Cancelled,
             'payment_status' => App\\Enums\\PaymentStatus::Failed,
         ]);
         App\\Models\\Payment::where('order_id', $order->id)->update(['status' => App\\Enums\\PaymentStatus::Failed]);
-    `]);
+    `,
+  ]);
 
-    await statusCard.getByRole('button', { name: 'Coba cek QRIS' }).click();
-    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Status pembayaran final');
-    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
-    await expect(statusCard.locator('[data-payment-status-announcement]')).toHaveText('Status pembayaran final. Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.');
-    await expect(statusCard.getByRole('button', { name: 'Coba cek QRIS' })).toBeHidden();
-    await expect(statusCard.getByRole('link', { name: 'Belanja lagi' })).toBeVisible();
-    await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
-    await expectNoDocumentOverflow(page);
+  await statusCard.getByRole("button", { name: "Coba cek QRIS" }).click();
+  await expect(statusCard.locator("[data-payment-status-title]")).toHaveText(
+    "Status pembayaran final"
+  );
+  await expect(statusCard.locator("[data-payment-status-message]")).toHaveText(
+    "Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli."
+  );
+  await expect(
+    statusCard.locator("[data-payment-status-announcement]")
+  ).toHaveText(
+    "Status pembayaran final. Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli."
+  );
+  await expect(
+    statusCard.getByRole("button", { name: "Coba cek QRIS" })
+  ).toBeHidden();
+  await expect(
+    statusCard.getByRole("link", { name: "Belanja lagi" })
+  ).toBeVisible();
+  await expect(
+    statusCard.getByRole("link", { name: "Butuh bantuan?" })
+  ).toBeVisible();
+  await expectNoDocumentOverflow(page);
 });
 
-test('keeps QRIS retry states clear for incomplete provider payloads', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.route(`**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`, async (route) => {
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-                ok: false,
-                title: 'Gagal membuat QRIS',
-                message: 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
-            }),
-        });
-    });
-
-    await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
-    const statusCard = page.locator('[data-shop-payment-status]');
-    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Provider belum memberi nominal');
-
-    await statusCard.getByRole('button', { name: 'Coba ambil total QRIS' }).click();
-    await expect(statusCard.locator('[data-payment-status-title]')).toHaveText('Gagal membuat QRIS');
-    await expect(statusCard.locator('[data-payment-status-message]')).toHaveText('QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.');
-    await expect(statusCard.getByRole('link', { name: 'Butuh bantuan?' })).toBeVisible();
-});
-
-test('reloads invoice when QRIS retry obtains final provider total', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.route(`**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`, async (route) => {
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-                ok: true,
-                payment_status: 'pending',
-                order_status: 'pending_payment',
-                is_paid: false,
-                is_terminal: false,
-                qris_ready: true,
-                should_reload: true,
-                redirect_url: `${baseUrl}/shop/orders/reloaded-qris`,
-                message: 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.',
-            }),
-        });
-    });
-
-    await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
-    await page.locator('[data-shop-payment-status]').getByRole('button', { name: 'Coba ambil total QRIS' }).click();
-    await expect(page).toHaveURL(`${baseUrl}/shop/orders/reloaded-qris`);
-});
-
-test('prioritizes invoice content by state without mobile overflow', async ({ page }) => {
-    for (const width of [320, 390, 768, 1280]) {
-        await page.setViewportSize({ width, height: 1000 });
-
-        await page.goto(`${baseUrl}${invoiceFixtures.pendingWithNativeQris.showUrl}`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toBeVisible();
-        await expect(page.getByText('Total bayar QRIS')).toBeVisible();
-        await expect(page.getByText('Batas bayar')).toBeVisible();
-        await expect(page.getByAltText(/QRIS invoice/)).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Cek status pembayaran' })).toBeVisible();
-        await expectBefore(page.getByRole('heading', { name: 'QRIS invoice' }), page.locator('section[aria-label="Ringkasan invoice"]'));
-        await expectNoDocumentOverflow(page);
-
-        await page.goto(`${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByRole('heading', { name: 'Provider belum memberi nominal' })).toBeVisible();
-        await expect(page.getByText('Total produk', { exact: true })).toBeVisible();
-        await expect(page.getByText('Rp45.000')).toBeVisible();
-        await expect(page.getByText('Menunggu provider')).toBeVisible();
-        await expect(page.locator('[data-shop-payment-status]').getByText('Jangan bayar total produk')).toBeVisible();
-        await expect(page.getByAltText(/QRIS invoice/)).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'Coba ambil total QRIS' })).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Butuh bantuan?' }).first()).toBeVisible();
-        await expectNoDocumentOverflow(page);
-
-        await page.goto(`${baseUrl}${invoiceFixtures.paid.showUrl}`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByRole('heading', { name: 'Data akun' })).toBeVisible();
-        await expect(page.getByText('browser-paid@example.test|BrowserPaidSecret')).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
-        await expectBefore(page.getByRole('heading', { name: 'Data akun' }), page.locator('section[aria-label="Ringkasan invoice"]'));
-        await expectNoDocumentOverflow(page);
-
-        await page.goto(`${baseUrl}${invoiceFixtures.expired.showUrl}`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' })).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Buat order baru' })).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
-        await expectBefore(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' }), page.locator('section[aria-label="Ringkasan invoice"]'));
-        await expectNoDocumentOverflow(page);
-
-        await page.goto(`${baseUrl}${invoiceFixtures.cancelled.showUrl}`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByRole('heading', { name: 'Invoice ini tidak bisa dibayar lagi' })).toBeVisible();
-        await expect(page.getByText('Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Cek status pembayaran' })).toHaveCount(0);
-        await expect(page.getByRole('heading', { name: 'QRIS invoice' })).toHaveCount(0);
-        await expectNoDocumentOverflow(page);
+test("keeps QRIS retry states clear for incomplete provider payloads", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route(
+    `**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: false,
+          title: "Gagal membuat QRIS",
+          message:
+            "QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.",
+        }),
+      });
     }
+  );
+
+  await page.goto(
+    `${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`,
+    { waitUntil: "domcontentloaded" }
+  );
+  const statusCard = page.locator("[data-shop-payment-status]");
+  await expect(statusCard.locator("[data-payment-status-title]")).toHaveText(
+    "Provider belum memberi nominal"
+  );
+
+  await statusCard
+    .getByRole("button", { name: "Coba ambil total QRIS" })
+    .click();
+  await expect(statusCard.locator("[data-payment-status-title]")).toHaveText(
+    "Gagal membuat QRIS"
+  );
+  await expect(statusCard.locator("[data-payment-status-message]")).toHaveText(
+    "QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal."
+  );
+  await expect(
+    statusCard.getByRole("link", { name: "Butuh bantuan?" })
+  ).toBeVisible();
 });
 
-test('stacks shop cards and keeps focus on the active filter at mobile width', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 900 });
-    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
-
-    const catalogGrid = page.locator('#storefront-product-grid');
-    const productA = catalogGrid.locator('a[data-product]').filter({ hasText: 'Browser QA Produk A' }).first();
-    const productB = catalogGrid.locator('a[data-product]').filter({ hasText: 'Browser QA Produk B' }).first();
-    await page.waitForTimeout(700);
-    await expectOneColumn(productA, productB);
-
-    await productB.focus();
-    await expect(productB).toBeFocused();
-
-    const firstCategory = page.getByRole('button', { name: 'Browser Responsive QA', exact: true });
-    await firstCategory.evaluate((button) => button.click());
-    await expect(firstCategory).toBeFocused();
-    await expect(productB).toBeHidden();
-    await expectNoDocumentOverflow(page);
-});
-
-test('keeps the mobile navigation focus contained and restores its trigger', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto(`${baseUrl}/shop`, { waitUntil: 'domcontentloaded' });
-
-    const trigger = page.getByRole('button', { name: 'Buka menu navigasi' });
-    await trigger.focus();
-    await page.keyboard.press('Enter');
-
-    const menu = page.getByLabel(/Menu navigasi Lhie Store/);
-    const closeButton = menu.getByRole('button', { name: 'Tutup menu' });
-    await expect(menu).toBeVisible();
-    await expect(closeButton).toBeFocused();
-
-    await page.keyboard.press('Shift+Tab');
-    await expect(menu.getByRole('link', { name: /Beranda Lhie Store/ })).toBeFocused();
-    await page.keyboard.press('Shift+Tab');
-    await expect(menu.getByRole('link', { name: 'Akun pelanggan' })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(menu.getByRole('link', { name: /Beranda Lhie Store/ })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(closeButton).toBeFocused();
-
-    await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
-    await expect(trigger).toBeFocused();
-});
-
-test('lets admins reveal and hide the password field from an accessible control', async ({ page }) => {
-    await page.goto(`${baseUrl}/admin/login`);
-
-    const password = page.locator('#password');
-    await expect(password).toHaveAttribute('type', 'password');
-
-    const showPassword = page.getByRole('button', { name: 'Lihat password' });
-    await expect(showPassword).toBeVisible();
-    await expect(showPassword).toHaveAttribute('aria-controls', 'password');
-
-    await showPassword.click();
-    await expect(password).toHaveAttribute('type', 'text');
-
-    const hidePassword = page.getByRole('button', { name: 'Sembunyikan password' });
-    await expect(hidePassword).toBeVisible();
-    await expect(hidePassword).toHaveAttribute('aria-controls', 'password');
-
-    await hidePassword.click();
-    await expect(password).toHaveAttribute('type', 'password');
-    await expect(page.getByRole('button', { name: 'Lihat password' })).toBeVisible();
-});
-
-test('serializes the visible admin password field before submitting bogus credentials', async ({ page }) => {
-    const bogusEmail = 'missing-admin@example.test';
-    const filledPassword = 'definitely-wrong-password';
-
-    await page.goto(`${baseUrl}/admin/login`);
-    await page.getByLabel('Username / email admin').fill(bogusEmail);
-    await page.locator('input[type="password"]:visible').fill(filledPassword);
-
-    const serializedPayload = await page.locator('form').evaluate((form) => (
-        new URLSearchParams(new FormData(form)).toString()
-    ));
-
-    expect(serializedPayload).toContain(`email=${encodeURIComponent(bogusEmail)}`);
-    expect(serializedPayload).toContain(`password=${encodeURIComponent(filledPassword)}`);
-
-    await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
-
-    await expect(page.getByText('Email atau password admin tidak cocok.')).toBeVisible();
-    await expect(page.getByText('Password admin wajib diisi.')).toHaveCount(0);
-});
-
-test('renders the compact admin dashboard at desktop width', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await installClipboardProbe(page);
-    await login(page);
-
-    await expect(page.getByRole('heading', { name: 'Test User' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Navigasi desktop' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Bagikan Toko' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Mode pembayaran' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
-    await expectStoreLinkCopyAndShare(page);
-
-    await expectNoDocumentOverflow(page);
-    await expectPrimaryActionsAtLeast44px(page);
-
-    await page.goto(`${baseUrl}/admin?tab=produk`);
-    await exerciseProductManagementModals(page);
-    await expectNoDocumentOverflow(page);
-});
-test('uses a compact sticky shell header on internal admin tabs', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await login(page);
-
-    for (const [tab, label] of [
-        ['produk', 'Produk'],
-        ['penjualan', 'Pesanan'],
-        ['broadcast', 'Siaran'],
-        ['telegram-channel', 'Store Channel'],
-    ]) {
-        await page.goto(`${baseUrl}/admin?tab=${tab}`);
-
-        const compactHeader = page.getByRole('banner', { name: 'Navigasi section admin' });
-        await expect(page.locator('header').filter({ hasText: 'Halo,' })).toHaveCount(0);
-        await expect(compactHeader).toBeVisible();
-        await expect(compactHeader.getByRole('heading', { name: label, exact: true })).toBeVisible();
-        await expect(compactHeader).toContainText('Toko aktif');
-        await expect(compactHeader).toHaveCSS('position', 'sticky');
-        await expect(compactHeader.getByRole('link', { name: 'Buka Toko' })).toHaveCount(0);
-        await expect(compactHeader.getByRole('button', { name: 'Bagikan Toko' })).toHaveCount(0);
-
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        const headerBox = await compactHeader.boundingBox();
-        expect(headerBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+test("reloads invoice when QRIS retry obtains final provider total", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route(
+    `**${invoiceFixtures.pendingMissingProviderTotal.statusPath}**`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          payment_status: "pending",
+          order_status: "pending_payment",
+          is_paid: false,
+          is_terminal: false,
+          qris_ready: true,
+          should_reload: true,
+          redirect_url: `${baseUrl}/shop/orders/reloaded-qris`,
+          message:
+            "QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.",
+        }),
+      });
     }
+  );
+
+  await page.goto(
+    `${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`,
+    { waitUntil: "domcontentloaded" }
+  );
+  await page
+    .locator("[data-shop-payment-status]")
+    .getByRole("button", { name: "Coba ambil total QRIS" })
+    .click();
+  await expect(page).toHaveURL(`${baseUrl}/shop/orders/reloaded-qris`);
 });
 
-test('keeps responsive navigation and utility actions usable', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 740 });
+test("prioritizes invoice content by state without mobile overflow", async ({
+  page,
+}) => {
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 1000 });
+
+    await page.goto(
+      `${baseUrl}${invoiceFixtures.pendingWithNativeQris.showUrl}`,
+      { waitUntil: "domcontentloaded" }
+    );
+    await expect(
+      page.getByRole("heading", { name: "QRIS invoice" })
+    ).toBeVisible();
+    await expect(page.getByText("Total bayar QRIS")).toBeVisible();
+    await expect(page.getByText("Batas bayar")).toBeVisible();
+    await expect(page.getByAltText(/QRIS invoice/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Cek status pembayaran" })
+    ).toBeVisible();
+    await expectBefore(
+      page.getByRole("heading", { name: "QRIS invoice" }),
+      page.locator('section[aria-label="Ringkasan invoice"]')
+    );
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(
+      `${baseUrl}${invoiceFixtures.pendingMissingProviderTotal.showUrl}`,
+      { waitUntil: "domcontentloaded" }
+    );
+    await expect(
+      page.getByRole("heading", { name: "Provider belum memberi nominal" })
+    ).toBeVisible();
+    await expect(page.getByText("Total produk", { exact: true })).toBeVisible();
+    await expect(page.getByText("Rp45.000")).toBeVisible();
+    await expect(page.getByText("Menunggu provider")).toBeVisible();
+    await expect(
+      page
+        .locator("[data-shop-payment-status]")
+        .getByText("Jangan bayar total produk")
+    ).toBeVisible();
+    await expect(page.getByAltText(/QRIS invoice/)).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Coba ambil total QRIS" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Butuh bantuan?" }).first()
+    ).toBeVisible();
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(`${baseUrl}${invoiceFixtures.paid.showUrl}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(
+      page.getByRole("heading", { name: "Data akun" })
+    ).toBeVisible();
+    await expect(
+      page.getByText("browser-paid@example.test|BrowserPaidSecret")
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "QRIS invoice" })
+    ).toHaveCount(0);
+    await expectBefore(
+      page.getByRole("heading", { name: "Data akun" }),
+      page.locator('section[aria-label="Ringkasan invoice"]')
+    );
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(`${baseUrl}${invoiceFixtures.expired.showUrl}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(
+      page.getByRole("heading", { name: "Invoice ini tidak bisa dibayar lagi" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Buat order baru" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "QRIS invoice" })
+    ).toHaveCount(0);
+    await expectBefore(
+      page.getByRole("heading", {
+        name: "Invoice ini tidak bisa dibayar lagi",
+      }),
+      page.locator('section[aria-label="Ringkasan invoice"]')
+    );
+    await expectNoDocumentOverflow(page);
+
+    await page.goto(`${baseUrl}${invoiceFixtures.cancelled.showUrl}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(
+      page.getByRole("heading", { name: "Invoice ini tidak bisa dibayar lagi" })
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli."
+      )
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Cek status pembayaran" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "QRIS invoice" })
+    ).toHaveCount(0);
+    await expectNoDocumentOverflow(page);
+  }
+});
+
+test("stacks shop cards and keeps focus on the active filter at mobile width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+  const catalogGrid = page.locator("#storefront-product-grid");
+  const productA = catalogGrid
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  const productB = catalogGrid
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk B" })
+    .first();
+  await page.waitForTimeout(700);
+  await expectOneColumn(productA, productB);
+
+  await productB.focus();
+  await expect(productB).toBeFocused();
+
+  const firstCategory = page.getByRole("button", {
+    name: "Browser Responsive QA",
+    exact: true,
+  });
+  await firstCategory.evaluate((button) => button.click());
+  await expect(firstCategory).toBeFocused();
+  await expect(productB).toBeHidden();
+  await expectNoDocumentOverflow(page);
+});
+
+test("keeps the mobile navigation focus contained and restores its trigger", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+  const trigger = page.getByRole("button", { name: "Buka menu navigasi" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+
+  const menu = page.getByLabel(/Menu navigasi Lhie Store/);
+  const closeButton = menu.getByRole("button", { name: "Tutup menu" });
+  await expect(menu).toBeVisible();
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    menu.getByRole("link", { name: /Beranda Lhie Store/ })
+  ).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    menu.getByRole("link", { name: "Akun pelanggan" })
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    menu.getByRole("link", { name: /Beranda Lhie Store/ })
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("lets admins reveal and hide the password field from an accessible control", async ({
+  page,
+}) => {
+  await page.goto(`${baseUrl}/admin/login`);
+
+  const password = page.locator("#password");
+  await expect(password).toHaveAttribute("type", "password");
+
+  const showPassword = page.getByRole("button", { name: "Lihat password" });
+  await expect(showPassword).toBeVisible();
+  await expect(showPassword).toHaveAttribute("aria-controls", "password");
+
+  await showPassword.click();
+  await expect(password).toHaveAttribute("type", "text");
+
+  const hidePassword = page.getByRole("button", {
+    name: "Sembunyikan password",
+  });
+  await expect(hidePassword).toBeVisible();
+  await expect(hidePassword).toHaveAttribute("aria-controls", "password");
+
+  await hidePassword.click();
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(
+    page.getByRole("button", { name: "Lihat password" })
+  ).toBeVisible();
+});
+
+test("serializes the visible admin password field before submitting bogus credentials", async ({
+  page,
+}) => {
+  const bogusEmail = "missing-admin@example.test";
+  const filledPassword = "definitely-wrong-password";
+
+  await page.goto(`${baseUrl}/admin/login`);
+  await page.getByLabel("Username / email admin").fill(bogusEmail);
+  await page.locator('input[type="password"]:visible').fill(filledPassword);
+
+  const serializedPayload = await page
+    .locator("form")
+    .evaluate((form) => new URLSearchParams(new FormData(form)).toString());
+
+  expect(serializedPayload).toContain(
+    `email=${encodeURIComponent(bogusEmail)}`
+  );
+  expect(serializedPayload).toContain(
+    `password=${encodeURIComponent(filledPassword)}`
+  );
+
+  await page.getByRole("button", { name: /sign in|login|masuk/i }).click();
+
+  await expect(
+    page.getByText("Email atau password admin tidak cocok.")
+  ).toBeVisible();
+  await expect(page.getByText("Password admin wajib diisi.")).toHaveCount(0);
+});
+
+test("renders the compact admin dashboard at desktop width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await installClipboardProbe(page);
+  await login(page);
+
+  await expect(page.getByRole("heading", { name: "Test User" })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Navigasi desktop" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Navigasi dashboard" })
+  ).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Bagikan Toko" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Mode pembayaran" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Hosted Pakasir" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "QR Native Pakasir" })
+  ).toBeVisible();
+  await expectStoreLinkCopyAndShare(page);
+
+  await expectNoDocumentOverflow(page);
+  await expectPrimaryActionsAtLeast44px(page);
+
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  await exerciseProductManagementModals(page);
+  await expectNoDocumentOverflow(page);
+});
+test("uses a compact sticky shell header on internal admin tabs", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+
+  for (const [tab, label] of [
+    ["produk", "Produk"],
+    ["penjualan", "Pesanan"],
+    ["broadcast", "Siaran"],
+    ["telegram-channel", "Store Channel"],
+  ]) {
+    await page.goto(`${baseUrl}/admin?tab=${tab}`);
+
+    const compactHeader = page.getByRole("banner", {
+      name: "Navigasi section admin",
+    });
+    await expect(
+      page.locator("header").filter({ hasText: "Halo," })
+    ).toHaveCount(0);
+    await expect(compactHeader).toBeVisible();
+    await expect(
+      compactHeader.getByRole("heading", { name: label, exact: true })
+    ).toBeVisible();
+    await expect(compactHeader).toContainText("Toko aktif");
+    await expect(compactHeader).toHaveCSS("position", "sticky");
+    await expect(
+      compactHeader.getByRole("link", { name: "Buka Toko" })
+    ).toHaveCount(0);
+    await expect(
+      compactHeader.getByRole("button", { name: "Bagikan Toko" })
+    ).toHaveCount(0);
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const headerBox = await compactHeader.boundingBox();
+    expect(headerBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  }
+});
+
+test("keeps responsive navigation and utility actions usable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await login(page);
+
+  const mobileNav = page.getByRole("navigation", {
+    name: "Navigasi dashboard",
+  });
+  await expect(mobileNav).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Pesanan", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Produk", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    mobileNav.getByRole("button", { name: "Siaran", exact: true })
+  ).toHaveCount(0);
+
+  const mobileNavMetrics = await mobileNav.evaluate((element) => {
+    const buttons = [...element.querySelectorAll("button")].map((button) => {
+      const rect = button.getBoundingClientRect();
+
+      return { left: rect.left, right: rect.right };
+    });
+
+    return {
+      right: element.getBoundingClientRect().right,
+      viewportWidth: window.innerWidth,
+      buttons,
+    };
+  });
+
+  expect(mobileNavMetrics.right).toBeLessThanOrEqual(
+    mobileNavMetrics.viewportWidth + 1
+  );
+  expect(
+    Math.max(...mobileNavMetrics.buttons.map((button) => button.right))
+  ).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
+
+  await mobileNav.getByRole("button", { name: "Lainnya", exact: true }).click();
+
+  const moreSheet = page.getByRole("dialog", { name: "Menu lainnya" });
+  await expect(moreSheet).toBeVisible();
+  await expect(
+    moreSheet.getByRole("button", { name: "Siaran", exact: true })
+  ).toBeVisible();
+  await expect(
+    moreSheet.getByRole("button", { name: "Store Channel", exact: true })
+  ).toBeVisible();
+  await expect(
+    moreSheet.getByRole("button", { name: "Tambah Produk", exact: true })
+  ).toBeVisible();
+  await expect(
+    moreSheet.getByRole("button", { name: "Siaran", exact: true })
+  ).toBeFocused();
+
+  const closeMenu = moreSheet.getByRole("button", { name: "Tutup menu" });
+  const lastUtilityAction = moreSheet.getByRole("button", {
+    name: "Tambah Produk",
+    exact: true,
+  });
+  await lastUtilityAction.focus();
+  await page.keyboard.press("Tab");
+  await expect(closeMenu).toBeFocused();
+  await closeMenu.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(lastUtilityAction).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(moreSheet).toBeHidden();
+  await expect(
+    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
+  ).toBeFocused();
+
+  await page.goto(`${baseUrl}/admin?tab=broadcast`);
+  const broadcastTextarea = page.locator("#broadcast-message");
+  await broadcastTextarea.scrollIntoViewIfNeeded();
+
+  const broadcastOverlap = await page.evaluate(() => {
+    const nav = document
+      .querySelector(".mobile-bottom-nav")
+      ?.getBoundingClientRect();
+    const field = document
+      .querySelector("#broadcast-message")
+      ?.getBoundingClientRect();
+
+    if (!nav || !field) {
+      return -1;
+    }
+
+    return Math.max(
+      0,
+      Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top)
+    );
+  });
+
+  expect(broadcastOverlap).toBe(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+
+  const desktopNav = page.getByRole("navigation", { name: "Navigasi desktop" });
+  const desktopButtons = desktopNav.getByRole("button");
+  const desktopBoxes = await desktopButtons.evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+
+      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
+    })
+  );
+
+  await expect(desktopButtons).toHaveCount(8);
+  expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
+  expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+  await expect(
+    desktopNav.getByRole("button", { name: "Produk", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+});
+
+test("closes the mobile utility sheet from outside click and restores its trigger", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+
+  const nav = page.getByRole("navigation", { name: "Navigasi dashboard" });
+  const trigger = nav.getByRole("button", { name: "Lainnya", exact: true });
+  await trigger.click();
+
+  const sheet = page.getByRole("dialog", { name: "Menu lainnya" });
+  await expect(sheet).toBeVisible();
+  await page.mouse.click(6, 120);
+  await expect(sheet).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+for (const width of [768, 1024, 1280, 1440, 1920]) {
+  test(`keeps all desktop navigation items reachable without overflow at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
     await login(page);
 
-    const mobileNav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
-    await expect(mobileNav).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Pesanan', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Produk', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toHaveAttribute('aria-current', 'page');
-    await expect(mobileNav.getByRole('button', { name: 'Siaran', exact: true })).toHaveCount(0);
-
-    const mobileNavMetrics = await mobileNav.evaluate((element) => {
-        const buttons = [...element.querySelectorAll('button')].map((button) => {
-            const rect = button.getBoundingClientRect();
-
-            return { left: rect.left, right: rect.right };
-        });
-
-        return {
-            right: element.getBoundingClientRect().right,
-            viewportWidth: window.innerWidth,
-            buttons,
-        };
+    const desktopNav = page.getByRole("navigation", {
+      name: "Navigasi desktop",
     });
+    await expect(desktopNav).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Navigasi dashboard" })
+    ).toBeHidden();
 
-    expect(mobileNavMetrics.right).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
-    expect(Math.max(...mobileNavMetrics.buttons.map((button) => button.right))).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
-
-    await mobileNav.getByRole('button', { name: 'Lainnya', exact: true }).click();
-
-    const moreSheet = page.getByRole('dialog', { name: 'Menu lainnya' });
-    await expect(moreSheet).toBeVisible();
-    await expect(moreSheet.getByRole('button', { name: 'Siaran', exact: true })).toBeVisible();
-    await expect(moreSheet.getByRole('button', { name: 'Store Channel', exact: true })).toBeVisible();
-    await expect(moreSheet.getByRole('button', { name: 'Tambah Produk', exact: true })).toBeVisible();
-    await expect(moreSheet.getByRole('button', { name: 'Siaran', exact: true })).toBeFocused();
-
-    const closeMenu = moreSheet.getByRole('button', { name: 'Tutup menu' });
-    const lastUtilityAction = moreSheet.getByRole('button', { name: 'Tambah Produk', exact: true });
-    await lastUtilityAction.focus();
-    await page.keyboard.press('Tab');
-    await expect(closeMenu).toBeFocused();
-    await closeMenu.focus();
-    await page.keyboard.press('Shift+Tab');
-    await expect(lastUtilityAction).toBeFocused();
-
-    await page.keyboard.press('Escape');
-    await expect(moreSheet).toBeHidden();
-    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeFocused();
-
-    await page.goto(`${baseUrl}/admin?tab=broadcast`);
-    const broadcastTextarea = page.locator('#broadcast-message');
-    await broadcastTextarea.scrollIntoViewIfNeeded();
-
-    const broadcastOverlap = await page.evaluate(() => {
-        const nav = document.querySelector('.mobile-bottom-nav')?.getBoundingClientRect();
-        const field = document.querySelector('#broadcast-message')?.getBoundingClientRect();
-
-        if (!nav || !field) {
-            return -1;
-        }
-
-        return Math.max(0, Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top));
-    });
-
-    expect(broadcastOverlap).toBe(0);
-
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${baseUrl}/admin?tab=produk`);
-
-    const desktopNav = page.getByRole('navigation', { name: 'Navigasi desktop' });
-    const desktopButtons = desktopNav.getByRole('button');
-    const desktopBoxes = await desktopButtons.evaluateAll((buttons) => buttons.map((button) => {
+    const desktopButtons = desktopNav.getByRole("button");
+    const desktopBoxes = await desktopButtons.evaluateAll((buttons) =>
+      buttons.map((button) => {
         const rect = button.getBoundingClientRect();
 
         return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-    }));
+      })
+    );
 
-    await expect(desktopButtons).toHaveCount(6);
-    expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
-    expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
-    await expect(desktopNav.getByRole('button', { name: 'Produk', exact: true })).toHaveAttribute('aria-current', 'page');
-});
-
-test('closes the mobile utility sheet from outside click and restores its trigger', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await login(page);
-
-    const nav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
-    const trigger = nav.getByRole('button', { name: 'Lainnya', exact: true });
-    await trigger.click();
-
-    const sheet = page.getByRole('dialog', { name: 'Menu lainnya' });
-    await expect(sheet).toBeVisible();
-    await page.mouse.click(6, 120);
-    await expect(sheet).toBeHidden();
-    await expect(trigger).toBeFocused();
-});
-
-for (const width of [768, 1440]) {
-    test(`keeps six desktop navigation items in one row at ${width}px`, async ({ page }) => {
-        await page.setViewportSize({ width, height: 900 });
-        await login(page);
-
-        const desktopNav = page.getByRole('navigation', { name: 'Navigasi desktop' });
-        await expect(desktopNav).toBeVisible();
-        await expect(page.getByRole('navigation', { name: 'Navigasi dashboard' })).toBeHidden();
-
-        const desktopButtons = desktopNav.getByRole('button');
-        const desktopBoxes = await desktopButtons.evaluateAll((buttons) => buttons.map((button) => {
-            const rect = button.getBoundingClientRect();
-
-            return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-        }));
-
-        await expect(desktopButtons).toHaveCount(6);
-        expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
-        expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
-        await expectNoDocumentOverflow(page);
-    });
+    await expect(desktopButtons).toHaveCount(8);
+    if (width >= 1024) {
+      expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
+      expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+    }
+    await expectNoDocumentOverflow(page);
+  });
 }
 
-test('keeps fixed navigation below channel fields and modal surfaces', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await login(page);
+test("keeps fixed navigation below channel fields and modal surfaces", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
 
-    const mobileNav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
-    await expect(mobileNav.getByRole('button', { name: 'Ringkasan', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Pesanan', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Produk', exact: true })).toBeVisible();
-    await expect(mobileNav.getByRole('button', { name: 'Lainnya', exact: true })).toBeVisible();
-    await expectNoDocumentOverflow(page);
+  const mobileNav = page.getByRole("navigation", {
+    name: "Navigasi dashboard",
+  });
+  await expect(
+    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Pesanan", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Produk", exact: true })
+  ).toBeVisible();
+  await expect(
+    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
+  ).toBeVisible();
+  await expectNoDocumentOverflow(page);
 
-    await page.goto(`${baseUrl}/admin?tab=telegram-channel`);
+  await page.goto(`${baseUrl}/admin?tab=telegram-channel`);
 
-    const channelLink = page.getByRole('textbox', { name: 'Link channel publik' });
-    await channelLink.scrollIntoViewIfNeeded();
-    const channelOverlap = await page.evaluate(() => {
-        const nav = document.querySelector('.mobile-bottom-nav')?.getBoundingClientRect();
-        const field = document.querySelector('#store-channel-link')?.getBoundingClientRect();
+  const channelLink = page.getByRole("textbox", {
+    name: "Link channel publik",
+  });
+  await channelLink.scrollIntoViewIfNeeded();
+  const channelOverlap = await page.evaluate(() => {
+    const nav = document
+      .querySelector(".mobile-bottom-nav")
+      ?.getBoundingClientRect();
+    const field = document
+      .querySelector("#store-channel-link")
+      ?.getBoundingClientRect();
 
-        if (!nav || !field) {
-            return -1;
-        }
+    if (!nav || !field) {
+      return -1;
+    }
 
-        return Math.max(0, Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top));
-    });
+    return Math.max(
+      0,
+      Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top)
+    );
+  });
 
-    expect(channelOverlap).toBe(0);
+  expect(channelOverlap).toBe(0);
 
-    await page.goto(`${baseUrl}/admin?tab=produk`);
-    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  await page.getByRole("button", { name: /Tambah Produk/i }).click();
 
-    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
-    await expect(productModal).toBeVisible();
-    await expectElementWithinViewport(page, productModal);
-    const layerMetrics = await page.evaluate(() => {
-        const nav = document.querySelector('.mobile-bottom-nav');
-        const modalBackdrop = document.querySelector('#product-modal')?.parentElement;
+  const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
+  await expect(productModal).toBeVisible();
+  await expectElementWithinViewport(page, productModal);
+  const layerMetrics = await page.evaluate(() => {
+    const nav = document.querySelector(".mobile-bottom-nav");
+    const modalBackdrop =
+      document.querySelector("#product-modal")?.parentElement;
 
-        return {
-            navZIndex: Number.parseInt(window.getComputedStyle(nav).zIndex, 10),
-            modalZIndex: Number.parseInt(window.getComputedStyle(modalBackdrop).zIndex, 10),
-        };
-    });
+    return {
+      navZIndex: Number.parseInt(window.getComputedStyle(nav).zIndex, 10),
+      modalZIndex: Number.parseInt(
+        window.getComputedStyle(modalBackdrop).zIndex,
+        10
+      ),
+    };
+  });
 
-    expect(layerMetrics.modalZIndex).toBeGreaterThan(layerMetrics.navZIndex);
+  expect(layerMetrics.modalZIndex).toBeGreaterThan(layerMetrics.navZIndex);
 });
 
+test("keeps tabs, cards, and the stock modal usable at Telegram mini app width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
 
-test('keeps tabs, cards, and the stock modal usable at Telegram mini app width', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 900 });
-    await login(page);
+  await expectNoDocumentOverflow(page);
+  await expectBottomNavUsable(page);
+  await page
+    .getByRole("region", { name: "Mode pembayaran" })
+    .scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Hosted Pakasir" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "QR Native Pakasir" })
+  ).toBeVisible();
 
-    await expectNoDocumentOverflow(page);
-    await expectBottomNavUsable(page);
-    await page.getByRole('region', { name: 'Mode pembayaran' }).scrollIntoViewIfNeeded();
-    await expect(page.getByRole('button', { name: 'QR Manual' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Hosted Pakasir' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'QR Native Pakasir' })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Link toko" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bagikan", exact: true })
+  ).toBeVisible();
 
-    await expect(page.getByRole('region', { name: 'Link toko' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  await expect(
+    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" })
+  ).toBeVisible();
+  await expectOneColumn(
+    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" }),
+    page.locator("article:visible").filter({ hasText: "Browser QA Produk B" })
+  );
+  await expectNoDocumentOverflow(page);
+  await submitProductFromMiniAppModal(page);
 
-    await page.goto(`${baseUrl}/admin?tab=produk`);
-    await expect(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' })).toBeVisible();
-    await expectOneColumn(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' }), page.locator('article:visible').filter({ hasText: 'Browser QA Produk B' }));
-    await expectNoDocumentOverflow(page);
-    await submitProductFromMiniAppModal(page);
+  const productCard = page
+    .locator("article:visible")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  const productActions = productCard.locator("[data-product-actions]").first();
+  const primaryAction = productActions
+    .locator("[data-product-primary-action]")
+    .first();
+  const secondaryActions = productActions
+    .locator("[data-product-secondary-actions]")
+    .first();
+  const moreTrigger = productActions
+    .locator("[data-product-more-trigger]")
+    .first();
+  const morePanel = productActions.locator("[data-product-more-panel]").first();
 
-    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' }).first();
-    const productActions = productCard.locator('[data-product-actions]').first();
-    const primaryAction = productActions.locator('[data-product-primary-action]').first();
-    const secondaryActions = productActions.locator('[data-product-secondary-actions]').first();
-    const moreTrigger = productActions.locator('[data-product-more-trigger]').first();
-    const morePanel = productActions.locator('[data-product-more-panel]').first();
+  await expect(
+    primaryAction.getByRole("button", { name: "Stok", exact: true })
+  ).toBeVisible();
+  await expect(
+    secondaryActions.getByRole("button", { name: "Ubah", exact: true })
+  ).toBeVisible();
+  await expect(
+    secondaryActions.getByRole("button", { name: "Kelola", exact: true })
+  ).toBeVisible();
+  await expect(
+    productActions.getByRole("button", { name: "Bagikan", exact: true })
+  ).toBeHidden();
+  await expect(
+    productActions.getByRole("button", { name: /Pause|Aktifkan/ })
+  ).toBeHidden();
+  await expect(
+    productActions.getByRole("button", { name: "Arsipkan", exact: true })
+  ).toBeHidden();
+  await expect(moreTrigger).toHaveAttribute("aria-expanded", "false");
 
-    await expect(primaryAction.getByRole('button', { name: 'Stok', exact: true })).toBeVisible();
-    await expect(secondaryActions.getByRole('button', { name: 'Ubah', exact: true })).toBeVisible();
-    await expect(secondaryActions.getByRole('button', { name: 'Kelola', exact: true })).toBeVisible();
-    await expect(productActions.getByRole('button', { name: 'Bagikan', exact: true })).toBeHidden();
-    await expect(productActions.getByRole('button', { name: /Pause|Aktifkan/ })).toBeHidden();
-    await expect(productActions.getByRole('button', { name: 'Arsipkan', exact: true })).toBeHidden();
-    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'false');
+  await expectBefore(primaryAction, secondaryActions);
+  await expectBefore(secondaryActions, moreTrigger);
+  await expectStrictTouchTargetsAtLeast44px(productActions);
 
-    await expectBefore(primaryAction, secondaryActions);
-    await expectBefore(secondaryActions, moreTrigger);
-    await expectStrictTouchTargetsAtLeast44px(productActions);
+  await moreTrigger.click();
+  await expect(moreTrigger).toHaveAttribute("aria-expanded", "true");
+  await expect(morePanel).toBeVisible();
+  await expect(
+    morePanel.getByRole("button", { name: "Bagikan", exact: true })
+  ).toBeVisible();
+  await expect(
+    morePanel.getByRole("button", { name: /Pause|Aktifkan/ })
+  ).toBeVisible();
+  await expect(
+    morePanel.getByRole("button", { name: "Arsipkan", exact: true })
+  ).toBeVisible();
+  await expectStrictTouchTargetsAtLeast44px(productActions);
 
-    await moreTrigger.click();
-    await expect(moreTrigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(morePanel).toBeVisible();
-    await expect(morePanel.getByRole('button', { name: 'Bagikan', exact: true })).toBeVisible();
-    await expect(morePanel.getByRole('button', { name: /Pause|Aktifkan/ })).toBeVisible();
-    await expect(morePanel.getByRole('button', { name: 'Arsipkan', exact: true })).toBeVisible();
-    await expectStrictTouchTargetsAtLeast44px(productActions);
+  await productCard.getByRole("button", { name: "Kelola" }).click();
 
-    await productCard.getByRole('button', { name: 'Kelola' }).click();
+  const manageModal = page.getByRole("dialog", { name: "Kelola Stok" });
+  await expect(manageModal).toBeVisible();
+  await expect(
+    manageModal.getByText("browser-stock-a@example.test|pass")
+  ).toBeVisible();
+  await expect(manageModal.getByRole("textbox")).toBeHidden();
+  await manageModal
+    .getByRole("button", { name: "Ubah akun stok" })
+    .first()
+    .click();
+  await expect(manageModal.getByRole("textbox")).toBeVisible();
+  await manageModal.getByRole("button", { name: "Batal" }).click();
+  await expect(manageModal.getByRole("textbox")).toBeHidden();
+  await manageModal.getByRole("button", { name: /Tambah stok baru/ }).click();
 
-    const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
-    await expect(manageModal).toBeVisible();
-    await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
-    await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).first().click();
-    await expect(manageModal.getByRole('textbox')).toBeVisible();
-    await manageModal.getByRole('button', { name: 'Batal' }).click();
-    await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: /Tambah stok baru/ }).click();
+  const modal = page.getByRole("dialog", { name: "Tambah Stok" });
+  await expect(modal).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Tambah Stok" })
+  ).toBeVisible();
+  await expect(modal.getByText("0 item")).toBeVisible();
 
-    const modal = page.getByRole('dialog', { name: 'Tambah Stok' });
-    await expect(modal).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Tambah Stok' })).toBeVisible();
-    await expect(modal.getByText('0 item')).toBeVisible();
+  await modal
+    .getByPlaceholder("email@example.com|password\nKEY-XXXX-1234")
+    .fill("akun-1@example.test\nakun-2@example.test");
+  await expect(modal.getByText("2 item")).toBeVisible();
 
-    await modal.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234').fill('akun-1@example.test\nakun-2@example.test');
-    await expect(modal.getByText('2 item')).toBeVisible();
+  await expectElementWithinViewport(page, modal);
+  await expectTouchTargetAtLeast44px(
+    modal.getByRole("button", { name: "Batal" })
+  );
+  await expectTouchTargetAtLeast44px(
+    modal.getByRole("button", { name: /Simpan/ })
+  );
+  await expectNoDocumentOverflow(page);
 
-    await expectElementWithinViewport(page, modal);
-    await expectTouchTargetAtLeast44px(modal.getByRole('button', { name: 'Batal' }));
-    await expectTouchTargetAtLeast44px(modal.getByRole('button', { name: /Simpan/ }));
-    await expectNoDocumentOverflow(page);
-
-    await page.goto(`${baseUrl}/admin?tab=penjualan`);
-    await expect(page.getByText('INV-BROWSER-A')).toBeVisible();
-    await expectOneColumn(page.locator('[data-order-status]:visible').filter({ hasText: 'INV-BROWSER-A' }), page.locator('[data-order-status]:visible').filter({ hasText: 'INV-BROWSER-B' }));
-    await expectNoDocumentOverflow(page);
-    await expectPrimaryActionsAtLeast44px(page);
+  await page.goto(`${baseUrl}/admin?tab=penjualan`);
+  await expect(page.getByText("INV-BROWSER-A")).toBeVisible();
+  await expectOneColumn(
+    page
+      .locator("[data-order-status]:visible")
+      .filter({ hasText: "INV-BROWSER-A" }),
+    page
+      .locator("[data-order-status]:visible")
+      .filter({ hasText: "INV-BROWSER-B" })
+  );
+  await expectNoDocumentOverflow(page);
+  await expectPrimaryActionsAtLeast44px(page);
 });
 
-test('keeps category management create, edit, and delete confirmation usable on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 900 });
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=produk`);
+test("keeps category management create, edit, and delete confirmation usable on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
 
-    await expectNoDocumentOverflow(page);
+  await expectNoDocumentOverflow(page);
 
-    const opener = page.getByRole('button', { name: /Kelola Kategori/i });
-    await opener.click();
+  const opener = page.getByRole("button", { name: /Kelola Kategori/i });
+  await opener.click();
 
-    const modal = page.locator('#admin-category-management');
-    await expect(modal).toBeVisible();
-    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
-    await expect(modal.locator('#category-management-name')).toBeFocused();
-    await expect(modal.locator('article').filter({ hasText: 'Browser Responsive QA' })).toBeVisible();
-    await expectElementWithinViewport(page, modal);
+  const modal = page.locator("#admin-category-management");
+  await expect(modal).toBeVisible();
+  await expect(
+    modal.getByRole("heading", { name: /Kelola kategori/i })
+  ).toBeVisible();
+  await expect(modal.locator("#category-management-name")).toBeFocused();
+  await expect(
+    modal.locator("article").filter({ hasText: "Browser Responsive QA" })
+  ).toBeVisible();
+  await expectElementWithinViewport(page, modal);
 
-    const categoryForm = modal.locator('form').first();
-    await expect(categoryForm).toHaveAttribute('action', /\/admin\/categories$/);
-    await categoryForm.locator('#category-management-name').fill('Draft kategori browser');
-    await categoryForm.locator('#category-management-description').fill('Deskripsi draft kategori.');
-    await expect(categoryForm.locator('#category-management-name')).toHaveValue('Draft kategori browser');
+  const categoryForm = modal.locator("form").first();
+  await expect(categoryForm).toHaveAttribute("action", /\/admin\/categories$/);
+  await categoryForm
+    .locator("#category-management-name")
+    .fill("Draft kategori browser");
+  await categoryForm
+    .locator("#category-management-description")
+    .fill("Deskripsi draft kategori.");
+  await expect(categoryForm.locator("#category-management-name")).toHaveValue(
+    "Draft kategori browser"
+  );
 
-    const categoryArticle = modal.locator('article').filter({ hasText: 'Browser Responsive QA' }).first();
-    await categoryArticle.getByRole('button', { name: /Edit/i }).click();
-    await expect(modal.getByRole('heading', { name: 'Edit kategori' })).toBeVisible();
-    await expect(categoryForm).toHaveAttribute('action', /\/admin\/categories\/\d+$/);
-    await expect(categoryForm.locator('input[name="_method"]')).toHaveValue('PATCH');
-    await expect(categoryForm.locator('#category-management-name')).toHaveValue('Browser Responsive QA');
-    await expect(categoryForm.locator('#category-management-sort-order')).toHaveValue('99');
+  const categoryArticle = modal
+    .locator("article")
+    .filter({ hasText: "Browser Responsive QA" })
+    .first();
+  await categoryArticle.getByRole("button", { name: /Edit/i }).click();
+  await expect(
+    modal.getByRole("heading", { name: "Edit kategori" })
+  ).toBeVisible();
+  await expect(categoryForm).toHaveAttribute(
+    "action",
+    /\/admin\/categories\/\d+$/
+  );
+  await expect(categoryForm.locator('input[name="_method"]')).toHaveValue(
+    "PATCH"
+  );
+  await expect(categoryForm.locator("#category-management-name")).toHaveValue(
+    "Browser Responsive QA"
+  );
+  await expect(
+    categoryForm.locator("#category-management-sort-order")
+  ).toHaveValue("99");
 
-    await categoryForm.locator('#category-management-visibility').selectOption('false');
-    await categoryForm.locator('#category-management-sort-order').fill('101');
-    await expect(categoryForm.locator('input[type="hidden"][name="is_active"]')).toHaveValue('0');
-    await expect(categoryForm.locator('#category-management-sort-order')).toHaveValue('101');
+  await categoryForm
+    .locator("#category-management-visibility")
+    .selectOption("false");
+  await categoryForm.locator("#category-management-sort-order").fill("101");
+  await expect(
+    categoryForm.locator('input[type="hidden"][name="is_active"]')
+  ).toHaveValue("0");
+  await expect(
+    categoryForm.locator("#category-management-sort-order")
+  ).toHaveValue("101");
 
-    await modal.getByRole('button', { name: 'Batal edit' }).click();
-    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
-    await expect(categoryForm.locator('input[name="_method"]')).toHaveCount(0);
-    await expect(categoryForm.locator('#category-management-name')).toHaveValue('');
+  await modal.getByRole("button", { name: "Batal edit" }).click();
+  await expect(
+    modal.getByRole("heading", { name: /Kelola kategori/i })
+  ).toBeVisible();
+  await expect(categoryForm.locator('input[name="_method"]')).toHaveCount(0);
+  await expect(categoryForm.locator("#category-management-name")).toHaveValue(
+    ""
+  );
 
-    const deleteForm = categoryArticle.locator('form[data-category-delete-confirmation]');
-    const confirmation = await deleteForm.getAttribute('data-category-delete-confirmation');
-    expect(confirmation).toContain('Browser Responsive QA');
-    expect(confirmation).toContain('Tanpa kategori');
-    expect(confirmation).toContain('Status aktif, stok, dan reservasi');
+  const deleteForm = categoryArticle.locator(
+    "form[data-category-delete-confirmation]"
+  );
+  const confirmation = await deleteForm.getAttribute(
+    "data-category-delete-confirmation"
+  );
+  expect(confirmation).toContain("Browser Responsive QA");
+  expect(confirmation).toContain("Tanpa kategori");
+  expect(confirmation).toContain("Status aktif, stok, dan reservasi");
 
-    let confirmationType;
-    let confirmationMessage;
-    page.once('dialog', async (dialog) => {
-        confirmationType = dialog.type();
-        confirmationMessage = dialog.message();
-        await dialog.dismiss();
-    });
-    await deleteForm.getByRole('button', { name: /Hapus/i }).click();
-    expect(confirmationType).toBe('confirm');
-    expect(confirmationMessage).toContain('Tanpa kategori');
+  let confirmationType;
+  let confirmationMessage;
+  page.once("dialog", async (dialog) => {
+    confirmationType = dialog.type();
+    confirmationMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await deleteForm.getByRole("button", { name: /Hapus/i }).click();
+  expect(confirmationType).toBe("confirm");
+  expect(confirmationMessage).toContain("Tanpa kategori");
 
-    await expect(modal).toBeVisible();
-    await expectNoDocumentOverflow(page);
-    await modal.getByRole('button', { name: 'Tutup modal' }).click();
-    await expect(modal).toBeHidden();
-    await expect(opener).toBeFocused();
+  await expect(modal).toBeVisible();
+  await expectNoDocumentOverflow(page);
+  await modal.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(modal).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
-test('opens and closes category management from the desktop Products tab', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=produk`);
+test("opens and closes category management from the desktop Products tab", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
 
-    await expectNoDocumentOverflow(page);
+  await expectNoDocumentOverflow(page);
 
-    const opener = page.getByRole('button', { name: /Kelola Kategori/i });
-    await opener.click();
+  const opener = page.getByRole("button", { name: /Kelola Kategori/i });
+  await opener.click();
 
-    const modal = page.locator('#admin-category-management');
-    await expect(modal).toBeVisible();
-    await expect(modal.getByRole('heading', { name: /Kelola kategori/i })).toBeVisible();
-    await expect(modal.locator('#category-management-name')).toBeFocused();
-    await expect(modal.locator('article').filter({ hasText: 'Browser Responsive QA' })).toBeVisible();
-    await expectElementWithinViewport(page, modal);
+  const modal = page.locator("#admin-category-management");
+  await expect(modal).toBeVisible();
+  await expect(
+    modal.getByRole("heading", { name: /Kelola kategori/i })
+  ).toBeVisible();
+  await expect(modal.locator("#category-management-name")).toBeFocused();
+  await expect(
+    modal.locator("article").filter({ hasText: "Browser Responsive QA" })
+  ).toBeVisible();
+  await expectElementWithinViewport(page, modal);
 
-    await modal.getByRole('button', { name: 'Tutup modal' }).click();
-    await expect(modal).toBeHidden();
-    await expect(opener).toBeFocused();
+  await modal.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(modal).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
-test('traps keyboard focus in the product modal and restores its opener', async ({ page }) => {
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=produk`);
+test("traps keyboard focus in the product modal and restores its opener", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
 
-    const opener = page.getByRole('button', { name: /Tambah Produk/i });
-    await opener.click();
+  const opener = page.getByRole("button", { name: /Tambah Produk/i });
+  await opener.click();
 
-    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
-    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
-    const submitButton = dialog.getByRole('button', { name: /Submit produk/i });
-    await expect(dialog.locator('#product-name')).toBeFocused();
+  const dialog = page.getByRole("dialog", { name: /Tambah produk/i });
+  const closeButton = dialog.getByRole("button", { name: "Tutup modal" });
+  const submitButton = dialog.getByRole("button", { name: /Submit produk/i });
+  await expect(dialog.locator("#product-name")).toBeFocused();
 
-    await closeButton.focus();
-    await page.keyboard.press('Shift+Tab');
-    await expect(submitButton).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(closeButton).toBeFocused();
+  await closeButton.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(submitButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeButton).toBeFocused();
 
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(opener).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 
-    await opener.click();
-    await dialog.getByRole('button', { name: 'Tutup modal' }).click();
-    await expect(dialog).toBeHidden();
-    await expect(opener).toBeFocused();
+  await opener.click();
+  await dialog.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
-test('traps keyboard focus in the stock modal and restores its opener', async ({ page }) => {
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=produk`);
+test("traps keyboard focus in the stock modal and restores its opener", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
 
-    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
-    const opener = productCard.getByRole('button', { name: /Stok/i });
-    await opener.click();
+  const productCard = page
+    .locator("article:visible")
+    .filter({ hasText: "Browser QA Produk A" });
+  const opener = productCard.getByRole("button", { name: /Stok/i });
+  await opener.click();
 
-    const dialog = page.getByRole('dialog', { name: 'Tambah Stok' });
-    const closeButton = dialog.getByRole('button', { name: 'Tutup modal' });
-    const submitButton = dialog.getByRole('button', { name: /Simpan/i });
-    await expect(dialog.locator('#stock-items')).toBeFocused();
+  const dialog = page.getByRole("dialog", { name: "Tambah Stok" });
+  const closeButton = dialog.getByRole("button", { name: "Tutup modal" });
+  const submitButton = dialog.getByRole("button", { name: /Simpan/i });
+  await expect(dialog.locator("#stock-items")).toBeFocused();
 
-    await closeButton.focus();
-    await page.keyboard.press('Shift+Tab');
-    await expect(submitButton).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(closeButton).toBeFocused();
+  await closeButton.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(submitButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeButton).toBeFocused();
 
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(opener).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
-test('focuses the relevant product field when server validation reopens the modal', async ({ page }) => {
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=produk`);
-    await page.getByRole('button', { name: /Tambah Produk/i }).click();
+test("focuses the relevant product field when server validation reopens the modal", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  await page.getByRole("button", { name: /Tambah Produk/i }).click();
 
-    const dialog = page.getByRole('dialog', { name: /Tambah produk/i });
-    await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-        dialog.locator('form').evaluate((form) => form.submit()),
-    ]);
+  const dialog = page.getByRole("dialog", { name: /Tambah produk/i });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    dialog.locator("form").evaluate((form) => form.submit()),
+  ]);
 
-    await expect(page.getByRole('dialog', { name: /Tambah produk/i })).toBeVisible();
-    await expect(page.locator('#product-name')).toBeFocused();
+  await expect(
+    page.getByRole("dialog", { name: /Tambah produk/i })
+  ).toBeVisible();
+  await expect(page.locator("#product-name")).toBeFocused();
 });
 
 for (const navClickCase of [
-    {
-        name: 'desktop/tablet navigation',
-        viewport: { width: 1024, height: 900 },
-        navigationName: 'Navigasi desktop',
-    },
-    {
-        name: 'Telegram mini app navigation',
-        viewport: { width: 375, height: 900 },
-        navigationName: 'Navigasi dashboard',
-    },
+  {
+    name: "desktop/tablet navigation",
+    viewport: { width: 1024, height: 900 },
+    navigationName: "Navigasi desktop",
+  },
+  {
+    name: "Telegram mini app navigation",
+    viewport: { width: 375, height: 900 },
+    navigationName: "Navigasi dashboard",
+  },
 ]) {
-    test(`switches admin dashboard tabs and opens product creation from ${navClickCase.name} clicks`, async ({ page }) => {
-        await page.setViewportSize(navClickCase.viewport);
-        await login(page);
+  test(`switches admin dashboard tabs and opens product creation from ${navClickCase.name} clicks`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(navClickCase.viewport);
+    await login(page);
 
-        await expectClickedDashboardControlsToWork(page, navClickCase.navigationName);
-    });
+    await expectClickedDashboardControlsToWork(
+      page,
+      navClickCase.navigationName
+    );
+  });
 }
 
-test('preserves the sales filter while visiting another dashboard tab', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 900 });
-    await login(page);
-    await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+test("preserves the sales filter while visiting another dashboard tab", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
 
-    const nav = page.getByRole('navigation', { name: 'Navigasi desktop' });
-    await nav.getByRole('button', { name: 'Produk', exact: true }).click();
-    await page.waitForURL(`${baseUrl}/admin?tab=produk&sales_filter=waiting`);
-    await nav.getByRole('button', { name: 'Pesanan', exact: true }).click();
+  const nav = page.getByRole("navigation", { name: "Navigasi desktop" });
+  await nav.getByRole("button", { name: "Produk", exact: true }).click();
+  await page.waitForURL(`${baseUrl}/admin?tab=produk&sales_filter=waiting`);
+  await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
 
-    await expect(page).toHaveURL(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+  await expect(page).toHaveURL(
+    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting`
+  );
 });
 
 for (const broadcastDirectCase of [
-    {
-        name: 'desktop',
-        viewport: { width: 1024, height: 900 },
-        navigationName: 'Navigasi desktop',
-    },
-    {
-        name: 'Telegram mini app',
-        viewport: { width: 375, height: 900 },
-        navigationName: 'Navigasi dashboard',
-    },
+  {
+    name: "desktop",
+    viewport: { width: 1024, height: 900 },
+    navigationName: "Navigasi desktop",
+  },
+  {
+    name: "Telegram mini app",
+    viewport: { width: 375, height: 900 },
+    navigationName: "Navigasi dashboard",
+  },
 ]) {
-    test(`opens Siaran directly with matching active navigation on ${broadcastDirectCase.name}`, async ({ page }) => {
-        await page.setViewportSize(broadcastDirectCase.viewport);
-        await login(page);
-        await page.goto(`${baseUrl}/admin?tab=broadcast`);
+  test(`opens Siaran directly with matching active navigation on ${broadcastDirectCase.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(broadcastDirectCase.viewport);
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=broadcast`);
 
-        await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+    await expect(
+      page.locator("#admin-section-broadcast h2").first()
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Status Siaran" })
+    ).toBeVisible();
 
-        const nav = page.getByRole('navigation', { name: broadcastDirectCase.navigationName });
-        if (broadcastDirectCase.navigationName === 'Navigasi dashboard') {
-            await expect(nav.getByRole('button', { name: 'Lainnya', exact: true })).toHaveClass(/bottom-nav-active/);
-        } else {
-            await expect(nav.getByRole('button', { name: 'Siaran', exact: true })).toHaveClass(/bottom-nav-active/);
-        }
+    const nav = page.getByRole("navigation", {
+      name: broadcastDirectCase.navigationName,
     });
+    if (broadcastDirectCase.navigationName === "Navigasi dashboard") {
+      await expect(
+        nav.getByRole("button", { name: "Lainnya", exact: true })
+      ).toHaveClass(/bottom-nav-active/);
+    } else {
+      await expect(
+        nav.getByRole("button", { name: "Siaran", exact: true })
+      ).toHaveClass(/bottom-nav-active/);
+    }
+  });
 }
 
 async function expectClickedDashboardControlsToWork(page, navigationName) {
-    const nav = page.getByRole('navigation', { name: navigationName });
-    const isMobileNav = navigationName === 'Navigasi dashboard';
-    await expect(nav).toBeVisible();
+  const nav = page.getByRole("navigation", { name: navigationName });
+  const isMobileNav = navigationName === "Navigasi dashboard";
+  await expect(nav).toBeVisible();
 
-    await nav.getByRole('button', { name: 'Produk', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /Produk Saya/ })).toBeVisible();
-    await expect(page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' })).toBeVisible();
+  await nav.getByRole("button", { name: "Produk", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: /Produk Saya/ })
+  ).toBeVisible();
+  await expect(
+    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" })
+  ).toBeVisible();
 
-    await nav.getByRole('button', { name: 'Pesanan', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /Penjualan Saya/ })).toBeVisible();
-    await expect(page.getByText('INV-BROWSER-A')).toBeVisible();
+  await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: /Penjualan Saya/ })
+  ).toBeVisible();
+  await expect(page.getByText("INV-BROWSER-A")).toBeVisible();
 
-    if (isMobileNav) {
-        await clickMobileUtility(page, nav, 'Store Channel');
-    } else {
-        await nav.getByRole('button', { name: 'Channel', exact: true }).click();
-    }
-    await expect(page.getByRole('region', { name: 'Telegram Channel' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Setup Store Channel' })).toBeVisible();
+  if (isMobileNav) {
+    await clickMobileUtility(page, nav, "Store Channel");
+  } else {
+    await nav.getByRole("button", { name: "Channel", exact: true }).click();
+  }
+  await expect(
+    page.getByRole("region", { name: "Telegram Channel" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Setup Store Channel" })
+  ).toBeVisible();
 
-    if (isMobileNav) {
-        await clickMobileUtility(page, nav, 'Siaran');
-        await expect(nav.getByRole('button', { name: 'Lainnya', exact: true })).toHaveClass(/bottom-nav-active/);
-    } else {
-        const broadcastButton = nav.getByRole('button', { name: 'Siaran', exact: true });
-        await broadcastButton.click();
-        await expect(broadcastButton).toHaveClass(/bottom-nav-active/);
-    }
-    await expect(page.locator('#admin-section-broadcast h2').first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Status Siaran' })).toBeVisible();
+  if (isMobileNav) {
+    await clickMobileUtility(page, nav, "Siaran");
+    await expect(
+      nav.getByRole("button", { name: "Lainnya", exact: true })
+    ).toHaveClass(/bottom-nav-active/);
+  } else {
+    const broadcastButton = nav.getByRole("button", {
+      name: "Siaran",
+      exact: true,
+    });
+    await broadcastButton.click();
+    await expect(broadcastButton).toHaveClass(/bottom-nav-active/);
+  }
+  await expect(
+    page.locator("#admin-section-broadcast h2").first()
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Status Siaran" })
+  ).toBeVisible();
 
-    if (isMobileNav) {
-        await clickMobileUtility(page, nav, 'Tambah Produk');
-    } else {
-        await nav.getByRole('button', { name: 'Tambah', exact: true }).click();
-    }
-    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
-    await expect(productModal).toBeVisible();
-    await expect(productModal.locator('#product-name')).toBeVisible();
-    await expect(page.getByRole('heading', { name: /Produk Saya/ })).toBeVisible();
+  if (isMobileNav) {
+    await clickMobileUtility(page, nav, "Tambah Produk");
+  } else {
+    await nav.getByRole("button", { name: "Tambah", exact: true }).click();
+  }
+  const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
+  await expect(productModal).toBeVisible();
+  await expect(productModal.locator("#product-name")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Produk Saya/ })
+  ).toBeVisible();
 }
 
 async function clickMobileUtility(page, nav, actionName) {
-    await nav.getByRole('button', { name: 'Lainnya', exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: 'Menu lainnya' });
-    await expect(sheet).toBeVisible();
-    await sheet.getByRole('button', { name: actionName, exact: true }).click();
+  await nav.getByRole("button", { name: "Lainnya", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Menu lainnya" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("button", { name: actionName, exact: true }).click();
 }
 
 async function submitProductFromMiniAppModal(page) {
-    const productName = `Mini App Produk ${Date.now()}`;
+  const productName = `Mini App Produk ${Date.now()}`;
 
-    await page.getByRole('button', { name: /Tambah Produk/i }).click();
-    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
-    await expect(productModal).toBeVisible();
-    await productModal.locator('#product-name').fill(productName);
-    await productModal.locator('#product-price').fill('33000');
-    await productModal.locator('#product-description').fill('Produk dibuat dari viewport Telegram Mini App.');
+  await page.getByRole("button", { name: /Tambah Produk/i }).click();
+  const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
+  await expect(productModal).toBeVisible();
+  await productModal.locator("#product-name").fill(productName);
+  await productModal.locator("#product-price").fill("33000");
+  await productModal
+    .locator("#product-description")
+    .fill("Produk dibuat dari viewport Telegram Mini App.");
 
-    await Promise.all([
-        page.waitForURL(`${baseUrl}/admin?tab=produk`),
-        productModal.getByRole('button', { name: /Submit produk/i }).click(),
-    ]);
+  await Promise.all([
+    page.waitForURL(`${baseUrl}/admin?tab=produk`),
+    productModal.getByRole("button", { name: /Submit produk/i }).click(),
+  ]);
 
-    await expect(page.getByRole('dialog', { name: /Tambah produk/i })).toBeHidden();
-    await expect(page.locator('article:visible').filter({ hasText: productName })).toBeVisible();
-    await expect(page.getByText(`Produk ${productName} berhasil dibuat.`)).toBeVisible();
-    await expectNoDocumentOverflow(page);
-    await expectPrimaryActionsAtLeast44px(page);
+  await expect(
+    page.getByRole("dialog", { name: /Tambah produk/i })
+  ).toBeHidden();
+  await expect(
+    page.locator("article:visible").filter({ hasText: productName })
+  ).toBeVisible();
+  await expect(
+    page.getByText(`Produk ${productName} berhasil dibuat.`)
+  ).toBeVisible();
+  await expectNoDocumentOverflow(page);
+  await expectPrimaryActionsAtLeast44px(page);
 }
 
 async function login(page) {
-    await page.goto(`${baseUrl}/admin/login`);
-    await page.getByLabel('Username / email admin').fill('test@example.com');
-    await page.locator('input[type="password"]').fill('password');
-    await page.getByRole('button', { name: /sign in|login|masuk/i }).click();
-    await page.waitForURL(`${baseUrl}/admin`);
+  await page.goto(`${baseUrl}/admin/login`);
+  await page.getByLabel("Username / email admin").fill("test@example.com");
+  await page.locator('input[type="password"]').fill("password");
+  await page.getByRole("button", { name: /sign in|login|masuk/i }).click();
+  await page.waitForURL(`${baseUrl}/admin`);
 }
 
 async function installClipboardProbe(page) {
-    await page.addInitScript(() => {
-        window.__copiedText = null;
+  await page.addInitScript(() => {
+    window.__copiedText = null;
 
-        Object.defineProperty(navigator, 'clipboard', {
-            configurable: true,
-            value: {
-                async writeText(text) {
-                    window.__copiedText = text;
-                },
-            },
-        });
-
-        Object.defineProperty(navigator, 'share', {
-            configurable: true,
-            value: undefined,
-        });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        async writeText(text) {
+          window.__copiedText = text;
+        },
+      },
     });
+
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: undefined,
+    });
+  });
 }
 
 async function expectStoreLinkCopyAndShare(page) {
-    const storeLink = page.getByRole('region', { name: 'Link toko' });
-    const visibleStoreUrl = (await storeLink.locator('p').nth(1).innerText()).trim();
+  const storeLink = page.getByRole("region", { name: "Link toko" });
+  const visibleStoreUrl = (
+    await storeLink.locator("p").nth(1).innerText()
+  ).trim();
 
-    await storeLink.getByRole('button', { name: 'Salin' }).click();
-    await expect(storeLink.getByRole('button', { name: 'Tersalin' })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe(visibleStoreUrl);
+  await storeLink.getByRole("button", { name: "Salin" }).click();
+  await expect(
+    storeLink.getByRole("button", { name: "Tersalin" })
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__copiedText))
+    .toBe(visibleStoreUrl);
 
-    await page.getByRole('button', { name: 'Bagikan Toko' }).click();
-    await expect(page.locator('header').getByRole('button', { name: 'Tersalin' })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe(visibleStoreUrl);
+  await page.getByRole("button", { name: "Bagikan Toko" }).click();
+  await expect(
+    page.locator("header").getByRole("button", { name: "Tersalin" })
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__copiedText))
+    .toBe(visibleStoreUrl);
 }
 
 async function exerciseProductManagementModals(page) {
-    const productCard = page.locator('article:visible').filter({ hasText: 'Browser QA Produk A' });
-    await expect(productCard).toBeVisible();
+  const productCard = page
+    .locator("article:visible")
+    .filter({ hasText: "Browser QA Produk A" });
+  await expect(productCard).toBeVisible();
 
-    await page.getByRole('button', { name: /Tambah Produk/i }).click();
-    const productModal = page.getByRole('dialog', { name: /Tambah produk/i });
-    await expect(productModal).toBeVisible();
-    await expectElementWithinViewport(page, productModal);
-    await productModal.getByRole('button', { name: 'Tutup modal' }).click();
-    await expect(productModal).toBeHidden();
+  await page.getByRole("button", { name: /Tambah Produk/i }).click();
+  const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
+  await expect(productModal).toBeVisible();
+  await expectElementWithinViewport(page, productModal);
+  await productModal.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(productModal).toBeHidden();
 
-    await productCard.getByRole('button', { name: /Stok/i }).click();
-    const stockModal = page.getByRole('dialog', { name: 'Tambah Stok' });
-    await expect(stockModal).toBeVisible();
-    await expect(stockModal.getByPlaceholder('email@example.com|password\nKEY-XXXX-1234')).toBeVisible();
-    await stockModal.getByRole('button', { name: 'Batal' }).click();
-    await expect(stockModal).toBeHidden();
+  await productCard.getByRole("button", { name: /Stok/i }).click();
+  const stockModal = page.getByRole("dialog", { name: "Tambah Stok" });
+  await expect(stockModal).toBeVisible();
+  await expect(
+    stockModal.getByPlaceholder("email@example.com|password\nKEY-XXXX-1234")
+  ).toBeVisible();
+  await stockModal.getByRole("button", { name: "Batal" }).click();
+  await expect(stockModal).toBeHidden();
 
-    await productCard.getByRole('button', { name: 'Kelola' }).click();
-    const manageModal = page.getByRole('dialog', { name: 'Kelola Stok' });
-    await expect(manageModal).toBeVisible();
-    await expect(manageModal.getByText('#1')).toBeVisible();
-    await expect(manageModal.getByText('browser-stock-a@example.test|pass')).toBeVisible();
-    await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: 'Ubah akun stok' }).first().click();
-    await expect(manageModal.getByRole('textbox')).toBeVisible();
-    await manageModal.getByRole('button', { name: 'Batal' }).click();
-    await expect(manageModal.getByRole('textbox')).toBeHidden();
-    await manageModal.getByRole('button', { name: /Tambah stok baru/ }).click();
+  await productCard.getByRole("button", { name: "Kelola" }).click();
+  const manageModal = page.getByRole("dialog", { name: "Kelola Stok" });
+  await expect(manageModal).toBeVisible();
+  await expect(manageModal.getByText("#1")).toBeVisible();
+  await expect(
+    manageModal.getByText("browser-stock-a@example.test|pass")
+  ).toBeVisible();
+  await expect(manageModal.getByRole("textbox")).toBeHidden();
+  await manageModal
+    .getByRole("button", { name: "Ubah akun stok" })
+    .first()
+    .click();
+  await expect(manageModal.getByRole("textbox")).toBeVisible();
+  await manageModal.getByRole("button", { name: "Batal" }).click();
+  await expect(manageModal.getByRole("textbox")).toBeHidden();
+  await manageModal.getByRole("button", { name: /Tambah stok baru/ }).click();
 
-    const reopenedStockModal = page.getByRole('dialog', { name: 'Tambah Stok' });
-    await expect(reopenedStockModal).toBeVisible();
-    await reopenedStockModal.getByRole('button', { name: 'Batal' }).click();
-    await expect(reopenedStockModal).toBeHidden();
+  const reopenedStockModal = page.getByRole("dialog", { name: "Tambah Stok" });
+  await expect(reopenedStockModal).toBeVisible();
+  await reopenedStockModal.getByRole("button", { name: "Batal" }).click();
+  await expect(reopenedStockModal).toBeHidden();
 }
 
 async function expectNoDocumentOverflow(page) {
-    const metrics = await page.evaluate(() => ({
-        bodyScrollWidth: document.body.scrollWidth,
-        documentScrollWidth: document.documentElement.scrollWidth,
-        viewportWidth: window.innerWidth,
-    }));
+  const metrics = await page.evaluate(() => ({
+    bodyScrollWidth: document.body.scrollWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
 
-    expect(metrics.documentScrollWidth, 'document should not overflow horizontally').toBeLessThanOrEqual(metrics.viewportWidth + 1);
-    expect(metrics.bodyScrollWidth, 'body should not overflow horizontally').toBeLessThanOrEqual(metrics.viewportWidth + 1);
+  expect(
+    metrics.documentScrollWidth,
+    "document should not overflow horizontally"
+  ).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+  expect(
+    metrics.bodyScrollWidth,
+    "body should not overflow horizontally"
+  ).toBeLessThanOrEqual(metrics.viewportWidth + 1);
 }
 
 async function expectBottomNavUsable(page) {
-    const nav = page.getByRole('navigation', { name: 'Navigasi dashboard' });
-    await expect(nav).toBeVisible();
-    await expect(nav).toHaveCSS('position', 'fixed');
-    await expect(nav.getByText('Ringkasan')).toBeVisible();
-    await expect(nav.getByText('Produk')).toBeVisible();
-    await expect(nav.getByText('Pesanan')).toBeVisible();
-    await expect(nav.getByText('Lainnya')).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Navigasi dashboard" });
+  await expect(nav).toBeVisible();
+  await expect(nav).toHaveCSS("position", "fixed");
+  await expect(nav.getByText("Ringkasan")).toBeVisible();
+  await expect(nav.getByText("Produk")).toBeVisible();
+  await expect(nav.getByText("Pesanan")).toBeVisible();
+  await expect(nav.getByText("Lainnya")).toBeVisible();
 
-    const metrics = await nav.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
+  const metrics = await nav.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
 
-        return {
-            bottomGap: Math.abs(window.innerHeight - rect.bottom),
-            left: rect.left,
-            right: rect.right,
-            width: rect.width,
-            viewportWidth: window.innerWidth,
-        };
-    });
+    return {
+      bottomGap: Math.abs(window.innerHeight - rect.bottom),
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+      viewportWidth: window.innerWidth,
+    };
+  });
 
-    expect(metrics.bottomGap).toBeLessThanOrEqual(2);
-    expect(metrics.left).toBeGreaterThanOrEqual(0);
-    expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-    expect(metrics.width).toBeGreaterThan(300);
+  expect(metrics.bottomGap).toBeLessThanOrEqual(2);
+  expect(metrics.left).toBeGreaterThanOrEqual(0);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+  expect(metrics.width).toBeGreaterThan(300);
 }
 
 async function expectOneColumn(firstLocator, secondLocator) {
-    const first = await firstLocator.boundingBox();
-    const second = await secondLocator.boundingBox();
+  const first = await firstLocator.boundingBox();
+  const second = await secondLocator.boundingBox();
 
-    expect(first).not.toBeNull();
-    expect(second).not.toBeNull();
-    const firstCenterX = first.x + first.width / 2;
-    const secondCenterX = second.x + second.width / 2;
-    expect(Math.abs(firstCenterX - secondCenterX)).toBeLessThanOrEqual(2);
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  const firstCenterX = first.x + first.width / 2;
+  const secondCenterX = second.x + second.width / 2;
+  expect(Math.abs(firstCenterX - secondCenterX)).toBeLessThanOrEqual(2);
 
-    const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
-    expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
+  const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
+  expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
 }
 
 async function expectBefore(firstLocator, secondLocator) {
-    const [first, second] = await Promise.all([
-        firstLocator.first().boundingBox(),
-        secondLocator.first().boundingBox(),
-    ]);
+  const [first, second] = await Promise.all([
+    firstLocator.first().boundingBox(),
+    secondLocator.first().boundingBox(),
+  ]);
 
-    expect(first).not.toBeNull();
-    expect(second).not.toBeNull();
-    expect(first.y + first.height).toBeLessThanOrEqual(second.y + 2);
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(first.y + first.height).toBeLessThanOrEqual(second.y + 2);
 }
 
 async function expectPrimaryActionsAtLeast44px(page) {
-    const tooSmall = await page.locator('button, a[href]').evaluateAll((elements) => elements
+  const tooSmall = await page
+    .locator("button, a[href]")
+    .evaluateAll((elements) =>
+      elements
         .filter((element) => {
-            const style = window.getComputedStyle(element);
-            const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
 
-            return style.display !== 'none'
-                && style.visibility !== 'hidden'
-                && rect.width > 0
-                && rect.height > 0
-                && (element.matches('.admin-dashboard-action') || element.matches('.filter-pill'));
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            (element.matches(".admin-dashboard-action") ||
+              element.matches(".filter-pill"))
+          );
         })
         .map((element) => ({
-            label: (element.textContent || element.getAttribute('aria-label') || element.href || element.tagName).trim(),
-            height: element.getBoundingClientRect().height,
+          label: (
+            element.textContent ||
+            element.getAttribute("aria-label") ||
+            element.href ||
+            element.tagName
+          ).trim(),
+          height: element.getBoundingClientRect().height,
         }))
-        .filter((element) => Math.round(element.height) < 44));
+        .filter((element) => Math.round(element.height) < 44)
+    );
 
-    expect(tooSmall, `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`).toEqual([]);
+  expect(
+    tooSmall,
+    `brutalist actions below 44px: ${JSON.stringify(tooSmall)}`
+  ).toEqual([]);
 }
 
 async function expectStrictTouchTargetsAtLeast44px(locator) {
-    const tooSmall = await locator.locator('button, a[href]').evaluateAll((elements) => elements
+  const tooSmall = await locator
+    .locator("button, a[href]")
+    .evaluateAll((elements) =>
+      elements
         .filter((element) => {
-            const style = window.getComputedStyle(element);
-            const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
 
-            return style.display !== 'none'
-                && style.visibility !== 'hidden'
-                && rect.width > 0
-                && rect.height > 0;
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            rect.width > 0 &&
+            rect.height > 0
+          );
         })
         .map((element) => {
-            const rect = element.getBoundingClientRect();
+          const rect = element.getBoundingClientRect();
 
-            return {
-                label: (element.textContent || element.getAttribute('aria-label') || element.tagName).trim(),
-                width: rect.width,
-                height: rect.height,
-            };
+          return {
+            label: (
+              element.textContent ||
+              element.getAttribute("aria-label") ||
+              element.tagName
+            ).trim(),
+            width: rect.width,
+            height: rect.height,
+          };
         })
-        .filter(({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44));
+        .filter(
+          ({ width, height }) =>
+            Math.round(width) < 44 || Math.round(height) < 44
+        )
+    );
 
-    expect(tooSmall, `touch targets below 44x44 CSS px: ${JSON.stringify(tooSmall)}`).toEqual([]);
+  expect(
+    tooSmall,
+    `touch targets below 44x44 CSS px: ${JSON.stringify(tooSmall)}`
+  ).toEqual([]);
 }
 
 async function expectTouchTargetAtLeast44px(locator) {
-    const box = await locator.boundingBox();
+  const box = await locator.boundingBox();
 
-    expect(box).not.toBeNull();
-    expect(Math.round(box.width)).toBeGreaterThanOrEqual(44);
-    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
+  expect(box).not.toBeNull();
+  expect(Math.round(box.width)).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
 }
 
 async function expectElementWithinViewport(page, locator) {
-    const box = await locator.boundingBox();
-    const viewport = page.viewportSize();
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
 
-    expect(box).not.toBeNull();
-    expect(viewport).not.toBeNull();
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
-    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
 }
 
 function runArtisan(args) {
-    const result = spawnSync('php', ['artisan', ...args], {
-        cwd: appDir,
-        env: appEnv(),
-        encoding: 'utf8',
-    });
+  const result = spawnSync("php", ["artisan", ...args], {
+    cwd: appDir,
+    env: appEnv(),
+    encoding: "utf8",
+  });
 
-    if (result.status !== 0) {
-        throw new Error(`php artisan ${args.join(' ')} failed\n${result.stdout}\n${result.stderr}`);
-    }
+  if (result.status !== 0) {
+    throw new Error(
+      `php artisan ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`
+    );
+  }
 
-    return result.stdout.trim();
+  return result.stdout.trim();
 }
 
 function appEnv() {
-    return {
-        ...process.env,
-        APP_ENV: 'testing',
-        APP_DEBUG: 'true',
-        APP_URL: baseUrl ?? 'http://127.0.0.1',
-        DB_CONNECTION: 'sqlite',
-        DB_DATABASE: dbPath,
-        SESSION_DRIVER: 'file',
-        CACHE_STORE: 'array',
-        QUEUE_CONNECTION: 'sync',
-        MAIL_MAILER: 'log',
-        DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true',
-    };
+  return {
+    ...process.env,
+    APP_ENV: "testing",
+    APP_DEBUG: "true",
+    APP_URL: baseUrl ?? "http://127.0.0.1",
+    DB_CONNECTION: "sqlite",
+    DB_DATABASE: dbPath,
+    SESSION_DRIVER: "file",
+    CACHE_STORE: "array",
+    QUEUE_CONNECTION: "sync",
+    MAIL_MAILER: "log",
+    DOGFOOD_FAKE_TELEGRAM_OUTBOUND: "true",
+  };
 }
 
 function findAvailablePort() {
-    return new Promise((resolve, reject) => {
-        const server = net.createServer();
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
 
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', () => {
-            const address = server.address();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
 
-            server.close(() => resolve(address.port));
-        });
+      server.close(() => resolve(address.port));
     });
+  });
 }
 
 async function waitForServer(url) {
-    const deadline = Date.now() + 15000;
-    let lastError;
+  const deadline = Date.now() + 15000;
+  let lastError;
 
-    while (Date.now() < deadline) {
-        try {
-            const response = await fetch(url);
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
 
-            if (response.ok) {
-                return;
-            }
-        } catch (error) {
-            lastError = error;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 250));
+      if (response.ok) {
+        return;
+      }
+    } catch (error) {
+      lastError = error;
     }
 
-    throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? 'no response'}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(
+    `Timed out waiting for ${url}: ${lastError?.message ?? "no response"}`
+  );
 }
 
 // Test data setup: create one owner plus enough product and order data to measure

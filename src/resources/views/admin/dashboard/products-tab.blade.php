@@ -37,7 +37,7 @@
                     <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
                 </x-admin-dashboard.notice>
 
-                <div class="grid gap-4 md:grid-cols-2">
+                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                     @forelse ($products as $product)
 
                         @include('admin.dashboard.product-card')

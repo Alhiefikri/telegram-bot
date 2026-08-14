@@ -21,7 +21,7 @@
                 </div>
 
                 {{-- Order cards --}}
-                <div class="space-y-3">
+                <div class="grid gap-3 md:grid-cols-2">
                     @forelse ($orders as $order)
                         <x-admin-dashboard.card
                             id="sales-proof-{{ $order['id'] }}"
@@ -30,7 +30,7 @@
                             as="article"
                             padding="compact"
                             shadow="sm"
-                            class="rounded-[1.125rem]"
+                            class="min-w-0 rounded-[1.125rem]"
                             data-order-status="{{ $order['order_status'] }}"
                             data-order-filter-groups="{{ implode(' ', $order['filter_groups']) }}"
                         >
