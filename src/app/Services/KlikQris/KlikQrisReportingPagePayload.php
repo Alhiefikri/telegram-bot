@@ -44,13 +44,10 @@ final readonly class KlikQrisReportingPagePayload
 
         foreach ([
             'current_page',
+            'first_page_url',
+            'next_page_url',
             'per_page',
             'total',
-            'last_page',
-            'first_page_url',
-            'last_page_url',
-            'next_page_url',
-            'prev_page_url',
         ] as $key) {
             if (! array_key_exists($key, $data)) {
                 throw new UnexpectedValueException('KlikQRIS reporting paginator metadata is incomplete.');
@@ -60,14 +57,18 @@ final readonly class KlikQrisReportingPagePayload
         $currentPage = KlikQrisReportingInteger::positive($data['current_page']);
         $perPage = KlikQrisReportingInteger::positive($data['per_page']);
         $total = KlikQrisReportingInteger::nonNegative($data['total']);
-        $lastPage = KlikQrisReportingInteger::positive($data['last_page']);
+        $calculatedLastPage = intdiv($total, $perPage) + ($total % $perPage === 0 ? 0 : 1);
+        $calculatedLastPage = max(1, $calculatedLastPage);
+        $lastPage = array_key_exists('last_page', $data)
+            ? KlikQrisReportingInteger::positive($data['last_page'])
+            : $calculatedLastPage;
 
-        if ($currentPage > $lastPage) {
+        if ($lastPage !== $calculatedLastPage || $currentPage > $lastPage) {
             throw new UnexpectedValueException('KlikQRIS reporting paginator page is invalid.');
         }
 
         foreach (['first_page_url', 'last_page_url', 'next_page_url', 'prev_page_url'] as $key) {
-            if ($data[$key] !== null && ! is_string($data[$key])) {
+            if (array_key_exists($key, $data) && $data[$key] !== null && ! is_string($data[$key])) {
                 throw new UnexpectedValueException('KlikQRIS reporting pagination URL is invalid.');
             }
         }

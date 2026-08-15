@@ -75,6 +75,42 @@ final class KlikQrisReportingTest extends TestCase
             && $request->hasHeader('id_merchant', 'merchant-test'));
     }
 
+    public function test_history_page_accepts_the_official_response_without_optional_paginator_fields(): void
+    {
+        Http::fake([
+            'https://klikqris.com/api/sandbox/qris/history*' => Http::response([
+                'status' => true,
+                'data' => [
+                    'current_page' => 1,
+                    'data' => [[
+                        'order_id' => 'INV-OFFICIAL-1',
+                        'created_at' => '2026-01-16 22:22:43',
+                        'total_amount' => '2112.00',
+                        'status' => 'SUCCESS',
+                        'type' => 'DANA',
+                        'keterangan' => 'coba webhook',
+                        'via' => 'API',
+                    ]],
+                    'first_page_url' => 'https://klikqris.com/api/qris/history?page=1',
+                    'next_page_url' => null,
+                    'per_page' => 30,
+                    'total' => 23,
+                ],
+            ], 200),
+        ]);
+
+        $page = app(KlikQrisClient::class)->historyPage();
+        $item = $page->items()[0];
+
+        $this->assertSame(1, $page->currentPage());
+        $this->assertSame(30, $page->perPage());
+        $this->assertSame(23, $page->total());
+        $this->assertSame(1, $page->lastPage());
+        $this->assertSame('INV-OFFICIAL-1', $item->orderId());
+        $this->assertSame(2112, $item->totalAmount());
+        $this->assertSame('SUCCESS', $item->status());
+    }
+
     public function test_withdrawal_query_is_sent_as_validated_array_and_parses_nullable_proof(): void
     {
         Http::fake(fn () => Http::response([
