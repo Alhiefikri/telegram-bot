@@ -27,6 +27,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(301, '/menu', ['id' => 999], 12345))->assertOk();
 
@@ -47,6 +48,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin?source=telegram');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(302, '/menu', ['id' => 999], 999))->assertOk();
 
@@ -64,6 +66,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'http://localhost/admin');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(306, '/menu', ['id' => 999], 12345))->assertOk();
 
@@ -84,6 +87,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.mini_app_url', null);
         URL::forceRootUrl('http://127.0.0.1');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         try {
             $this->postTelegramWebhook($this->messageUpdate(307, '/menu', ['id' => 999], 12345))->assertOk();
@@ -104,6 +108,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(303, '/menu', ['id' => 111], 12345))->assertOk();
 
@@ -294,6 +299,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(312, '/broadcast Promo grup', ['id' => 999], -100123, 'group'))->assertOk();
 
@@ -610,6 +616,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook(
             $this->messageUpdate(319, '📊 Statistik', ['id' => 999], -100123, 'group')
@@ -665,6 +672,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->callbackUpdate(310, 'group-stats', 'statistik_harian', ['id' => 999], -100123, 'group'))->assertOk();
 

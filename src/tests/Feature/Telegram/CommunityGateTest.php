@@ -15,6 +15,59 @@ use Tests\Support\TelegramBotTestSupport;
 
 class CommunityGateTest extends TelegramBotTestSupport
 {
+    public function test_malay_community_gate_and_private_redirect_copy_follow_customer_locale(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'ms']);
+        $this->fakeGateHttp('left');
+
+        $this->postTelegramWebhook($this->messageUpdate(499, '/produk'))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(498, '👤 Akaun Saya', ['id' => 12345], -100123, 'group'))->assertOk();
+
+        $gateRequests = Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Sertai saluran dahulu'));
+        $this->assertCount(1, $gateRequests);
+        $gatePayload = $gateRequests->first()[0]->data();
+        $buttons = array_column($gatePayload['reply_markup']['inline_keyboard'][0], 'text');
+        $this->assertContains('📢 Sertai Saluran', $buttons);
+        $this->assertContains('✅ Saya Sudah Sertai', $buttons);
+        $this->assertStringNotContainsString('Gabung kanal dulu', (string) $gatePayload['text']);
+        $this->assertStringNotContainsString('Join the channel first', (string) $gatePayload['text']);
+
+        $privacyRequests = Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Teruskan di chat peribadi'));
+        $this->assertCount(1, $privacyRequests);
+        $this->assertStringContainsString('Buka chat peribadi dengan bot', (string) $privacyRequests->first()[0]['text']);
+        $this->assertStringNotContainsString('Lanjut di chat pribadi', (string) $privacyRequests->first()[0]['text']);
+        $this->assertStringNotContainsString('Continue in a private chat', (string) $privacyRequests->first()[0]['text']);
+    }
+
+    public function test_malay_failed_community_verification_uses_catalog_callback_copy(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'channel_username' => '@store_channel',
+            'community_gate_enabled' => true,
+            'last_test_success' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'ms']);
+        $this->fakeGateHttp('left');
+
+        $this->postTelegramWebhook($this->messageUpdate(499, '/produk'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(500, 'verify-ms', 'community_gate:verify'))->assertOk();
+
+        Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'verify-ms'
+            && $request['text'] === 'Anda belum dikesan menyertai saluran.');
+    }
+
     public function test_language_selection_requires_channel_membership_before_welcome(): void
     {
         StoreChannelSetting::create([
@@ -107,6 +160,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'last_test_success' => true,
         ]);
         $product = Product::factory()->create(['is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $nextMessageId = 700;
         Http::preventStrayRequests();
         Http::fake(['https://api.telegram.org/*' => function (Request $request) use (&$nextMessageId) {
@@ -149,6 +203,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $nextMessageId = 800;
         Http::preventStrayRequests();
         Http::fake(['https://api.telegram.org/*' => function (Request $request) use (&$nextMessageId) {
@@ -282,6 +337,7 @@ class CommunityGateTest extends TelegramBotTestSupport
                 'telegram_chat_id' => $setup['telegram_chat_id'],
                 'last_test_success' => $setup['last_test_success'],
             ]);
+            Customer::factory()->create(['telegram_id' => $setup['update_id'], 'locale' => 'id']);
             $this->fakeTelegramHttp();
 
             $this->postTelegramWebhook($this->messageUpdate($setup['update_id'], '/katalog', [], $setup['update_id']))->assertOk();
@@ -345,6 +401,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         config()->set('services.telegram.token', 'sensitive-bot-token');
         $warnings = [];
         Log::shouldReceive('warning')->once()->withArgs(function (string $event, array $context) use (&$warnings) {
@@ -392,6 +449,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeGateHttpSequence(['left', 'member']);
         $this->postTelegramWebhook($this->messageUpdate(30, '/katalog', ['first_name' => 'Ayu']))->assertOk();
@@ -421,6 +479,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeGateHttpSequence(['left', 'member'], deleteFails: true);
         $this->postTelegramWebhook($this->messageUpdate(35, '/katalog', ['first_name' => 'Ayu']))->assertOk();
@@ -442,6 +501,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             'community_gate_enabled' => true,
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->fakeGateHttpSequence(['member', 'left']);
         config()->set('services.telegram.community_gate_cache_seconds', 0);
         $this->postTelegramWebhook($this->messageUpdate(40, '/katalog'))->assertOk();

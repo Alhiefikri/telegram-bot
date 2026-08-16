@@ -18,33 +18,23 @@ class TelegramMenuIntents
         private CheckoutMaintenance $maintenance,
     ) {}
 
-    public function sendLanguagePicker(string $chatId): void
+    public function sendLanguagePicker(string $chatId, ?Customer $customer = null): void
     {
-        $this->bot->sendMessage($chatId, '🌐 Pilih bahasa / Choose your language', $this->locale->languageKeyboard());
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'language.picker.prompt'), $this->locale->languageKeyboard());
     }
 
     public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $firstName = trim((string) $customer->first_name) ?: $this->locale->text($customer, 'Kak', 'there');
-        [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
-        $caption = implode("\n", $this->locale->code($customer) === 'en' ? [
-            $greetingIcon.' '.$greetingText.', '.$firstName.' — Welcome to LHIE STORE',
-            '━━━━━━━━━━━━━━',
-            'A simple, fast way to shop for digital products directly from Telegram.',
-            '', '🛍️ Browse products', '💳 Pay by QRIS / transfer', '📦 Check your orders anytime', '⚡ Accounts are delivered automatically after payment is confirmed', '', 'Where would you like to start?',
-        ] : [
-            $greetingIcon.' '.$greetingText.', '.$firstName.' — selamat datang di LHIE STORE',
-            '━━━━━━━━━━━━━━',
-            'Tempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.',
-            '',
-            '🛍️ Lihat produk',
-            '💳 Bayar via QRIS / transfer',
-            '📦 Cek pesanan kapan aja',
-            '⚡ Akun dikirim otomatis setelah pembayaran beres',
-            '',
-            'Mau mulai dari mana nih?',
-        ]);
+        $firstName = trim((string) $customer->first_name);
+        if ($firstName === '') {
+            $firstName = $this->locale->translate($customer, 'welcome.default_name');
+        }
 
+        [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
+        $caption = $this->locale->translate($customer, 'welcome.caption', [
+            'greeting' => $greetingIcon.' '.$greetingText,
+            'first_name' => $firstName,
+        ]);
         $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId, $isPrivateChat);
         $bannerReference = config('services.telegram.welcome_banner_url');
 
@@ -62,7 +52,6 @@ class TelegramMenuIntents
 
                 return;
             }
-
         }
 
         $this->bot->sendMessage($chatId, $caption, $replyMarkup);
@@ -70,11 +59,13 @@ class TelegramMenuIntents
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $message = $this->locale->text($customer, "☰ Menu utama\nMau ngapain dulu? Pilih tombol di bawah biar sat-set.", "☰ Main menu\nWhat would you like to do?");
+        $message = $this->locale->translate($customer, 'menu.title');
         $maintenance = $this->maintenance->current();
         if ($maintenance->active) {
-            $message .= "\n\n".$this->locale->text($customer, '⏸️ Checkout sedang maintenance. Produk dan keranjang tetap bisa diakses; Order baru sementara ditahan.', '⏸️ Checkout is under maintenance. Products and the cart remain available; new Orders are temporarily paused.')
-                .$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote);
+            $message .= "\n\n".$this->locale->translate($customer, 'menu.maintenance');
+            if ($maintenance->publicNote !== null) {
+                $message .= $this->locale->translate($customer, 'maintenance.admin_note', ['note' => $maintenance->publicNote]);
+            }
         }
 
         $this->bot->sendMessage($chatId, $message, $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
@@ -83,8 +74,14 @@ class TelegramMenuIntents
     public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array
     {
         $keyboard = [
-            [['text' => $customer && $this->locale->code($customer) === 'en' ? '🛍️ Browse Products' : '🛍️ Lihat Produk'], ['text' => $customer && $this->locale->code($customer) === 'en' ? '📦 Orders' : '📦 Pesanan']],
-            [['text' => '💬 Support'], ['text' => $customer && $this->locale->code($customer) === 'en' ? '🌐 Language' : '🌐 Bahasa']],
+            [
+                ['text' => $this->locale->translate($customer, 'menu.products')],
+                ['text' => $this->locale->translate($customer, 'menu.orders')],
+            ],
+            [
+                ['text' => $this->locale->translate($customer, 'menu.support')],
+                ['text' => $this->locale->translate($customer, 'menu.language')],
+            ],
         ];
 
         if ($isPrivateChat && $customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
@@ -100,7 +97,7 @@ class TelegramMenuIntents
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'is_persistent' => true,
-            'input_field_placeholder' => $customer && $this->locale->code($customer) === 'en' ? 'Choose a button or type /products' : 'Pilih tombol atau ketik /produk',
+            'input_field_placeholder' => $this->locale->translate($customer, 'menu.placeholder'),
         ];
     }
 
@@ -111,18 +108,11 @@ class TelegramMenuIntents
     {
         $hour = now('Asia/Jakarta')->hour;
 
-        $greeting = match (true) {
-            $hour >= 5 && $hour < 11 => ['🌅', 'Selamat pagi'],
-            $hour >= 11 && $hour < 15 => ['☀️', 'Selamat siang'],
-            $hour >= 15 && $hour < 18 => ['🌇', 'Selamat sore'],
-            default => ['🌙', 'Selamat malam'],
-        };
-        if ($this->locale->code($customer) !== 'en') {
-            return $greeting;
-        }
-
-        return match ($greeting[1]) {
-            'Selamat pagi' => [$greeting[0], 'Good morning'], 'Selamat siang' => [$greeting[0], 'Good afternoon'], 'Selamat sore' => [$greeting[0], 'Good evening'], default => [$greeting[0], 'Good evening']
+        return match (true) {
+            $hour >= 5 && $hour < 11 => ['🌅', $this->locale->translate($customer, 'welcome.greeting.morning')],
+            $hour >= 11 && $hour < 15 => ['☀️', $this->locale->translate($customer, 'welcome.greeting.afternoon')],
+            $hour >= 15 && $hour < 18 => ['🌇', $this->locale->translate($customer, 'welcome.greeting.evening')],
+            default => ['🌙', $this->locale->translate($customer, 'welcome.greeting.night')],
         };
     }
 
@@ -130,8 +120,8 @@ class TelegramMenuIntents
     {
         $keyboard = [
             [
-                ['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog'],
-                ['text' => $this->locale->text($customer, '📦 Cek Pesanan', '📦 Check Orders'), 'callback_data' => 'status'],
+                ['text' => $this->locale->translate($customer, 'welcome.action.products'), 'callback_data' => 'katalog'],
+                ['text' => $this->locale->translate($customer, 'welcome.action.orders'), 'callback_data' => 'status'],
             ],
         ];
 
@@ -150,10 +140,10 @@ class TelegramMenuIntents
         $adminContactUrl = $this->supportContact->resolve()['url'];
         $replyMarkup = [];
         if ($adminContactUrl) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->text($customer, '💬 Hubungi Admin', '💬 Chat with Admin'), 'url' => $adminContactUrl]]]];
+            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'support.contact'), 'url' => $adminContactUrl]]]];
         }
 
-        $this->bot->sendMessage($chatId, $this->locale->text($customer, "💬 Support\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.", "💬 Support\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help."), $replyMarkup);
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'support.message'), $replyMarkup);
     }
 
     public function sendAccountSummary(Customer $customer, string $chatId): void
@@ -161,17 +151,17 @@ class TelegramMenuIntents
         $ordersCount = $customer->orders()->count();
         $latestOrder = $customer->orders()->latest()->first();
         $lines = [
-            $this->locale->text($customer, '👤 Akun Saya', '👤 My Account'),
-            $this->locale->text($customer, 'Nama: ', 'Name: ').($customer->first_name ?: '-'),
-            'Username: @'.($customer->username ?: '-'),
-            $this->locale->text($customer, 'Total pesanan: ', 'Total orders: ').$ordersCount,
+            $this->locale->translate($customer, 'account.title'),
+            $this->locale->translate($customer, 'account.name').($customer->first_name ?: '-'),
+            $this->locale->translate($customer, 'account.username').'@'.($customer->username ?: '-'),
+            $this->locale->translate($customer, 'account.total_orders').$ordersCount,
         ];
         if ($latestOrder) {
-            $lines[] = $this->locale->text($customer, 'Pesanan terakhir: ', 'Latest order: ').$latestOrder->invoice_number.' · '.$this->locale->paymentStatus($customer, $latestOrder->payment_status);
+            $lines[] = $this->locale->translate($customer, 'account.latest_order').$latestOrder->invoice_number.' · '.$this->locale->accountPaymentStatus($customer, $latestOrder->payment_status);
         }
         $lines[] = '';
-        $lines[] = $this->locale->text($customer, 'Mau cek pesanan kamu?', 'Want to check your orders?');
+        $lines[] = $this->locale->translate($customer, 'account.follow_up');
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '📦 Lihat Pesanan', '📦 View Orders'), 'callback_data' => 'status']]]]);
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'account.orders_button'), 'callback_data' => 'status']]]]);
     }
 }

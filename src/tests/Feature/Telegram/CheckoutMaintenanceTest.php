@@ -47,6 +47,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_main_menu_includes_compact_maintenance_notice(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update(['is_active' => true, 'version' => 1, 'activated_at' => now()]);
 
         $this->postTelegramWebhook($this->messageUpdate(30, '/menu'))->assertOk();

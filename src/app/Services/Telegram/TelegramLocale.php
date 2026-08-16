@@ -10,14 +10,61 @@ use Carbon\CarbonInterface;
 
 class TelegramLocale
 {
+    public const DEFAULT_LOCALE = 'en';
+
+    /** @var array<string, string> */
+    private const LANGUAGE_OPTIONS = [
+        'id' => '🇮🇩 Bahasa Indonesia',
+        'en' => '🇬🇧 English',
+        'ms' => '🇲🇾 Bahasa Melayu',
+    ];
+
+    public function __construct(private TelegramTranslationCatalog $catalog) {}
+
     public function code(?Customer $customer): string
     {
-        return $customer?->locale === 'en' ? 'en' : 'id';
+        $locale = (string) ($customer?->locale ?? '');
+
+        return $this->isSupported($locale) ? $locale : self::DEFAULT_LOCALE;
     }
 
+    public function localeFromCallbackData(string $data): ?string
+    {
+        if (preg_match('/^locale:(?<locale>[a-z]{2})$/', $data, $matches) !== 1) {
+            return null;
+        }
+
+        $locale = $matches['locale'];
+
+        return $this->isSupported($locale) ? $locale : null;
+    }
+
+    private function isSupported(string $locale): bool
+    {
+        return array_key_exists($locale, self::LANGUAGE_OPTIONS);
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $replace
+     */
+    public function translate(?Customer $customer, string $key, array $replace = []): string
+    {
+        $translation = $this->catalog->get($key, $this->code($customer));
+
+        $replacements = [];
+        foreach ($replace as $name => $value) {
+            $replacements[':'.$name] = (string) $value;
+        }
+
+        return strtr($translation, $replacements);
+    }
+
+    /**
+     * Legacy pair helper for surfaces that are migrated by later tickets.
+     */
     public function text(?Customer $customer, string $id, string $en): string
     {
-        return $this->code($customer) === 'en' ? $en : $id;
+        return in_array($customer?->locale, [null, 'id'], true) ? $id : $en;
     }
 
     public function checkoutMaintenanceNote(Customer $customer, ?string $publicNote): string
@@ -26,17 +73,13 @@ class TelegramLocale
             return '';
         }
 
-        return $this->text(
-            $customer,
-            "\n\nCatatan admin:\n{$publicNote}",
-            "\n\nAdmin note:\n{$publicNote}",
-        );
+        return $this->text($customer, "\n\nCatatan admin:\n{$publicNote}", "\n\nAdmin note:\n{$publicNote}");
     }
 
     public function orderStatus(Customer $customer, OrderStatus $status): string
     {
         return match ($status) {
-            OrderStatus::Draft => 'Draft',
+            OrderStatus::Draft => $this->text($customer, 'Draft', 'Draft'),
             OrderStatus::PendingPayment => $this->text($customer, 'Menunggu pembayaran', 'Awaiting payment'),
             OrderStatus::Processing => $this->text($customer, 'Diproses', 'Processing'),
             OrderStatus::Completed => $this->text($customer, 'Selesai', 'Completed'),
@@ -54,6 +97,17 @@ class TelegramLocale
             PaymentStatus::Expired => $this->text($customer, 'Kedaluwarsa', 'Expired'),
             PaymentStatus::Refunded => $this->text($customer, 'Dikembalikan', 'Refunded'),
         };
+    }
+
+    public function accountPaymentStatus(Customer $customer, PaymentStatus $status): string
+    {
+        return $this->translate($customer, match ($status) {
+            PaymentStatus::Pending => 'status.payment.pending',
+            PaymentStatus::Paid => 'status.payment.paid',
+            PaymentStatus::Failed => 'status.payment.failed',
+            PaymentStatus::Expired => 'status.payment.expired',
+            PaymentStatus::Refunded => 'status.payment.refunded',
+        });
     }
 
     public function paymentMethod(Customer $customer, Payment $payment): string
@@ -102,14 +156,21 @@ class TelegramLocale
 
     public function languageKeyboard(): array
     {
-        return ['inline_keyboard' => [[['text' => '🇮🇩 Bahasa Indonesia', 'callback_data' => 'locale:id'], ['text' => '🇬🇧 English', 'callback_data' => 'locale:en']]]];
+        $buttons = [];
+        foreach (self::LANGUAGE_OPTIONS as $locale => $label) {
+            $buttons[] = ['text' => $label, 'callback_data' => 'locale:'.$locale];
+        }
+
+        return ['inline_keyboard' => [$buttons]];
     }
 
     private function dateParts(Customer $customer, CarbonInterface $date, bool $withTime): string
     {
-        $months = $this->code($customer) === 'en'
-            ? [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            : [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+        $months = match ($this->code($customer)) {
+            'en' => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+            'ms' => [1 => 'Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'],
+            default => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
+        };
         $formatted = $date->format('d').' '.$months[(int) $date->format('n')].' '.$date->format('Y');
 
         return $withTime ? $formatted.' '.$date->format('H:i') : $formatted;

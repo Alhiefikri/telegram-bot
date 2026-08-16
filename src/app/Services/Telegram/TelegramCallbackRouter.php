@@ -35,7 +35,7 @@ class TelegramCallbackRouter
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
             $this->session->forget($customer);
-            $this->bot->answerCallbackQuery($id, $this->text($customer, 'Gabung Store Channel dulu supaya bisa lanjut belanja.', 'Join the Store Channel first to continue shopping.'));
+            $this->bot->answerCallbackQuery($id, $this->locale->translate($customer, 'callback.community_gate_required'));
 
             return;
         }
@@ -44,11 +44,6 @@ class TelegramCallbackRouter
             return;
         }
 
-        $this->bot->answerCallbackQuery($id, $this->text($customer, 'Aksi ini belum dikenali. Coba pilih menu lain.', 'This action is not recognized. Please choose another option.'));
-    }
-
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
+        $this->bot->answerCallbackQuery($id, $this->locale->translate($customer, 'callback.unknown_action'));
     }
 }

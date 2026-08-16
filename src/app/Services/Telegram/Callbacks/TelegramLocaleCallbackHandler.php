@@ -33,17 +33,18 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
 
     public function supports(TelegramCallbackContext $context): bool
     {
-        return preg_match('/^locale:(id|en)$/', $context->data) === 1;
+        return $this->locale->localeFromCallbackData($context->data) !== null;
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
-        if (! preg_match('/^locale:(id|en)$/', $context->data, $matches)) {
+        $locale = $this->locale->localeFromCallbackData($context->data);
+        if ($locale === null) {
             return false;
         }
 
         $this->communityGate->clearPrompt($context->customer);
-        $context->customer->update(['locale' => $matches[1]]);
+        $context->customer->update(['locale' => $locale]);
         $context->customer->refresh();
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         if (! $this->communityGate->ensureAllowedOrPrompt($context->customer, $context->chatId)) {

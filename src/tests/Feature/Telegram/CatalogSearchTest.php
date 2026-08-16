@@ -27,11 +27,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Pilih bahasa')
+            && str_contains($r['text'], 'Choose your language')
+            && count($r['reply_markup']['inline_keyboard'] ?? []) === 1
+            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 3
             && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🇮🇩 Bahasa Indonesia'
             && ($r['reply_markup']['inline_keyboard'][0][1]['text'] ?? null) === '🇬🇧 English'
+            && ($r['reply_markup']['inline_keyboard'][0][2]['text'] ?? null) === '🇲🇾 Bahasa Melayu'
             && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'locale:id'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en');
+            && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en'
+            && ($r['reply_markup']['inline_keyboard'][0][2]['callback_data'] ?? null) === 'locale:ms');
     }
 
     public function test_start_with_sales_proof_deep_link_shows_welcome_instead_of_command_fallback(): void
@@ -193,9 +197,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(119, '/menu'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Menu utama')
+            && str_contains($r['text'], 'Main menu')
             && ! str_contains($r['text'], '🚀')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
+            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
             && ! str_contains(json_encode($r->data()), '☰ Menu')
             && ! str_contains(json_encode($r->data()), 'Akun Saya'));
     }

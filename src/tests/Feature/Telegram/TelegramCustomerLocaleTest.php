@@ -7,11 +7,116 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\Telegram\TelegramLocale;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
 class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 {
+    public function test_first_time_picker_offers_three_locales_and_malay_selection_rerenders_onboarding_and_menu(): void
+    {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
+        $this->fakeTelegramHttp();
+
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'store_support', 'is_active' => true]);
+        $this->postTelegramWebhook($this->messageUpdate(41101, '/start', ['id' => 41101, 'first_name' => 'Maya', 'username' => 'maya'], 41101))->assertOk();
+
+        $pickerRequests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '41101');
+        $this->assertCount(1, $pickerRequests);
+        $picker = $pickerRequests->first()[0]->data();
+        $this->assertSame('🌐 Choose your language', $picker['text']);
+        $this->assertSame([
+            ['text' => '🇮🇩 Bahasa Indonesia', 'callback_data' => 'locale:id'],
+            ['text' => '🇬🇧 English', 'callback_data' => 'locale:en'],
+            ['text' => '🇲🇾 Bahasa Melayu', 'callback_data' => 'locale:ms'],
+        ], $picker['reply_markup']['inline_keyboard'][0]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41102, 'locale-ms', 'locale:ms', ['id' => 41101, 'first_name' => 'Maya', 'username' => 'maya'], 41101))->assertOk();
+
+        $this->assertDatabaseHas('customers', ['telegram_id' => 41101, 'locale' => 'ms']);
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '41101')
+            ->map(fn (array $record): array => $record[0]->data());
+        $this->assertCount(2, $messages);
+        $welcomePhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '41101');
+        $this->assertCount(1, $welcomePhotos);
+
+        $visibleCopy = $messages
+            ->map(fn (array $payload): string => $this->visibleCopy($payload))
+            ->implode("\n");
+        $visibleCopy .= "\n".$this->telegramRequestField($welcomePhotos->first()[0], 'caption');
+        $this->assertStringContainsString('selamat datang ke LHIE STORE', $visibleCopy);
+        $this->assertStringContainsString('Menu utama', $visibleCopy);
+        $this->assertStringContainsString('Lihat Produk', $visibleCopy);
+        $this->assertStringContainsString('Sokongan', $visibleCopy);
+        $this->assertStringContainsString('Maya', $visibleCopy);
+        $this->assertStringNotContainsString('Welcome to LHIE STORE', $visibleCopy);
+        $this->assertStringNotContainsString('selamat datang di LHIE STORE', $visibleCopy);
+        $this->assertStringNotContainsString('Pilih tombol atau ketik', $visibleCopy);
+    }
+
+    public function test_malay_support_and_account_copy_preserve_customer_authored_values(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'store_support', 'is_active' => true]);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 41111,
+            'locale' => 'ms',
+            'first_name' => 'Nur "A"',
+            'username' => 'nur_a',
+        ]);
+        Order::factory()->for($customer)->create(['invoice_number' => 'INV-MS-ACCOUNT']);
+
+        $this->postTelegramWebhook($this->messageUpdate(41111, '💬 Sokongan', ['id' => 41111, 'first_name' => 'Nur "A"', 'username' => 'nur_a'], 41111))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41112, '👤 Akaun Saya', ['id' => 41111, 'first_name' => 'Nur "A"', 'username' => 'nur_a'], 41111))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '41111')
+            ->map(fn (array $record): array => $record[0]->data());
+        $this->assertCount(2, $messages);
+
+        $supportCopy = $this->visibleCopy($messages[0]);
+        $this->assertStringContainsString('Ada masalah dengan pesanan, bayaran atau log masuk akaun?', $supportCopy);
+        $this->assertStringContainsString('💬 Hubungi Admin', $supportCopy);
+        $this->assertStringNotContainsString('Ada kendala order, pembayaran, atau login akun?', $supportCopy);
+
+        $accountCopy = $this->visibleCopy($messages[1]);
+        $this->assertStringContainsString('👤 Akaun Saya', $accountCopy);
+        $this->assertStringContainsString('Nur "A"', $accountCopy);
+        $this->assertStringContainsString('@nur_a', $accountCopy);
+        $this->assertStringContainsString('INV-MS-ACCOUNT', $accountCopy);
+        $this->assertStringContainsString('Menunggu bayaran', $accountCopy);
+        $this->assertStringNotContainsString('Akun Saya', $accountCopy);
+        $this->assertStringNotContainsString('My Account', $accountCopy);
+    }
+
+    public function test_unknown_customer_locale_uses_english_catalog_fallback(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41121, 'locale' => 'xx']);
+
+        $this->postTelegramWebhook($this->messageUpdate(41121, '/menu', ['id' => 41121], 41121))->assertOk();
+
+        $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41121));
+        $this->assertStringContainsString('Main menu', $copy);
+        $this->assertStringContainsString('Browse Products', $copy);
+        $this->assertStringNotContainsString('Menu utama', $copy);
+        $this->assertStringNotContainsString('Lihat Produk', $copy);
+    }
+
+    public function test_missing_catalog_key_uses_english_fallback_for_every_locale(): void
+    {
+        $locale = app(TelegramLocale::class);
+
+        foreach (['id', 'en', 'ms', 'xx', null] as $customerLocale) {
+            $customer = Customer::factory()->make(['locale' => $customerLocale]);
+
+            $this->assertSame('Translation unavailable.', $locale->translate($customer, 'missing.catalog.key'));
+        }
+    }
+
     public function test_main_menu_copy_and_keyboard_follow_customer_locale(): void
     {
         $this->fakeTelegramHttp();

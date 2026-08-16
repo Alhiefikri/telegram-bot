@@ -680,7 +680,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['admin_contact_url' => 'https://t.me/adminsedulur', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -785,7 +785,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.payment_mode', 'manual');
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'GPT Plus', 'stock' => 5]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
@@ -867,7 +867,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Premium Account', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -902,7 +902,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Fallback Product', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -1018,7 +1018,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             ], 200),
         ]);
         ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'pakasir_checkout_flow' => 'api_qris', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'GPT Plus', 'price_amount' => 15000, 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 2);
 
@@ -1166,7 +1166,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'https://app.pakasir.test/api/transactioncreate/qris' => Http::response(['message' => 'provider down'], 500),
         ]);
         ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'pakasir_checkout_flow' => 'api_qris', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'GPT Plus', 'price_amount' => 15000, 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 

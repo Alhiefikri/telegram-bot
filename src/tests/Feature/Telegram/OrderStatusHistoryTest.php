@@ -116,7 +116,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $invoice = 'INV-ISSUE-112-CMD';
         $productName = 'Issue 112 Vault Product';
         $credential = 'issue112-command@example.test | password: Secret-112-CMD';
-        $customer = Customer::factory()->create(['telegram_id' => $privateChatId]);
+        $customer = Customer::factory()->create(['telegram_id' => $privateChatId, 'locale' => 'id']);
         $this->paidCompletedOrderWithCredential($customer, $invoice, $productName, $credential);
         $sensitiveValues = [$invoice, 'paid', 'Pembayaran sudah diterima', $productName, $credential, 'Secret-112-CMD'];
 
@@ -145,7 +145,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $invoice = 'INV-ISSUE-112-CB';
         $productName = 'Issue 112 Callback Product';
         $credential = 'issue112-callback@example.test | password: Secret-112-CB';
-        $customer = Customer::factory()->create(['telegram_id' => $privateChatId]);
+        $customer = Customer::factory()->create(['telegram_id' => $privateChatId, 'locale' => 'id']);
         $this->paidCompletedOrderWithCredential($customer, $invoice, $productName, $credential);
         $sensitiveValues = [$invoice, 'paid', 'Pembayaran sudah diterima', $productName, $credential, 'Secret-112-CB'];
 

@@ -132,15 +132,11 @@ class TelegramCommunityGate
             $url = $setting->channel_link ?: ($setting->channel_username ? 'https://t.me/'.ltrim($setting->channel_username, '@') : null);
             $keyboard = [[]];
             if ($url) {
-                $keyboard[0][] = ['text' => $this->locale->text($customer, '📢 Gabung kanal', '📢 Join Channel'), 'url' => $url];
+                $keyboard[0][] = ['text' => $this->locale->translate($customer, 'community_gate.join_button'), 'url' => $url];
             }
-            $keyboard[0][] = ['text' => $this->locale->text($customer, '✅ Saya sudah bergabung', '✅ I Have Joined'), 'callback_data' => self::VERIFY_CALLBACK];
+            $keyboard[0][] = ['text' => $this->locale->translate($customer, 'community_gate.verify_button'), 'callback_data' => self::VERIFY_CALLBACK];
 
-            $message = $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                '🔒 Gabung kanal dulu'."\n━━━━━━━━━━━━━━\n".'Agar bisa lanjut belanja dan dapat info stok terbaru, kamu perlu bergabung dengan kanal Store Channel dulu.'."\n\n".'Kalau sudah bergabung tapi status kamu belum bisa dicek, tekan tombol “Saya sudah bergabung” untuk coba lagi. Jika Telegram sedang gangguan, coba lagi nanti.',
-                '🔒 Join the channel first'."\n━━━━━━━━━━━━━━\n".'Before you can continue shopping, please join the Store Channel. Then press “I Have Joined” to verify.',
-            ), [
+            $message = $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'community_gate.message'), [
                 'inline_keyboard' => $keyboard,
             ]);
 

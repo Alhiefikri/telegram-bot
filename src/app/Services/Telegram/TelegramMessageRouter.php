@@ -40,7 +40,7 @@ class TelegramMessageRouter
         if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->session->forget($customer);
             if ($customer->locale === null) {
-                $this->menu->sendLanguagePicker($chatId);
+                $this->menu->sendLanguagePicker($chatId, $customer);
 
                 return;
             }
@@ -62,7 +62,7 @@ class TelegramMessageRouter
         }
 
         if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
-            $this->menu->sendLanguagePicker($chatId);
+            $this->menu->sendLanguagePicker($chatId, $customer);
 
             return;
         }
@@ -113,7 +113,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/support', '💬 Support'], true)) {
+        if (in_array($text, ['/support', '💬 Support', '💬 Sokongan'], true)) {
             $this->session->forget($customer);
             $this->menu->sendSupport($customer, $chatId);
 
@@ -134,7 +134,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account'], true)) {
+        if (in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya'], true)) {
             $this->session->forget($customer);
             $this->menu->sendAccountSummary($customer, $chatId);
 
@@ -250,7 +250,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || $this->isBroadcastCommand($text);
