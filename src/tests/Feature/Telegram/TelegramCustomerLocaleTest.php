@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -115,6 +117,15 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
             $this->assertSame('Translation unavailable.', $locale->translate($customer, 'missing.catalog.key'));
         }
+    }
+
+    public function test_null_customer_locale_keeps_legacy_indonesian_status_defaults(): void
+    {
+        $locale = app(TelegramLocale::class);
+        $customer = Customer::factory()->make(['locale' => null]);
+
+        $this->assertSame('Menunggu pembayaran', $locale->orderStatus($customer, OrderStatus::PendingPayment));
+        $this->assertSame('Menunggu pembayaran', $locale->paymentStatus($customer, PaymentStatus::Pending));
     }
 
     public function test_main_menu_copy_and_keyboard_follow_customer_locale(): void

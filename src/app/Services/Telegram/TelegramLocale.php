@@ -12,12 +12,8 @@ class TelegramLocale
 {
     public const DEFAULT_LOCALE = 'en';
 
-    /** @var array<string, string> */
-    private const LANGUAGE_OPTIONS = [
-        'id' => '🇮🇩 Bahasa Indonesia',
-        'en' => '🇬🇧 English',
-        'ms' => '🇲🇾 Bahasa Melayu',
-    ];
+    /** @var list<string> */
+    private const SUPPORTED_LOCALES = ['id', 'en', 'ms'];
 
     public function __construct(private TelegramTranslationCatalog $catalog) {}
 
@@ -41,7 +37,7 @@ class TelegramLocale
 
     private function isSupported(string $locale): bool
     {
-        return array_key_exists($locale, self::LANGUAGE_OPTIONS);
+        return in_array($locale, self::SUPPORTED_LOCALES, true);
     }
 
     /**
@@ -71,25 +67,32 @@ class TelegramLocale
 
     public function orderStatus(Customer $customer, OrderStatus $status): string
     {
-        return match ($status) {
-            OrderStatus::Draft => $this->text($customer, 'Draft', 'Draft'),
-            OrderStatus::PendingPayment => $this->text($customer, 'Menunggu pembayaran', 'Awaiting payment'),
-            OrderStatus::Processing => $this->text($customer, 'Diproses', 'Processing'),
-            OrderStatus::Completed => $this->text($customer, 'Selesai', 'Completed'),
-            OrderStatus::Cancelled => $this->text($customer, 'Dibatalkan', 'Cancelled'),
-            OrderStatus::Expired => $this->text($customer, 'Kedaluwarsa', 'Expired'),
-        };
+        return $this->translateWithLegacyDefault($customer, match ($status) {
+            OrderStatus::Draft => 'status.order.draft',
+            OrderStatus::PendingPayment => 'status.order.pending_payment',
+            OrderStatus::Processing => 'status.order.processing',
+            OrderStatus::Completed => 'status.order.completed',
+            OrderStatus::Cancelled => 'status.order.cancelled',
+            OrderStatus::Expired => 'status.order.expired',
+        });
     }
 
     public function paymentStatus(Customer $customer, PaymentStatus $status): string
     {
-        return match ($status) {
-            PaymentStatus::Pending => $this->text($customer, 'Menunggu pembayaran', 'Awaiting payment'),
-            PaymentStatus::Paid => $this->text($customer, 'Dibayar', 'Paid'),
-            PaymentStatus::Failed => $this->text($customer, 'Gagal', 'Failed'),
-            PaymentStatus::Expired => $this->text($customer, 'Kedaluwarsa', 'Expired'),
-            PaymentStatus::Refunded => $this->text($customer, 'Dikembalikan', 'Refunded'),
-        };
+        return $this->translateWithLegacyDefault($customer, match ($status) {
+            PaymentStatus::Pending => 'status.payment.order.pending',
+            PaymentStatus::Paid => 'status.payment.order.paid',
+            PaymentStatus::Failed => 'status.payment.order.failed',
+            PaymentStatus::Expired => 'status.payment.order.expired',
+            PaymentStatus::Refunded => 'status.payment.order.refunded',
+        });
+    }
+
+    private function translateWithLegacyDefault(?Customer $customer, string $key): string
+    {
+        $locale = $customer?->locale === null ? 'id' : $this->code($customer);
+
+        return $this->catalog->translate($key, $locale);
     }
 
     public function accountPaymentStatus(Customer $customer, PaymentStatus $status): string
@@ -146,8 +149,11 @@ class TelegramLocale
     public function languageKeyboard(): array
     {
         $buttons = [];
-        foreach (self::LANGUAGE_OPTIONS as $locale => $label) {
-            $buttons[] = ['text' => $label, 'callback_data' => 'locale:'.$locale];
+        foreach (self::SUPPORTED_LOCALES as $locale) {
+            $buttons[] = [
+                'text' => $this->catalog->translate('language.option.'.$locale, $locale),
+                'callback_data' => 'locale:'.$locale,
+            ];
         }
 
         return ['inline_keyboard' => [$buttons]];
@@ -155,12 +161,8 @@ class TelegramLocale
 
     private function dateParts(Customer $customer, CarbonInterface $date, bool $withTime): string
     {
-        $months = match ($this->code($customer)) {
-            'en' => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            'ms' => [1 => 'Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'],
-            default => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
-        };
-        $formatted = $date->format('d').' '.$months[(int) $date->format('n')].' '.$date->format('Y');
+        $month = $this->translate($customer, 'date.month.'.(int) $date->format('n'));
+        $formatted = $date->format('d').' '.$month.' '.$date->format('Y');
 
         return $withTime ? $formatted.' '.$date->format('H:i') : $formatted;
     }
