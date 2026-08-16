@@ -56,7 +56,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         }
 
         if ($context->data === 'balance') {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Fitur saldo segera hadir.', 'Balance is coming soon.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.balance_soon'));
 
             return true;
         }
@@ -66,7 +66,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_unavailable'));
 
                 return true;
             }

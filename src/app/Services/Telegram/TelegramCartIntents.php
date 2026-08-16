@@ -21,7 +21,7 @@ class TelegramCartIntents
     public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity, bool $forceConfirmation = false, bool $sendConfirmation = true): bool
     {
         if ($quantity < 1) {
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Angkanya belum pas. Pilih jumlah sesuai stok yang tersedia.', 'That quantity is not available. Please choose a quantity within the available stock.'));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.quantity_invalid'));
 
             return false;
         }
@@ -35,7 +35,7 @@ class TelegramCartIntents
                 ->firstOrFail();
 
             if ($product->availableStock() < $quantity) {
-                $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.', 'This product could not be added to your cart because stock changed or is no longer available.'));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.stock_conflict'));
 
                 return false;
             }
@@ -55,15 +55,22 @@ class TelegramCartIntents
 
             $subtotal = $product->price_amount * $quantity;
             $message = $checkoutMaintenanceActive
-                ? $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nCheckout sedang maintenance. Cek status untuk melihat kapan Order baru bisa dibuat.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nCheckout is under maintenance. Check the status to see when new Orders can be created.")
-                    .$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote)
-                : $this->locale->text($customer, "🛒 Masuk keranjang\n📦 {$product->name}\n🔢 Jumlah: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nSudah cocok? Lanjutkan checkout di bawah.", "🛒 Added to cart\n📦 {$product->name}\n🔢 Quantity: {$quantity}\n💰 Subtotal: Rp".number_format($subtotal, 0, ',', '.')."\n\nLooks right? Continue to checkout below.");
+                ? $this->locale->translate($customer, 'cart.added_maintenance', [
+                    'product' => $product->name,
+                    'quantity' => $quantity,
+                    'subtotal' => number_format($subtotal, 0, ',', '.'),
+                ]).$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote)
+                : $this->locale->translate($customer, 'cart.added', [
+                    'product' => $product->name,
+                    'quantity' => $quantity,
+                    'subtotal' => number_format($subtotal, 0, ',', '.'),
+                ]);
             $this->bot->sendMessage($chatId, $message, [
                 'inline_keyboard' => [[
                     [
                         'text' => $checkoutMaintenanceActive
-                            ? $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status')
-                            : $this->locale->text($customer, '💳 Lanjut Checkout', '💳 Continue to Checkout'),
+                            ? $this->locale->translate($customer, 'cart.status_button')
+                            : $this->locale->translate($customer, 'cart.checkout_button'),
                         'callback_data' => $checkoutMaintenanceActive ? 'checkout-maintenance:status' : 'checkout',
                     ],
                 ]],
@@ -72,7 +79,7 @@ class TelegramCartIntents
             return true;
         } catch (Throwable) {
             $this->deleteFreshEmptyCart($cart);
-            $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Produk belum bisa masuk keranjang. Stoknya berubah atau sudah tidak tersedia.', 'This product could not be added to your cart because stock changed or is no longer available.'));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.stock_conflict'));
 
             return false;
         }

@@ -365,6 +365,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         ]);
 
         foreach ([['member', false], ['administrator', false], ['creator', false], ['restricted', true]] as $index => [$status, $isMember]) {
+            Customer::factory()->create(['telegram_id' => 9000 + $index, 'locale' => 'id']);
             $this->fakeGateHttp($status, $isMember);
 
             $this->postTelegramWebhook($this->messageUpdate(100 + $index, '/katalog', [], 9000 + $index))->assertOk();

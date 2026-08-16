@@ -38,12 +38,12 @@ class TelegramCatalogIntents
 
         $keyboard = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->values()->all();
         if ($hasUncategorized) {
-            $keyboard[] = [['text' => $this->locale->text($customer, '📂 Lainnya', '📂 Other'), 'callback_data' => 'category:uncategorized']];
+            $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.uncategorized'), 'callback_data' => 'category:uncategorized']];
         }
 
         $message = $keyboard === []
-            ? $this->locale->text($customer, "🛍️ Produk masih kosong nih\nBelum ada produk yang bisa ditampilkan sekarang.\n\nCek lagi nanti ya.", "🛍️ No products yet\nThere are no products to show right now.\n\nPlease check again later.")
-            : $this->locale->text($customer, "🛍️ Lihat Produk\n━━━━━━━━━━━━━━\nPilih kategori yang kamu mau.\n\n✨ Produk tersedia dan kosong tetap kelihatan jelas di sini.", "🛍️ Browse Products\n━━━━━━━━━━━━━━\nChoose a category.\n\n✨ Available and sold-out products are clearly shown here.");
+            ? $this->locale->translate($customer, 'catalog.empty')
+            : $this->locale->translate($customer, 'catalog.header');
         $maintenance = $this->maintenance->current();
         if ($maintenance->active) {
             $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
@@ -64,7 +64,7 @@ class TelegramCatalogIntents
         $keyboard = [];
         if ($checkoutMaintenanceActive) {
             $keyboard[] = [[
-                'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+                'text' => $this->locale->translate($customer, 'catalog.check_status'),
                 'callback_data' => 'checkout-maintenance:status',
             ]];
         } elseif ($availableStock > 0) {
@@ -83,36 +83,38 @@ class TelegramCatalogIntents
             }
         }
         $keyboard[] = [[
-            'text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'),
+            'text' => $this->locale->translate($customer, 'catalog.back_categories'),
             'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
         ]];
 
         $lines = [
             '🛍️ '.$product->name,
             '━━━━━━━━━━━━━━',
-            $this->locale->text($customer, '💰 Harga: Rp', '💰 Price: Rp').number_format($product->price_amount, 0, ',', '.'),
+            $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
         ];
         if ($binanceAvailable) {
             $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT';
         }
-        $lines[] = $availableStock > 0 ? $this->locale->text($customer, '✅ Status: Tersedia', '✅ Status: Available') : $this->locale->text($customer, '❌ Status: Stok kosong', '❌ Status: Sold out');
+        $lines[] = $availableStock > 0
+            ? $this->locale->translate($customer, 'catalog.status.available')
+            : $this->locale->translate($customer, 'catalog.status.sold_out');
         if ($availableStock > 0) {
-            $lines[] = $this->locale->text($customer, '📦 Stok: ', '📦 Stock: ').$availableStock;
+            $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
         }
-        $lines[] = $this->locale->text($customer, '🛒 Terjual: ', '🛒 Sold: ').$soldQuantity;
+        $lines[] = $this->locale->translate($customer, 'catalog.sold').$soldQuantity;
         $lines[] = '';
-        $lines[] = $this->locale->text($customer, '📝 Detail produk', '📝 Product details');
+        $lines[] = $this->locale->translate($customer, 'catalog.details');
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
         $lines[] = $checkoutMaintenanceActive
             ? $this->maintenanceNotice($customer, $maintenance)
             : ($availableStock > 0
-                ? $this->locale->text($customer, 'Pilih cara bayar di bawah.', 'Choose a payment method below.')
+                ? $this->locale->translate($customer, 'catalog.payment_method')
                     ."\n\n"
                     .$this->locale->qrisCrossBorderSupport($customer)
                     ."\n\n"
-                    .$this->locale->text($customer, 'Setelah pilih jumlah, checkout langsung dibuat.', 'After you choose the quantity, checkout is created immediately.')
-                : $this->locale->text($customer, 'Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.', 'This product is sold out. Check another product or wait for a restock.'));
+                    .$this->locale->translate($customer, 'catalog.after_quantity')
+                : $this->locale->translate($customer, 'catalog.sold_out_guidance'));
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -126,7 +128,7 @@ class TelegramCatalogIntents
         $keyboard = [];
         if ($checkoutMaintenanceActive) {
             $keyboard[] = [[
-                'text' => $this->locale->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+                'text' => $this->locale->translate($customer, 'catalog.check_status'),
                 'callback_data' => 'checkout-maintenance:status',
             ]];
         } else {
@@ -144,25 +146,25 @@ class TelegramCatalogIntents
                 ]];
             }
         }
-        $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Detail Produk', '⬅️ Product Details'), 'callback_data' => 'product:'.$product->id]];
+        $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.quantity.back_details'), 'callback_data' => 'product:'.$product->id]];
 
         $lines = [
-            $this->locale->text($customer, '🔢 Pilih jumlah', '🔢 Choose quantity'),
+            $this->locale->translate($customer, 'catalog.quantity.title'),
             '━━━━━━━━━━━━━━',
-            $this->locale->text($customer, '📦 Produk: ', '📦 Product: ').$product->name,
-            $this->locale->text($customer, '✅ Stok tersedia: ', '✅ Available stock: ').$availableStock,
+            $this->locale->translate($customer, 'catalog.quantity.product').$product->name,
+            $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock,
         ];
         if ($paymentMethod === 'binance') {
-            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt((int) $product->usdt_price_amount).' USDT'.$this->locale->text($customer, ' per item', ' / item');
+            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt((int) $product->usdt_price_amount).' USDT'.$this->locale->translate($customer, 'catalog.quantity.per_item');
         } elseif ($paymentMethod === 'qris') {
-            $lines[] = '💳 QRIS: Rp'.number_format($product->price_amount, 0, ',', '.').$this->locale->text($customer, ' per item', ' / item');
+            $lines[] = '💳 QRIS: Rp'.number_format($product->price_amount, 0, ',', '.').$this->locale->translate($customer, 'catalog.quantity.per_item');
         }
         $lines[] = '';
         $lines[] = $checkoutMaintenanceActive
             ? $this->maintenanceNotice($customer, $maintenance)
             : ($directCheckout
-                ? $this->locale->text($customer, 'Tekan jumlah yang kamu mau. Checkout langsung dibuat tanpa langkah tambahan.', 'Tap the quantity you want. Checkout will be created immediately with no extra step.')
-                : $this->locale->text($customer, 'Mau ambil berapa item?', 'How many items would you like?'));
+                ? $this->locale->translate($customer, 'catalog.quantity.direct_prompt')
+                : $this->locale->translate($customer, 'catalog.quantity.prompt'));
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
@@ -173,11 +175,11 @@ class TelegramCatalogIntents
         $category = null;
         if ($categoryId === 'uncategorized') {
             $query->whereNull('category_id');
-            $title = $this->locale->text($customer, 'Lainnya', 'Other');
+            $title = $this->locale->translate($customer, 'catalog.uncategorized');
         } else {
             $category = Category::whereKey((int) $categoryId)->where('is_active', true)->first();
             if (! $category) {
-                $this->bot->sendMessage($chatId, $this->locale->text($customer, 'Kategori ini sudah tidak tersedia. Coba pilih kategori lain.', 'This category is no longer available. Please choose another category.'), ['inline_keyboard' => [[['text' => $this->locale->text($customer, '⬅️ Balik ke Kategori', '⬅️ Back to Categories'), 'callback_data' => 'back:categories']]]]);
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'catalog.back_categories'), 'callback_data' => 'back:categories']]]]);
 
                 return;
             }
@@ -187,7 +189,7 @@ class TelegramCatalogIntents
 
         $products = $query->withAvailability()->limit(12)->get();
         $maintenance = $this->maintenance->current();
-        $lines = [$this->locale->text($customer, '🛍️ Daftar Produk', '🛍️ Product List'), '━━━━━━━━━━━━━━', $this->locale->text($customer, 'Kategori: ', 'Category: ').$title];
+        $lines = [$this->locale->translate($customer, 'catalog.category.title'), '━━━━━━━━━━━━━━', $this->locale->translate($customer, 'catalog.category.label').$title];
         if ($category?->description) {
             $lines[] = '';
             $lines[] = $category->description;
@@ -197,15 +199,15 @@ class TelegramCatalogIntents
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
         }
         $lines[] = '';
-        $lines[] = $this->locale->text($customer, 'Pilih produk untuk melihat detail.', 'Choose a product to view its details.');
+        $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
         $keyboard = $products->values()->map(fn ($product) => [$this->productButton($product)])->all();
         if ($this->hasMultipleCategoryOptions()) {
-            $keyboard[] = [['text' => $this->locale->text($customer, '⬅️ Pilih Kategori', '⬅️ Choose Category'), 'callback_data' => 'back:categories']];
+            $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.category.back'), 'callback_data' => 'back:categories']];
         }
 
         $message = $products->isEmpty()
-            ? $this->locale->text($customer, "📂 Belum ada produk di kategori ini\nCoba cek kategori lain dulu ya.", "📂 No products in this category\nPlease check another category.")
+            ? $this->locale->translate($customer, 'catalog.category.empty')
             : implode("\n", $lines);
         if ($maintenance->active && $products->isEmpty()) {
             $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
@@ -232,18 +234,18 @@ class TelegramCatalogIntents
 
         $maintenance = $this->maintenance->current();
         if ($products->isEmpty()) {
-            $message = $this->locale->text($customer, "Produk dengan kata kunci \"{$keyword}\" belum ketemu.\n\nCoba kata kunci lain, atau buka /produk untuk lihat semua produk.", "No products matched \"{$keyword}\".\n\nTry another keyword or open /products to browse all products.");
+            $message = $this->locale->translate($customer, 'search.no_results', ['keyword' => $keyword]);
             if ($maintenance->active) {
                 $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
             }
-            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => [[['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']]]]);
+            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']]]]);
 
             return;
         }
 
         $hasMore = $products->count() > $limit;
         $products = $products->take($limit)->values();
-        $lines = [$this->locale->text($customer, '🔎 Hasil pencarian: ', '🔎 Search results: ').$keyword, '━━━━━━━━━━━━━━', ''];
+        $lines = [$this->locale->translate($customer, 'search.title').$keyword, '━━━━━━━━━━━━━━', ''];
         if ($maintenance->active) {
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
             $lines[] = '';
@@ -255,22 +257,18 @@ class TelegramCatalogIntents
         }
         if ($hasMore) {
             $lines[] = '';
-            $lines[] = $this->locale->text($customer, 'Masih ada hasil lain. Coba pakai kata kunci yang lebih spesifik biar lebih cepat ketemu.', 'There are more results. Try a more specific keyword.');
+            $lines[] = $this->locale->translate($customer, 'search.more');
         }
 
         $keyboard = $products->map(fn ($product) => [$this->productButton($product)])->all();
-        $keyboard[] = [['text' => $this->locale->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']];
+        $keyboard[] = [['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
     private function maintenanceNotice(Customer $customer, CheckoutMaintenanceState $state): string
     {
-        return $this->locale->text(
-            $customer,
-            '⏸️ Checkout sedang maintenance. Produk dan stok tetap bisa dilihat; Order baru sementara ditahan.',
-            '⏸️ Checkout is under maintenance. Products and stock remain available; new Orders are temporarily paused.',
-        ).$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
+        return $this->locale->translate($customer, 'checkout.maintenance').$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
     }
 
     private function hasMultipleCategoryOptions(): bool
@@ -288,7 +286,7 @@ class TelegramCatalogIntents
     {
         $description = trim((string) $product->description);
 
-        return $description !== '' ? $description : $this->locale->text($customer, 'Deskripsi produk belum ditambahkan. Tapi tenang, produknya tetap bisa dicek dari info harga dan stok.', 'No product description has been added yet. You can still check the price and stock information.');
+        return $description !== '' ? $description : $this->locale->translate($customer, 'catalog.description_missing');
     }
 
     private function soldQuantity(Product $product): int

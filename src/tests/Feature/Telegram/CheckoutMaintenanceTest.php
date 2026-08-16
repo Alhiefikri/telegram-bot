@@ -18,6 +18,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_active_catalog_and_quantity_controls_replace_purchase_actions_without_blocking_cart_management(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'public_note' => 'Coba lagi setelah update selesai.',
@@ -61,6 +62,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_checkout_maintenance_status_returns_active_notice_then_reopened_navigation(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'public_note' => 'Admin sedang sinkronisasi payment provider.',
@@ -106,7 +108,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12347, 'username' => 'reopened-buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12347, 'username' => 'reopened-buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Reopened Telegram Product', 'stock' => 1, 'reserved_stock' => 0]);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
@@ -166,7 +168,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12346, 'username' => 'stale-buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12346, 'username' => 'stale-buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Telegram Stale Product', 'stock' => 2, 'reserved_stock' => 0]);
         $carts = app(CartService::class);
         $carts->addItem($carts->activeCartFor($customer), $product, 1);
@@ -189,6 +191,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_stale_direct_quantity_callback_returns_maintenance_notice_before_availability_validation(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Sold Out Stale Product', 'stock' => 0, 'reserved_stock' => 0]);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
@@ -214,7 +217,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Telegram Idempotent Product', 'stock' => 2, 'reserved_stock' => 0]);
         $carts = app(CartService::class);
         $carts->addItem($carts->activeCartFor($customer), $product, 1);
@@ -239,6 +242,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_stale_purchase_callbacks_return_maintenance_notice_before_stock_validation(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Sold Out Purchase', 'stock' => 0, 'reserved_stock' => 0]);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
@@ -263,6 +267,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_stale_checkout_choice_returns_maintenance_notice_without_an_active_cart(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'public_note' => 'Admin sedang sinkronisasi payment provider.',
@@ -284,6 +289,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
     public function test_sold_out_product_detail_keeps_maintenance_status_action_visible(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Sold Out Detail', 'stock' => 0, 'reserved_stock' => 0]);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
@@ -297,7 +303,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Sold Out Detail'))
             ->last()[0];
         $payload = json_encode($message->data(), JSON_THROW_ON_ERROR);
-        $this->assertStringContainsString('Checkout sedang maintenance', (string) $message['text']);
+        $this->assertStringContainsString('Checkout sedang dalam maintenance', (string) $message['text']);
         $this->assertStringContainsString('checkout-maintenance:status', $payload);
     }
 

@@ -146,7 +146,7 @@ class TelegramMessageRouter
             $command = str_starts_with($text, '/search') ? '/search' : '/cari';
             $keyword = trim(substr($text, strlen($command)));
             if ($keyword === '') {
-                $this->bot->sendMessage($chatId, $this->text($customer, "Mau cari produk apa?\n\nKetik seperti ini:\n/cari netflix\n\nBisa pakai nama produk, kategori, atau kata kunci lain.", "What product are you looking for?\n\nType it like this:\n/search netflix\n\nYou can use a product name, category, or other keyword."));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'search.prompt'));
 
                 return;
             }
@@ -167,7 +167,7 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $this->binanceVerify->cancelPrompt($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($chatId, $this->text($customer, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.", "🛒 Your active cart has been cancelled.\n\nOpen /products to browse again."));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.cancelled'));
 
             return;
         }
@@ -238,7 +238,7 @@ class TelegramMessageRouter
             }
 
             if (! ctype_digit($text)) {
-                $this->bot->sendMessage($chatId, $this->text($customer, 'Angkanya belum pas. Pilih jumlah sesuai stok yang tersedia.', 'That quantity is not available. Please choose a quantity within the available stock.'));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.quantity_invalid'));
             }
 
             return;

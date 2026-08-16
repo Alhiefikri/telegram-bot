@@ -107,13 +107,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 $product = Product::publicVisible()->whereKey($productId)->first();
                 if (! $product || $product->availableStock() < $quantity) {
                     $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk atau jumlah ini sudah tidak tersedia. Coba pilih produk lain.', 'This product or quantity is no longer available. Please choose another product.'));
+                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_or_quantity_unavailable'));
 
                     return;
                 }
                 if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
                     $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini. Pilih QRIS untuk melanjutkan.', 'Binance Pay is not available for this product. Choose QRIS to continue.'));
+                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
 
                     return;
                 }
@@ -168,7 +168,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $binanceButton = [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']];
         $buttons = [$qrisButton, $binanceButton];
         $this->bot->answerCallbackQuery($context->callbackQueryId);
-        $paymentMethodMessage = $this->text($context->customer, 'Pilih metode pembayaran di bawah.', 'Choose a payment method below.')
+        $paymentMethodMessage = $this->locale->translate($context->customer, 'checkout.payment_method')
             ."\n\n"
             .$this->locale->qrisCrossBorderSupport($context->customer);
         $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons]);
@@ -209,7 +209,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             if ($binance) {
                 $cart->load('cartItems.product');
                 if (! $this->checkoutIntents->binancePayEnabled() || ! $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
-                    $this->bot->sendMessage($context->chatId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk keranjang ini. Pilih QRIS untuk melanjutkan.', 'Binance Pay is not available for this cart. Choose QRIS to continue.'), [
+                    $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'cart.binance_unavailable_cart'), [
                         'inline_keyboard' => [[['text' => '💳 QRIS', 'callback_data' => 'checkout:current']]],
                     ]);
 
@@ -237,7 +237,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             return;
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang.", "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again."));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.invalid_cart'));
 
             return;
         }
@@ -278,20 +278,15 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function maintenanceMessage(Customer $customer, CheckoutMaintenanceState $state): string
     {
-        return $this->text(
-            $customer,
-            '⏸️ Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.'
-                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
-            '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed. Check status again in a little while.'
-                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
-        );
+        return $this->locale->translate($customer, 'checkout.maintenance')
+            .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
     }
 
     /** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
     private function maintenanceKeyboard(Customer $customer): array
     {
         return ['inline_keyboard' => [[[
-            'text' => $this->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+            'text' => $this->locale->translate($customer, 'checkout.status_button'),
             'callback_data' => 'checkout-maintenance:status',
         ]]]];
     }
@@ -345,12 +340,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             Cache::lock('telegram:checkout:'.$checkoutKey, 45)
                 ->block(5, fn () => $callback());
         } catch (LockTimeoutException) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Checkout sedang diproses. Tunggu sebentar.', 'Checkout is being processed. Please wait a moment.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'checkout.processing'));
         }
     }
 
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
-    }
 }

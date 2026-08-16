@@ -38,6 +38,8 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     public function test_two_buyers_competing_for_last_stock_can_cart_but_only_one_checkout_reserves_stock(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 390001, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 390002, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 1, secrets: ['last-secret']);
 
         $this->postTelegramWebhook($this->callbackUpdate(39001, 'buyer-a-qty', 'qty:'.$product->id.':1', ['id' => 390001, 'username' => 'buyer_a'], 390001))->assertOk();
@@ -59,6 +61,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     public function test_duplicate_quantity_callback_sets_quantity_once_and_does_not_repeat_payment_choices(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 390003, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 2, secrets: ['secret-a', 'secret-b']);
 
         $this->postTelegramWebhook($this->callbackUpdate(39003, 'same-buyer-qty-a', 'qty:'.$product->id.':1', ['id' => 390003, 'username' => 'buyer_dup'], 390003))->assertOk();
@@ -73,6 +76,8 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     public function test_competing_quantity_callbacks_may_exceed_stock_but_checkout_does_not_oversell(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 391001, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 391002, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 2, secrets: ['secret-1', 'secret-2']);
 
         $this->postTelegramWebhook($this->callbackUpdate(39101, 'buyer-a-qty-two', 'qty:'.$product->id.':2', ['id' => 391001, 'username' => 'buyer_a'], 391001))->assertOk();

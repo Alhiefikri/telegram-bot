@@ -12,6 +12,7 @@ use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -74,6 +75,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_product_detail_buy_button_shows_quantity_choices_and_quantity_adds_cart_item(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Kopi', 'description' => 'Kopi premium siap kirim.', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
         foreach (range(1, 5) as $index) {
             ProductStockItem::create(['product_id' => $product->id, 'secret' => "kopi-{$index}@example.test | password: Secret-222"]);
@@ -122,6 +124,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
@@ -363,6 +366,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $settings = ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => false,
@@ -407,6 +411,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_quantity_selection_ignores_abandoned_active_carts_and_checkout_revalidates_stock(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 880002, 'locale' => 'id']);
         $product = Product::factory()->create([
             'name' => 'CHATGPT PLUS PRIVATE',
             'description' => 'Akun private siap pakai.',
@@ -440,6 +445,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_reselecting_same_quantity_after_product_navigation_resends_checkout_prompt(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $productA = Product::factory()->create(['name' => 'Kopi A', 'price_amount' => 25000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
         $productB = Product::factory()->create(['name' => 'Kopi B', 'price_amount' => 30000, 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
 
@@ -465,6 +471,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_stale_quantity_buttons_keep_their_product_id_after_switching_products(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $productA = Product::factory()->create(['name' => 'Stale A', 'price_amount' => 12000, 'stock' => 4, 'reserved_stock' => 0, 'is_active' => true]);
         $productB = Product::factory()->create(['name' => 'Fresh B', 'price_amount' => 18000, 'stock' => 4, 'reserved_stock' => 0, 'is_active' => true]);
 
@@ -504,6 +511,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_manual_non_numeric_quantity_keeps_selected_product_for_retry(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Kopi', 'stock' => 5, 'is_active' => true]);
 
         $this->postTelegramWebhook($this->callbackUpdate(9001, 'cb-product', 'buy:'.$product->id))->assertOk();
@@ -522,6 +530,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_unavailable_product_and_buy_callbacks_do_not_mutate_cart_or_show_payment(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $inactive = Product::factory()->create(['is_active' => false, 'stock' => 5, 'reserved_stock' => 0]);
         $available = Product::factory()->create(['name' => 'Ready', 'stock' => 5, 'reserved_stock' => 0, 'is_active' => true]);
         $outOfStock = Product::factory()->create(['name' => 'Kosong', 'description' => 'Masih bisa dibaca.', 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
@@ -621,7 +630,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Berubah', 'stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
@@ -659,7 +668,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_batal_abandons_active_cart_clears_selected_product_and_is_repeatable(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Kopi', 'stock' => 5, 'reserved_stock' => 0]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -1204,6 +1213,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'description' => 'Bad Request: query is too old and response timeout expired or query ID is invalid',
             ], 400),
         ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Callback Safe', 'stock' => 2, 'reserved_stock' => 0, 'is_active' => true]);
 
         $this->postTelegramWebhook($this->callbackUpdate(9401, 'expired-callback', 'buy:'.$product->id))->assertOk();
@@ -1212,6 +1222,110 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Pilih jumlah')
             && str_contains($r['text'], 'Callback Safe')
             && str_contains(json_encode($r->data()), 'qty:'.$product->id.':1'));
+    }
+
+    public function test_cart_copy_follow_each_locale_for_quantity_validation_confirmation_cancellation_and_maintenance(): void
+    {
+        $this->fakeTelegramHttp();
+        $locales = [
+            'id' => [
+                'chat_id' => 45201,
+                'quantity' => 'Pilih jumlah',
+                'invalid' => 'Angkanya belum pas',
+                'added' => 'Masuk keranjang',
+                'checkout' => 'Lanjut Checkout',
+                'cancelled' => 'Keranjang aktif sudah dibatalkan',
+                'maintenance' => 'Checkout sedang maintenance',
+                'maintenance_button' => 'Cek Status Checkout',
+            ],
+            'en' => [
+                'chat_id' => 45202,
+                'quantity' => 'Choose quantity',
+                'invalid' => 'That quantity is not available',
+                'added' => 'Added to cart',
+                'checkout' => 'Continue to Checkout',
+                'cancelled' => 'Your active cart has been cancelled',
+                'maintenance' => 'Checkout is under maintenance',
+                'maintenance_button' => 'Check Checkout Status',
+            ],
+            'ms' => [
+                'chat_id' => 45203,
+                'quantity' => 'Pilih kuantiti',
+                'invalid' => 'Kuantiti itu tidak tersedia',
+                'added' => 'Ditambahkan ke troli',
+                'checkout' => 'Teruskan Checkout',
+                'cancelled' => 'Troli aktif telah dibatalkan',
+                'maintenance' => 'Checkout sedang diselenggara',
+                'maintenance_button' => 'Semak Status Checkout',
+            ],
+        ];
+
+        foreach ($locales as $index => $locale) {
+            Customer::factory()->create(['telegram_id' => $locale['chat_id'], 'locale' => $index]);
+            $product = Product::factory()->create([
+                'name' => 'Cart Locale '.$index,
+                'price_amount' => 25000,
+                'stock' => 5,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+            $from = ['id' => $locale['chat_id'], 'first_name' => 'Cart Tester'];
+
+            $this->postTelegramWebhook($this->callbackUpdate(45210 + $locale['chat_id'], 'buy-'.$index, 'buy:'.$product->id, $from, $locale['chat_id']))->assertOk();
+            $this->postTelegramWebhook($this->messageUpdate(45220 + $locale['chat_id'], 'not-a-number', $from, $locale['chat_id']))->assertOk();
+            $this->postTelegramWebhook($this->callbackUpdate(45230 + $locale['chat_id'], 'qty-'.$index, 'qty:'.$product->id.':2', $from, $locale['chat_id']))->assertOk();
+            $this->postTelegramWebhook($this->messageUpdate(45240 + $locale['chat_id'], '/batal', $from, $locale['chat_id']))->assertOk();
+
+            CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+                'is_active' => true,
+                'public_note' => 'KEEP admin note',
+                'version' => 1,
+                'activated_at' => now(),
+            ]);
+            $maintenanceProduct = Product::factory()->create([
+                'name' => 'Maintenance Cart '.$index,
+                'price_amount' => 15000,
+                'stock' => 1,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+
+            $this->postTelegramWebhook($this->callbackUpdate(45250 + $locale['chat_id'], 'maintenance-buy-'.$index, 'buy:'.$maintenanceProduct->id, $from, $locale['chat_id']))->assertOk();
+            $this->postTelegramWebhook($this->callbackUpdate(45260 + $locale['chat_id'], 'maintenance-qty-'.$index, 'qty:'.$maintenanceProduct->id.':1', $from, $locale['chat_id']))->assertOk();
+            CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+                'is_active' => false,
+                'public_note' => null,
+                'version' => 2,
+                'activated_at' => null,
+            ]);
+
+            $payloads = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === (string) $locale['chat_id'])
+                ->map(fn (array $record): array => $record[0]->data());
+            $copy = $payloads->map(fn (array $payload): string => (string) ($payload['text'] ?? '')."\n".json_encode($payload['reply_markup'] ?? []))->implode("\n");
+
+            foreach (['quantity', 'invalid', 'added', 'checkout', 'cancelled', 'maintenance', 'maintenance_button'] as $key) {
+                $this->assertStringContainsString($locale[$key], $copy);
+            }
+            $this->assertStringContainsString('Cart Locale '.$index, $copy);
+            $this->assertStringContainsString('Maintenance Cart '.$index, $copy);
+            $this->assertStringContainsString('Rp50.000', $copy);
+            $this->assertStringContainsString('Rp15.000', $copy);
+            $this->assertStringContainsString('KEEP admin note', $copy);
+
+            if ($index === 'en') {
+                $this->assertStringNotContainsString('Masuk keranjang', $copy);
+                $this->assertStringNotContainsString('Keranjang aktif sudah dibatalkan', $copy);
+                $this->assertStringNotContainsString('Cek Status Checkout', $copy);
+            }
+
+            if ($index === 'ms') {
+                $this->assertStringNotContainsString('Masuk keranjang', $copy);
+                $this->assertStringNotContainsString('Keranjang aktif sudah dibatalkan', $copy);
+                $this->assertStringNotContainsString('Added to cart', $copy);
+                $this->assertStringNotContainsString('Checkout is under maintenance', $copy);
+            }
+        }
     }
 
     private function cartConfirmationMessagesFor(string $productName, int $quantity)

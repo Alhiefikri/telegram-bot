@@ -53,7 +53,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forget($context->customer);
             $context->customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "🛒 Keranjang aktif sudah dibatalkan.\n\nKalau mau pilih produk lagi, buka /produk ya.", "🛒 Your active cart has been cancelled.\n\nOpen /products to browse again."));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'cart.cancelled'));
 
             return true;
         }
@@ -78,13 +78,13 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             }
             if (! $product || $availableStock < 1) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_unavailable'));
 
                 return true;
             }
             if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Binance Pay sedang tidak tersedia untuk produk ini. Pilih QRIS untuk melanjutkan.', 'Binance Pay is not available for this product. Choose QRIS to continue.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
 
                 return true;
             }
@@ -115,7 +115,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             }
             if (! $product || $availableStock < 1) {
                 $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Produk ini belum bisa dibeli sekarang. Coba pilih produk lain.', 'This product cannot be purchased right now. Please choose another product.'));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_unavailable'));
 
                 return true;
             }
@@ -152,26 +152,17 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 
     private function maintenanceMessage(Customer $customer, CheckoutMaintenanceState $state): string
     {
-        return $this->text(
-            $customer,
-            '⏸️ Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.'
-                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
-            '⏸️ Checkout is under maintenance. You can still browse products, view stock, and manage your cart, but new Orders cannot be created right now. Existing Orders continue to be processed. Check status again in a little while.'
-                .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote),
-        );
+        return $this->locale->translate($customer, 'checkout.maintenance')
+            .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
     }
 
     /** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
     private function maintenanceKeyboard(Customer $customer): array
     {
         return ['inline_keyboard' => [[[
-            'text' => $this->text($customer, '🔄 Cek Status Checkout', '🔄 Check Checkout Status'),
+            'text' => $this->locale->translate($customer, 'checkout.status_button'),
             'callback_data' => 'checkout-maintenance:status',
         ]]]];
     }
 
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
-    }
 }
