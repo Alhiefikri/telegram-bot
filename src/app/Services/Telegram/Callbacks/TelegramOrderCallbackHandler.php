@@ -82,30 +82,30 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
             ->first();
 
         if (! $order) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pesanan sudah tidak bisa dibatalkan.', 'This order can no longer be cancelled.'));
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pesanan tidak ditemukan atau sudah tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.", "Order not found or can no longer be cancelled.\n\nCheck the latest status with /status."));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.unavailable'));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.not_found'));
 
             return;
         }
 
         $outcome = $this->cancellation->cancel($order);
         if ($outcome === CustomerCancellationOutcome::VerificationUnavailable) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Status pembayaran belum dapat diverifikasi.', 'Payment status cannot be verified yet.'));
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, 'Status pembayaran belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.', 'Payment status cannot be verified yet. Your order was not cancelled; please try again shortly.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.verification_unavailable'));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.verification_unavailable_detail'));
 
             return;
         }
 
         if ($outcome === CustomerCancellationOutcome::Paid) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pembayaran sudah diterima.', 'Payment has already been received.'));
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pembayaran sudah diterima, jadi pesanan tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.", "Payment has already been received, so this order cannot be cancelled.\n\nCheck the latest status with /status."));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.paid'));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.paid_detail'));
 
             return;
         }
 
         if ($outcome !== CustomerCancellationOutcome::Cancelled) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Pesanan sudah tidak bisa dibatalkan.', 'This order can no longer be cancelled.'));
-            $this->bot->sendMessage($context->chatId, $this->text($context->customer, "Pesanan sudah diproses atau tidak bisa dibatalkan lagi.\n\nCek status terbaru lewat /status.", "This order has been processed or can no longer be cancelled.\n\nCheck the latest status with /status."));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.processed'));
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.processed_detail'));
 
             return;
         }
@@ -120,8 +120,10 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
             }
         }
 
-        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->text($context->customer, 'Order dibatalkan dan stok sudah dilepas.', 'Order cancelled and stock released.'));
-        $this->bot->sendMessage($context->chatId, $this->text($context->customer, "❌ Pesanan dibatalkan\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.\n\nKalau mau pesan lagi, buka /produk ya.", "❌ Order cancelled\nInvoice {$cancelled->invoice_number} was cancelled and the stock was released.\n\nOpen /products if you would like to order again."));
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.success'));
+        $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.success_detail', [
+            'invoice' => $cancelled->invoice_number,
+        ]));
     }
 
     private function text(Customer $customer, string $id, string $en): string

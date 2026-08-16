@@ -29,39 +29,26 @@ class TelegramManualPaymentIntents
         $order = $this->manualPaymentOrderForCustomer($customer, $invoice)
             ?? $this->expiredBinancePaymentOrderForCustomer($customer, $invoice);
         if (! $order) {
-            $this->bot->sendMessage($chatId, $invoice === ''
-                ? $this->locale->text(
-                    $customer,
-                    "Belum ada pesanan manual yang menunggu pembayaran.\n\nCheckout dulu lewat /produk, lalu kirim screenshot bukti transfer sebagai FOTO dengan caption:\n\n/payment",
-                    "No manual order is awaiting payment.\n\nCheck out first using /products, then send a payment screenshot as a PHOTO with this caption:\n\n/payment",
-                )
-                : $this->locale->text(
-                    $customer,
-                    "Invoice tidak ditemukan atau bukan pesanan manual milik kamu.\n\nCoba cek lagi di /status atau /riwayat.",
-                    "The invoice was not found or is not your manual order.\n\nCheck again using /status or /history.",
-                ));
+            $this->bot->sendMessage(
+                $chatId,
+                $this->locale->translate($customer, $invoice === '' ? 'payment.proof.no_pending' : 'payment.proof.invoice_not_found'),
+            );
 
             return;
         }
 
         $photoFileId = $this->largestPhotoFileId($message) ?? $this->pendingProofPhotoFileId($customer, $order);
         if (! $photoFileId) {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                "Bukti pembayaran harus dikirim sebagai FOTO.\n\nPilih salah satu cara:\n1. Upload screenshot dan isi caption dengan /payment\n2. Jika screenshot sudah terkirim, balas foto itu dengan /payment\n\nKalau punya beberapa order, pakai:\n/payment {$order->invoice_number}",
-                "Payment proof must be sent as a PHOTO.\n\nUse either method:\n1. Upload the screenshot with /payment as its caption\n2. If the screenshot was already sent, reply to that photo with /payment\n\nIf you have multiple orders, use:\n/payment {$order->invoice_number}",
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.photo_required', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return;
         }
 
         $adminTelegramChatId = $this->adminTelegramChatId();
         if (! $adminTelegramChatId) {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                "📸 Bukti pembayaran sudah diterima.\n\nVerifikasi otomatis belum bisa diteruskan sekarang. Silakan hubungi admin langsung untuk konfirmasi manual.",
-                "📸 Payment proof received.\n\nAutomatic verification could not be forwarded right now. Please contact the admin directly for manual confirmation.",
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.admin_unavailable'));
 
             return;
         }
@@ -121,42 +108,28 @@ class TelegramManualPaymentIntents
             ];
         });
         if ($claim === null) {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                '📸 Bukti pembayaran sudah diterima dan sedang menunggu verifikasi admin, atau order sudah tidak menunggu pembayaran.',
-                '📸 Payment proof has already been received and is awaiting admin verification, or this order is no longer awaiting payment.',
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.duplicate'));
 
             return;
         }
         $this->forgetPendingProofPhoto($customer);
 
         if ($claim['status'] === 'order_id_required') {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                'Pembayaran Binance ini memakai verifikasi Order ID. Klik tombol “Saya Sudah Bayar” pada instruksi checkout lalu kirim Binance Order ID. Screenshot hanya dipakai sebagai fallback setelah order expired.',
-                'This Binance payment requires Order ID verification. Tap “I\'ve Paid” in the checkout instructions and send the Binance Order ID. A screenshot is only used as a fallback after the order expires.',
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.binance_order_id_required'));
 
             return;
         }
 
         if ($claim['status'] === 'automatic_verification_required') {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                'Pembayaran Binance ini memakai nominal unik dan sedang diverifikasi otomatis. Pastikan nominal yang dikirim sama persis dengan instruksi checkout. Screenshot tidak diperlukan selama order masih aktif; sistem akan mengirim produk jika transfer cocok.',
-                'This Binance payment uses a unique amount and is being verified automatically. Make sure the amount you send exactly matches the checkout instructions. A screenshot is not needed while the order is active; the product will be sent when the transfer matches.',
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.binance_amount_unique'));
 
             return;
         }
 
         if ($claim['status'] === 'expired') {
-            $this->bot->sendMessage($chatId, $this->locale->text(
-                $customer,
-                'Batas pembayaran sudah lewat. Tunggu order diproses sebagai expired, lalu kirim screenshot dengan caption /payment '.$order->invoice_number.' untuk review admin.',
-                'The payment deadline has passed. Wait for the order to expire, then send a screenshot with the caption /payment '.$order->invoice_number.' for admin review.',
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.deadline_passed', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return;
         }
@@ -171,32 +144,16 @@ class TelegramManualPaymentIntents
         }
 
         if ($claim['late']) {
-            $this->bot->sendMessage($chatId, $forwarded
-                ? $this->locale->text(
-                    $customer,
-                    "📸 Bukti pembayaran terlambat sudah diterima\n━━━━━━━━━━━━━━\nBukti sudah dikirim ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
-                    "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof was sent to the admin for manual review. The order has expired and stock was not reserved again.",
-                )
-                : $this->locale->text(
-                    $customer,
-                    "📸 Bukti pembayaran terlambat sudah masuk\n━━━━━━━━━━━━━━\nBukti akan diteruskan ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
-                    "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof will be forwarded to the admin for manual review. The order has expired and stock was not reserved again.",
-                ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, $forwarded
+                ? 'payment.proof.late_forwarded'
+                : 'payment.proof.late_forwarding'));
 
             return;
         }
 
-        $this->bot->sendMessage($chatId, $forwarded
-            ? $this->locale->text(
-                $customer,
-                "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
-                "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
-            )
-            : $this->locale->text(
-                $customer,
-                "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBukti sedang diteruskan ke admin untuk diverifikasi. Kamu tidak perlu kirim ulang.\n\nKalau pembayaran sesuai, produk akan dikirim otomatis.",
-                "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt is being forwarded to the admin for verification. You do not need to send it again.\n\nIf the payment matches, the product will be sent automatically.",
-            ));
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, $forwarded
+            ? 'payment.proof.forwarded'
+            : 'payment.proof.forwarding'));
     }
 
     public function forwardSubmittedManualPaymentProof(Order $order, $payment): bool
@@ -489,52 +446,19 @@ class TelegramManualPaymentIntents
         }
         $support = $this->buyerSupport();
 
-        $lines = $this->locale->code($customer) === 'en' ? [
-            '❌ Payment could not be accepted',
-            '━━━━━━━━━━━━━━',
-            '🧾 Invoice: '.$order->invoice_number,
-            '📌 Status: Rejected by admin',
-            '',
-            'Possible reasons:',
-            '• The payment amount did not match exactly',
-            '• The destination QR name was not LHIE STORE',
-            '• The payment proof was unclear',
-            '• The payment had not arrived when it was checked',
-            '',
-            'This order has been cancelled, so the stock is no longer reserved.',
-            '',
-            $this->paymentRejectedContactLine('en', $support['username']),
-        ] : [
-            '❌ Pembayaran belum bisa diterima',
-            '━━━━━━━━━━━━━━',
-            '🧾 Invoice: '.$order->invoice_number,
-            '📌 Status: Ditolak admin',
-            '',
-            'Kemungkinan penyebab:',
-            '• Nominal pembayaran belum sama persis',
-            '• Nama QR tujuan bukan LHIE STORE',
-            '• Bukti pembayaran kurang jelas',
-            '• Pembayaran belum masuk saat dicek',
-            '',
-            'Pesanan ini sudah dibatalkan, jadi stok tidak tertahan.',
-            '',
-            $this->paymentRejectedContactLine('id', $support['username']),
-        ];
+        $message = $this->locale->translate($customer, 'payment.manual.rejected', [
+            'invoice' => $order->invoice_number,
+            'contact' => $this->paymentRejectedContactLine($customer, $support['username']),
+        ]);
 
-        $this->bot->sendMessage($customer->telegram_id, implode("\n", $lines), $this->buyerSupportReplyMarkup($customer, $support['url']));
+        $this->bot->sendMessage($customer->telegram_id, $message, $this->buyerSupportReplyMarkup($customer, $support['url']));
     }
 
-    private function paymentRejectedContactLine(string $locale, string $username): string
+    private function paymentRejectedContactLine(Customer $customer, string $username): string
     {
-        if ($username !== '') {
-            return $locale === 'en'
-                ? 'If you believe the transfer was correct, resend a clearer payment proof or contact @'.$username.' for a manual check.'
-                : 'Kalau kamu merasa sudah transfer dengan benar, kirim ulang bukti yang lebih jelas atau hubungi @'.$username.' agar bisa dicek manual.';
-        }
-
-        return $locale === 'en'
-            ? 'If you believe the transfer was correct, resend a clearer payment proof or contact the admin for a manual check.'
-            : 'Kalau kamu merasa sudah transfer dengan benar, kirim ulang bukti yang lebih jelas atau hubungi admin agar bisa dicek manual.';
+        return $this->locale->translate($customer, 'payment.manual.rejected_contact', [
+            'contact' => $username !== '' ? '@'.$username : 'admin',
+        ]);
     }
 
     /**
@@ -552,7 +476,7 @@ class TelegramManualPaymentIntents
         }
 
         return ['inline_keyboard' => [[[
-            'text' => $this->locale->text($customer, 'Hubungi Admin', 'Chat with Admin'),
+            'text' => $this->locale->translate($customer, 'payment.action.contact_admin'),
             'url' => $url,
         ]]]];
     }

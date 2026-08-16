@@ -956,7 +956,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Invalid Flow Product', 'stock' => 5]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
@@ -1090,7 +1090,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'transaction' => ['status' => 'cancelled'],
             ]),
         ]);
-        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $buyer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
         $otherBuyer = Customer::factory()->create(['telegram_id' => 67890, 'username' => 'other_buyer']);
         $product = Product::factory()->create(['name' => 'Cancelable Native QRIS', 'price_amount' => 15000, 'stock' => 1, 'reserved_stock' => 0]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'cancelable@example.test|pass']);

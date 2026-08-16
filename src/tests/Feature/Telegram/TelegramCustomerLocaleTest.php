@@ -282,25 +282,35 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         ]);
         $indonesian = Customer::factory()->create(['telegram_id' => 41061, 'locale' => 'id']);
         $english = Customer::factory()->create(['telegram_id' => 41062, 'locale' => 'en']);
+        $malay = Customer::factory()->create(['telegram_id' => 41063, 'locale' => 'ms']);
         $indonesianProduct = Product::factory()->create(['name' => 'ID Locale Product', 'usdt_price_amount' => 2_500_000]);
         $englishProduct = Product::factory()->create(['name' => 'EN Locale Product', 'usdt_price_amount' => 3_000_000]);
+        $malayProduct = Product::factory()->create(['name' => 'MS Locale Product', 'usdt_price_amount' => 3_500_000]);
         $carts = app(CartService::class);
         $carts->addItem($carts->activeCartFor($indonesian), $indonesianProduct, 1);
         $carts->addItem($carts->activeCartFor($english), $englishProduct, 1);
+        $carts->addItem($carts->activeCartFor($malay), $malayProduct, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(41061, 'binance-id', 'checkout:binance', ['id' => 41061], 41061))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(41062, 'binance-en', 'checkout:binance', ['id' => 41062], 41062))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41063, 'binance-ms', 'checkout:binance', ['id' => 41063], 41063))->assertOk();
 
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41061),
-            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran sebagai foto dengan caption /payment'],
-            ['💎 Binance Pay checkout', '💎 CHECKOUT USDT', '1️⃣', 'Send the payment screenshot'],
+            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran sebagai foto dengan caption /payment', 'Batalkan Order'],
+            ['💎 Binance Pay checkout', '💎 CHECKOUT USDT', '1️⃣', 'Send the payment screenshot', 'Cancel Order'],
         );
         $this->assertLocalizedCopy(
             $this->customerPhotoPayload(41062),
-            ['💎 Binance Pay checkout', 'BINANCE PAY ID', 'Scan the QR code or enter the Pay ID', 'Send the payment screenshot as a photo with the caption /payment'],
-            ['💎 Checkout Binance Pay', '💎 USDT CHECKOUT', '1️⃣', 'Kirim screenshot pembayaran'],
+            ['💎 Binance Pay checkout', 'BINANCE PAY ID', 'Scan the QR code or enter the Pay ID', 'Send the payment screenshot as a photo with the caption /payment', 'Cancel Order'],
+            ['💎 Checkout Binance Pay', '💎 USDT CHECKOUT', '1️⃣', 'Kirim screenshot pembayaran', 'Batalkan Order'],
         );
+        $this->assertLocalizedCopy(
+            $this->customerPhotoPayload(41063),
+            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Imbas kod QR atau masukkan ID Pay', 'Hantar tangkapan skrin pembayaran sebagai foto dengan kapsyen /payment', 'Batalkan Pesanan'],
+            ['💎 Binance Pay checkout', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran', 'Cancel Order'],
+        );
+
     }
 
     public function test_payment_options_prioritize_qris_and_explain_cross_border_support(): void
@@ -315,28 +325,37 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         ]);
         $indonesian = Customer::factory()->create(['telegram_id' => 41071, 'locale' => 'id']);
         $english = Customer::factory()->create(['telegram_id' => 41072, 'locale' => 'en']);
+        $malay = Customer::factory()->create(['telegram_id' => 41073, 'locale' => 'ms']);
         $product = Product::factory()->create([
             'price_amount' => 50000,
             'usdt_price_amount' => 3_000_000,
-            'stock' => 2,
+            'stock' => 3,
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
 
         $this->postTelegramWebhook($this->callbackUpdate(41071, 'payment-options-id', 'product:'.$product->id, ['id' => 41071], 41071))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(41072, 'payment-options-en', 'product:'.$product->id, ['id' => 41072], 41072))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41073, 'payment-options-ms', 'product:'.$product->id, ['id' => 41073], 41073))->assertOk();
 
         $idPayload = $this->customerPayload('/sendMessage', 41071);
         $enPayload = $this->customerPayload('/sendMessage', 41072);
+        $msPayload = $this->customerPayload('/sendMessage', 41073);
         $idButtons = collect($idPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
         $enButtons = collect($enPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+        $msButtons = collect($msPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+        $this->assertSame('💳 QRIS · Rp50.000', $msPayload['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('💎 Binance Pay · 3 USDT', $msPayload['reply_markup']['inline_keyboard'][1][0]['text']);
 
         $this->assertSame('buy:qris:'.$product->id, $idButtons[0]);
         $this->assertSame('buy:binance:'.$product->id, $idButtons[1]);
         $this->assertSame('buy:qris:'.$product->id, $enButtons[0]);
         $this->assertSame('buy:binance:'.$product->id, $enButtons[1]);
+        $this->assertSame('buy:qris:'.$product->id, $msButtons[0]);
+        $this->assertSame('buy:binance:'.$product->id, $msButtons[1]);
         $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara saat ini mendukung koneksi dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
         $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border currently supports connections with:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability still depends on the payment app/provider'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
+        $this->assertLocalizedCopy($msPayload, ['QRIS Rentas Sempadan kini menyokong sambungan dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'QRIS Cross-Border currently supports connections with:']);
     }
 
     public function test_checkout_method_prompt_explains_qris_cross_border_support_in_customer_locale(): void
@@ -351,29 +370,36 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         ]);
         $indonesian = Customer::factory()->create(['telegram_id' => 41081, 'locale' => 'id']);
         $english = Customer::factory()->create(['telegram_id' => 41082, 'locale' => 'en']);
+        $malay = Customer::factory()->create(['telegram_id' => 41083, 'locale' => 'ms']);
         $product = Product::factory()->create([
             'price_amount' => 50000,
             'usdt_price_amount' => 3_000_000,
-            'stock' => 2,
+            'stock' => 3,
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
         $carts = app(CartService::class);
         $carts->addItem($carts->activeCartFor($indonesian), $product, 1);
         $carts->addItem($carts->activeCartFor($english), $product, 1);
+        $carts->addItem($carts->activeCartFor($malay), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(41081, 'qris-choice-id', 'checkout', ['id' => 41081], 41081))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(41082, 'qris-choice-en', 'checkout', ['id' => 41082], 41082))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41083, 'qris-choice-ms', 'checkout', ['id' => 41083], 41083))->assertOk();
 
         $idCheckoutPayload = $this->customerPayload('/sendMessage', 41081);
         $enCheckoutPayload = $this->customerPayload('/sendMessage', 41082);
+        $msCheckoutPayload = $this->customerPayload('/sendMessage', 41083);
         $idCheckoutButtons = collect($idCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
         $enCheckoutButtons = collect($enCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
+        $msCheckoutButtons = collect($msCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
 
         $this->assertSame('checkout:current', $idCheckoutButtons[0]);
         $this->assertSame('checkout:binance', $idCheckoutButtons[1]);
         $this->assertSame('checkout:current', $enCheckoutButtons[0]);
         $this->assertSame('checkout:binance', $enCheckoutButtons[1]);
+        $this->assertSame('checkout:current', $msCheckoutButtons[0]);
+        $this->assertSame('checkout:binance', $msCheckoutButtons[1]);
         $this->assertLocalizedCopy(
             $idCheckoutPayload,
             ['Pilih metode pembayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok'],
@@ -384,12 +410,16 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
             ['Choose a payment method below.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China'],
             ['Pilih metode pembayaran di bawah.', '🇸🇬 Singapura'],
         );
+        $this->assertLocalizedCopy(
+            $msCheckoutPayload,
+            ['Pilih kaedah bayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China'],
+            ['Pilih metode pembayaran di bawah.', 'Choose a payment method below.'],
+        );
     }
 
     public function test_router_error_and_empty_order_copy_follow_customer_voice(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 41091, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41092, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41093, 'locale' => 'id']);
 
@@ -418,7 +448,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
     {
         $copy = $this->visibleCopy($payload);
         foreach ($expected as $fragment) {
-            $this->assertStringContainsString($fragment, $copy);
+            $this->assertStringContainsString($fragment, $copy, "Missing localized fragment: {$fragment}");
         }
         foreach ($oppositeLocale as $fragment) {
             $this->assertStringNotContainsString($fragment, $copy);

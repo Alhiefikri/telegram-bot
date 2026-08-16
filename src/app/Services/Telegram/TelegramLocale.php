@@ -49,14 +49,7 @@ class TelegramLocale
      */
     public function translate(?Customer $customer, string $key, array $replace = []): string
     {
-        $translation = $this->catalog->get($key, $this->code($customer));
-
-        $replacements = [];
-        foreach ($replace as $name => $value) {
-            $replacements[':'.$name] = (string) $value;
-        }
-
-        return strtr($translation, $replacements);
+        return $this->catalog->translate($key, $this->code($customer), $replace);
     }
 
     /**
@@ -117,8 +110,8 @@ class TelegramLocale
         return match (strtolower($label)) {
             'qris', 'hosted' => 'QRIS',
             'binance_pay_id', 'binance pay' => 'Binance Pay',
-            'bank_transfer', 'bank transfer' => $this->text($customer, 'Transfer bank', 'Bank transfer'),
-            default => $label !== '' ? $label : $this->text($customer, 'Tidak diketahui', 'Unknown'),
+            'bank_transfer', 'bank transfer' => $this->translate($customer, 'payment.method.bank_transfer'),
+            default => $label !== '' ? $label : $this->translate($customer, 'payment.method.unknown'),
         };
     }
 

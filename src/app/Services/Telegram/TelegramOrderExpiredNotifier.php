@@ -50,34 +50,41 @@ class TelegramOrderExpiredNotifier
 
         if ($binancePayment !== null) {
             $lines = [
-                $this->locale->text($order->customer, '⏳ Verifikasi Binance belum selesai', '⏳ Binance verification did not finish'),
+                $this->locale->translate($order->customer, 'payment.expired.binance_title'),
                 '━━━━━━━━━━━━━━',
-                '🧾 Invoice: '.$order->invoice_number,
-                $this->locale->text($order->customer, '💵 Order ID sudah diterima, tetapi transaksi belum bisa dikonfirmasi otomatis.', '💵 Your Order ID was received, but the transaction could not be confirmed automatically.'),
+                $this->locale->translate($order->customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                $this->locale->translate($order->customer, 'payment.expired.binance_order_id'),
                 '',
-                $this->locale->text($order->customer, 'Kalau kamu sudah membayar, kirim screenshot bukti transfer sebagai foto dengan caption:', 'If you already paid, send your transfer screenshot as a photo with this caption:'),
+                $this->locale->translate($order->customer, 'payment.expired.binance_prompt'),
                 '/payment '.$order->invoice_number,
                 '',
-                $this->locale->text($order->customer, 'Admin akan mengecek pembayaran terlambat secara manual. Stok tidak dikunci ulang otomatis.', 'The admin will review the late payment manually. Stock is not reserved again automatically.'),
+                $this->locale->translate($order->customer, 'payment.expired.binance_review'),
             ];
             $replyMarkup = [];
         } else {
             $lines = [
-                $this->locale->text($order->customer, '⏳ Order kedaluwarsa', '⏳ Order expired'),
+                $this->locale->translate($order->customer, 'payment.expired.title'),
                 '━━━━━━━━━━━━━━',
-                '🧾 Invoice: '.$order->invoice_number,
-                $this->locale->text($order->customer, '📦 Produk: ', '📦 Products: ').$order->orderItems->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))->join(', '),
-                '💰 Total: Rp'.number_format($order->total_amount, 0, ',', '.'),
+                $this->locale->translate($order->customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                $this->locale->translate($order->customer, 'payment.products', [
+                    'items' => $order->orderItems->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))->join(', '),
+                ]),
+                $this->locale->translate($order->customer, 'payment.total', [
+                    'amount' => 'Rp'.number_format($order->total_amount, 0, ',', '.'),
+                ]),
                 '',
-                $this->locale->text($order->customer, 'Pembayaran tidak selesai sampai batas waktu, jadi order dibatalkan otomatis.', 'Payment was not completed before the deadline, so this order was cancelled automatically.'),
+                $this->locale->translate($order->customer, 'payment.expired.cancelled'),
                 '',
-                $this->locale->text($order->customer, 'Tenang, kamu masih bisa order ulang kapan aja.', 'You can place a new order anytime.'),
+                $this->locale->translate($order->customer, 'payment.expired.reorder'),
             ];
-            $buttonText = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === PaymentProvider::KLIKQRIS)
-                ? $this->locale->text($order->customer, '🔄 Buat QRIS Baru', '🔄 Create New QRIS')
-                : $this->locale->text($order->customer, '🛍️ Order Ulang', '🛍️ Order Again');
+            $buttonKey = $order->payments->contains(fn ($payment): bool => strtolower((string) $payment->provider) === PaymentProvider::KLIKQRIS)
+                ? 'payment.action.new_qris'
+                : 'payment.action.reorder';
             $replyMarkup = [
-                'inline_keyboard' => [[['text' => $buttonText, 'callback_data' => 'katalog']]],
+                'inline_keyboard' => [[[
+                    'text' => $this->locale->translate($order->customer, $buttonKey),
+                    'callback_data' => 'katalog',
+                ]]],
             ];
         }
 

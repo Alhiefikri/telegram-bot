@@ -839,7 +839,7 @@ class PakasirWebhookTest extends TestCase
                 'transaction' => ['status' => 'cancelled'],
             ]),
         ]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'first_name' => 'Buyer', 'locale' => 'id']);
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);

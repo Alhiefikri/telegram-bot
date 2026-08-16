@@ -46,7 +46,7 @@ class TelegramBinanceVerifyIntents
         [$order, $payment] = $this->findVerifiableOrder($customer, $orderId);
 
         if (! $order || ! $payment) {
-            $this->bot->answerCallbackQuery($callbackQueryId, $this->text($customer, 'Pesanan tidak ditemukan.', 'Order not found.'));
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->translate($customer, 'payment.error.order_not_found'));
 
             return;
         }
@@ -75,16 +75,10 @@ class TelegramBinanceVerifyIntents
             return;
         }
 
-        $this->bot->answerCallbackQuery($callbackQueryId, $this->text(
-            $customer,
-            'Permintaan cek diterima. Pembayaran sedang diperiksa.',
-            'Check requested. Your payment is being verified.',
-        ));
-        $this->bot->sendMessage($chatId, $this->text(
-            $customer,
-            "🔎 Sedang mengecek pembayaran\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nSistem sedang memeriksa nominal persis dan penerima Binance. Kamu akan diberi kabar jika pembayaran cocok.",
-            "🔎 Checking your payment\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nWe are checking the exact amount and Binance receiver. You will be notified if the payment matches.",
-        ));
+        $this->bot->answerCallbackQuery($callbackQueryId, $this->translate($customer, 'payment.binance.check_requested'));
+        $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.checking', [
+            'invoice' => $order->invoice_number,
+        ]));
     }
 
     public function verifyAmountUnique(string $paymentId): void
@@ -117,7 +111,7 @@ class TelegramBinanceVerifyIntents
         [$order, $payment] = $this->findVerifiableOrder($customer, $orderId);
 
         if (! $order || ! $payment) {
-            $this->bot->answerCallbackQuery($callbackQueryId, $this->text($customer, 'Pesanan tidak ditemukan.', 'Order not found.'));
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->translate($customer, 'payment.error.order_not_found'));
 
             return;
         }
@@ -131,22 +125,16 @@ class TelegramBinanceVerifyIntents
 
         if ((int) $payment->binance_order_id_attempts >= self::MAX_ORDER_ID_ATTEMPTS) {
             $this->bot->answerCallbackQuery($callbackQueryId);
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.'.',
-                'You have reached the maximum of 3 Order IDs. Please contact the admin with invoice '.$order->invoice_number.'.',
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.max_order_ids', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return;
         }
 
         $this->session->promptOrder($customer, $order->id);
         $this->bot->answerCallbackQuery($callbackQueryId);
-        $this->bot->sendMessage($chatId, $this->text(
-            $customer,
-            "🧾 Kirim Binance Order ID\n━━━━━━━━━━━━━━\nBalas chat ini dengan Order ID dari bukti transfer kamu (10–128 karakter ASCII, tanpa spasi). ID ini wajib supaya pembayaran bisa diverifikasi otomatis.\n\nCara menemukannya:\nBuka aplikasi Binance → Pay → pilih transfer kamu → Order Details → salin Order ID.",
-            'Please send the Binance Pay Order ID for this payment. Open the completed payment in Binance Pay, view Order Details, and copy the Order ID exactly. Do not send your Binance Pay ID or a screenshot here.',
-        ));
+        $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.order_id_prompt'));
     }
 
     /**
@@ -177,61 +165,48 @@ class TelegramBinanceVerifyIntents
 
         $candidate = BinanceOrderId::normalize($text);
         if ($candidate === null) {
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                'Kirim Binance Order ID persis seperti di Order Details (10–128 karakter ASCII, tanpa spasi). Coba kirim ulang, atau ketik /batal untuk berhenti.',
-                'Please send the Binance Order ID exactly as shown in Order Details (10–128 ASCII characters, no spaces). Try again, or type /batal to stop.',
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.order_id_invalid'));
 
             return true;
         }
-
         if (! $this->session->withinAttemptLimit($order->id)) {
-            $this->bot->sendMessage($chatId, $this->text($customer, 'Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.', 'Too many attempts. Please wait a few minutes and try again.'));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.too_many_attempts'));
 
             return true;
         }
 
         $submission = $this->verification->submitOrderId($order->id, $candidate);
         if ($submission->outcome === BinanceVerificationSubmissionOutcome::Limit) {
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                'Batas pengiriman Order ID sudah tercapai (maksimal 3 ID). Hubungi admin dengan invoice '.$order->invoice_number.'.',
-                'You have reached the maximum of 3 Order IDs. Please contact the admin with invoice '.$order->invoice_number.'.',
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.max_order_ids', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return true;
         }
 
         if ($submission->outcome === BinanceVerificationSubmissionOutcome::Expired) {
             $this->session->forget($customer);
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                "⏳ Batas pembayaran sudah lewat. Order {$order->invoice_number} akan ditangani sebagai pembayaran terlambat. Kirim screenshot dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
-                "⏳ The payment deadline has passed. Order {$order->invoice_number} will be handled as a late payment. Send a screenshot with the caption /payment {$order->invoice_number} so the admin can review it.",
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.deadline_late', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return true;
         }
 
         if ($submission->outcome === BinanceVerificationSubmissionOutcome::GraceExpired) {
             $this->session->forget($customer);
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
-                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.grace_expired', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return true;
         }
 
         if ($submission->outcome === BinanceVerificationSubmissionOutcome::Manual) {
             $this->session->forget($customer);
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                "Verifikasi otomatis tidak tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number}.",
-                "Automatic verification is not available for order {$order->invoice_number}. Send a payment screenshot as a photo with the caption /payment {$order->invoice_number}.",
-            ));
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.manual_fallback', [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return true;
         }
@@ -311,127 +286,103 @@ class TelegramBinanceVerifyIntents
         switch ($result->outcome) {
             case BinanceVerificationOutcome::Confirmed:
                 $this->session->forget($customer);
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    "✅ Pembayaran terverifikasi!\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n💵 {$amount} USDT diterima.\n\nProduk kamu sedang dikirim ke chat ini sekarang. Terima kasih! 🎉",
-                    "✅ Payment confirmed!\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n💵 {$amount} USDT received.\n\nYour product is being delivered to this chat right now. Thank you! 🎉",
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.confirmed', [
+                    'invoice' => $order->invoice_number,
+                    'amount' => $amount,
+                ]));
                 break;
 
             case BinanceVerificationOutcome::AlreadyPaid:
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
-                    "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.already_paid', [
+                    'invoice' => $order->invoice_number,
+                ]));
                 break;
 
             case BinanceVerificationOutcome::NotFound:
                 if ($payment->binance_verification_mode === 'amount_unique') {
-                    $this->bot->sendMessage($chatId, $this->text(
-                        $customer,
-                        "🔎 Pembayaran belum ditemukan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nTransfer dengan nominal persis {$amount} USDT belum terlihat di riwayat Binance. Setelah transfer selesai, tekan tombol Saya Sudah Bayar untuk mengecek lagi.",
-                        "🔎 Payment not found yet\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nA transfer for the exact amount of {$amount} USDT is not visible in Binance history yet. After completing the transfer, tap I've Paid to check again.",
-                    ), $allowRetryButtons ? [
-                        'inline_keyboard' => [[
-                            [
-                                'text' => $this->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
-                                'callback_data' => 'binance:verify:'.$order->id,
-                            ],
-                        ]],
-                    ] : []);
+                    $this->bot->sendMessage(
+                        $chatId,
+                        $this->translate($customer, 'payment.binance.not_found_amount', [
+                            'invoice' => $order->invoice_number,
+                            'amount' => $amount,
+                        ]),
+                        $allowRetryButtons ? [
+                            'inline_keyboard' => [[
+                                [
+                                    'text' => $this->translate($customer, 'payment.action.paid'),
+                                    'callback_data' => 'binance:verify:'.$order->id,
+                                ],
+                            ]],
+                        ] : [],
+                    );
 
                     break;
                 }
 
                 if ($finalRetry) {
                     $this->escalator->notify($order, $payment, $result, $submittedOrderId);
-                    $this->bot->sendMessage($chatId, $this->text(
-                        $customer,
-                        "⏳ Order ID sudah diterima, tetapi pembayaran belum terlihat. Kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} agar bisa dicek manual.",
-                        "⏳ Order ID received, but the payment is not visible yet. Send a payment screenshot with the caption /payment {$order->invoice_number} for a manual review.",
-                    ));
+                    $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.not_found_order_id_final', [
+                        'invoice' => $order->invoice_number,
+                    ]));
 
                     break;
                 }
 
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    "🔎 Order ID sudah diterima\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nPembayaran belum terlihat. Tunggu hasil verifikasi; kamu tidak perlu mengirim ulang ID yang sama.",
-                    "🔎 Order ID received\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment is not visible yet. Please wait for the verification result; you do not need to resend the same ID.",
-                ), $allowRetryButtons ? [
-                    'inline_keyboard' => [
-                        [[
-                            'text' => $this->text($customer, '🧾 Ganti Order ID', '🧾 Change Order ID'),
-                            'callback_data' => 'binance:orderid:'.$order->id,
+                $this->bot->sendMessage(
+                    $chatId,
+                    $this->translate($customer, 'payment.binance.not_found_order_id', [
+                        'invoice' => $order->invoice_number,
+                    ]),
+                    $allowRetryButtons ? [
+                        'inline_keyboard' => [[
+                            [
+                                'text' => $this->translate($customer, 'payment.action.change_order_id'),
+                                'callback_data' => 'binance:orderid:'.$order->id,
+                            ],
                         ]],
-                    ],
-                ] : []);
+                    ] : [],
+                );
                 break;
 
             case BinanceVerificationOutcome::Mismatch:
             case BinanceVerificationOutcome::TransactionAlreadyUsed:
             case BinanceVerificationOutcome::OrderNotPending:
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    "⚠️ Pembayaran kamu butuh pengecekan manual\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nDetail pembayaran belum sepenuhnya cocok dengan pesanan ini, jadi konfirmasi membutuhkan waktu lebih lama. Kamu tidak perlu melakukan apa-apa lagi.",
-                    "⚠️ Your payment needs a manual check\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n\nThe payment details do not fully match this order, so confirmation will take longer. No further action is needed from you.",
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.manual_review', [
+                    'invoice' => $order->invoice_number,
+                ]));
                 break;
 
             case BinanceVerificationOutcome::NotConfigured:
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    'Verifikasi otomatis sedang tidak tersedia. Kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
-                    'Automatic verification is currently unavailable. As a backup, please send your payment screenshot with the caption /payment.',
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.not_configured'));
                 break;
 
             case BinanceVerificationOutcome::IncompleteWindow:
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    $payment->binance_verification_mode === 'amount_unique'
-                        ? 'Riwayat Binance belum selesai diperiksa. Tekan Saya Sudah Bayar lagi setelah beberapa saat.'
-                        : 'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
-                    $payment->binance_verification_mode === 'amount_unique'
-                        ? "Binance history could not be checked completely yet. Tap I've Paid again in a moment."
-                        : 'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, $verificationMode === 'amount_unique'
+                    ? 'payment.binance.incomplete_amount'
+                    : 'payment.binance.incomplete_order_id'));
                 break;
 
             case BinanceVerificationOutcome::ProviderError:
                 if ($result->retryable) {
                     if ($finalRetry) {
                         $this->escalator->notify($order, $payment, $result, $submittedOrderId);
-                        $this->bot->sendMessage($chatId, $this->text(
-                            $customer,
-                            "Verifikasi otomatis belum berhasil diselesaikan. Kirim screenshot pembayaran dengan caption /payment {$order->invoice_number} sebagai cadangan.",
-                            "Automatic verification could not be completed. Send a payment screenshot with the caption /payment {$order->invoice_number} as a backup.",
-                        ));
+                        $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.retry_final', [
+                            'invoice' => $order->invoice_number,
+                        ]));
 
                         break;
                     }
 
-                    $this->bot->sendMessage($chatId, $this->text(
-                        $customer,
-                        $payment->binance_verification_mode === 'amount_unique'
-                            ? 'Verifikasi belum selesai. Tekan Saya Sudah Bayar lagi setelah beberapa saat.'
-                            : 'Order ID kamu sudah diterima. Sistem sedang memeriksa pembayaran dengan aman dan akan memberi kabar setelah hasilnya tersedia.',
-                        $payment->binance_verification_mode === 'amount_unique'
-                            ? "The payment check could not finish. Tap I've Paid again in a moment."
-                            : 'Your Order ID was received. We are checking your payment securely and will update you when the result is available.',
-                    ));
+                    $this->bot->sendMessage($chatId, $this->translate($customer, $verificationMode === 'amount_unique'
+                        ? 'payment.binance.retry_amount'
+                        : 'payment.binance.retry_order_id'));
                     break;
                 }
 
                 $this->escalator->notify($order, $payment, $result, $submittedOrderId);
-                $this->bot->sendMessage($chatId, $this->text(
-                    $customer,
-                    'Verifikasi Binance tidak dapat dilanjutkan saat ini. Kirim screenshot pembayaran dengan caption /payment sebagai cadangan.',
-                    'Automatic Binance verification could not continue. Please send your payment screenshot with the caption /payment as a backup.',
-                ));
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.binance.provider_error'));
                 break;
 
             case BinanceVerificationOutcome::StaleSubmission:
@@ -453,36 +404,28 @@ class TelegramBinanceVerifyIntents
     private function amountUniqueGuardMessage(Customer $customer, Order $order, Payment $payment): ?string
     {
         if ($payment->status === PaymentStatus::Paid) {
-            return $this->text(
-                $customer,
-                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
-                "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
-            );
+            return $this->translate($customer, 'payment.binance.already_paid', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         if ($order->order_status !== OrderStatus::PendingPayment || $payment->status !== PaymentStatus::Pending) {
-            return $this->text(
-                $customer,
-                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini.",
-                "Order {$order->invoice_number} is no longer awaiting payment. If you already sent a transfer, please contact the admin with this invoice.",
-            );
+            return $this->translate($customer, 'payment.binance.not_pending', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         $verificationStatus = $this->verification->status($payment);
         if ($verificationStatus->mode !== 'amount_unique' || ! $verificationStatus->automatic) {
-            return $this->text(
-                $customer,
-                "Verifikasi otomatis tidak tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
-                "Automatic verification is not available for order {$order->invoice_number}. Send a payment screenshot as a photo with the caption /payment {$order->invoice_number} so the admin can review it.",
-            );
+            return $this->translate($customer, 'payment.binance.amount_unique_unavailable', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         if ($verificationStatus->closed()) {
-            return $this->text(
-                $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
-                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
-            );
+            return $this->translate($customer, 'payment.binance.verification_ended', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         return null;
@@ -491,36 +434,28 @@ class TelegramBinanceVerifyIntents
     private function guardMessage(Customer $customer, Order $order, Payment $payment): ?string
     {
         if ($payment->status === PaymentStatus::Paid) {
-            return $this->text(
-                $customer,
-                "Pesanan {$order->invoice_number} sudah lunas. Cek /status kalau produk belum sampai.",
-                "Order {$order->invoice_number} is already paid. Check /status if the product has not arrived yet.",
-            );
+            return $this->translate($customer, 'payment.binance.already_paid', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         if ($order->order_status !== OrderStatus::PendingPayment || $payment->status !== PaymentStatus::Pending) {
-            return $this->text(
-                $customer,
-                "Pesanan {$order->invoice_number} sudah tidak menunggu pembayaran. Kalau kamu terlanjur transfer, hubungi admin dengan invoice ini.",
-                "Order {$order->invoice_number} is no longer awaiting payment. If you already sent a transfer, please contact the admin with this invoice.",
-            );
+            return $this->translate($customer, 'payment.binance.not_pending', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         $verificationStatus = $this->verification->status($payment);
         if ($verificationStatus->mode !== 'order_id') {
-            return $this->text(
-                $customer,
-                "Verifikasi Order ID belum tersedia untuk order {$order->invoice_number}. Kirim screenshot pembayaran sebagai foto dengan caption /payment {$order->invoice_number} agar admin bisa mengeceknya.",
-                "Order ID verification is not available for order {$order->invoice_number}. Send a payment screenshot as a photo with the caption /payment {$order->invoice_number} so the admin can review it.",
-            );
+            return $this->translate($customer, 'payment.binance.order_id_unavailable', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         if ($verificationStatus->closed()) {
-            return $this->text(
-                $customer,
-                "Verifikasi otomatis untuk order {$order->invoice_number} sudah berakhir. Jika pembayaran sudah dikirim, kirim screenshot dengan caption /payment {$order->invoice_number}.",
-                "Automatic verification for order {$order->invoice_number} has ended. If you already paid, send a screenshot with the caption /payment {$order->invoice_number}.",
-            );
+            return $this->translate($customer, 'payment.binance.verification_ended', [
+                'invoice' => $order->invoice_number,
+            ]);
         }
 
         return null;
@@ -573,8 +508,11 @@ class TelegramBinanceVerifyIntents
         return rtrim(rtrim(number_format($amountMicro / 1_000_000, 6, '.', ''), '0'), '.');
     }
 
-    private function text(Customer $customer, string $id, string $en): string
+    /**
+     * @param  array<string, scalar|null>  $replace
+     */
+    private function translate(Customer $customer, string $key, array $replace = []): string
     {
-        return $this->locale->text($customer, $id, $en);
+        return $this->locale->translate($customer, $key, $replace);
     }
 }

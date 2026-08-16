@@ -29,7 +29,7 @@ class TelegramPaymentProofCallbackHandler implements TelegramCallbackHandler
 
     public function handle(TelegramCallbackContext $context): bool
     {
-        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Kirim foto bukti pembayaran dengan /payment INVOICE di caption.', 'Send a photo with /payment INVOICE in its caption.'));
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.proof.command_prompt'));
 
         return true;
     }

@@ -118,8 +118,8 @@ class TelegramCheckoutIntents
     {
         return $this->bot->sendMessage($chatId, $this->paymentInstructions->klikQrisRetry($order, $outcome, $locale), [
             'inline_keyboard' => [
-                [['text' => $locale === 'en' ? '✅ Check Payment' : '✅ Cek Pembayaran', 'callback_data' => 'order:'.$order->invoice_number]],
-                [['text' => $locale === 'en' ? '❌ Cancel Order' : '❌ Batalkan Order', 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
             ],
         ]);
     }
@@ -157,12 +157,12 @@ class TelegramCheckoutIntents
         $keyboard = [];
         if ($autoVerify) {
             $keyboard[] = [[
-                'text' => $this->locale->text($customer, '✅ Saya Sudah Bayar', "✅ I've Paid"),
+                'text' => $this->locale->translate($customer, 'payment.action.paid'),
                 'callback_data' => 'binance:verify:'.$order->id,
             ]];
         }
         $keyboard[] = [[
-            'text' => $this->locale->text($customer, '❌ Batalkan Order', '❌ Cancel Order'),
+            'text' => $this->locale->translate($customer, 'payment.action.cancel'),
             'callback_data' => 'buyer:cancel-pending:'.$order->id,
         ]];
 
@@ -291,11 +291,7 @@ class TelegramCheckoutIntents
 
     public function pakasirUnavailableCustomerMessage(Customer $customer): string
     {
-        return $this->locale->text(
-            $customer,
-            "Pembayaran otomatis sedang tidak tersedia, jadi checkout ini dialihkan ke QR manual.\n\nIkuti instruksi QR di bawah untuk selesaikan pembayaran kamu.",
-            "Automatic payment is currently unavailable, so this checkout has been redirected to a manual QR payment.\n\nFollow the QR instructions below to complete your payment.",
-        );
+        return $this->locale->translate($customer, 'payment.pakasir.unavailable_fallback');
     }
 
     public function manualPaymentMethod(): string
@@ -306,7 +302,7 @@ class TelegramCheckoutIntents
     public function manualPaymentOption(Customer $customer): array
     {
         return [
-            'label' => $this->locale->text($customer, 'QR Manual', 'Manual QR'),
+            'label' => $this->locale->translate($customer, 'payment.method.manual'),
             'name' => 'LHIE STORE',
         ];
     }

@@ -164,8 +164,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return;
         }
         $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
-        $qrisButton = [['text' => '💳 QRIS', 'callback_data' => 'checkout:current']];
-        $binanceButton = [['text' => '💎 USDT · Binance Pay ('.$this->checkoutIntents->formatUsdt($micro).' USDT)', 'callback_data' => 'checkout:binance']];
+        $qrisButton = [['text' => $this->locale->translate($context->customer, 'checkout.payment.qris'), 'callback_data' => 'checkout:current']];
+        $binanceButton = [['text' => $this->locale->translate($context->customer, 'checkout.payment.binance', ['amount' => $this->checkoutIntents->formatUsdt($micro)]), 'callback_data' => 'checkout:binance']];
         $buttons = [$qrisButton, $binanceButton];
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         $paymentMethodMessage = $this->locale->translate($context->customer, 'checkout.payment_method')
@@ -209,9 +209,16 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             if ($binance) {
                 $cart->load('cartItems.product');
                 if (! $this->checkoutIntents->binancePayEnabled() || ! $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
-                    $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'cart.binance_unavailable_cart'), [
-                        'inline_keyboard' => [[['text' => '💳 QRIS', 'callback_data' => 'checkout:current']]],
-                    ]);
+                    $this->bot->sendMessage(
+                        $context->chatId,
+                        $this->locale->translate($context->customer, 'cart.binance_unavailable_cart'),
+                        [
+                            'inline_keyboard' => [[[
+                                'text' => $this->locale->translate($context->customer, 'checkout.payment.qris'),
+                                'callback_data' => 'checkout:current',
+                            ]]],
+                        ],
+                    );
 
                     return;
                 }
@@ -343,5 +350,4 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'checkout.processing'));
         }
     }
-
 }

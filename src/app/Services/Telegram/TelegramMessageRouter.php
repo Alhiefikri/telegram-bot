@@ -180,11 +180,7 @@ class TelegramMessageRouter
         }
 
         if ($isPrivateChat && $text === '' && $this->manualPayments->rememberPendingProofPhoto($customer, $message)) {
-            $this->bot->sendMessage($chatId, $this->text(
-                $customer,
-                '📸 Screenshot bukti sudah diterima. Sekarang kirim /payment untuk meneruskannya ke admin.',
-                '📸 Your payment screenshot has been received. Now send /payment to forward it to the admin.',
-            ));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.photo_received'));
 
             return;
         }

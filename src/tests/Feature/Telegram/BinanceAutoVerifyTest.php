@@ -238,6 +238,29 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('binance:verify:', $body);
     }
 
+    public function test_malay_binance_order_id_prompt_and_retry_limit_are_localized(): void
+    {
+        $this->fakeTelegramHttp();
+        $this->enableBinancePay();
+        [$order, $payment] = $this->createBinanceOrder(locale: 'ms');
+
+        $this->postTelegramWebhook($this->callbackUpdate(305, 'binance-verify-prompt-ms', 'binance:verify:'.$order->id))->assertOk();
+
+        $payment->update(['binance_order_id_attempts' => 3]);
+        $this->postTelegramWebhook($this->callbackUpdate(306, 'binance-verify-limit-ms', 'binance:verify:'.$order->id))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345')
+            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
+            ->values();
+        $this->assertCount(2, $messages);
+        $this->assertStringContainsString('Sila hantar ID Pesanan Binance Pay', $messages[0]);
+        $this->assertStringContainsString('Had penghantaran ID Pesanan telah dicapai', $messages[1]);
+        $this->assertStringContainsString($order->invoice_number, $messages[1]);
+        $this->assertStringNotContainsString('Please send the Binance Pay Order ID', $messages->implode("\n"));
+        $this->assertStringNotContainsString('maximum of 3 Order IDs', $messages->implode("\n"));
+    }
+
     public function test_ive_paid_tap_only_prompts_for_the_required_order_id(): void
     {
         $this->fakeTelegramHttp();
@@ -424,6 +447,41 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
             $this->assertStringNotContainsString('Admin sudah diberi tahu', $text);
             $this->assertStringNotContainsString('admin has been notified', strtolower($text));
         }
+    }
+
+    public function test_malay_binance_retry_and_manual_review_messages_are_localized(): void
+    {
+        $this->enableBinancePay('amount_unique');
+        [$order, $payment] = $this->createBinanceOrder(locale: 'ms');
+        $this->fakeTelegramHttp();
+        $intents = app(TelegramBinanceVerifyIntents::class);
+
+        $intents->respondToResult(
+            $order->customer,
+            '12345',
+            $order,
+            $payment,
+            BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError, retryable: true),
+            true,
+        );
+        $intents->respondToResult(
+            $order->customer,
+            '12345',
+            $order,
+            $payment,
+            BinanceVerificationResult::of(BinanceVerificationOutcome::Mismatch),
+            false,
+        );
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(2, $messages);
+        $copy = $messages->map(fn (array $record): string => json_encode($record[0]->data()) ?: '')->implode("\n");
+        $this->assertStringContainsString('Pengesahan belum selesai', $copy);
+        $this->assertStringContainsString('Bayaran anda memerlukan semakan manual', $copy);
+        $this->assertStringContainsString('Saya Sudah Bayar', $copy);
+        $this->assertStringNotContainsString('The payment check could not finish', $copy);
+        $this->assertStringNotContainsString('Your payment needs a manual check', $copy);
     }
 
     public function test_uid_receiver_is_checked_against_binance_pay_uid_not_pay_id(): void
@@ -1318,9 +1376,9 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
     }
 
     /** @return array{0: Order, 1: Payment, 2: Customer} */
-    private function createBinanceOrder(int $telegramId = 12345): array
+    private function createBinanceOrder(int $telegramId = 12345, string $locale = 'en'): array
     {
-        $customer = Customer::factory()->create(['telegram_id' => $telegramId, 'locale' => 'en']);
+        $customer = Customer::factory()->create(['telegram_id' => $telegramId, 'locale' => $locale]);
         $product = Product::factory()->create([
             'stock' => 5,
             'reserved_stock' => 0,

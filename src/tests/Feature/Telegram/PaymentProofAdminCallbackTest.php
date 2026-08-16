@@ -117,6 +117,42 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('menunggu verifikasi admin', $customerCopy);
     }
 
+    public function test_malay_customer_gets_localized_payment_proof_guidance_and_forwarding(): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'ms']);
+
+        $this->postTelegramWebhook($this->messageUpdate(211, '/payment'))->assertOk();
+
+        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'BRIVA',
+            'status' => PaymentStatus::Pending,
+        ]);
+        $this->postTelegramWebhook($this->messageUpdate(212, '/payment '.$order->invoice_number))->assertOk();
+
+        $photo = $this->paymentPhotoUpdate(213, $order->invoice_number, ['username' => 'buyer']);
+        unset($photo['message']['caption']);
+        $this->postTelegramWebhook($photo)->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(214, '/payment '.$order->invoice_number))->assertOk();
+
+        $texts = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345')
+            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
+            ->values();
+        $this->assertCount(4, $texts);
+        $this->assertStringContainsString('Tiada pesanan manual yang sedang menunggu bayaran', $texts[0]);
+        $this->assertStringContainsString('Bukti bayaran mesti dihantar sebagai FOTO', $texts[1]);
+        $this->assertStringContainsString('Tangkapan skrin pembayaran telah diterima', $texts[2]);
+        $this->assertStringContainsString('Bukti telah dihantar kepada admin', $texts[3]);
+        $this->assertStringContainsString($order->invoice_number, $texts[1]);
+        $this->assertStringNotContainsString('No manual order is awaiting payment', $texts->implode("\n"));
+        $this->assertStringNotContainsString('Payment proof must be sent as a PHOTO', $texts->implode("\n"));
+    }
+
     public function test_binance_payment_photo_with_payment_caption_reaches_admin_without_auto_approval(): void
     {
         $this->fakeTelegramHttp();
@@ -181,7 +217,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => 'en']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => 'ms']);
         $order = Order::factory()->create(['customer_id' => $customer->id]);
         $payment = Payment::factory()->create([
             'order_id' => $order->id,
@@ -208,6 +244,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
 
         $this->postTelegramWebhook($this->paymentPhotoUpdate(208, $order->invoice_number, ['username' => 'late-buyer']))->assertOk();
+        $buyerMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(1, $buyerMessages);
+        $this->assertStringContainsString('Bukti bayaran lewat telah diterima', (string) ($buyerMessages->first()[0]['text'] ?? ''));
 
         $payment->refresh();
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);

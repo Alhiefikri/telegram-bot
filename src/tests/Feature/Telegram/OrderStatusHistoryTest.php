@@ -525,6 +525,38 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($copy['otherCancelStaleMessage'], $messageText);
     }
 
+    public function test_malay_buyer_cancellation_messages_cover_success_and_stale_states(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactioncancel' => Http::response([
+                'transaction' => ['status' => 'cancelled'],
+            ]),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'ms']);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-MS',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Pending]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(308, 'cancel-success-ms', 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame('Pesanan dibatalkan dan stok telah dilepaskan.', $this->callbackAnswerText('cancel-success-ms'));
+        $this->assertStringContainsString('Pesanan dibatalkan', $this->sentMessageContaining($order->invoice_number));
+
+        $this->postTelegramWebhook($this->callbackUpdate(309, 'cancel-stale-ms', 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame('Pesanan ini tidak lagi boleh dibatalkan.', $this->callbackAnswerText('cancel-stale-ms'));
+        $messages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345')
+            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''));
+        $this->assertCount(2, $messages);
+        $this->assertStringContainsString('Pesanan tidak ditemui atau tidak lagi boleh dibatalkan.', $messages->last());
+        $this->assertStringNotContainsString('Order not found or can no longer be cancelled.', $messages->last());
+    }
+
     public static function customerLocaleCases(): array
     {
         return [

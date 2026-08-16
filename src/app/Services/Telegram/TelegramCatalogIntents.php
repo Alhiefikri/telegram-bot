@@ -69,12 +69,16 @@ class TelegramCatalogIntents
             ]];
         } elseif ($availableStock > 0) {
             $qrisButton = [[
-                'text' => '💳 QRIS · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'text' => $this->locale->translate($customer, 'catalog.payment.qris_button', [
+                    'amount' => number_format($product->price_amount, 0, ',', '.'),
+                ]),
                 'callback_data' => 'buy:qris:'.$product->id,
             ]];
             if ($binanceAvailable) {
                 $binanceButton = [[
-                    'text' => '💎 Binance Pay · '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT',
+                    'text' => $this->locale->translate($customer, 'catalog.payment.binance_button', [
+                        'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
+                    ]),
                     'callback_data' => 'buy:binance:'.$product->id,
                 ]];
                 $keyboard = [$qrisButton, $binanceButton];
@@ -93,7 +97,9 @@ class TelegramCatalogIntents
             $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
         ];
         if ($binanceAvailable) {
-            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt($product->usdt_price_amount).' USDT';
+            $lines[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
+                'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
+            ]);
         }
         $lines[] = $availableStock > 0
             ? $this->locale->translate($customer, 'catalog.status.available')
@@ -134,9 +140,13 @@ class TelegramCatalogIntents
         } else {
             for ($quantity = 1; $quantity <= $quantityLimit; $quantity++) {
                 if ($paymentMethod === 'binance') {
-                    $total = $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity).' USDT';
+                    $total = $this->locale->translate($customer, 'catalog.quantity.binance_total', [
+                        'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity),
+                    ]);
                 } elseif ($paymentMethod === 'qris') {
-                    $total = 'Rp'.number_format($product->price_amount * $quantity, 0, ',', '.');
+                    $total = $this->locale->translate($customer, 'catalog.quantity.qris_total', [
+                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
+                    ]);
                 } else {
                     $total = null;
                 }
@@ -155,9 +165,13 @@ class TelegramCatalogIntents
             $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock,
         ];
         if ($paymentMethod === 'binance') {
-            $lines[] = '💎 Binance Pay: '.$this->checkout->formatUsdt((int) $product->usdt_price_amount).' USDT'.$this->locale->translate($customer, 'catalog.quantity.per_item');
+            $lines[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
+                'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount),
+            ]).$this->locale->translate($customer, 'catalog.quantity.per_item');
         } elseif ($paymentMethod === 'qris') {
-            $lines[] = '💳 QRIS: Rp'.number_format($product->price_amount, 0, ',', '.').$this->locale->translate($customer, 'catalog.quantity.per_item');
+            $lines[] = $this->locale->translate($customer, 'catalog.payment.qris_total', [
+                'amount' => number_format($product->price_amount, 0, ',', '.'),
+            ]).$this->locale->translate($customer, 'catalog.quantity.per_item');
         }
         $lines[] = '';
         $lines[] = $checkoutMaintenanceActive
