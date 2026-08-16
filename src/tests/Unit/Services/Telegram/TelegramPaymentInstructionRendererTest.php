@@ -447,8 +447,8 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '💳 Jumlah bayaran QRIS: IDR 125875.00',
         ]);
         $this->assertStringContainsString('QRIS ini sah selama 15 minit', $instruction->caption());
-        $this->assertStringContainsString('Menunggu jumlah akhir daripada penyedia', $retry);
-        $this->assertStringContainsString('Jangan bayar jumlah kecil produk', $retry);
+        $this->assertStringContainsString('Menunggu jumlah akhir', $retry);
+        $this->assertStringContainsString('Jangan bayar jumlah produk sahaja', $retry);
         $this->assertStringContainsString('Semak Bayaran', json_encode($instruction->replyMarkup) ?: '');
         $this->assertStringContainsString('Batalkan Pesanan', json_encode($instruction->replyMarkup) ?: '');
     }

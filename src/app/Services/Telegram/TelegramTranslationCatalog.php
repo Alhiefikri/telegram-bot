@@ -807,9 +807,9 @@ final class TelegramTranslationCatalog
             'ms' => 'Imbas QRIS ini terus dari Telegram. Bayar hanya melalui imej QR di atas.',
         ],
         'payment.klikqris.provider_deadline' => [
-            'id' => '⏳ Batas provider: :date',
-            'en' => '⏳ Provider deadline: :date',
-            'ms' => '⏳ Tarikh akhir penyedia: :date',
+            'id' => '⏳ Batas pembayaran: :date',
+            'en' => '⏳ Payment deadline: :date',
+            'ms' => '⏳ Tarikh akhir bayaran: :date',
         ],
         'payment.klikqris.validity' => [
             'id' => 'QRIS ini berlaku 15 menit. Setelah batas waktu, buat QRIS baru dan jangan bayar QR ini.',
@@ -837,9 +837,9 @@ final class TelegramTranslationCatalog
             'ms' => '⏳ QRIS anda sedang dipulihkan',
         ],
         'payment.klikqris.retry.total_pending_lead' => [
-            'id' => '⏳ Menunggu nominal final dari provider',
+            'id' => '⏳ Menunggu nominal final',
             'en' => '⏳ Waiting for the final amount',
-            'ms' => '⏳ Menunggu jumlah akhir daripada penyedia',
+            'ms' => '⏳ Menunggu jumlah akhir',
         ],
         'payment.klikqris.retry.invalid_lead' => [
             'id' => '⚠️ QRIS tidak bisa disiapkan',
@@ -847,24 +847,24 @@ final class TelegramTranslationCatalog
             'ms' => '⚠️ QRIS tidak dapat disediakan',
         ],
         'payment.klikqris.retry.creating_body' => [
-            'id' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan membuat checkout baru; buka invoice ini lagi sebentar atau tap Cek Pembayaran.',
-            'en' => 'The provider is preparing your QRIS and its final amount. Do not create another checkout; open this invoice again shortly or tap Check Payment.',
-            'ms' => 'Penyedia sedang menyediakan QRIS dan jumlah akhir. Jangan buat checkout baharu; buka invois ini sebentar lagi atau tekan Semak Bayaran.',
+            'id' => 'QRIS sedang disiapkan. Jangan membuat checkout baru; buka invoice ini lagi sebentar atau tap Cek Pembayaran.',
+            'en' => 'Your QRIS is still being prepared. Do not create another checkout; open this invoice again shortly or tap Check Payment.',
+            'ms' => 'QRIS anda masih sedang disediakan. Jangan buat checkout baharu; buka invois ini sebentar lagi atau tekan Semak Bayaran.',
         ],
         'payment.klikqris.retry.recovery_pending_body' => [
-            'id' => 'QRIS sedang dipulihkan pada invoice yang sama, tanpa membuat instruksi bayar baru. Tap Cek Pembayaran sebentar lagi atau buka invoice ini lagi.',
-            'en' => 'Your QRIS is being recovered on this same invoice, and no new payment instruction was created. Tap Check Payment shortly or open this invoice again.',
-            'ms' => 'QRIS anda sedang dipulihkan pada invois yang sama dan tiada arahan bayaran baharu dibuat. Tekan Semak Bayaran sebentar lagi atau buka invois ini semula.',
+            'id' => 'QRIS belum siap pada invoice yang sama dan belum ada instruksi bayar baru. Tap Cek Pembayaran sebentar lagi atau buka invoice ini lagi.',
+            'en' => 'Your QRIS is not ready on the same invoice yet, and no new payment instruction is available. Tap Check Payment shortly or open this invoice again.',
+            'ms' => 'QRIS anda belum sedia pada invois yang sama dan tiada arahan bayaran baharu. Tekan Semak Bayaran sebentar lagi atau buka invois ini semula.',
         ],
         'payment.klikqris.retry.total_pending_body' => [
-            'id' => 'Provider belum memberi total bayar final. Jangan bayar total produk. Buka invoice ini lagi sebentar.',
-            'en' => 'The provider has not supplied the final payable amount yet. Do not pay the product subtotal. Open this invoice again shortly.',
-            'ms' => 'Penyedia belum memberikan jumlah bayaran akhir. Jangan bayar jumlah kecil produk. Buka invois ini sebentar lagi.',
+            'id' => 'Nominal final pembayaran belum tersedia. Jangan bayar total produk. Buka invoice ini lagi sebentar.',
+            'en' => 'The final payable amount is not available yet. Do not pay the product subtotal. Open this invoice again shortly.',
+            'ms' => 'Jumlah akhir bayaran belum tersedia. Jangan bayar jumlah produk sahaja. Buka invois ini sebentar lagi.',
         ],
         'payment.klikqris.retry.invalid_body' => [
-            'id' => 'Provider memberi hasil QRIS yang tidak valid. Jangan bayar. Hubungi bantuan dengan nomor invoice ini untuk menyelesaikan pesanan.',
-            'en' => 'The provider returned an unusable QRIS result. Do not pay. Contact support with your invoice number to resolve this order.',
-            'ms' => 'Penyedia memberikan hasil QRIS yang tidak sah. Jangan bayar. Hubungi sokongan dengan nombor invois ini untuk menyelesaikan pesanan.',
+            'id' => 'QRIS ini belum bisa digunakan. Jangan bayar. Hubungi bantuan dengan nomor invoice ini untuk menyelesaikan pesanan.',
+            'en' => 'This QRIS cannot be used. Do not pay. Contact support with your invoice number to resolve this order.',
+            'ms' => 'QRIS ini tidak boleh digunakan. Jangan bayar. Hubungi sokongan dengan nombor invois anda untuk menyelesaikan pesanan.',
         ],
         'payment.klikqris.retry.ready_lead' => [
             'id' => 'QRIS siap',
@@ -909,7 +909,7 @@ final class TelegramTranslationCatalog
         'payment.proof.invoice_not_found' => [
             'id' => "Invoice tidak ditemukan atau bukan pesanan manual milik kamu.\n\nCoba cek lagi di /status atau /riwayat.",
             'en' => "The invoice was not found or is not your manual order.\n\nCheck again using /status or /history.",
-            'ms' => "Invois tidak ditemui atau bukan pesanan manual anda.\n\nSemak semula melalui /status atau /sejarah.",
+            'ms' => "Invois tidak ditemui atau bukan pesanan manual anda.\n\nSemak semula melalui /status atau /riwayat.",
         ],
         'payment.proof.photo_required' => [
             'id' => "Bukti pembayaran harus dikirim sebagai FOTO.\n\nPilih salah satu cara:\n1. Upload screenshot dan isi caption dengan /payment\n2. Jika screenshot sudah terkirim, balas foto itu dengan /payment\n\nKalau punya beberapa order, pakai:\n/payment :invoice",
@@ -942,24 +942,24 @@ final class TelegramTranslationCatalog
             'ms' => 'Tarikh akhir bayaran telah berlalu. Tunggu pesanan tamat tempoh, kemudian hantar tangkapan skrin dengan kapsyen /payment :invoice untuk semakan admin.',
         ],
         'payment.proof.late_forwarded' => [
-            'id' => "📸 Bukti pembayaran terlambat sudah diterima\n━━━━━━━━━━━━━━\nBukti sudah dikirim ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
-            'en' => "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof was sent to the admin for manual review. The order has expired and stock was not reserved again.",
-            'ms' => "📸 Bukti bayaran lewat telah diterima\n━━━━━━━━━━━━━━\nBukti telah dihantar kepada admin untuk semakan manual. Pesanan telah tamat tempoh dan stok tidak dikunci semula.",
+            'id' => "📸 Bukti pembayaran terlambat sudah diterima\nOrder sudah expired dan stok tidak dikunci ulang.\nTunggu pengecekan manual; kamu tidak perlu kirim ulang.",
+            'en' => "📸 Late payment proof received\nThe order has expired and stock was not reserved again.\nWait for manual review; you do not need to send it again.",
+            'ms' => "📸 Bukti bayaran lewat telah diterima\nPesanan telah tamat tempoh dan stok tidak dikunci semula.\nTunggu semakan manual; anda tidak perlu menghantarnya semula.",
         ],
         'payment.proof.late_forwarding' => [
-            'id' => "📸 Bukti pembayaran terlambat sudah masuk\n━━━━━━━━━━━━━━\nBukti akan diteruskan ke admin untuk pengecekan manual. Order sudah expired dan stok tidak dikunci ulang.",
-            'en' => "📸 Late payment proof received\n━━━━━━━━━━━━━━\nThe proof will be forwarded to the admin for manual review. The order has expired and stock was not reserved again.",
-            'ms' => "📸 Bukti bayaran lewat telah diterima\n━━━━━━━━━━━━━━\nBukti akan dihantar kepada admin untuk semakan manual. Pesanan telah tamat tempoh dan stok tidak dikunci semula.",
+            'id' => "📸 Bukti pembayaran terlambat sudah masuk\nOrder sudah expired dan stok tidak dikunci ulang.\nBukti akan diproses untuk pengecekan manual; kamu tidak perlu kirim ulang.",
+            'en' => "📸 Late payment proof received\nThe order has expired and stock was not reserved again.\nThe proof will be processed for manual review; you do not need to send it again.",
+            'ms' => "📸 Bukti bayaran lewat telah diterima\nPesanan telah tamat tempoh dan stok tidak dikunci semula.\nBukti akan diproses untuk semakan manual; anda tidak perlu menghantarnya semula.",
         ],
         'payment.proof.forwarded' => [
-            'id' => "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBuktinya sudah dikirim ke admin.\n\nSekarang tinggal tunggu dicek ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
-            'en' => "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt has been sent to the admin.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
-            'ms' => "📸 Bukti bayaran telah diterima\n━━━━━━━━━━━━━━\nBukti telah dihantar kepada admin.\n\nSila tunggu semakan. Jika bayaran sepadan, produk akan dihantar secara automatik.",
+            'id' => "📸 Bukti pembayaran sudah masuk\nBukti sudah diteruskan untuk dicek.\n\nSekarang tinggal tunggu ya. Kalau pembayaran sesuai, produk akan dikirim otomatis.",
+            'en' => "📸 Payment proof received\nIt was sent for review.\n\nPlease wait while it is checked. If the payment matches, the product will be sent automatically.",
+            'ms' => "📸 Bukti bayaran telah diterima\nBukti telah dihantar untuk semakan.\n\nSila tunggu semakan. Jika bayaran sepadan, produk akan dihantar secara automatik.",
         ],
         'payment.proof.forwarding' => [
-            'id' => "📸 Bukti pembayaran sudah masuk\n━━━━━━━━━━━━━━\nBukti sedang diteruskan ke admin untuk diverifikasi. Kamu tidak perlu kirim ulang.\n\nKalau pembayaran sesuai, produk akan dikirim otomatis.",
-            'en' => "📸 Payment proof received\n━━━━━━━━━━━━━━\nIt is being forwarded to the admin for verification. You do not need to send it again.\n\nIf the payment matches, the product will be sent automatically.",
-            'ms' => "📸 Bukti bayaran telah diterima\n━━━━━━━━━━━━━━\nBukti sedang dihantar kepada admin untuk pengesahan. Anda tidak perlu menghantarnya semula.\n\nJika bayaran sepadan, produk akan dihantar secara automatik.",
+            'id' => "📸 Bukti pembayaran sudah masuk\nBukti sedang diteruskan untuk diverifikasi. Kamu tidak perlu kirim ulang.\n\nKalau pembayaran sesuai, produk akan dikirim otomatis.",
+            'en' => "📸 Payment proof received\nIt is being sent for review. You do not need to send it again.\n\nIf the payment matches, the product will be sent automatically.",
+            'ms' => "📸 Bukti bayaran telah diterima\nBukti sedang dihantar untuk pengesahan. Anda tidak perlu menghantarnya semula.\n\nJika bayaran sepadan, produk akan dihantar secara automatik.",
         ],
         'payment.manual.rejected' => [
             'id' => "❌ Pembayaran belum bisa diterima\n━━━━━━━━━━━━━━\n🧾 Invoice: :invoice\n📌 Status: Ditolak admin\n\nKemungkinan penyebab:\n• Nominal pembayaran belum sama persis\n• Nama QR tujuan bukan LHIE STORE\n• Bukti pembayaran kurang jelas\n• Pembayaran belum masuk saat dicek\n\nPesanan ini sudah dibatalkan, jadi stok tidak tertahan.\n\n:contact",

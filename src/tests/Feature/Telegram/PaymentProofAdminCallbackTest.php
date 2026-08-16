@@ -36,6 +36,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -107,7 +108,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'duplicate' => true,
         ], [
             'accepted' => $texts->contains(fn (string $text): bool => str_contains($text, 'Payment proof received')
-                && str_contains($text, 'sent to the admin')),
+                && str_contains($text, 'sent for review')),
             'duplicate' => $texts->contains(fn (string $text): bool => str_contains($text, 'Payment proof has already been received')
                 && str_contains($text, 'awaiting admin verification')),
         ]);
@@ -147,10 +148,27 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Tiada pesanan manual yang sedang menunggu bayaran', $texts[0]);
         $this->assertStringContainsString('Bukti bayaran mesti dihantar sebagai FOTO', $texts[1]);
         $this->assertStringContainsString('Tangkapan skrin pembayaran telah diterima', $texts[2]);
-        $this->assertStringContainsString('Bukti telah dihantar kepada admin', $texts[3]);
+        $this->assertStringContainsString('Bukti telah dihantar untuk semakan', $texts[3]);
         $this->assertStringContainsString($order->invoice_number, $texts[1]);
         $this->assertStringNotContainsString('No manual order is awaiting payment', $texts->implode("\n"));
         $this->assertStringNotContainsString('Payment proof must be sent as a PHOTO', $texts->implode("\n"));
+    }
+
+    #[DataProvider('missingPaymentInvoiceLocaleCases')]
+    public function test_missing_payment_invoice_error_uses_localized_supported_history_command(string $locale, string $expectedCopy, string $historyCommand): void
+    {
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => $locale]);
+
+        $this->postTelegramWebhook($this->messageUpdate(215, '/payment INV-MISSING-257', ['username' => 'buyer']))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(1, $messages);
+        $text = (string) ($messages->first()[0]['text'] ?? '');
+        $this->assertStringContainsString($expectedCopy, $text);
+        $this->assertStringContainsString($historyCommand, $text);
     }
 
     public function test_binance_payment_photo_with_payment_caption_reaches_admin_without_auto_approval(): void
@@ -213,11 +231,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_expired_binance_payment_screenshot_is_forwarded_without_reviving_the_order(): void
+    #[DataProvider('expiredPaymentProofLocaleCases')]
+    public function test_expired_binance_payment_screenshot_is_forwarded_without_reviving_the_order(string $locale, string $expectedCopy): void
     {
         $this->fakeTelegramHttp();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => 'ms']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'late-buyer', 'locale' => $locale]);
         $order = Order::factory()->create(['customer_id' => $customer->id]);
         $payment = Payment::factory()->create([
             'order_id' => $order->id,
@@ -247,7 +266,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $buyerMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12345');
         $this->assertCount(1, $buyerMessages);
-        $this->assertStringContainsString('Bukti bayaran lewat telah diterima', (string) ($buyerMessages->first()[0]['text'] ?? ''));
+        $this->assertStringContainsString($expectedCopy, (string) ($buyerMessages->first()[0]['text'] ?? ''));
 
         $payment->refresh();
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
@@ -258,6 +277,24 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertCount(1, $adminPhotos);
         $this->assertStringContainsString('late', strtolower((string) ($adminPhotos->first()[0]['caption'] ?? '')));
         $this->assertArrayNotHasKey('reply_markup', $adminPhotos->first()[0]);
+    }
+
+    public static function expiredPaymentProofLocaleCases(): array
+    {
+        return [
+            'Indonesian' => ['id', 'Bukti pembayaran terlambat sudah diterima'],
+            'English' => ['en', 'Late payment proof received'],
+            'Malay' => ['ms', 'Bukti bayaran lewat telah diterima'],
+        ];
+    }
+
+    public static function missingPaymentInvoiceLocaleCases(): array
+    {
+        return [
+            'Indonesian' => ['id', 'Invoice tidak ditemukan', '/riwayat'],
+            'English' => ['en', 'The invoice was not found', '/history'],
+            'Malay' => ['ms', 'Invois tidak ditemui', '/riwayat'],
+        ];
     }
 
     public function test_pending_auto_binance_payment_rejects_screenshot_bypass(): void
