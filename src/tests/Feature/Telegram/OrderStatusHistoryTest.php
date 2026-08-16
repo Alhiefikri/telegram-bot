@@ -4,7 +4,9 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\ReconcileCustomerCancellationPayment;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -14,9 +16,12 @@ use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderLifecycle;
+use App\Services\OrderLifecycleResult;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -25,7 +30,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_batal_abandons_cart_and_status_reports_latest_order(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         app(CartService::class)->activeCartFor($customer);
         $order = Order::factory()->create(['customer_id' => $customer->id]);
 
@@ -55,7 +60,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_riwayat_fallback_when_no_orders(): void
     {
         $this->fakeTelegramHttp();
-
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->postTelegramWebhook($this->messageUpdate(202, '/riwayat'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -63,10 +68,32 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Yuk lihat produk dulu'));
     }
 
+    #[DataProvider('emptyOrderLocaleCases')]
+    public function test_empty_status_and_history_use_customer_locale(array $copy): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+
+        $this->postTelegramWebhook($this->messageUpdate(220, '/status'))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(221, $copy['historyCommand']))->assertOk();
+
+        $requests = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(2, $requests);
+        $statusText = (string) $requests->first()[0]['text'];
+        $historyRequest = $requests->last()[0];
+        $historyText = (string) $historyRequest['text'];
+        $this->assertStringContainsString($copy['status'], $statusText);
+        $this->assertStringContainsString($copy['history'], $historyText);
+        $this->assertSame($copy['browse'], $historyRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertStringNotContainsString($copy['otherStatus'], $statusText);
+        $this->assertStringNotContainsString($copy['otherHistory'], $historyText);
+    }
+
     public function test_riwayat_hides_other_customer_orders(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $own = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-OWN']);
         Order::factory()->create(['invoice_number' => 'INV-OTHER']);
 
@@ -80,7 +107,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_without_invoice_sends_usage_instruction(): void
     {
         $this->fakeTelegramHttp();
-
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->postTelegramWebhook($this->messageUpdate(204, '/order'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -196,7 +223,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_detail_refreshes_pending_pakasir_payment_from_transaction_detail(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
@@ -225,7 +252,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_detail_status_refresh_is_rate_limited_per_payment(): void
     {
         config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 1);
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
@@ -251,7 +278,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_cannot_access_other_customer_order(): void
     {
         $this->fakeTelegramHttp();
-        Order::factory()->create(['invoice_number' => 'INV-SECRET']);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(206, '/order INV-SECRET'))->assertOk();
 
@@ -263,7 +290,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_callback_valid_detail_and_manipulated_callback_cannot_leak_other_order(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $own = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-CB', 'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
         OrderItem::factory()->create(['order_id' => $own->id, 'product_name' => 'Netflix']);
         Order::factory()->create(['invoice_number' => 'INV-OTHER-CB']);
@@ -288,7 +315,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         try {
             $this->fakeTelegramHttp();
-            $customer = Customer::factory()->create(['telegram_id' => 12345]);
+            $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
             $order = Order::factory()->create([
                 'customer_id' => $customer->id,
                 'invoice_number' => 'INV-SG-EXPIRY',
@@ -331,7 +358,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     public function test_order_detail_expired_or_cancelled_instructs_checkout_again(): void
     {
         $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-EXP', 'order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
         Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-CAN', 'order_status' => OrderStatus::Cancelled, 'payment_status' => PaymentStatus::Failed]);
 
@@ -446,6 +473,45 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         }
     }
 
+    #[DataProvider('orderGuidanceLocaleCases')]
+    public function test_order_guidance_states_use_customer_locale(array $case): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create([
+            'telegram_id' => 12345,
+            'locale' => $case['locale'],
+        ]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-GUIDANCE-'.$case['locale'].'-'.$case['state'],
+            'order_status' => $case['orderStatus'],
+            'payment_status' => $case['paymentStatus'],
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'manual',
+            'status' => $case['paymentStatus'],
+            'paid_at' => $case['paymentStatus'] === PaymentStatus::Paid ? now() : null,
+        ]);
+        if ($case['manualReview']) {
+            ManualFulfillmentReview::create([
+                'order_id' => $order->id,
+                'payment_id' => $payment->id,
+                'amount' => $payment->amount,
+                'currency' => $payment->currency,
+                'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+                'state' => ManualFulfillmentReview::STATE_PENDING,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(305, '/order '.$order->invoice_number))->assertOk();
+
+        $text = $this->sentMessageContaining($order->invoice_number);
+        $this->assertStringContainsString($case['guidance'], $text);
+        $this->assertStringNotContainsString($case['otherGuidance'], $text);
+    }
+
     #[DataProvider('customerLocaleCases')]
     public function test_group_privacy_denials_follow_customer_locale_for_message_and_callback(array $copy): void
     {
@@ -525,6 +591,119 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($copy['otherCancelStaleMessage'], $messageText);
     }
 
+    #[DataProvider('cancellationFailureLocaleCases')]
+    public function test_buyer_cancel_verification_failure_is_localized(array $copy): void
+    {
+        Queue::fake([ReconcileCustomerCancellationPayment::class]);
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => function () use (&$payment) {
+                return Http::response(['transaction' => [
+                    'project' => 'unexpected-project',
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'payment_method' => 'qris',
+                    'status' => 'pending',
+                ]]);
+            },
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-VERIFY-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'provider_payment_number_hash' => hash('sha256', 'verify-'.$copy['locale']),
+            'provider_created_at' => now(),
+        ]);
+
+        $callbackId = 'cancel-verify-'.$copy['locale'];
+        $this->postTelegramWebhook($this->callbackUpdate(310, $callbackId, 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->assertSame($copy['verificationAnswer'], $this->callbackAnswerText($callbackId));
+        $message = $this->sentMessageRequestContaining($copy['verificationDetail']);
+        $this->assertStringNotContainsString($copy['otherVerificationDetail'], (string) $message['text']);
+    }
+
+    #[DataProvider('cancellationFailureLocaleCases')]
+    public function test_buyer_cancel_paid_provider_outcome_is_localized(array $copy): void
+    {
+        $payment = null;
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => function () use (&$payment) {
+                return Http::response(['transaction' => [
+                    'project' => 'sedulur-digital',
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'payment_method' => 'qris',
+                    'status' => 'completed',
+                ]]);
+            },
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-PAID-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'provider_payment_number_hash' => hash('sha256', 'paid-'.$copy['locale']),
+            'provider_created_at' => now(),
+        ]);
+
+        $callbackId = 'cancel-paid-'.$copy['locale'];
+        $this->postTelegramWebhook($this->callbackUpdate(311, $callbackId, 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame($copy['paidAnswer'], $this->callbackAnswerText($callbackId));
+        $message = $this->sentMessageRequestContaining($copy['paidDetail']);
+        $this->assertStringNotContainsString($copy['otherPaidDetail'], (string) $message['text']);
+    }
+
+    #[DataProvider('cancellationFailureLocaleCases')]
+    public function test_buyer_cancel_processed_outcome_is_localized(array $copy): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-PROCESSED-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'manual',
+            'status' => PaymentStatus::Pending,
+        ]);
+        $lifecycle = $this->mock(OrderLifecycle::class);
+        $lifecycle->shouldReceive('applyPendingCancellation')
+            ->once()
+            ->andReturn(new OrderLifecycleResult($order, $payment, false));
+        $this->app->instance(OrderLifecycle::class, $lifecycle);
+
+        $callbackId = 'cancel-processed-'.$copy['locale'];
+        $this->postTelegramWebhook($this->callbackUpdate(312, $callbackId, 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->assertSame($copy['processedAnswer'], $this->callbackAnswerText($callbackId));
+        $message = $this->sentMessageRequestContaining($copy['processedDetail']);
+        $this->assertStringNotContainsString($copy['otherProcessedDetail'], (string) $message['text']);
+    }
+
     public function test_malay_buyer_cancellation_messages_cover_success_and_stale_states(): void
     {
         $this->fakeTelegramHttp([
@@ -557,9 +736,43 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('Order not found or can no longer be cancelled.', $messages->last());
     }
 
+    public static function emptyOrderLocaleCases(): array
+    {
+        return [
+            'Indonesian' => [[
+                'locale' => 'id',
+                'historyCommand' => '/riwayat',
+                'status' => 'Belum ada pesanan nih',
+                'otherStatus' => 'You do not have any orders yet',
+                'history' => 'Riwayat masih kosong',
+                'otherHistory' => 'No order history',
+                'browse' => '🛍️ Lihat Produk',
+            ]],
+            'English' => [[
+                'locale' => 'en',
+                'historyCommand' => '/history',
+                'status' => 'You do not have any orders yet',
+                'otherStatus' => 'Belum ada pesanan nih',
+                'history' => 'No order history',
+                'otherHistory' => 'Riwayat masih kosong',
+                'browse' => '🛍️ Browse Products',
+            ]],
+            'Malay' => [[
+                'locale' => 'ms',
+                'historyCommand' => '/sejarah',
+                'status' => 'Tiada pesanan lagi',
+                'otherStatus' => 'You do not have any orders yet',
+                'history' => 'Tiada sejarah pesanan',
+                'otherHistory' => 'No order history',
+                'browse' => '🛍️ Lihat Produk',
+            ]],
+        ];
+    }
+
     public static function customerLocaleCases(): array
     {
         return [
+
             'Indonesian' => [[
                 'locale' => 'id',
                 'historyCommand' => '/riwayat',
@@ -631,6 +844,158 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'cancelStaleAnswer' => 'This order can no longer be cancelled.',
                 'cancelStaleMessage' => 'Order not found or can no longer be cancelled.',
                 'otherCancelStaleMessage' => 'Pesanan tidak ditemukan atau sudah tidak bisa dibatalkan.',
+            ]],
+            'Malay' => [[
+                'locale' => 'ms',
+                'historyCommand' => '/sejarah',
+                'statusTitle' => 'Status pesanan',
+                'otherStatusTitle' => 'Order status',
+                'orderStatusLabel' => 'Pesanan:',
+                'paymentStatusLabel' => 'Bayaran:',
+                'orderPending' => 'Menunggu bayaran',
+                'paymentPending' => 'Menunggu bayaran',
+                'historyTitle' => 'Sejarah Pesanan Terkini',
+                'otherHistoryTitle' => 'Recent Order History',
+                'detailButton' => '🧾 Butiran',
+                'shortDate' => '04 Mei 2026',
+                'otherShortDate' => '04 May 2026',
+                'orderTitle' => 'Butiran Pesanan',
+                'otherOrderTitle' => 'Order Details',
+                'orderCompleted' => 'Selesai',
+                'paymentPaid' => 'Dibayar',
+                'createdLabel' => 'Dibuat:',
+                'createdDate' => '04 Mei 2026 15:30 WIB',
+                'paidLabel' => 'Dibayar:',
+                'paidDate' => '05 Mei 2026 09:15 WIB',
+                'paymentLabel' => 'Bayaran:',
+                'deliveryNoteHeading' => '📌 Nota penghantaran:',
+                'otherDeliveryNoteHeading' => '📌 Delivery note:',
+                'privacyMessage' => 'Teruskan di chat peribadi',
+                'otherPrivacyMessage' => 'Continue in a private chat',
+                'privacyCallback' => 'teruskan di chat peribadi',
+                'otherPrivacyCallback' => 'continue in a private chat',
+                'cancelSuccessAnswer' => 'Pesanan dibatalkan dan stok telah dilepaskan.',
+                'cancelSuccessMessage' => 'Pesanan dibatalkan',
+                'otherCancelSuccessMessage' => 'Order cancelled',
+                'cancelStaleAnswer' => 'Pesanan ini tidak lagi boleh dibatalkan.',
+                'cancelStaleMessage' => 'Pesanan tidak ditemui atau tidak lagi boleh dibatalkan.',
+                'otherCancelStaleMessage' => 'Order not found or can no longer be cancelled.',
+            ]],
+        ];
+    }
+
+    public static function orderGuidanceLocaleCases(): array
+    {
+        $states = [
+            'pending' => [OrderStatus::PendingPayment, PaymentStatus::Pending, false],
+            'processing' => [OrderStatus::Processing, PaymentStatus::Paid, false],
+            'completed' => [OrderStatus::Completed, PaymentStatus::Paid, false],
+            'cancelled' => [OrderStatus::Cancelled, PaymentStatus::Pending, false],
+            'expired' => [OrderStatus::Expired, PaymentStatus::Expired, false],
+            'payment_failed' => [OrderStatus::Cancelled, PaymentStatus::Failed, false],
+            'refunded' => [OrderStatus::Completed, PaymentStatus::Refunded, false],
+            'late_payment' => [OrderStatus::Expired, PaymentStatus::Paid, false],
+            'late_payment_cancelled' => [OrderStatus::Cancelled, PaymentStatus::Paid, false],
+            'manual_review_cancelled' => [OrderStatus::Cancelled, PaymentStatus::Paid, true],
+            'manual_review' => [OrderStatus::Expired, PaymentStatus::Paid, true],
+        ];
+        $guidance = [
+            'id' => [
+                'pending' => ['Order masih menunggu pembayaran.', 'This order is awaiting payment.'],
+                'processing' => ['Pembayaran sudah diterima. Pesanan sedang diproses.', 'Payment has been received.'],
+                'completed' => ['Pembayaran sudah diterima. Pesanan sudah selesai diproses.', 'Payment has been received. Your order is complete.'],
+                'cancelled' => ['Order ini sudah dibatalkan.', 'This order was cancelled.'],
+                'expired' => ['Order ini expired sebelum pembayaran selesai.', 'This order expired before payment was completed.'],
+                'payment_failed' => ['Pembayaran gagal atau ditolak', 'Payment failed or was rejected'],
+                'refunded' => ['Pembayaran ini sudah dikembalikan.', 'This payment was refunded.'],
+                'late_payment' => ['Pembayaran diterima setelah order expired.', 'Payment was received after this order expired.'],
+                'late_payment_cancelled' => ['Pembayaran diterima setelah order dibatalkan.', 'Payment was received after this order was cancelled.'],
+                'manual_review_cancelled' => ['Pembayaran diterima setelah order dibatalkan dan sedang menunggu review manual.', 'Payment was received after this order was cancelled and is waiting for manual review.'],
+                'manual_review' => ['sedang menunggu review manual.', 'waiting for manual review.'],
+            ],
+            'en' => [
+                'pending' => ['This order is awaiting payment.', 'Order masih menunggu pembayaran.'],
+                'processing' => ['Payment has been received. Your order is being processed.', 'Pembayaran sudah diterima.'],
+                'completed' => ['Payment has been received. Your order is complete.', 'Pembayaran sudah diterima.'],
+                'cancelled' => ['This order was cancelled.', 'Order ini sudah dibatalkan.'],
+                'expired' => ['This order expired before payment was completed.', 'Order ini expired sebelum pembayaran selesai.'],
+                'payment_failed' => ['Payment failed or was rejected', 'Pembayaran gagal atau ditolak'],
+                'refunded' => ['This payment was refunded.', 'Pembayaran ini sudah dikembalikan.'],
+                'late_payment' => ['Payment was received after this order expired.', 'Pembayaran diterima setelah order expired.'],
+                'late_payment_cancelled' => ['Payment was received after this order was cancelled.', 'Pembayaran diterima setelah order dibatalkan.'],
+                'manual_review_cancelled' => ['Payment was received after this order was cancelled and is waiting for manual review.', 'Pembayaran diterima setelah order dibatalkan dan sedang menunggu review manual.'],
+                'manual_review' => ['waiting for manual review.', 'sedang menunggu review manual.'],
+            ],
+            'ms' => [
+                'pending' => ['Pesanan ini sedang menunggu bayaran.', 'This order is awaiting payment.'],
+                'processing' => ['Bayaran telah diterima. Pesanan anda sedang diproses.', 'Pembayaran sudah diterima.'],
+                'completed' => ['Bayaran telah diterima. Pesanan anda telah selesai.', 'Payment has been received.'],
+                'cancelled' => ['Pesanan ini telah dibatalkan.', 'This order was cancelled.'],
+                'expired' => ['Pesanan ini tamat tempoh sebelum bayaran selesai.', 'This order expired before payment was completed.'],
+                'payment_failed' => ['Bayaran gagal atau ditolak', 'Payment failed or was rejected'],
+                'refunded' => ['Bayaran ini telah dipulangkan.', 'This payment was refunded.'],
+                'late_payment' => ['Bayaran diterima selepas pesanan tamat tempoh.', 'Payment was received after this order expired.'],
+                'late_payment_cancelled' => ['Bayaran diterima selepas pesanan dibatalkan.', 'Payment was received after this order was cancelled.'],
+                'manual_review_cancelled' => ['Bayaran diterima selepas pesanan dibatalkan dan sedang menunggu semakan manual.', 'Payment was received after this order was cancelled and is waiting for manual review.'],
+                'manual_review' => ['sedang menunggu semakan manual.', 'waiting for manual review.'],
+            ],
+        ];
+        $cases = [];
+        foreach ($guidance as $locale => $localeGuidance) {
+            foreach ($states as $state => [$orderStatus, $paymentStatus, $manualReview]) {
+                $cases[$locale.'-'.$state] = [[
+                    'locale' => $locale,
+                    'state' => $state,
+                    'orderStatus' => $orderStatus,
+                    'paymentStatus' => $paymentStatus,
+                    'manualReview' => $manualReview,
+                    'guidance' => $localeGuidance[$state][0],
+                    'otherGuidance' => $localeGuidance[$state][1],
+                ]];
+            }
+        }
+
+        return $cases;
+    }
+
+    public static function cancellationFailureLocaleCases(): array
+    {
+        return [
+            'Indonesian' => [[
+                'locale' => 'id',
+                'verificationAnswer' => 'Status pembayaran belum dapat diverifikasi.',
+                'verificationDetail' => 'Status pembayaran belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.',
+                'otherVerificationDetail' => 'Payment status cannot be verified yet.',
+                'paidAnswer' => 'Pembayaran sudah diterima.',
+                'paidDetail' => 'Pembayaran sudah diterima, jadi pesanan tidak bisa dibatalkan.',
+                'otherPaidDetail' => 'Payment has already been received.',
+                'processedAnswer' => 'Pesanan sudah tidak bisa dibatalkan.',
+                'processedDetail' => 'Pesanan sudah diproses atau tidak bisa dibatalkan lagi.',
+                'otherProcessedDetail' => 'This order can no longer be cancelled.',
+            ]],
+            'English' => [[
+                'locale' => 'en',
+                'verificationAnswer' => 'Payment status cannot be verified yet.',
+                'verificationDetail' => 'Payment status cannot be verified yet. Your order was not cancelled; please try again shortly.',
+                'otherVerificationDetail' => 'Status pembayaran belum dapat diverifikasi.',
+                'paidAnswer' => 'Payment has already been received.',
+                'paidDetail' => 'Payment has already been received, so this order cannot be cancelled.',
+                'otherPaidDetail' => 'Pembayaran sudah diterima.',
+                'processedAnswer' => 'This order can no longer be cancelled.',
+                'processedDetail' => 'This order has been processed or can no longer be cancelled.',
+                'otherProcessedDetail' => 'Pesanan sudah tidak bisa dibatalkan.',
+            ]],
+            'Malay' => [[
+                'locale' => 'ms',
+                'verificationAnswer' => 'Status bayaran belum dapat disahkan.',
+                'verificationDetail' => 'Status bayaran belum dapat disahkan. Pesanan anda tidak dibatalkan; sila cuba lagi sebentar lagi.',
+                'otherVerificationDetail' => 'Payment status cannot be verified yet.',
+                'paidAnswer' => 'Bayaran telah diterima.',
+                'paidDetail' => 'Bayaran telah diterima, jadi pesanan ini tidak boleh dibatalkan.',
+                'otherPaidDetail' => 'Payment has already been received.',
+                'processedAnswer' => 'Pesanan ini tidak lagi boleh dibatalkan.',
+                'processedDetail' => 'Pesanan ini telah diproses atau tidak lagi boleh dibatalkan.',
+                'otherProcessedDetail' => 'This order can no longer be cancelled.',
             ]],
         ];
     }

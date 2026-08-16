@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -22,6 +23,13 @@ class ManualFulfillmentReview extends Model
     public const STATE_REFUND_UNCERTAIN = 'refund_uncertain';
 
     public const REASON_LATE_PAYMENT = 'late_payment';
+
+    public function scopeOpenLatePayment(Builder $query): void
+    {
+        $query
+            ->whereIn('state', [self::STATE_PENDING, self::STATE_REFUND_UNCERTAIN])
+            ->where('reason', self::REASON_LATE_PAYMENT);
+    }
 
     protected function casts(): array
     {

@@ -293,7 +293,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         return [
             'Indonesian' => ['id', 'Invoice tidak ditemukan', '/riwayat'],
             'English' => ['en', 'The invoice was not found', '/history'],
-            'Malay' => ['ms', 'Invois tidak ditemui', '/riwayat'],
+            'Malay' => ['ms', 'Invois tidak ditemui', '/sejarah'],
         ];
     }
 
@@ -774,6 +774,94 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && str_contains((string) ($r['text'] ?? ''), 'Secret-123'));
         Http::assertNotSent(fn ($r) => (string) ($r['chat_id'] ?? '') === '999'
             && str_contains((string) (($r['text'] ?? '').($r['caption'] ?? '')), 'Secret-123'));
+    }
+
+    #[DataProvider('receiptLocaleCases')]
+    public function test_paid_receipt_localizes_system_copy_for_each_customer_locale(array $copy): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $product = Product::factory()->create([
+            'name' => 'Locale Receipt Product',
+            'delivery_note' => 'merchant-delivery-note::KEEP-OPAQUE',
+            'usage_guide_title' => 'Locale guide',
+            'usage_guide_url' => '/locale-guide',
+        ]);
+        $order = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 25000,
+        ]);
+        $item = OrderItem::factory()->for($order)->create([
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'delivery_note' => $product->delivery_note,
+            'delivery_note_snapshotted' => true,
+            'quantity' => 1,
+            'subtotal' => 25000,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'secret' => 'buyer@example.test | password: Locale-Secret',
+        ]);
+        Payment::factory()->for($order)->create([
+            'method' => 'manual',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12345');
+        $this->assertCount(1, $messages);
+        $text = (string) $messages->first()[0]['text'];
+        $this->assertStringContainsString($copy['title'], $text);
+        $this->assertStringContainsString($copy['accountDetails'], $text);
+        $this->assertStringContainsString($copy['deliveryNote'], $text);
+        $this->assertStringContainsString('merchant-delivery-note::KEEP-OPAQUE', $text);
+        $this->assertStringContainsString('buyer@example.test | password: Locale-Secret', $text);
+        $this->assertStringContainsString($copy['thanks'], $text);
+        $this->assertStringNotContainsString($copy['otherTitle'], $text);
+        $this->assertStringNotContainsString($copy['otherAccountDetails'], $text);
+        $this->assertStringNotContainsString($copy['otherDeliveryNote'], $text);
+    }
+
+    public static function receiptLocaleCases(): array
+    {
+        return [
+            'Indonesian' => [[
+                'locale' => 'id',
+                'title' => '✅ Pembayaran diterima',
+                'otherTitle' => '✅ Payment received',
+                'accountDetails' => '🔐 Data akun',
+                'otherAccountDetails' => '🔐 Account details',
+                'deliveryNote' => '📌 Catatan pengiriman:',
+                'otherDeliveryNote' => '📌 Delivery note:',
+                'thanks' => 'Terima kasih sudah belanja di LHIE STORE.',
+            ]],
+            'English' => [[
+                'locale' => 'en',
+                'title' => '✅ Payment received',
+                'otherTitle' => '✅ Pembayaran diterima',
+                'accountDetails' => '🔐 Account details',
+                'otherAccountDetails' => '🔐 Data akun',
+                'deliveryNote' => '📌 Delivery note:',
+                'otherDeliveryNote' => '📌 Catatan pengiriman:',
+                'thanks' => 'Thank you for shopping at LHIE STORE.',
+            ]],
+            'Malay' => [[
+                'locale' => 'ms',
+                'title' => '✅ Bayaran diterima',
+                'otherTitle' => '✅ Payment received',
+                'accountDetails' => '🔐 Butiran akaun',
+                'otherAccountDetails' => '🔐 Account details',
+                'deliveryNote' => '📌 Nota penghantaran:',
+                'otherDeliveryNote' => '📌 Delivery note:',
+                'thanks' => 'Terima kasih kerana membeli-belah di LHIE STORE.',
+            ]],
+        ];
     }
 
     public function test_admin_can_reject_manual_payment_callback_and_english_buyer_gets_localized_message(): void

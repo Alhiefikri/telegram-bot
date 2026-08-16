@@ -74,6 +74,11 @@ class Order extends Model
         return $this->hasMany(ManualFulfillmentReview::class);
     }
 
+    public function hasOpenLatePaymentReview(): bool
+    {
+        return $this->manualFulfillmentReviews()->openLatePayment()->exists();
+    }
+
     public function providerCancellationAttempts()
     {
         return $this->hasMany(ProviderCancellationAttempt::class);

@@ -67,11 +67,11 @@ class TelegramReceiptNotifier
 
             $guides = $this->usageGuides->forOrder($claimed);
             $lines = [
-                $this->locale->text($claimed->customer, '✅ Pembayaran diterima', '✅ Payment received'),
+                $this->locale->translate($claimed->customer, 'receipt.title'),
                 '━━━━━━━━━━━━━━',
-                '🧾 Invoice: '.$claimed->invoice_number,
+                $this->locale->translate($claimed->customer, 'payment.invoice', ['invoice' => $claimed->invoice_number]),
                 '',
-                $this->locale->text($claimed->customer, 'Produk pesanan kamu:', 'Your ordered products:'),
+                $this->locale->translate($claimed->customer, 'receipt.products'),
             ];
             foreach ($claimed->orderItems as $item) {
                 $lines[] = '- '.$item->product_name.' x '.$item->quantity;
@@ -79,25 +79,25 @@ class TelegramReceiptNotifier
             $accountLines = $this->accountSecretLines($claimed);
             if ($accountLines !== []) {
                 $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, '🔐 Data akun', '🔐 Account details');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.account_details');
                 $lines[] = '━━━━━━━━━━━━━━';
                 array_push($lines, ...$accountLines);
                 $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, '⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.', '⚠️ Save these details securely and do not share them with anyone.');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.save_details');
                 foreach ($guides as $guide) {
                     $lines[] = '';
                     $lines[] = '📘 '.$guide['title'];
                     $lines[] = $guide['url'];
                 }
                 $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, 'Kalau ada kendala login, hubungi /support dan sertakan invoice ini.', 'If you have a login problem, contact /support and include this invoice.');
-                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE.', 'Thank you for shopping at LHIE STORE.');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.login_help');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.thanks');
             } else {
                 $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, 'Pesanan kamu sudah tercatat. Simpan pesan ini sebagai bukti pembelian.', 'Your order has been recorded. Save this message as proof of purchase.');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.recorded');
                 $lines[] = '';
-                $lines[] = $this->locale->text($claimed->customer, 'Kalau butuh bantuan, hubungi /support dan sertakan invoice ini.', 'If you need help, contact /support and include this invoice.');
-                $lines[] = $this->locale->text($claimed->customer, 'Terima kasih sudah belanja di LHIE STORE.', 'Thank you for shopping at LHIE STORE.');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.support_help');
+                $lines[] = $this->locale->translate($claimed->customer, 'receipt.thanks');
             }
 
             try {
@@ -144,7 +144,7 @@ class TelegramReceiptNotifier
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {
                 $lines[] = '';
-                $lines[] = $this->locale->text($order->customer, '📌 Catatan pengiriman:', '📌 Delivery note:');
+                $lines[] = $this->locale->translate($order->customer, 'receipt.delivery_note');
                 $lines[] = $deliveryNote;
             }
             $lines[] = '';
@@ -170,7 +170,7 @@ class TelegramReceiptNotifier
         $supportUrl = $this->supportContact->resolve()['url'];
         if ($supportUrl !== '') {
             $rows[] = [[
-                'text' => $this->locale->text($customer, 'Hubungi Support', 'Contact Support'),
+                'text' => $this->locale->translate($customer, 'receipt.support_button'),
                 'url' => $supportUrl,
             ]];
         }

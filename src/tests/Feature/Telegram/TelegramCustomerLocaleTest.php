@@ -119,13 +119,32 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_null_customer_locale_keeps_legacy_indonesian_status_defaults(): void
+    public function test_null_customer_locale_uses_english_lifecycle_status_fallback(): void
     {
         $locale = app(TelegramLocale::class);
         $customer = Customer::factory()->make(['locale' => null]);
 
-        $this->assertSame('Menunggu pembayaran', $locale->orderStatus($customer, OrderStatus::PendingPayment));
-        $this->assertSame('Menunggu pembayaran', $locale->paymentStatus($customer, PaymentStatus::Pending));
+        $this->assertSame('Awaiting payment', $locale->orderStatus($customer, OrderStatus::PendingPayment));
+        $this->assertSame('Awaiting payment', $locale->paymentStatus($customer, PaymentStatus::Pending));
+    }
+
+    public function test_null_customer_locale_order_status_uses_english_catalog_fallback(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41124, 'locale' => null]);
+        Order::factory()->create([
+            'customer_id' => $customer->id,
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41124, '/status', ['id' => 41124], 41124))->assertOk();
+
+        $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41124));
+        $this->assertStringContainsString('Order status', $copy);
+        $this->assertStringContainsString('Awaiting payment', $copy);
+        $this->assertStringNotContainsString('Status pesanan', $copy);
+        $this->assertStringNotContainsString('Menunggu pembayaran', $copy);
     }
 
     public function test_main_menu_copy_and_keyboard_follow_customer_locale(): void
@@ -431,6 +450,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
     public function test_router_error_and_empty_order_copy_follow_customer_voice(): void
     {
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41091, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41092, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41093, 'locale' => 'id']);
 

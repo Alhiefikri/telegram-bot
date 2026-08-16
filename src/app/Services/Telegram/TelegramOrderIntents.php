@@ -35,20 +35,54 @@ class TelegramOrderIntents
         private TelegramMessageChunker $messageChunker,
     ) {}
 
-    public function sendOrderHistory(Customer $customer, string $chatId): void
+    public function sendLatestOrderStatus(Customer $customer, string $chatId): void
     {
-        $orders = $customer->orders()->latest()->limit(5)->get();
-        if ($orders->isEmpty()) {
-            $this->bot->sendMessage($chatId, $this->text($customer, "📦 Riwayat masih kosong\n━━━━━━━━━━━━━━\nKamu belum punya pesanan.\n\nYuk lihat produk dulu, siapa tahu ada yang cocok.", "📦 No order history\n━━━━━━━━━━━━━━\nYou do not have any orders yet.\n\nBrowse products to get started."), ['inline_keyboard' => [[['text' => $this->text($customer, '🛍️ Lihat Produk', '🛍️ Browse Products'), 'callback_data' => 'katalog']]]]);
+        $order = $customer->orders()->latest()->first();
+        if (! $order) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.status.empty'));
 
             return;
         }
 
-        $lines = [$this->text($customer, '📦 Riwayat Pesanan Terakhir', '📦 Recent Order History'), '━━━━━━━━━━━━━━', $this->text($customer, 'Tekan Detail untuk lihat isi pesanan.', 'Tap Details to view an order.')];
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.status.message', [
+            'invoice' => $order->invoice_number,
+            'order_status' => $this->locale->orderStatus($customer, $order->order_status),
+            'payment_status' => $this->locale->paymentStatus($customer, $order->payment_status),
+        ]));
+    }
+
+    public function sendOrderHistory(Customer $customer, string $chatId): void
+    {
+        $orders = $customer->orders()->latest()->limit(5)->get();
+        if ($orders->isEmpty()) {
+            $this->bot->sendMessage(
+                $chatId,
+                $this->locale->translate($customer, 'order.history.empty'),
+                ['inline_keyboard' => [[[
+                    'text' => $this->locale->translate($customer, 'order.history.browse_button'),
+                    'callback_data' => 'katalog',
+                ]]]],
+            );
+
+            return;
+        }
+
+        $lines = [
+            $this->locale->translate($customer, 'order.history.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'order.history.instruction'),
+        ];
         $keyboard = [];
         foreach ($orders as $i => $order) {
-            $lines[] = ($i + 1).'. '.$order->invoice_number.' · '.$this->locale->orderStatus($customer, $order->order_status).' / '.$this->locale->paymentStatus($customer, $order->payment_status).' · Rp '.number_format($order->total_amount, 0, ',', '.').' · '.$this->locale->formatShortDate($customer, $order->created_at);
-            $keyboard[] = [['text' => $this->text($customer, '🧾 Detail ', '🧾 Details ').$order->invoice_number, 'callback_data' => 'order:'.$order->invoice_number]];
+            $lines[] = ($i + 1).'. '.$order->invoice_number
+                .' · '.$this->locale->orderStatus($customer, $order->order_status)
+                .' / '.$this->locale->paymentStatus($customer, $order->payment_status)
+                .' · Rp '.number_format($order->total_amount, 0, ',', '.')
+                .' · '.$this->locale->formatShortDate($customer, $order->created_at);
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'order.history.detail_button').$order->invoice_number,
+                'callback_data' => 'order:'.$order->invoice_number,
+            ]];
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -56,9 +90,16 @@ class TelegramOrderIntents
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void
     {
-        $order = $customer->orders()->where('invoice_number', $invoice)->with(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()])->first();
+        $order = $customer->orders()
+            ->where('invoice_number', $invoice)
+            ->with([
+                'orderItems.stockItems',
+                'orderItems.product',
+                'payments' => fn ($query) => $query->latest(),
+            ])
+            ->first();
         if (! $order) {
-            $this->bot->sendMessage($chatId, $this->text($customer, "Pesanan tidak ditemukan.\n\nCoba cek nomor invoice-nya lagi, atau lihat daftar pesanan kamu di /riwayat.", "Order not found.\n\nCheck the invoice number or view your order history with /history."));
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.detail.not_found'));
 
             return;
         }
@@ -66,34 +107,58 @@ class TelegramOrderIntents
         $payment = $order->payments->first();
         $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
         if ($refreshNotice !== null) {
-            $order = $order->fresh(['orderItems.stockItems', 'orderItems.product', 'payments' => fn ($query) => $query->latest()]);
+            $order = $order->fresh([
+                'orderItems.stockItems',
+                'orderItems.product',
+                'payments' => fn ($query) => $query->latest(),
+            ]);
             $payment = $order->payments->first();
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
+        $orderStatusLabel = $this->locale->orderStatus($customer, $order->order_status);
+        $paymentStatusLabel = $this->locale->paymentStatus($customer, $paymentStatus);
         $lines = [
-            $this->text($customer, '🧾 Detail Pesanan', '🧾 Order Details'),
+            $this->locale->translate($customer, 'order.detail.title'),
             '━━━━━━━━━━━━━━',
-            'Invoice: '.$order->invoice_number,
-            $this->text($customer, 'Status: ', 'Status: ').$this->locale->orderStatus($customer, $order->order_status).' / '.$this->locale->paymentStatus($customer, $paymentStatus),
-            $this->text($customer, 'Dibuat: ', 'Created: ').$this->locale->formatDate($customer, $order->created_at),
+            $this->locale->translate($customer, 'order.detail.invoice', ['invoice' => $order->invoice_number]),
+            $this->locale->translate($customer, 'order.detail.status', [
+                'order_status' => $orderStatusLabel,
+                'payment_status' => $paymentStatusLabel,
+            ]),
+            $this->locale->translate($customer, 'order.detail.created', [
+                'date' => $this->locale->formatDate($customer, $order->created_at),
+            ]),
             '',
-            $this->text($customer, 'Item:', 'Items:'),
+            $this->locale->translate($customer, 'order.detail.items'),
         ];
         foreach ($order->orderItems as $item) {
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
-        $lines[] = 'Total: Rp '.number_format($order->total_amount, 0, ',', '.');
+        $lines[] = $this->locale->translate($customer, 'order.detail.total', [
+            'amount' => 'Rp '.number_format($order->total_amount, 0, ',', '.'),
+        ]);
         if ($payment) {
-            $lines[] = $this->text($customer, 'Pembayaran: ', 'Payment: ').$this->locale->paymentMethod($customer, $payment).' ('.$this->locale->paymentStatus($customer, $payment->status).')';
+            $lines[] = $this->locale->translate($customer, 'order.detail.payment', [
+                'method' => $this->locale->paymentMethod($customer, $payment),
+                'status' => $this->locale->paymentStatus($customer, $payment->status),
+            ]);
             if ($payment->paid_at) {
-                $lines[] = $this->text($customer, 'Dibayar: ', 'Paid: ').$this->locale->formatDate($customer, $payment->paid_at);
+                $lines[] = $this->locale->translate($customer, 'order.detail.paid', [
+                    'date' => $this->locale->formatDate($customer, $payment->paid_at),
+                ]);
             }
         }
-        if (($order->order_status === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = $this->text($customer, 'Batas pembayaran: ', 'Payment deadline: ').$this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at);
+        if (($order->order_status === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending)
+            && ($payment?->expired_at || $order->expires_at)) {
+            $lines[] = $this->locale->translate($customer, 'order.detail.deadline', [
+                'date' => $this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at),
+            ]);
         }
-        if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true) && ($payment?->expired_at || $order->expires_at)) {
-            $lines[] = $this->text($customer, 'Berakhir: ', 'Expired: ').$this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at);
+        if (in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true)
+            && ($payment?->expired_at || $order->expires_at)) {
+            $lines[] = $this->locale->translate($customer, 'order.detail.expired', [
+                'date' => $this->locale->formatDate($customer, $payment?->expired_at ?? $order->expires_at),
+            ]);
         }
         if ($refreshNotice !== null) {
             $lines[] = '';
@@ -102,7 +167,7 @@ class TelegramOrderIntents
         $accountLines = $this->accountSecretLines($customer, $order, $paymentStatus);
         if ($accountLines !== []) {
             $lines[] = '';
-            $lines[] = $this->text($customer, '🔐 Data akun:', '🔐 Account details:');
+            $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
             array_push($lines, ...$accountLines);
         }
         $lines[] = '';
@@ -135,17 +200,55 @@ class TelegramOrderIntents
     {
         $orderStatus = $order->order_status;
         $paymentStatus = $payment?->status ?? $order->payment_status;
+        if ($order->hasOpenLatePaymentReview()) {
+            return $this->locale->translate(
+                $customer,
+                $orderStatus === OrderStatus::Cancelled
+                    ? 'order.guidance.manual_review_cancelled'
+                    : 'order.guidance.manual_review',
+            );
+        }
+        if ($paymentStatus === PaymentStatus::Refunded) {
+            return $this->locale->translate($customer, 'order.guidance.refunded');
+        }
+        if ($orderStatus === OrderStatus::Expired || $orderStatus === OrderStatus::Cancelled) {
+            if ($paymentStatus === PaymentStatus::Paid) {
+                return $this->locale->translate(
+                    $customer,
+                    $orderStatus === OrderStatus::Cancelled
+                        ? 'order.guidance.late_payment_cancelled'
+                        : 'order.guidance.late_payment',
+                );
+            }
+            if ($paymentStatus === PaymentStatus::Failed) {
+                return $this->locale->translate($customer, 'order.guidance.payment_failed');
+            }
+            if ($orderStatus === OrderStatus::Expired) {
+                return $this->locale->translate($customer, 'order.guidance.expired');
+            }
+
+            return $this->locale->translate($customer, 'order.guidance.cancelled');
+        }
+        if ($paymentStatus === PaymentStatus::Failed) {
+            return $this->locale->translate($customer, 'order.guidance.payment_failed');
+        }
+        if ($paymentStatus === PaymentStatus::Expired) {
+            return $this->locale->translate($customer, 'order.guidance.expired');
+        }
         if ($orderStatus === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) {
-            return $this->text($customer, 'Order masih menunggu pembayaran. Selesaikan pembayaran sebelum batas waktu ya.', 'This order is awaiting payment. Complete payment before the deadline.');
+            return $this->locale->translate($customer, 'order.guidance.pending');
         }
-        if (in_array($orderStatus, [OrderStatus::Processing, OrderStatus::Completed], true) || $paymentStatus === PaymentStatus::Paid) {
-            return $this->text($customer, 'Pembayaran sudah diterima. Pesanan sedang atau sudah selesai diproses.', 'Payment has been received. Your order is being processed or is complete.');
+        if ($orderStatus === OrderStatus::Processing) {
+            return $this->locale->translate($customer, 'order.guidance.processing');
         }
-        if (in_array($orderStatus, [OrderStatus::Expired, OrderStatus::Cancelled], true) || in_array($paymentStatus, [PaymentStatus::Expired, PaymentStatus::Failed], true)) {
-            return $this->text($customer, 'Order ini sudah tidak aktif. Kamu bisa checkout ulang lewat /produk.', 'This order is no longer active. You can check out again via /products.');
+        if ($orderStatus === OrderStatus::Completed) {
+            return $this->locale->translate($customer, 'order.guidance.completed');
+        }
+        if ($paymentStatus === PaymentStatus::Paid) {
+            return $this->locale->translate($customer, 'order.guidance.processing');
         }
 
-        return $this->text($customer, 'Kalau butuh bantuan, hubungi admin toko lewat /support.', 'Need help? Contact store support via /support.');
+        return $this->locale->translate($customer, 'order.guidance.support');
     }
 
     private function refreshProviderPaymentStatus(Customer $customer, Order $order, ?Payment $payment): ?string
@@ -174,7 +277,7 @@ class TelegramOrderIntents
         if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
             $seconds = RateLimiter::availableIn($key);
 
-            return $this->text($customer, "Cek status pembayaran dibatasi sementara. Coba lagi dalam {$seconds} detik.", "Payment-status checks are temporarily limited. Try again in {$seconds} seconds.");
+            return $this->locale->translate($customer, 'order.refresh.rate_limited', ['seconds' => $seconds]);
         }
 
         RateLimiter::hit($key, 60);
@@ -191,7 +294,7 @@ class TelegramOrderIntents
             report($e);
             $this->klikQrisAlerts->notifyFor($payment);
 
-            return $this->text($customer, 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.', 'Payment status cannot be checked automatically right now. Please try again later.');
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
         }
 
         if ($result !== null) {
@@ -199,10 +302,10 @@ class TelegramOrderIntents
         }
 
         if ($event?->processed_at !== null) {
-            return $this->text($customer, 'Status pembayaran dicek ulang dan sudah terverifikasi.', 'Payment status was checked again and verified.');
+            return $this->locale->translate($customer, 'order.refresh.verified');
         }
 
-        return $this->text($customer, 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.', 'Payment status was checked. No completed payment was found.');
+        return $this->locale->translate($customer, 'order.refresh.not_paid');
     }
 
     private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string
@@ -221,7 +324,7 @@ class TelegramOrderIntents
         if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
             $seconds = RateLimiter::availableIn($key);
 
-            return $this->text($customer, "Baru bisa cek status pembayaran lagi dalam {$seconds} detik.", "You can check your payment status again in {$seconds} seconds.");
+            return $this->locale->translate($customer, 'order.refresh.pakasir_rate_limited', ['seconds' => $seconds]);
         }
 
         RateLimiter::hit($key, 60);
@@ -231,14 +334,14 @@ class TelegramOrderIntents
         } catch (Throwable $e) {
             report($e);
 
-            return $this->text($customer, 'Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.', 'Payment status cannot be checked automatically right now. Please try again later.');
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
         }
 
         if ($event->processed_at !== null) {
-            return $this->text($customer, 'Status pembayaran dicek ulang dan sudah terverifikasi.', 'Payment status was checked again and verified.');
+            return $this->locale->translate($customer, 'order.refresh.verified');
         }
 
-        return $this->text($customer, 'Status pembayaran sudah dicek. Belum ada pembayaran selesai.', 'Payment status was checked. No completed payment was found.');
+        return $this->locale->translate($customer, 'order.refresh.not_paid');
     }
 
     private function accountSecretLines(Customer $customer, Order $order, PaymentStatus $paymentStatus): array
@@ -259,7 +362,7 @@ class TelegramOrderIntents
             }
             $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
             if ($deliveryNote !== '') {
-                $lines[] = $this->text($customer, '📌 Catatan pengiriman:', '📌 Delivery note:');
+                $lines[] = $this->locale->translate($customer, 'order.detail.delivery_note');
                 $lines[] = $deliveryNote;
             }
         }
@@ -272,10 +375,5 @@ class TelegramOrderIntents
         $entities = $this->credentialFormatter->codeEntities($text);
 
         return $entities === [] ? [] : ['entities' => $entities];
-    }
-
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
     }
 }

@@ -4,7 +4,6 @@ namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Models\Customer;
 use App\Services\CustomerCancellationOutcome;
 use App\Services\CustomerPendingOrderCancellation;
 use App\Services\Telegram\TelegramBotClient;
@@ -46,10 +45,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     {
         if ($context->data === 'status') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $order = $context->customer->orders()->latest()->first();
-            $orderStatus = $order ? $this->locale->orderStatus($context->customer, $order->order_status) : null;
-            $paymentStatus = $order ? $this->locale->paymentStatus($context->customer, $order->payment_status) : null;
-            $this->bot->sendMessage($context->chatId, $order ? $this->text($context->customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Pesanan: {$orderStatus}\n💳 Pembayaran: {$paymentStatus}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$orderStatus}\n💳 Payment: {$paymentStatus}") : $this->text($context->customer, 'Belum ada pesanan nih.', 'You do not have any orders yet.'));
+            $this->orders->sendLatestOrderStatus($context->customer, $context->chatId);
 
             return true;
         }
@@ -124,10 +120,5 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.success_detail', [
             'invoice' => $cancelled->invoice_number,
         ]));
-    }
-
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
     }
 }

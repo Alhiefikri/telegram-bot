@@ -67,7 +67,7 @@ class TelegramLocale
 
     public function orderStatus(Customer $customer, OrderStatus $status): string
     {
-        return $this->translateWithLegacyDefault($customer, match ($status) {
+        return $this->translate($customer, match ($status) {
             OrderStatus::Draft => 'status.order.draft',
             OrderStatus::PendingPayment => 'status.order.pending_payment',
             OrderStatus::Processing => 'status.order.processing',
@@ -79,20 +79,13 @@ class TelegramLocale
 
     public function paymentStatus(Customer $customer, PaymentStatus $status): string
     {
-        return $this->translateWithLegacyDefault($customer, match ($status) {
+        return $this->translate($customer, match ($status) {
             PaymentStatus::Pending => 'status.payment.order.pending',
             PaymentStatus::Paid => 'status.payment.order.paid',
             PaymentStatus::Failed => 'status.payment.order.failed',
             PaymentStatus::Expired => 'status.payment.order.expired',
             PaymentStatus::Refunded => 'status.payment.order.refunded',
         });
-    }
-
-    private function translateWithLegacyDefault(?Customer $customer, string $key): string
-    {
-        $locale = $customer?->locale === null ? 'id' : $this->code($customer);
-
-        return $this->catalog->translate($key, $locale);
     }
 
     public function accountPaymentStatus(Customer $customer, PaymentStatus $status): string

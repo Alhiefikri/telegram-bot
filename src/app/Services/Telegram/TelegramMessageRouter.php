@@ -187,15 +187,12 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
             $this->session->forget($customer);
-            $order = $customer->orders()->latest()->first();
-            $orderStatus = $order ? $this->locale->orderStatus($customer, $order->order_status) : null;
-            $paymentStatus = $order ? $this->locale->paymentStatus($customer, $order->payment_status) : null;
-            $this->bot->sendMessage($chatId, $order ? $this->text($customer, "📦 Status pesanan\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Pesanan: {$orderStatus}\n💳 Pembayaran: {$paymentStatus}\n\nMau lihat semua riwayat? Ketik /riwayat\nMau detail order? Ketik /order {$order->invoice_number}", "📦 Order status\n━━━━━━━━━━━━━━\n🧾 Invoice: {$order->invoice_number}\n📌 Order: {$orderStatus}\n💳 Payment: {$paymentStatus}\n\nView your history with /history\nView this order with /order {$order->invoice_number}") : $this->text($customer, "📦 Belum ada pesanan nih.\n\nBuka /produk dulu untuk mulai belanja.", "📦 You do not have any orders yet.\n\nOpen /products to start shopping."));
+            $this->orders->sendLatestOrderStatus($customer, $chatId);
 
             return;
         }
 
-        if (in_array($text, ['/riwayat', '/history'], true)) {
+        if (in_array($text, ['/riwayat', '/sejarah', '/history'], true)) {
             $this->session->forget($customer);
             $this->orders->sendOrderHistory($customer, $chatId);
 
@@ -206,7 +203,9 @@ class TelegramMessageRouter
             $this->session->forget($customer);
             $invoice = trim(substr($text, strlen('/order')));
             if ($invoice === '') {
-                $this->bot->sendMessage($chatId, $this->text($customer, "Ketik nomor invoice setelah command.\n\nContoh:\n/order INV-12345678", "Type the invoice number after the command.\n\nExample:\n/order INV-12345678"));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.detail.invoice_prompt', [
+                    'example' => 'INV-12345678',
+                ]));
 
                 return;
             }
@@ -246,7 +245,7 @@ class TelegramMessageRouter
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
+        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/sejarah', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || $this->isBroadcastCommand($text);
