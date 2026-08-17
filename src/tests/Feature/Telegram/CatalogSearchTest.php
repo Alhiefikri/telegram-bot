@@ -112,7 +112,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && $request['photo'] === 'banner-file-id'
             && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Browse products')
-            && ($request->data()['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products');
+            && ($request->data()['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
+            && ($request->data()['reply_markup']['is_persistent'] ?? false) === true);
     }
 
     public function test_english_catalog_product_and_quantity_choices_use_english_customer_copy(): void

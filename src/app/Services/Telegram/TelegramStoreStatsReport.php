@@ -2,16 +2,33 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Services\PaymentReceiptReport;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 final class TelegramStoreStatsReport
 {
+    private const START_METRICS_CACHE_KEY = 'telegram:start:metrics';
+
     public function __construct(
         private readonly PaymentReceiptReport $receiptReport,
     ) {}
+
+    /**
+     * @return array{sold_units: int, bot_users: int}
+     */
+    public function startMetrics(): array
+    {
+        $cacheSeconds = (int) config('services.telegram.start_metrics_cache_seconds', 60);
+        if ($cacheSeconds <= 0) {
+            return $this->calculateStartMetrics();
+        }
+
+        return Cache::remember(self::START_METRICS_CACHE_KEY, $cacheSeconds, fn (): array => $this->calculateStartMetrics());
+    }
 
     /**
      * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
@@ -108,6 +125,17 @@ final class TelegramStoreStatsReport
             'sales_value' => $salesValue,
             'receipts' => $receipts,
             'earning' => $receipts['IDR'] ?? 0,
+        ];
+    }
+
+    /**
+     * @return array{sold_units: int, bot_users: int}
+     */
+    private function calculateStartMetrics(): array
+    {
+        return [
+            'sold_units' => $this->receiptReport->canonicalPaidOrderItemQuantity(),
+            'bot_users' => (int) Customer::query()->whereNotNull('telegram_id')->count(),
         ];
     }
 

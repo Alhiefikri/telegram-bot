@@ -6,6 +6,7 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
+use App\Services\Telegram\TelegramChatPrivacyGuard;
 use App\Services\Telegram\TelegramCommunityGate;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
@@ -15,6 +16,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramCommunityGate $communityGate,
+        private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
     ) {}
@@ -37,7 +39,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
     public function handle(TelegramCallbackContext $context): bool
     {
         $this->session->forget($context->customer);
-        if ($this->communityGate->verify($context->customer, $context->chatId)) {
+        if ($this->communityGate->verify($context->customer, $context->chatId, $this->chatPrivacy->isPrivate($context->chatType))) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
         } else {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'community_gate.not_joined'));

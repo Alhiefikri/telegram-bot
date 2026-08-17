@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use Illuminate\Database\Eloquent\Builder;
@@ -51,6 +53,17 @@ class PaymentReceiptReport
                     ->orWhereRaw('UPPER(canonical_payments.currency) = ?', ['IDR']);
             })
             ->sum(DB::raw("CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END"));
+    }
+
+    public function canonicalPaidOrderItemQuantity(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
+    {
+        $canonicalOrderIds = $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)
+            ->select('canonical_payments.order_id');
+
+        return (int) OrderItem::query()
+            ->whereIn('order_id', $canonicalOrderIds)
+            ->whereHas('order', fn ($query) => $query->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed]))
+            ->sum('quantity');
     }
 
     /**

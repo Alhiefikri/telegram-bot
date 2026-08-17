@@ -56,7 +56,6 @@ class TelegramMessageRouter
                 }
             }
             $this->menu->sendWelcome($customer, $chatId, $isPrivateChat);
-            $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
             return;
         }

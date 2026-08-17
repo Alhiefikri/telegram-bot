@@ -40,7 +40,7 @@ class TelegramCommunityGate
         return false;
     }
 
-    public function verify(Customer $customer, string $chatId): bool
+    public function verify(Customer $customer, string $chatId, bool $isPrivateChat = true): bool
     {
         if (! $this->allows($customer, forceRefresh: true)) {
             $this->sendOrReusePrompt($customer, $chatId);
@@ -49,8 +49,7 @@ class TelegramCommunityGate
         }
 
         $this->clearPrompt($customer);
-        $this->menu->sendWelcome($customer, $chatId);
-        $this->menu->sendMainMenu($customer, $chatId);
+        $this->menu->sendWelcome($customer, $chatId, $isPrivateChat);
 
         return true;
     }

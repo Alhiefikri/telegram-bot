@@ -16,6 +16,7 @@ class TelegramMenuIntents
         private TelegramLocale $locale,
         private TelegramSupportContact $supportContact,
         private CheckoutMaintenance $maintenance,
+        private TelegramStoreStatsReport $statsReport,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null): void
@@ -25,17 +26,25 @@ class TelegramMenuIntents
 
     public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
-        $firstName = trim((string) $customer->first_name);
-        if ($firstName === '') {
-            $firstName = $this->locale->translate($customer, 'welcome.default_name');
-        }
-
         [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
-        $caption = $this->locale->translate($customer, 'welcome.caption', [
-            'greeting' => $greetingIcon.' '.$greetingText,
-            'first_name' => $firstName,
-        ]);
-        $replyMarkup = $this->welcomeInlineKeyboard($customer, $chatId, $isPrivateChat);
+        $metrics = $this->statsReport->startMetrics();
+        $greeting = $greetingIcon.' '.$greetingText;
+        $caption = $isPrivateChat
+            ? $this->locale->translate($customer, 'welcome.caption', [
+                'greeting' => $greeting,
+                'first_name' => $this->welcomeName($customer),
+                'sold_units' => $metrics['sold_units'],
+                'bot_users' => $metrics['bot_users'],
+                'name' => $this->displayName($customer),
+                'username' => $this->displayUsername($customer),
+            ])
+            : $this->locale->translate($customer, 'welcome.group_caption', [
+                'greeting' => $greeting,
+                'sold_units' => $metrics['sold_units'],
+                'bot_users' => $metrics['bot_users'],
+            ]);
+        $caption .= $this->maintenanceNotice($customer);
+        $replyMarkup = $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat);
         $bannerReference = config('services.telegram.welcome_banner_url');
 
         if (is_string($bannerReference) && trim($bannerReference) !== '') {
@@ -60,13 +69,7 @@ class TelegramMenuIntents
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
     {
         $message = $this->locale->translate($customer, 'menu.title');
-        $maintenance = $this->maintenance->current();
-        if ($maintenance->active) {
-            $message .= "\n\n".$this->locale->translate($customer, 'menu.maintenance');
-            if ($maintenance->publicNote !== null) {
-                $message .= $this->locale->translate($customer, 'maintenance.admin_note', ['note' => $maintenance->publicNote]);
-            }
-        }
+        $message .= $this->maintenanceNotice($customer);
 
         $this->bot->sendMessage($chatId, $message, $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
     }
@@ -116,23 +119,47 @@ class TelegramMenuIntents
         };
     }
 
-    private function welcomeInlineKeyboard(Customer $customer, string $chatId, bool $isPrivateChat): array
+    private function maintenanceNotice(Customer $customer): string
     {
-        $keyboard = [
-            [
-                ['text' => $this->locale->translate($customer, 'welcome.action.products'), 'callback_data' => 'katalog'],
-                ['text' => $this->locale->translate($customer, 'welcome.action.orders'), 'callback_data' => 'status'],
-            ],
-        ];
-
-        if ($isPrivateChat && $this->adminAccess->isAdmin($customer, $chatId)) {
-            $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
-            if ($adminDashboardButton !== null) {
-                $keyboard[] = [$adminDashboardButton];
-            }
+        $maintenance = $this->maintenance->current();
+        if (! $maintenance->active) {
+            return '';
         }
 
-        return ['inline_keyboard' => $keyboard];
+        $message = "\n\n".$this->locale->translate($customer, 'menu.maintenance');
+        if ($maintenance->publicNote !== null) {
+            $message .= $this->locale->translate($customer, 'maintenance.admin_note', ['note' => $maintenance->publicNote]);
+        }
+
+        return $message;
+    }
+
+    private function welcomeName(Customer $customer): string
+    {
+        $firstName = $this->profileName($customer);
+
+        return $firstName !== '' ? $firstName : $this->locale->translate($customer, 'welcome.default_name');
+    }
+
+    private function displayName(Customer $customer): string
+    {
+        $firstName = $this->profileName($customer);
+
+        return $firstName !== '' ? $firstName : '-';
+    }
+
+    private function profileName(Customer $customer): string
+    {
+        $firstName = trim((string) $customer->first_name);
+
+        return strcasecmp($firstName, 'Telegram Customer') === 0 ? '' : $firstName;
+    }
+
+    private function displayUsername(Customer $customer): string
+    {
+        $username = trim((string) $customer->username);
+
+        return $username !== '' ? '@'.ltrim($username, '@') : '-';
     }
 
     public function sendSupport(Customer $customer, string $chatId): void

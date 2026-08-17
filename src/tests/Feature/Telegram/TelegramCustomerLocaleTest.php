@@ -40,7 +40,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '41101')
             ->map(fn (array $record): array => $record[0]->data());
-        $this->assertCount(2, $messages);
+        $this->assertCount(1, $messages);
         $welcomePhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) $this->telegramRequestField($request, 'chat_id') === '41101');
         $this->assertCount(1, $welcomePhotos);
@@ -48,9 +48,9 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $visibleCopy = $messages
             ->map(fn (array $payload): string => $this->visibleCopy($payload))
             ->implode("\n");
-        $visibleCopy .= "\n".$this->telegramRequestField($welcomePhotos->first()[0], 'caption');
+        $welcomePayload = $welcomePhotos->first()[0]->data();
+        $visibleCopy .= "\n".$this->visibleCopy($welcomePayload);
         $this->assertStringContainsString('selamat datang ke LHIE STORE', $visibleCopy);
-        $this->assertStringContainsString('Menu utama', $visibleCopy);
         $this->assertStringContainsString('Lihat Produk', $visibleCopy);
         $this->assertStringContainsString('Sokongan', $visibleCopy);
         $this->assertStringContainsString('Maya', $visibleCopy);

@@ -28,7 +28,7 @@ Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail 
 Alur customer berjalan dari Telegram:
 
 1. Customer mengirim `/start`.
-2. Bot membuat atau menggunakan ulang data customer Telegram, lalu menampilkan katalog kategori.
+2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka alur produk.
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
 4. Customer memilih kategori dari tombol inline, atau memilih hasil pencarian.
 5. Bot menampilkan produk aktif dengan stok tersedia pada kategori tersebut atau dari hasil pencarian.

@@ -173,7 +173,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, TelegramUpdate::first()->processed_at);
-        Http::assertSentCount(2);
+        Http::assertSentCount(1);
     }
 
     #[Group('postgres-release')]
@@ -189,7 +189,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, $update->fresh()->processed_at);
-        Http::assertSentCount(2);
+        Http::assertSentCount(1);
     }
 
     public function test_recovery_command_redispatches_only_unprocessed_stored_updates(): void
@@ -241,6 +241,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         config()->set('services.telegram.processing_max_attempts', 3);
         config()->set('services.telegram.processing_retry_delay_seconds', 60);
         $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => false, 'description' => 'blocked'], 403),
             'https://api.telegram.org/*' => Http::response(['ok' => false, 'description' => 'blocked'], 403),
         ]);
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
@@ -540,6 +541,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->assertIsInt($welcomePhotoIndex);
         $this->assertIsInt($welcomeMessageIndex);
         $this->assertSame($welcomePhotoIndex, $welcomeMessageIndex);
+        $this->assertCount(1, $recorded->filter(fn (array $record): bool => str_ends_with($record[0]->url(), '/sendPhoto')));
     }
 
     public function test_start_welcome_uses_local_banner_when_banner_url_is_not_configured(): void

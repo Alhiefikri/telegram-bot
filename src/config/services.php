@@ -193,6 +193,7 @@ return [
         'admin_telegram_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
         'mini_app_url' => env('TELEGRAM_MINI_APP_URL'),
         'welcome_banner_url' => env('TELEGRAM_WELCOME_BANNER_URL'),
+        'start_metrics_cache_seconds' => (int) env('TELEGRAM_START_METRICS_CACHE_SECONDS', 60),
         'webhook_rate_limit_per_minute' => env('TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE', 120),
         'community_gate_cache_seconds' => (int) env('TELEGRAM_COMMUNITY_GATE_CACHE_SECONDS', 15),
         'claim_lease_seconds' => (int) env('TELEGRAM_CLAIM_LEASE_SECONDS', 600),

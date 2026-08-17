@@ -297,7 +297,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         Http::assertSent(fn (Request $r) => (str_ends_with($r->url(), '/sendMessage') || str_ends_with($r->url(), '/sendPhoto'))
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'selamat datang di LHIE STORE'));
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
     }
 
@@ -441,7 +441,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
-    public function test_successful_verification_deletes_prompt_and_sends_welcome_menu(): void
+    public function test_successful_verification_deletes_prompt_and_sends_single_welcome_menu(): void
     {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
@@ -465,7 +465,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $r) => (str_ends_with($r->url(), '/sendMessage') || str_ends_with($r->url(), '/sendPhoto'))
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'Ayu')
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'selamat datang di LHIE STORE'));
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'] ?? '', 'Menu utama'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/answerCallbackQuery')
             && $r['callback_query_id'] === 'verify');

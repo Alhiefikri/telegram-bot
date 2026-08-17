@@ -51,8 +51,7 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        $this->menu->sendWelcome($context->customer, $context->chatId);
-        $this->menu->sendMainMenu($context->customer, $context->chatId, $this->chatPrivacy->isPrivate($context->chatType));
+        $this->menu->sendWelcome($context->customer, $context->chatId, $this->chatPrivacy->isPrivate($context->chatType));
 
         return true;
     }
