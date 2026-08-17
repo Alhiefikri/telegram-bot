@@ -19,12 +19,15 @@ use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramBroadcast;
+use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -61,6 +64,11 @@ class TelegramOutboundEffectService
 
     public const TYPE_ADMIN_EXPIRED = TelegramOutboundEffectType::AdminOrderExpiredNotification->value;
 
+    public const TYPE_ADMIN_BROADCAST = TelegramOutboundEffectType::AdminBroadcastRecipient->value;
+
+    /** Compatibility alias for callers that spell out the recipient unit. */
+    public const TYPE_ADMIN_BROADCAST_RECIPIENT = self::TYPE_ADMIN_BROADCAST;
+
     public const TYPE_MANUAL_PAYMENT_PROOF = TelegramOutboundEffectType::ManualPaymentProof->value;
 
     public const TYPE_SALES_PROOF = TelegramOutboundEffectType::SalesProofPost->value;
@@ -90,6 +98,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_ADMIN_ORDER_PAID = 'admin-order-paid-v1';
 
     public const TEMPLATE_ADMIN_ORDER_EXPIRED = 'admin-order-expired-v1';
+
+    public const TEMPLATE_ADMIN_BROADCAST = 'admin-broadcast-v1';
 
     public const TEMPLATE_MANUAL_PAYMENT_PROOF = 'manual-payment-proof-v1';
 
@@ -122,6 +132,13 @@ class TelegramOutboundEffectService
     ];
 
     /** @var list<string> */
+    private const ADMIN_BROADCAST_EFFECT_TYPES = [
+        self::TYPE_ADMIN_BROADCAST,
+    ];
+
+    public const ADMIN_BROADCAST_MAX_ATTEMPTS = 5;
+
+    /** @var list<string> */
     private const SALES_PROOF_EFFECT_TYPES = [
         self::TYPE_SALES_PROOF,
     ];
@@ -141,6 +158,10 @@ class TelegramOutboundEffectService
         'proof_already_forwarded',
         'proof_disabled',
         'proof_target_missing',
+        'telegram_http_400',
+        'telegram_http_403',
+        'broadcast_recipient_attempts_exhausted',
+        'broadcast_recipient_terminal_failure',
     ];
 
     /** @var list<string> */
@@ -251,6 +272,65 @@ class TelegramOutboundEffectService
             legacySentColumn: 'admin_expired_order_notified_at',
             chatId: $chatId,
         );
+    }
+
+    /**
+     * Materialize one independent Admin Broadcast recipient delivery unit.
+     *
+     * The recipient snapshot remains the source of the immutable audience
+     * decision. The shared ledger owns the Telegram side effect and its
+     * ambiguity-safe claim/finalization protocol.
+     */
+    public function recordAdminBroadcastRecipient(
+        TelegramBroadcast $broadcast,
+        TelegramBroadcastRecipient $recipient,
+        string|TelegramOutboundEffectState|null $state = null,
+        ?CarbonInterface $sentAt = null,
+        ?CarbonInterface $failedAt = null,
+        ?CarbonInterface $unknownAt = null,
+        ?CarbonInterface $nextAttemptAt = null,
+        ?string $lastErrorCode = null,
+        ?string $lastError = null,
+    ): TelegramOutboundEffect {
+        $effectKey = self::adminBroadcastRecipientEffectKey(
+            (string) $broadcast->broadcast_key,
+            (string) $recipient->getKey(),
+        );
+        $state ??= TelegramOutboundEffectState::Pending->value;
+        $state = $state instanceof TelegramOutboundEffectState ? $state->value : $state;
+
+        $now = now();
+        TelegramOutboundEffect::query()->insertOrIgnore([
+            'id' => (string) Str::uuid(),
+            'effect_key' => $effectKey,
+            'effect_group_key' => $effectKey,
+            'sequence' => 1,
+            'effect_type' => self::TYPE_ADMIN_BROADCAST,
+            'source_type' => TelegramBroadcastRecipient::class,
+            'source_id' => (string) $recipient->getKey(),
+            'target_type' => 'customer',
+            'telegram_chat_id' => (string) $recipient->telegram_id,
+            'queue' => 'telegram-broadcast',
+            'telegram_method' => filled($broadcast->photo_file_id) ? 'sendPhoto' : 'sendMessage',
+            'locale' => $recipient->locale,
+            'template_version' => self::TEMPLATE_ADMIN_BROADCAST,
+            'state' => $state,
+            'attempts' => (int) $recipient->attempts,
+            'next_attempt_at' => $nextAttemptAt ?? ($state === TelegramOutboundEffectState::Pending->value ? $now : null),
+            'sent_at' => $sentAt,
+            'failed_at' => $failedAt,
+            'unknown_at' => $unknownAt,
+            'last_error_code' => $lastErrorCode,
+            'last_error' => $lastError,
+            'outcome_metadata' => json_encode([
+                'delivery_context' => 'admin_broadcast',
+                'broadcast_source' => (string) ($broadcast->source ?: 'admin'),
+            ], JSON_THROW_ON_ERROR),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return TelegramOutboundEffect::query()->where('effect_key', $effectKey)->firstOrFail();
     }
 
     public function recordManualPaymentProof(Order $order, Payment $payment, ?string $chatId = null): ?TelegramOutboundEffect
@@ -605,6 +685,17 @@ class TelegramOutboundEffectService
         return self::checkoutEffectKey($orderId, $effectType);
     }
 
+    public static function adminBroadcastRecipientEffectKey(string $broadcastKey, string $recipientId): string
+    {
+        return 'broadcast:'.$broadcastKey.':recipient:'.$recipientId.':v1';
+    }
+
+    /** Compatibility alias for callers that use the shorter family name. */
+    public static function broadcastRecipientEffectKey(string $broadcastKey, string $recipientId): string
+    {
+        return self::adminBroadcastRecipientEffectKey($broadcastKey, $recipientId);
+    }
+
     public static function manualPaymentProofEffectKey(string $paymentId): string
     {
         return 'payment:'.$paymentId.':'.self::TYPE_MANUAL_PAYMENT_PROOF.':v1';
@@ -893,6 +984,12 @@ class TelegramOutboundEffectService
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
+            self::TYPE_ADMIN_BROADCAST => SendTelegramBroadcastBatch::dispatch(
+                (int) TelegramBroadcastRecipient::query()
+                    ->whereKey($effect->source_id)
+                    ->value('broadcast_id'),
+                $jobEnqueuedAt,
+            ),
             self::TYPE_MANUAL_PAYMENT_PROOF => ForwardManualPaymentProof::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
@@ -945,6 +1042,11 @@ class TelegramOutboundEffectService
                                     ->orWhereJsonContains('outcome_metadata', ['manual_retry_requested' => true]);
                             });
                     });
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_ADMIN_BROADCAST)
+                    ->orWhere('attempts', '<', self::ADMIN_BROADCAST_MAX_ATTEMPTS);
             })
             ->where(function (Builder $query) use ($at): void {
                 $query->whereNull('next_attempt_at')
@@ -1869,15 +1971,23 @@ class TelegramOutboundEffectService
         });
     }
 
-    public function finalizeFailed(string $effectId, string $claimToken, Throwable $exception): bool
-    {
-        return DB::transaction(function () use ($effectId, $claimToken, $exception): bool {
+    public function finalizeFailed(
+        string $effectId,
+        string $claimToken,
+        Throwable $exception,
+        ?int $retryAfterSeconds = null,
+    ): bool {
+        return DB::transaction(function () use ($effectId, $claimToken, $exception, $retryAfterSeconds): bool {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if (! $this->claimMatches($effect, $claimToken)) {
                 return false;
             }
 
             $now = now();
+            $failureCode = $this->failureCode($exception);
+            $isBroadcast = $effect->effect_type === self::TYPE_ADMIN_BROADCAST;
+            $attemptsExhausted = $isBroadcast && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS;
+            $terminal = in_array($failureCode, self::NON_RETRYABLE_FAILURE_CODES, true) || $attemptsExhausted;
             $effect->forceFill([
                 'state' => TelegramOutboundEffectState::Failed->value,
                 'lease_until' => null,
@@ -1886,10 +1996,12 @@ class TelegramOutboundEffectService
                 'failed_at' => $now,
                 'unknown_at' => null,
                 'manual_review_at' => null,
-                'next_attempt_at' => $effect->effect_type === self::TYPE_SALES_PROOF
-                    ? ((int) $effect->attempts < self::SALES_PROOF_MAX_ATTEMPTS ? $now : null)
-                    : $now->copy()->addSeconds($this->retryDelaySeconds($effect->attempts)),
-                'last_error_code' => $this->failureCode($exception),
+                'next_attempt_at' => $terminal
+                    ? null
+                    : ($effect->effect_type === self::TYPE_SALES_PROOF
+                        ? ((int) $effect->attempts < self::SALES_PROOF_MAX_ATTEMPTS ? $now : null)
+                        : $now->copy()->addSeconds($retryAfterSeconds ?? $this->retryDelaySeconds($effect->attempts))),
+                'last_error_code' => $attemptsExhausted ? 'broadcast_recipient_attempts_exhausted' : $failureCode,
                 'last_error' => 'Telegram delivery failed before completion.',
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
             ])->save();
@@ -2063,6 +2175,17 @@ class TelegramOutboundEffectService
         return in_array($this->stateValue($effect), self::REVIEW_STATES, true);
     }
 
+    public function isTerminalFailure(TelegramOutboundEffect $effect): bool
+    {
+        if ($this->stateValue($effect) !== TelegramOutboundEffectState::Failed->value) {
+            return false;
+        }
+
+        return in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)
+            || ($effect->effect_type === self::TYPE_ADMIN_BROADCAST
+                && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS);
+    }
+
     private function stateValue(TelegramOutboundEffect $effect): string
     {
         return $effect->state instanceof TelegramOutboundEffectState
@@ -2086,6 +2209,15 @@ class TelegramOutboundEffectService
                 ->value('orders.invoice_number');
             if (is_string($invoice) && $invoice !== '') {
                 return 'Payment proof '.$invoice;
+            }
+        }
+
+        if ($effect->source_type === TelegramBroadcastRecipient::class) {
+            $broadcastId = TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->value('broadcast_id');
+            if ($broadcastId !== null) {
+                return 'Admin Broadcast #'.$broadcastId.' recipient #'.substr((string) $effect->source_id, 0, 8);
             }
         }
 
@@ -2179,6 +2311,11 @@ class TelegramOutboundEffectService
             return false;
         }
 
+        if ($effect->effect_type === self::TYPE_ADMIN_BROADCAST
+            && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS) {
+            return false;
+        }
+
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte($at);
     }
 
@@ -2197,6 +2334,11 @@ class TelegramOutboundEffectService
 
         if ($effect->effect_type === self::TYPE_SALES_PROOF
             && (int) $effect->attempts >= self::SALES_PROOF_MAX_ATTEMPTS) {
+            return false;
+        }
+
+        if ($effect->effect_type === self::TYPE_ADMIN_BROADCAST
+            && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS) {
             return false;
         }
 
@@ -2258,6 +2400,27 @@ class TelegramOutboundEffectService
                 'payment_proof_forwarding_token' => $effect->claim_token,
                 'updated_at' => now(),
             ]);
+
+            return;
+        }
+
+        if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
+            TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'send_started_at' => $at,
+                    'send_claim_token' => $effect->claim_token,
+                    'failed_at' => null,
+                    'retry_at' => null,
+                    'terminal_failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+            $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
+            if ($broadcastId !== null) {
+                $this->syncAdminBroadcastProjection((int) $broadcastId);
+            }
 
             return;
         }
@@ -2329,6 +2492,29 @@ class TelegramOutboundEffectService
                     'payment_proof_forwarded_at' => $at,
                     'updated_at' => now(),
                 ]);
+
+            return;
+        }
+
+        if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
+            TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'sent_at' => $at,
+                    'send_started_at' => null,
+                    'send_claim_token' => null,
+                    'failed_at' => null,
+                    'retry_at' => null,
+                    'terminal_failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+            $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
+            if ($broadcastId !== null) {
+                $this->syncAdminBroadcastProjection((int) $broadcastId);
+            }
 
             return;
         }
@@ -2416,6 +2602,29 @@ class TelegramOutboundEffectService
             return;
         }
 
+        if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
+            $terminal = $this->isTerminalFailure($effect);
+            TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'send_started_at' => null,
+                    'send_claim_token' => null,
+                    'failed_at' => $effect->failed_at ?? now(),
+                    'retry_at' => $terminal ? null : $effect->next_attempt_at,
+                    'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
+                    'last_error' => $effect->last_error ?: 'Telegram broadcast delivery failed before completion.',
+                    'attempts' => $terminal ? self::ADMIN_BROADCAST_MAX_ATTEMPTS : (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+            $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
+            if ($broadcastId !== null) {
+                $this->syncAdminBroadcastProjection((int) $broadcastId);
+            }
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
             $startedColumn = match ($effect->effect_type) {
                 self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
@@ -2443,6 +2652,53 @@ class TelegramOutboundEffectService
         ]);
     }
 
+    private function syncAdminBroadcastProjection(int $broadcastId): void
+    {
+        $recipientIds = TelegramBroadcastRecipient::query()
+            ->where('broadcast_id', $broadcastId)
+            ->selectRaw('CAST(id AS TEXT)');
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_type', TelegramBroadcastRecipient::class)
+            ->where('effect_type', self::TYPE_ADMIN_BROADCAST)
+            ->whereIn('source_id', $recipientIds);
+        $recipientCount = TelegramBroadcastRecipient::query()->where('broadcast_id', $broadcastId)->count();
+        $sentCount = (clone $effects)->where('state', TelegramOutboundEffectState::Sent->value)->count();
+        $terminalFailedCount = (clone $effects)
+            ->where('state', TelegramOutboundEffectState::Failed->value)
+            ->where(function (Builder $terminal): void {
+                $terminal
+                    ->whereIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'broadcast_recipient_attempts_exhausted',
+                        'broadcast_recipient_terminal_failure',
+                    ])
+                    ->orWhere('attempts', '>=', self::ADMIN_BROADCAST_MAX_ATTEMPTS);
+            })
+            ->count();
+        $pendingCount = max(0, $recipientCount - $sentCount - $terminalFailedCount);
+        $complete = $recipientCount > 0 && $pendingCount === 0;
+        $status = match (true) {
+            $recipientCount === 0 => TelegramBroadcast::STATUS_COMPLETED,
+            $complete && $sentCount === 0 => TelegramBroadcast::STATUS_FAILED,
+            $complete && $terminalFailedCount > 0 => TelegramBroadcast::STATUS_PARTIALLY_FAILED,
+            $complete => TelegramBroadcast::STATUS_COMPLETED,
+            $sentCount > 0 || $terminalFailedCount > 0 => TelegramBroadcast::STATUS_IN_PROGRESS,
+            default => TelegramBroadcast::STATUS_QUEUED,
+        };
+
+        TelegramBroadcast::query()->whereKey($broadcastId)->update([
+            'status' => $status,
+            'recipient_count' => $recipientCount,
+            'sent_count' => $sentCount,
+            'failed_count' => $terminalFailedCount,
+            'terminal_failed_count' => $terminalFailedCount,
+            'pending_count' => $pendingCount,
+            'completed_at' => $complete || $recipientCount === 0 ? now() : null,
+            'updated_at' => now(),
+        ]);
+    }
+
     private static function templateVersion(string $effectType): string
     {
         return match ($effectType) {
@@ -2454,6 +2710,7 @@ class TelegramOutboundEffectService
             self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
             self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,
+            self::TYPE_ADMIN_BROADCAST => self::TEMPLATE_ADMIN_BROADCAST,
             self::TYPE_MANUAL_PAYMENT_PROOF => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
             self::TYPE_SALES_PROOF => self::TEMPLATE_SALES_PROOF,
             default => 'checkout-payment-v1',

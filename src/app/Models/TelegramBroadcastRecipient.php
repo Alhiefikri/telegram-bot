@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['broadcast_id', 'customer_id', 'telegram_id', 'locale', 'send_started_at', 'send_claim_token', 'sent_at', 'failed_at', 'retry_at', 'terminal_failed_at', 'last_error', 'attempts'])]
 class TelegramBroadcastRecipient extends Model
@@ -29,5 +30,11 @@ class TelegramBroadcastRecipient extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    public function outboundEffect(): HasOne
+    {
+        return $this->hasOne(TelegramOutboundEffect::class, 'source_id')
+            ->where('source_type', self::class);
     }
 }

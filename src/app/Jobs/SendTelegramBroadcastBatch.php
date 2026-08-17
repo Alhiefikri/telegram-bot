@@ -66,6 +66,7 @@ class SendTelegramBroadcastBatch implements ShouldBeUniqueUntilProcessing, Shoul
                 'sent' => $result?->sent,
                 'transient_failures' => $result?->transientFailures,
                 'terminal_failures' => $result?->terminalFailures,
+                'unknown' => $result?->unknown,
                 'retry_after_seconds' => $result?->retryAfterSeconds,
                 'has_more' => $result?->hasMore,
                 'memory_before_bytes' => $memoryBefore,
