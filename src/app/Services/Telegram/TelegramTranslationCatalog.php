@@ -53,17 +53,17 @@ final class TelegramTranslationCatalog
 
     public function get(string $key, string $locale): string
     {
-        $translation = $this->translator->get($key, [], $locale);
+        $translation = $this->translator->get($key, [], $locale, false);
         if ($this->isResolved($translation, $key)) {
             return $translation;
         }
 
-        $fallback = $this->translator->get($key, [], self::DEFAULT_LOCALE);
+        $fallback = $this->translator->get($key, [], self::DEFAULT_LOCALE, false);
         if ($this->isResolved($fallback, $key)) {
             return $fallback;
         }
 
-        $missing = $this->translator->get(self::MISSING_KEY, [], self::DEFAULT_LOCALE);
+        $missing = $this->translator->get(self::MISSING_KEY, [], self::DEFAULT_LOCALE, false);
 
         return is_string($missing) ? $missing : self::MISSING_KEY;
     }

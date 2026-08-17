@@ -11,8 +11,11 @@ use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\TelegramPaymentInstruction;
 use App\Services\Telegram\TelegramPaymentInstructionRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
+use App\Services\Telegram\TelegramTranslationCatalog;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -322,6 +325,49 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             'Kalau kesusahan, chat admin @warung_support.',
         ]);
         $this->assertStringContainsString('Setelah bayar, kirim screenshot bukti pembayaran ke bot ini sebagai FOTO dengan caption:', $instruction->caption());
+    }
+
+    public function test_payment_deadline_month_is_resolved_by_translation_catalog(): void
+    {
+        $translator = Mockery::mock(Translator::class);
+        $translator->shouldReceive('get')->andReturnUsing(function (string $key): string {
+            return $key === 'date.month.8' ? 'Catalog August' : $key;
+        });
+        $renderer = new TelegramPaymentInstructionRenderer(
+            $this->qrCodes,
+            new TelegramTranslationCatalog($translator),
+        );
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-08-04 16:30:00', 'Asia/Jakarta'));
+
+        $instruction = $renderer->manual($order, [
+            'label' => 'BCA Manual QR',
+            'name' => 'Lhie Store QRIS',
+        ], 'warung_support', 'en');
+
+        $this->assertStringContainsString('04 Catalog August 2026 16:30 WIB', $instruction->caption());
+    }
+
+    #[DataProvider('paymentDeadlineMonthCases')]
+    public function test_payment_deadline_month_is_localized_for_each_supported_locale(string $locale, string $month): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-08-04 16:30:00', 'Asia/Jakarta'));
+        $payment = Payment::factory()->for($order)->create([
+            'merchant_ref' => 'PKS-MONTH-'.$locale,
+            'amount' => 125000,
+        ]);
+
+        $instruction = $this->renderer()->hostedPakasir($order, $payment, 'https://pakasir.example/pay/month', false, $locale);
+
+        $this->assertStringContainsString('04 '.$month.' 2026 16:30 WIB', $instruction->caption());
+    }
+
+    public static function paymentDeadlineMonthCases(): array
+    {
+        return [
+            'indonesian' => ['id', 'Agu'],
+            'english' => ['en', 'Aug'],
+            'malay' => ['ms', 'Ogo'],
+        ];
     }
 
     public function test_manual_instruction_uses_english_caption_and_no_buyer_actions_for_en_locale(): void

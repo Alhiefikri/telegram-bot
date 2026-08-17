@@ -92,5 +92,4 @@ final class TelegramCheckoutMaintenanceCallbackHandler implements TelegramCallba
 
         return $keyboard;
     }
-
 }

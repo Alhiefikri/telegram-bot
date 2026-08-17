@@ -311,13 +311,9 @@ class TelegramPaymentInstructionRenderer
     {
         $timezone = (string) config('app.timezone');
         $localized = $date->copy()->timezone($timezone);
-        $months = match ($locale) {
-            'id' => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
-            'ms' => [1 => 'Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'],
-            default => [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-        };
+        $month = $this->catalog->translate('date.month.'.(int) $localized->format('n'), $locale);
 
-        return $localized->format('d').' '.$months[(int) $localized->format('n')].$localized->format(' Y H:i').' '.$this->timezoneLabel($timezone);
+        return $localized->format('d').' '.$month.$localized->format(' Y H:i').' '.$this->timezoneLabel($timezone);
     }
 
     private function timezoneLabel(string $timezone): string

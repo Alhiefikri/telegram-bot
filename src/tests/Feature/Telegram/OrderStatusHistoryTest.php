@@ -249,6 +249,42 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Pembayaran sudah diterima'));
     }
 
+    #[DataProvider('manualPaymentLocaleCases')]
+    public function test_order_detail_localizes_qr_manual_payment_method(string $locale, int $chatId, string $label): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => $chatId, 'locale' => $locale]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-MANUAL-'.$locale,
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_name' => 'Manual QR Product', 'quantity' => 1, 'subtotal' => 10000]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'QR_MANUAL',
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate($chatId + 1000, '/order '.$order->invoice_number, ['id' => $chatId], $chatId))->assertOk();
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId
+            && str_contains((string) ($request['text'] ?? ''), $label)
+            && ! str_contains((string) ($request['text'] ?? ''), 'QR_MANUAL'));
+    }
+
+    public static function manualPaymentLocaleCases(): array
+    {
+        return [
+            'indonesian' => ['id', 12351, 'QR Manual'],
+            'english' => ['en', 12352, 'Manual QR'],
+            'malay' => ['ms', 12353, 'QR Manual'],
+        ];
+    }
+
     public function test_order_detail_status_refresh_is_rate_limited_per_payment(): void
     {
         config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 1);

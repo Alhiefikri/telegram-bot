@@ -315,6 +315,88 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertFalse($second['has_more']);
     }
 
+    public function test_legacy_stock_notification_recipients_are_finalized_before_delivery(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'legacy rollout', $admin, '127.0.0.1', ['legacy-secret'])['movement_id'];
+        $event = StockNotificationEvent::create([
+            'inventory_movement_id' => $movementId,
+            'kind' => InventoryMovementType::Adjustment->value,
+            'recipients_snapshotted_at' => now(),
+        ]);
+        $recipient = StockNotificationRecipient::create([
+            'stock_notification_event_id' => $event->id,
+            'recipient_type' => 'customer',
+            'telegram_id' => '991004',
+            'locale' => null,
+            'text' => 'Stok masuk',
+            'reply_markup' => [],
+            'claim_token' => '00000000-0000-0000-0000-000000000004',
+            'claim_expires_at' => now()->addMinutes(5),
+        ]);
+
+        $migration = require database_path('migrations/2026_08_17_000002_finalize_legacy_stock_notification_recipients.php');
+        $migration->up();
+
+        $result = app(StockNotificationDeliveryPipeline::class)->deliver($movementId);
+        $recipient->refresh();
+
+        $this->assertSame(0, $result['processed']);
+        $this->assertSame(5, $recipient->attempts);
+        $this->assertNotNull($recipient->failed_at);
+        $this->assertNotNull($recipient->terminal_failed_at);
+        $this->assertNull($recipient->sent_at);
+        $this->assertSame('00000000-0000-0000-0000-000000000004', $recipient->claim_token);
+        $this->assertNotNull($recipient->claim_expires_at);
+        $this->assertStringContainsString('locale rollout', (string) $recipient->last_error);
+        $this->assertCount(0, Http::recorded());
+    }
+
+    public function test_stock_notification_snapshots_each_customer_locale_and_keeps_store_channel_english(): void
+    {
+        $this->fakeTelegramHttp();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $customers = [
+            Customer::factory()->create(['telegram_id' => 991010, 'locale' => 'id']),
+            Customer::factory()->create(['telegram_id' => 991011, 'locale' => 'en']),
+            Customer::factory()->create(['telegram_id' => 991012, 'locale' => 'ms']),
+        ];
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'localized rollout', $admin, '127.0.0.1', ['localized-secret'])['movement_id'];
+
+        app(StockNotificationDeliveryPipeline::class)->deliver($movementId);
+
+        foreach ([
+            [$customers[0], '✅ Stok Tersedia'],
+            [$customers[1], '✅ Back in Stock'],
+            [$customers[2], '✅ Stok Tersedia Semula'],
+        ] as [$customer, $title]) {
+            $recipient = StockNotificationRecipient::query()->where('customer_id', $customer->id)->sole();
+
+            $this->assertSame($customer->locale, $recipient->locale);
+            $this->assertStringContainsString($title, (string) $recipient->text);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === (string) $customer->telegram_id
+                && str_contains((string) ($request['text'] ?? ''), $title));
+        }
+
+        $channelRecipient = StockNotificationRecipient::query()->where('recipient_type', 'store_channel')->sole();
+        $this->assertNull($channelRecipient->locale);
+        $this->assertStringContainsString('RESTOCK', (string) $channelRecipient->text);
+        $this->assertStringNotContainsString('Stok masuk', (string) $channelRecipient->text);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '-100123'
+            && str_contains((string) ($request['text'] ?? ''), 'RESTOCK')
+            && ! str_contains((string) ($request['text'] ?? ''), 'Stok masuk'));
+    }
+
     public function test_permanent_stock_notification_failure_is_recorded_for_operator_follow_up(): void
     {
         Customer::factory()->create(['telegram_id' => 991002, 'locale' => 'ms']);

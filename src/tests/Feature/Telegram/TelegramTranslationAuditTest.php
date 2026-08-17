@@ -38,10 +38,24 @@ class TelegramTranslationAuditTest extends TestCase
     public function test_catalog_uses_english_when_a_requested_locale_key_is_missing(): void
     {
         $translator = Mockery::mock(Translator::class);
-        $translator->shouldReceive('get')->with('catalog.key', [], 'ms')->once()->andReturn('catalog.key');
-        $translator->shouldReceive('get')->with('catalog.key', [], 'en')->once()->andReturn('English fallback');
+        $translator->shouldReceive('get')->with('catalog.key', [], 'ms', false)->once()->andReturn('catalog.key');
+        $translator->shouldReceive('get')->with('catalog.key', [], 'en', false)->once()->andReturn('English fallback');
 
         $this->assertSame('English fallback', (new TelegramTranslationCatalog($translator))->translate('catalog.key', 'ms'));
+    }
+
+    public function test_catalog_english_fallback_ignores_application_fallback_locale(): void
+    {
+        config()->set('app.fallback_locale', 'id');
+        $translator = app('translator');
+        $translator->setFallback('id');
+        $translator->addLines(['catalog.fallback_probe' => 'Nilai Bahasa Indonesia'], 'id');
+        $translator->addLines(['catalog.fallback_probe' => 'English fallback'], 'en');
+
+        $this->assertSame(
+            'English fallback',
+            (new TelegramTranslationCatalog($translator))->translate('catalog.fallback_probe', 'ms'),
+        );
     }
 
     public function test_store_channel_audit_rejects_known_indonesian_system_copy(): void
