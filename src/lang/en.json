@@ -329,5 +329,18 @@
   "notification.price.usdt.now_available": "Now available at :amount",
   "notification.price.usdt.unavailable": "No longer available for Binance Pay.",
   "notification.price.help": "Need help? Reply with /support.",
-  "notification.price.cta": "🛒 View Product"
+  "notification.price.cta": "🛒 View Product",
+  "notification.store_channel.cta": "🛒 View Product",
+  "notification.store_channel.restock.title": "✨ :product RESTOCK — AVAILABLE NOW",
+  "notification.store_channel.restock.explanation": "New stock has arrived and the product is ready to order again.",
+  "notification.store_channel.restock.added": "📥 Stock added: +:quantity :unit",
+  "notification.store_channel.restock.available": "📦 Available stock now: :stock :unit",
+  "notification.store_channel.restock.price": "💳 QRIS price: Rp:amount",
+  "notification.store_channel.restock.binance": "💎 Binance Pay: :amount USDT",
+  "notification.store_channel.restock.follow_up": "Don't miss it again 🙌",
+  "notification.store_channel.sold_out.label": "🔴 SOLD OUT",
+  "notification.store_channel.sold_out.confirmation": "The last available stock was just sold after payment was successfully confirmed ✅",
+  "notification.store_channel.sold_out.thanks": "Thank you for your enthusiasm and trust 🙏",
+  "notification.store_channel.sold_out.unavailable": "This product cannot be ordered again for now.",
+  "notification.store_channel.sold_out.follow_up": "Follow this channel for the next stock update. We will let you know when the product is available again."
 }

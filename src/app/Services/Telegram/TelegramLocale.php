@@ -12,6 +12,8 @@ class TelegramLocale
 {
     public const DEFAULT_LOCALE = 'en';
 
+    public const STORE_CHANNEL_LOCALE = 'en';
+
     /** @var list<string> */
     private const SUPPORTED_LOCALES = ['id', 'en', 'ms'];
 

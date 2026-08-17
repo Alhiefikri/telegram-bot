@@ -59,25 +59,8 @@ class TelegramProductNotificationService
         }
 
         $this->sendStoreChannel(
-            implode("\n", [
-                '✨ '.$product->name.' RESTOCK — SUDAH TERSEDIA',
-                '━━━━━━━━━━━━━━',
-                'Stok baru sudah masuk dan produk siap dipesan kembali.',
-                '',
-                '📥 Stok masuk: +'.$addedQuantity.' item',
-                '📦 Stok tersedia sekarang: '.$availableStock.' item',
-                '💳 Harga QRIS: Rp'.number_format($product->price_amount, 0, ',', '.'),
-                ...($product->usdt_price_amount !== null
-                    ? ['💎 Binance Pay: '.$this->formatUsdt($product->usdt_price_amount).' USDT']
-                    : []),
-                '',
-                'Jangan sampai kehabisan lagi ya 🙌',
-            ]),
-            [
-                'inline_keyboard' => [[
-                    ['text' => '🛒 Lihat Produk', 'url' => $this->urls->telegramProductStartUrl($product)],
-                ]],
-            ],
+            $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
+            $this->storeChannelProductReplyMarkup($product),
         );
 
         return $this->broadcast->sendToActiveUsers(
@@ -116,8 +99,8 @@ class TelegramProductNotificationService
                 'recipient_type' => 'store_channel',
                 'telegram_id' => $channelChatId,
                 'locale' => null,
-                'text' => implode("\n", ['✨ '.$product->name.' RESTOCK — SUDAH TERSEDIA', '━━━━━━━━━━━━━━', 'Stok baru sudah masuk dan produk siap dipesan kembali.', '', '📥 Stok masuk: +'.$addedQuantity.' item', '📦 Stok tersedia sekarang: '.$availableStock.' item', '💳 Harga QRIS: Rp'.number_format($product->price_amount, 0, ',', '.'), ...($product->usdt_price_amount !== null ? ['💎 Binance Pay: '.$this->formatUsdt($product->usdt_price_amount).' USDT'] : []), '', 'Jangan sampai kehabisan lagi ya 🙌']),
-                'reply_markup' => ['inline_keyboard' => [[['text' => '🛒 Lihat Produk', 'url' => $this->urls->telegramProductStartUrl($product)]]]],
+                'text' => $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
+                'reply_markup' => $this->storeChannelProductReplyMarkup($product),
             ];
         }
 
@@ -133,7 +116,7 @@ class TelegramProductNotificationService
         }
         $deliveries = [];
         if ($channelChatId = $this->storeChannelChatId()) {
-            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'store_channel', 'telegram_id' => $channelChatId, 'locale' => null, 'text' => implode("\n", ['📦 '.$product->name, '🔴 TERJUAL HABIS', '━━━━━━━━━━━━━━', '', 'Stok terakhir baru saja terjual setelah pembayaran berhasil dikonfirmasi ✅', '', 'Terima kasih atas antusiasme dan kepercayaannya 🙏', 'Produk ini sementara belum dapat dipesan kembali.', '', 'Pantau channel ini untuk mendapatkan informasi stok berikutnya. Kami akan mengabari saat produk tersedia lagi.']), 'reply_markup' => []];
+            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'store_channel', 'telegram_id' => $channelChatId, 'locale' => null, 'text' => $this->storeChannelSoldOutMessage($product), 'reply_markup' => []];
         }
         if (! blank(config('services.telegram.token')) && ($adminChatId = $this->adminAccess->adminChatId())) {
             $deliveries[] = ['customer_id' => null, 'recipient_type' => 'admin', 'telegram_id' => (string) $adminChatId, 'locale' => null, 'text' => implode("\n", ['⚠️ Stok habis', '━━━━━━━━━━━━━━', '📦 '.$product->name, '', 'Stok yang tersedia untuk dibeli sekarang 0.', '', 'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.']), 'reply_markup' => []];
@@ -223,18 +206,7 @@ class TelegramProductNotificationService
 
     public function notifyProductSoldOut(Product $product): void
     {
-        $this->sendStoreChannel(implode("\n", [
-            '📦 '.$product->name,
-            '🔴 TERJUAL HABIS',
-            '━━━━━━━━━━━━━━',
-            '',
-            'Stok terakhir baru saja terjual setelah pembayaran berhasil dikonfirmasi ✅',
-            '',
-            'Terima kasih atas antusiasme dan kepercayaannya 🙏',
-            'Produk ini sementara belum dapat dipesan kembali.',
-            '',
-            'Pantau channel ini untuk mendapatkan informasi stok berikutnya. Kami akan mengabari saat produk tersedia lagi.',
-        ]));
+        $this->sendStoreChannel($this->storeChannelSoldOutMessage($product));
 
         $this->notifyAdminOutOfStock($product);
     }
@@ -281,6 +253,71 @@ class TelegramProductNotificationService
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    private function storeChannelRestockMessage(Product $product, int $addedQuantity, int $availableStock): string
+    {
+        $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
+
+        return implode("\n", [
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $product->name]),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.explanation'),
+            '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
+                'quantity' => $addedQuantity,
+                'unit' => $this->stockUnit($addedQuantity),
+            ]),
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.available', [
+                'stock' => $availableStock,
+                'unit' => $this->stockUnit($availableStock),
+            ]),
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.price', [
+                'amount' => number_format($product->price_amount, 0, ',', '.'),
+            ]),
+            ...($product->usdt_price_amount !== null
+                ? [$this->locale->translateLocale($locale, 'notification.store_channel.restock.binance', [
+                    'amount' => $this->formatUsdt($product->usdt_price_amount),
+                ])]
+                : []),
+            '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.follow_up'),
+        ]);
+    }
+
+    private function storeChannelSoldOutMessage(Product $product): string
+    {
+        $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
+
+        return implode("\n", [
+            '📦 '.$product->name,
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.label'),
+            '━━━━━━━━━━━━━━',
+            '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.confirmation'),
+            '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.thanks'),
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.unavailable'),
+            '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.follow_up'),
+        ]);
+    }
+
+    private function storeChannelProductReplyMarkup(Product $product): array
+    {
+        return [
+            'inline_keyboard' => [[
+                [
+                    'text' => $this->locale->translateLocale(TelegramLocale::STORE_CHANNEL_LOCALE, 'notification.store_channel.cta'),
+                    'url' => $this->urls->telegramProductStartUrl($product),
+                ],
+            ]],
+        ];
+    }
+
+    private function stockUnit(int $quantity): string
+    {
+        return $quantity === 1 ? 'item' : 'items';
     }
 
     private function storeChannelChatId(): ?string

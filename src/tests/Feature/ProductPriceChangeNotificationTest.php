@@ -18,6 +18,7 @@ use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
+use App\Storefront\StorefrontUrl;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -120,7 +121,15 @@ class ProductPriceChangeNotificationTest extends TestCase
             "🏷️ Price Drop\n━━━━━━━━━━━━━━\nGood news for you.\n📦 CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 + 0.2 USDT.\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
             $storeChannelMessages->first()[0]['text'],
         );
-        $this->assertArrayNotHasKey('reply_markup', $storeChannelMessages->first()[0]);
+        $this->assertSame(
+            [
+                'inline_keyboard' => [[[
+                    'text' => '🛒 View Product',
+                    'url' => 'https://t.me/lhiestore_bot?start=product_'.$product->id,
+                ]]],
+            ],
+            $storeChannelMessages->first()[0]['reply_markup'],
+        );
     }
 
     public function test_usdt_only_decrease_shows_the_usdt_savings_without_an_idr_savings_amount(): void
@@ -582,7 +591,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class)) extends ProductPriceChangeNotificationService
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class)) extends ProductPriceChangeNotificationService
         {
             public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
             {

@@ -182,14 +182,14 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         ]);
         $product = $this->stockedProduct(stock: 1, secrets: ['sold-out-secret']);
         $product->forceFill(['name' => 'ChatGPT Plus Private'])->save();
-        $customer = Customer::factory()->create(['telegram_id' => 399003]);
+        $customer = Customer::factory()->create(['telegram_id' => 399003, 'locale' => 'id']);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->setItemQuantity($cart, $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($cart);
 
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '-100123'
-            && str_contains((string) ($request['text'] ?? ''), 'TERJUAL HABIS'));
+            && str_contains((string) ($request['text'] ?? ''), 'SOLD OUT'));
         Queue::assertNotPushed(SendProductStockNotifications::class);
 
         app(OrderStateMachine::class)->markPaymentPaid($order->payments()->sole());
@@ -207,8 +207,13 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
             && str_contains((string) $request['text'], 'ChatGPT')
-            && str_contains((string) $request['text'], 'TERJUAL HABIS')
-            && str_contains((string) $request['text'], 'pembayaran berhasil dikonfirmasi')
+            && str_contains((string) $request['text'], 'SOLD OUT')
+            && str_contains((string) $request['text'], 'payment was successfully confirmed')
+            && str_contains((string) $request['text'], 'Thank you for your enthusiasm and trust')
+            && str_contains((string) $request['text'], 'cannot be ordered again for now')
+            && str_contains((string) $request['text'], 'Follow this channel for the next stock update')
+            && ! str_contains((string) $request['text'], 'TERJUAL HABIS')
+            && ! str_contains((string) $request['text'], 'Stok terakhir')
             && ! str_contains((string) $request['text'], 'invoice'));
     }
 
@@ -273,7 +278,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $sendMessages = collect(Http::recorded())
             ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage')
                 && (string) ($request[0]['chat_id'] ?? '') === '-100123'
-                && str_contains((string) ($request[0]['text'] ?? ''), 'TERJUAL HABIS'));
+                && str_contains((string) ($request[0]['text'] ?? ''), 'SOLD OUT'));
 
         $this->assertCount(1, $sendMessages);
         $this->assertNotNull($sale->fresh()->stock_notification_sent_at);
@@ -367,6 +372,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             'telegram_chat_id' => '-100123',
             'last_test_success' => true,
         ]);
+        Customer::factory()->create(['telegram_id' => 399007, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
         $product->forceFill([
             'name' => 'ChatGPT Plus Private',
@@ -390,10 +396,17 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             && (string) $request['chat_id'] === '-100123'
             && str_contains((string) $request['text'], 'ChatGPT Plus Private')
             && str_contains((string) $request['text'], 'RESTOCK')
-            && str_contains((string) $request['text'], 'Stok masuk: +3 item')
-            && str_contains((string) $request['text'], 'Stok tersedia sekarang: 3 item')
-            && str_contains((string) $request['text'], 'Harga QRIS: Rp35.000')
-            && str_contains((string) $request['text'], 'Binance Pay: 1.25 USDT'));
+            && str_contains((string) $request['text'], 'New stock has arrived')
+            && str_contains((string) $request['text'], 'Stock added: +3 items')
+            && str_contains((string) $request['text'], 'Available stock now: 3 items')
+            && str_contains((string) $request['text'], 'QRIS price: Rp35.000')
+            && str_contains((string) $request['text'], 'Binance Pay: 1.25 USDT')
+            && str_contains((string) $request['text'], "Don't miss it again")
+            && str_contains((string) json_encode($request->data()), 'View Product')
+            && ! str_contains((string) $request['text'], 'Stok masuk')
+            && ! str_contains((string) $request['text'], 'Stok tersedia sekarang')
+            && ! str_contains((string) $request['text'], 'Harga QRIS')
+            && ! str_contains((string) $request['text'], 'Jangan sampai kehabisan lagi'));
     }
 
     public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void

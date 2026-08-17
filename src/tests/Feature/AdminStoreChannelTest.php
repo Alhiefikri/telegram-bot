@@ -69,6 +69,9 @@ class AdminStoreChannelTest extends TestCase
         $this->post(route('admin.store-channel.test'))
             ->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-test');
 
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+            && $request['text'] === "✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet.");
+
         $this->assertDatabaseHas('store_channel_settings', [
             'telegram_chat_id' => '-100123',
             'last_test_success' => true,

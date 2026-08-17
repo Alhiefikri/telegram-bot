@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StoreChannelSetting;
+use App\Storefront\StorefrontUrl;
 use App\Support\Money;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,7 @@ class ProductPriceChangeNotificationService
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
@@ -150,7 +152,11 @@ class ProductPriceChangeNotificationService
         }
 
         try {
-            $response = $this->bot->sendMessage($chatId, $this->message($claimed, 'en'));
+            $response = $this->bot->sendMessage(
+                $chatId,
+                $this->message($claimed, TelegramLocale::STORE_CHANNEL_LOCALE),
+                $this->storeChannelReplyMarkup($claimed),
+            );
             $messageId = data_get($response, 'result.message_id');
             if (data_get($response, 'ok') !== true || ! $messageId) {
                 throw new RuntimeException('Telegram sendMessage did not return a successful Store Channel message ID.');
@@ -446,6 +452,18 @@ class ProductPriceChangeNotificationService
         return [
             'inline_keyboard' => [[
                 ['text' => $this->locale->translateLocale($locale, 'notification.price.cta'), 'callback_data' => 'product:'.$event->product_id],
+            ]],
+        ];
+    }
+
+    private function storeChannelReplyMarkup(ProductPriceChangeEvent $event): array
+    {
+        return [
+            'inline_keyboard' => [[
+                [
+                    'text' => $this->locale->translateLocale(TelegramLocale::STORE_CHANNEL_LOCALE, 'notification.store_channel.cta'),
+                    'url' => $this->urls->telegramProductStartUrlForId((int) $event->product_id),
+                ],
             ]],
         ];
     }
