@@ -232,6 +232,30 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('I did not understand that command', $copy);
     }
 
+    public function test_malay_command_aliases_route_to_existing_customer_intents(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41034, 'locale' => 'ms', 'first_name' => 'Maya']);
+
+        $this->postTelegramWebhook($this->messageUpdate(41034, '/bantuan', ['id' => 41034], 41034))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41035, '/akaun', ['id' => 41034], 41034))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41036, '/pesanan', ['id' => 41034], 41034))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41037, '/sejarah', ['id' => 41034], 41034))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41038, '/carian', ['id' => 41034], 41034))->assertOk();
+
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '41034')
+            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''));
+
+        $this->assertCount(5, $messages);
+        $this->assertStringContainsString('Ada masalah dengan pesanan, bayaran atau log masuk akaun?', $messages[0]);
+        $this->assertStringContainsString('👤 Akaun Saya', $messages[1]);
+        $this->assertStringContainsString('Tiada pesanan lagi', $messages[2]);
+        $this->assertStringContainsString('Tiada sejarah pesanan', $messages[3]);
+        $this->assertStringContainsString('Apakah produk yang anda cari?', $messages[4]);
+        $this->assertStringNotContainsString('Saya tidak memahami perintah itu', $messages->implode("\n"));
+    }
+
     public function test_history_english_command_alias_opens_order_history(): void
     {
         $this->fakeTelegramHttp();

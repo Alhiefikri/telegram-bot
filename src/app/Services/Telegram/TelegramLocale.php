@@ -14,9 +14,6 @@ class TelegramLocale
 
     public const STORE_CHANNEL_LOCALE = 'en';
 
-    /** @var list<string> */
-    private const SUPPORTED_LOCALES = ['id', 'en', 'ms'];
-
     public function __construct(private TelegramTranslationCatalog $catalog) {}
 
     public function code(?Customer $customer): string
@@ -54,7 +51,7 @@ class TelegramLocale
 
     private function isSupported(string $locale): bool
     {
-        return in_array($locale, self::SUPPORTED_LOCALES, true);
+        return in_array($locale, TelegramTranslationCatalog::SUPPORTED_LOCALES, true);
     }
 
     /**
@@ -63,14 +60,6 @@ class TelegramLocale
     public function translate(?Customer $customer, string $key, array $replace = []): string
     {
         return $this->catalog->translate($key, $this->code($customer), $replace);
-    }
-
-    /**
-     * Legacy pair helper for surfaces that are migrated by later tickets.
-     */
-    public function text(?Customer $customer, string $id, string $en): string
-    {
-        return in_array($customer?->locale, [null, 'id'], true) ? $id : $en;
     }
 
     public function checkoutMaintenanceNote(Customer $customer, ?string $publicNote): string
@@ -159,7 +148,7 @@ class TelegramLocale
     public function languageKeyboard(): array
     {
         $buttons = [];
-        foreach (self::SUPPORTED_LOCALES as $locale) {
+        foreach (TelegramTranslationCatalog::SUPPORTED_LOCALES as $locale) {
             $buttons[] = [
                 'text' => $this->catalog->translate('language.option.'.$locale, $locale),
                 'callback_data' => 'locale:'.$locale,

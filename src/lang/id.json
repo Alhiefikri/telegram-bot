@@ -1,4 +1,8 @@
 {
+  "translation.missing": "Translation unavailable.",
+  "router.access_denied": "Akses ditolak.",
+  "router.admin_required": "Akses admin diperlukan.",
+  "router.unknown_command": "Aku belum paham perintah itu.\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.",
   "language.picker.prompt": "🌐 Pilih bahasa",
   "welcome.default_name": "Kak",
   "welcome.greeting.morning": "Selamat pagi",
@@ -329,5 +333,18 @@
   "notification.price.usdt.now_available": "Sekarang tersedia di :amount",
   "notification.price.usdt.unavailable": "Tidak tersedia lagi untuk Binance Pay.",
   "notification.price.help": "Butuh bantuan? Balas /support ya.",
-  "notification.price.cta": "🛒 Lihat Produk"
+  "notification.price.cta": "🛒 Lihat Produk",
+  "notification.store_channel.cta": "🛒 View Product",
+  "notification.store_channel.restock.title": "✨ :product RESTOCK — AVAILABLE NOW",
+  "notification.store_channel.restock.explanation": "New stock has arrived and the product is ready to order again.",
+  "notification.store_channel.restock.added": "📥 Stock added: +:quantity :unit",
+  "notification.store_channel.restock.available": "📦 Available stock now: :stock :unit",
+  "notification.store_channel.restock.price": "💳 QRIS price: Rp:amount",
+  "notification.store_channel.restock.binance": "💎 Binance Pay: :amount USDT",
+  "notification.store_channel.restock.follow_up": "Don't miss it again 🙌",
+  "notification.store_channel.sold_out.label": "🔴 SOLD OUT",
+  "notification.store_channel.sold_out.confirmation": "The last available stock was just sold after payment was successfully confirmed ✅",
+  "notification.store_channel.sold_out.thanks": "Thank you for your enthusiasm and trust 🙏",
+  "notification.store_channel.sold_out.unavailable": "This product cannot be ordered again for now.",
+  "notification.store_channel.sold_out.follow_up": "Follow this channel for the next stock update. We will let you know when the product is available again."
 }

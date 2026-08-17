@@ -9,6 +9,14 @@ use Illuminate\Support\Arr;
 
 class TelegramMessageRouter
 {
+    private const SUPPORT_COMMANDS = ['/support', '/bantuan', '💬 Support', '💬 Sokongan'];
+
+    private const ACCOUNT_COMMANDS = ['/akun', '/akaun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya'];
+
+    private const ORDER_STATUS_COMMANDS = ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'];
+
+    private const ORDER_HISTORY_COMMANDS = ['/riwayat', '/sejarah', '/history'];
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramIntentSession $session,
@@ -75,7 +83,7 @@ class TelegramMessageRouter
         if (in_array($text, ['📊 Statistik', '📊 Statistik Harian'], true)) {
             $this->session->forget($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
-                $this->bot->sendMessage($chatId, $this->text($customer, 'Akses ditolak.', 'Access denied.'));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
 
                 return;
             }
@@ -88,7 +96,7 @@ class TelegramMessageRouter
         if ($text === '📦 Cek Stok' || $text === '/stok') {
             $this->session->forget($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
-                $this->bot->sendMessage($chatId, $this->text($customer, 'Akses ditolak.', 'Access denied.'));
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
 
                 return;
             }
@@ -112,7 +120,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/support', '💬 Support', '💬 Sokongan'], true)) {
+        if (in_array($text, self::SUPPORT_COMMANDS, true)) {
             $this->session->forget($customer);
             $this->menu->sendSupport($customer, $chatId);
 
@@ -133,16 +141,20 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya'], true)) {
+        if (in_array($text, self::ACCOUNT_COMMANDS, true)) {
             $this->session->forget($customer);
             $this->menu->sendAccountSummary($customer, $chatId);
 
             return;
         }
 
-        if ($text === '/cari' || str_starts_with($text, '/cari ') || $text === '/search' || str_starts_with($text, '/search ')) {
+        if ($text === '/cari' || str_starts_with($text, '/cari ')
+            || $text === '/carian' || str_starts_with($text, '/carian ')
+            || $text === '/search' || str_starts_with($text, '/search ')) {
             $this->session->forget($customer);
-            $command = str_starts_with($text, '/search') ? '/search' : '/cari';
+            $command = str_starts_with($text, '/search')
+                ? '/search'
+                : (str_starts_with($text, '/carian') ? '/carian' : '/cari');
             $keyword = trim(substr($text, strlen($command)));
             if ($keyword === '') {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'search.prompt'));
@@ -184,14 +196,14 @@ class TelegramMessageRouter
             return;
         }
 
-        if (in_array($text, ['/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders'], true)) {
+        if (in_array($text, self::ORDER_STATUS_COMMANDS, true)) {
             $this->session->forget($customer);
             $this->orders->sendLatestOrderStatus($customer, $chatId);
 
             return;
         }
 
-        if (in_array($text, ['/riwayat', '/sejarah', '/history'], true)) {
+        if (in_array($text, self::ORDER_HISTORY_COMMANDS, true)) {
             $this->session->forget($customer);
             $this->orders->sendOrderHistory($customer, $chatId);
 
@@ -239,20 +251,28 @@ class TelegramMessageRouter
         }
 
         $this->session->forget($customer);
-        $this->bot->sendMessage($chatId, $this->text($customer, "Aku belum paham perintah itu.\n\nCoba buka /produk untuk belanja, atau /support kalau butuh bantuan.", "I did not understand that command.\n\nOpen /products to shop or /support if you need help."));
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.unknown_command'));
     }
 
     private function isPrivateOnlyCommand(string $text): bool
     {
-        return in_array($text, ['/akun', '/account', '👤 Akun Saya', '👤 My Account', '👤 Akaun Saya', '/batal', '/payment', '/status', '/pesanan', '/orders', '📦 Pesanan', '📦 Orders', '/riwayat', '/sejarah', '/history', '/order', '/broadcast', '📣 Broadcast Info', '📊 Statistik', '📊 Statistik Harian', '📦 Cek Stok', '/stok'], true)
+        return in_array($text, [
+            ...self::ACCOUNT_COMMANDS,
+            '/batal',
+            '/payment',
+            ...self::ORDER_STATUS_COMMANDS,
+            ...self::ORDER_HISTORY_COMMANDS,
+            '/order',
+            '/broadcast',
+            '📣 Broadcast Info',
+            '📊 Statistik',
+            '📊 Statistik Harian',
+            '📦 Cek Stok',
+            '/stok',
+        ], true)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || $this->isBroadcastCommand($text);
-    }
-
-    private function text(Customer $customer, string $id, string $en): string
-    {
-        return $this->locale->text($customer, $id, $en);
     }
 
     private function startProductId(string $text): ?int

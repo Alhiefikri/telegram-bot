@@ -37,7 +37,7 @@ class TelegramAdminStatsCallbackHandler implements TelegramCallbackHandler
     public function handle(TelegramCallbackContext $context): bool
     {
         if (! $this->adminAccess->isAdmin($context->customer, $context->chatId)) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->text($context->customer, 'Akses ditolak.', 'Access denied.'));
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'router.access_denied'));
 
             return true;
         }

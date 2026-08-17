@@ -261,7 +261,7 @@ class TelegramManualPaymentIntents
     public function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
     {
         if (! $this->isTelegramAdmin($admin, $chatId)) {
-            $this->bot->answerCallbackQuery($callbackQueryId, $this->locale->text($admin, 'Akses admin diperlukan.', 'Admin access is required.'));
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->locale->translateLocale($admin->locale ?? 'id', 'router.admin_required'));
 
             return;
         }
@@ -286,7 +286,7 @@ class TelegramManualPaymentIntents
     public function rejectManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
     {
         if (! $this->isTelegramAdmin($admin, $chatId)) {
-            $this->bot->answerCallbackQuery($callbackQueryId, $this->locale->text($admin, 'Akses admin diperlukan.', 'Admin access is required.'));
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->locale->translateLocale($admin->locale ?? 'id', 'router.admin_required'));
 
             return;
         }
@@ -313,7 +313,7 @@ class TelegramManualPaymentIntents
     public function cancelPendingOrderFromTelegram(Customer $admin, string $chatId, string $invoice): void
     {
         if (! $this->isTelegramAdmin($admin, $chatId)) {
-            $this->bot->sendMessage($chatId, $this->locale->text($admin, 'Akses admin diperlukan.', 'Admin access is required.'));
+            $this->bot->sendMessage($chatId, $this->locale->translateLocale($admin->locale ?? 'id', 'router.admin_required'));
 
             return;
         }

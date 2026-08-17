@@ -564,6 +564,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->callbackUpdate(309, 'forged-stats', 'statistik_harian', ['id' => 111], 111))->assertOk();
 
@@ -657,6 +658,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
         Product::factory()->create(['name' => 'Gemini Pro', 'stock' => 12, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(317, '📦 Cek Stok', ['id' => 111], 111))->assertOk();

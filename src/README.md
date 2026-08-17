@@ -396,6 +396,12 @@ Manual checkout notification retry behavior:
 
 Admin Broadcast memakai queue telegram-broadcast dengan batch maksimal 25 recipient dan shared cache limiter `TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND` (default `25` pesan/detik), sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik walaupun worker ditambah. Respons HTTP 429 memakai nilai retry_after yang dibatasi; recipient yang belum due tetap pending dan ditemukan kembali oleh command telegram:recover-outbound setelah window retry aman.
 
+Sebelum release perubahan copy Store Bot, jalankan audit katalog tiga locale:
+
+```bash
+php artisan telegram:translation-audit
+```
+
 Contoh command umum Laravel:
 
 ```bash

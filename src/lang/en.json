@@ -1,5 +1,8 @@
 {
   "translation.missing": "Translation unavailable.",
+  "router.access_denied": "Access denied.",
+  "router.admin_required": "Admin access is required.",
+  "router.unknown_command": "I did not understand that command.\n\nOpen /products to shop or /support if you need help.",
   "language.picker.prompt": "🌐 Choose your language",
   "welcome.default_name": "there",
   "welcome.greeting.morning": "Good morning",
