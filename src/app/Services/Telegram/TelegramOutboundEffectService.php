@@ -10,6 +10,10 @@ use App\Exceptions\TelegramOutboundPreSendException;
 use App\Exceptions\TelegramTransportException;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
+use App\Jobs\ForwardManualPaymentProof;
+use App\Jobs\SendAdminOrderExpiredNotification;
+use App\Jobs\SendAdminOrderPaidNotification;
+use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
@@ -46,6 +50,21 @@ class TelegramOutboundEffectService
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
+    public const TYPE_ADMIN_PENDING = TelegramOutboundEffectType::AdminOrderPendingNotification->value;
+
+    public const TYPE_ADMIN_PAID = TelegramOutboundEffectType::AdminOrderPaidNotification->value;
+
+    public const TYPE_ADMIN_EXPIRED = TelegramOutboundEffectType::AdminOrderExpiredNotification->value;
+
+    public const TYPE_MANUAL_PAYMENT_PROOF = TelegramOutboundEffectType::ManualPaymentProof->value;
+
+    /** Compatibility aliases for callers that use the longer effect names. */
+    public const TYPE_ADMIN_ORDER_PENDING_NOTIFICATION = self::TYPE_ADMIN_PENDING;
+
+    public const TYPE_ADMIN_ORDER_PAID_NOTIFICATION = self::TYPE_ADMIN_PAID;
+
+    public const TYPE_ADMIN_ORDER_EXPIRED_NOTIFICATION = self::TYPE_ADMIN_EXPIRED;
+
     /** Compatibility alias for callers that refer to the receipt family directly. */
     public const TYPE_RECEIPT = self::TYPE_RECEIPT_CREDENTIALS;
 
@@ -58,6 +77,14 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
+
+    public const TEMPLATE_ADMIN_ORDER_PENDING = 'admin-order-pending-v1';
+
+    public const TEMPLATE_ADMIN_ORDER_PAID = 'admin-order-paid-v1';
+
+    public const TEMPLATE_ADMIN_ORDER_EXPIRED = 'admin-order-expired-v1';
+
+    public const TEMPLATE_MANUAL_PAYMENT_PROOF = 'manual-payment-proof-v1';
 
     public const RECEIPT_QUEUE = 'notifications';
 
@@ -75,6 +102,13 @@ class TelegramOutboundEffectService
     ];
 
     /** @var list<string> */
+    private const ADMIN_NOTIFICATION_EFFECT_TYPES = [
+        self::TYPE_ADMIN_PENDING,
+        self::TYPE_ADMIN_PAID,
+        self::TYPE_ADMIN_EXPIRED,
+    ];
+
+    /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
         'checkout_expired',
         'checkout_not_pending',
@@ -82,6 +116,11 @@ class TelegramOutboundEffectService
         'checkout_payment_not_pending',
         'receipt_not_eligible',
         'receipt_render_changed',
+        'admin_notification_not_eligible',
+        'admin_target_missing',
+        'proof_not_eligible',
+        'proof_attachment_missing',
+        'proof_already_forwarded',
     ];
 
     /** @var list<string> */
@@ -103,11 +142,19 @@ class TelegramOutboundEffectService
         'resolution_at',
         'receipt_chunk_index',
         'receipt_chunk_count',
+        'attachment_type',
+        'attachment_present',
+        'payment_method',
+        'late_evidence',
+        'proof_status',
     ];
 
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly TelegramReceiptNotifier $receiptNotifier,
+        private readonly TelegramAdminAccess $adminAccess,
+        private readonly TelegramAdminOrderNotifier $adminOrderNotifier,
+        private readonly TelegramAdminPaidOrderNotifier $adminPaidOrderNotifier,
     ) {}
 
     public function recordCheckoutInstructions(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
@@ -148,6 +195,127 @@ class TelegramOutboundEffectService
     public function recordManualCheckout(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
     {
         return $this->recordCheckoutInstructions($order, $payment, $customer);
+    }
+
+    public function recordAdminOrderPendingNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
+    {
+        return $this->recordAdminOrderNotification(
+            order: $order,
+            effectType: self::TYPE_ADMIN_PENDING,
+            templateVersion: self::TEMPLATE_ADMIN_ORDER_PENDING,
+            legacyStartedColumn: 'admin_pending_order_notification_started_at',
+            legacySentColumn: 'admin_pending_order_notified_at',
+            chatId: $chatId,
+        );
+    }
+
+    public function recordAdminOrderPaidNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
+    {
+        return $this->recordAdminOrderNotification(
+            order: $order,
+            effectType: self::TYPE_ADMIN_PAID,
+            templateVersion: self::TEMPLATE_ADMIN_ORDER_PAID,
+            legacyStartedColumn: 'admin_paid_order_notification_started_at',
+            legacySentColumn: 'admin_paid_order_notified_at',
+            chatId: $chatId,
+        );
+    }
+
+    public function recordAdminOrderExpiredNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
+    {
+        return $this->recordAdminOrderNotification(
+            order: $order,
+            effectType: self::TYPE_ADMIN_EXPIRED,
+            templateVersion: self::TEMPLATE_ADMIN_ORDER_EXPIRED,
+            legacyStartedColumn: 'admin_expired_order_notification_started_at',
+            legacySentColumn: 'admin_expired_order_notified_at',
+            chatId: $chatId,
+        );
+    }
+
+    public function recordManualPaymentProof(Order $order, Payment $payment, ?string $chatId = null): ?TelegramOutboundEffect
+    {
+        $chatId = $this->adminTargetChatId($chatId);
+        if ($chatId === null || blank(config('services.telegram.token'))) {
+            return null;
+        }
+
+        $effectKey = self::manualPaymentProofEffectKey((string) $payment->getKey());
+        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        // A legacy worker may already have ownership of this proof. Do not
+        // create a second delivery unit while it is still in flight.
+        if ($payment->payment_proof_forwarded_at !== null
+            || $payment->payment_proof_forwarding_started_at !== null) {
+            return null;
+        }
+
+        if ($payment->payment_proof_file_id === null || $payment->payment_proof_submitted_at === null) {
+            return null;
+        }
+
+        $lateEvidence = $payment->method === 'BINANCE_PAY_ID'
+            && in_array($payment->status, [PaymentStatus::Expired, PaymentStatus::Failed], true)
+            && in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_MANUAL_PAYMENT_PROOF,
+                'source_type' => Payment::class,
+                'source_id' => (string) $payment->getKey(),
+                'target_type' => 'admin',
+                'telegram_chat_id' => $chatId,
+                'queue' => 'notifications',
+                'telegram_method' => 'sendPhoto',
+                'locale' => $order->customer?->locale,
+                'template_version' => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'manual_payment_proof',
+                    'attachment_type' => 'telegram_file_reference',
+                    'attachment_present' => true,
+                    'payment_method' => (string) $payment->method,
+                    'late_evidence' => $lateEvidence,
+                    'proof_status' => $payment->status instanceof PaymentStatus
+                        ? $payment->status->value
+                        : (string) $payment->getRawOriginal('status'),
+                ],
+            ],
+        );
+    }
+
+    /**
+     * Dispatch the pending admin effect created during checkout. A false
+     * result tells expand-phase callers to retain their legacy fallback job.
+     */
+    public function dispatchPendingAdminNotification(Order $order): bool
+    {
+        $effect = $this->forOrder((string) $order->getKey(), self::TYPE_ADMIN_PENDING);
+        if ($effect === null) {
+            return false;
+        }
+
+        if ($this->isDispatchable($effect)) {
+            $this->dispatch($effect);
+        }
+
+        // An existing effect, including a sent or review state, is authoritative
+        // even when it is not currently dispatchable. Do not enqueue a legacy
+        // fallback that could race the ledger owner.
+        return true;
+    }
+
+    public function hasConfiguredAdminTarget(): bool
+    {
+        return $this->adminTargetChatId() !== null && filled(config('services.telegram.token'));
     }
 
     /**
@@ -233,6 +401,16 @@ class TelegramOutboundEffectService
         return 'order:'.$orderId.':'.$effectType.':v1';
     }
 
+    public static function adminOrderEffectKey(string $orderId, string $effectType): string
+    {
+        return self::checkoutEffectKey($orderId, $effectType);
+    }
+
+    public static function manualPaymentProofEffectKey(string $paymentId): string
+    {
+        return 'payment:'.$paymentId.':'.self::TYPE_MANUAL_PAYMENT_PROOF.':v1';
+    }
+
     public static function manualCheckoutEffectKey(string $orderId): string
     {
         return self::checkoutEffectKey($orderId, self::TYPE_MANUAL_CHECKOUT);
@@ -249,6 +427,18 @@ class TelegramOutboundEffectService
             ->orderByDesc('id');
 
         return $query->first();
+    }
+
+    public function forPayment(string $paymentId, ?string $effectType = null): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', Payment::class)
+            ->where('source_id', $paymentId)
+            ->when($effectType !== null, fn (Builder $query) => $query->where('effect_type', $effectType))
+            ->when($effectType === null, fn (Builder $query) => $query->whereIn('effect_type', [self::TYPE_MANUAL_PAYMENT_PROOF]))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -457,6 +647,10 @@ class TelegramOutboundEffectService
 
     public function dispatch(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null, bool $force = false): void
     {
+        if (! $force && ! $this->isDispatchable($effect)) {
+            return;
+        }
+
         $jobEnqueuedAt ??= now()->toISOString();
         $pending = match ($effect->effect_type) {
             self::TYPE_MANUAL_CHECKOUT => SendManualCheckoutNotifications::dispatch(
@@ -482,6 +676,26 @@ class TelegramOutboundEffectService
             self::TYPE_RECEIPT_CREDENTIALS => SendTelegramReceipt::dispatch(
                 (string) $effect->source_id,
                 $force,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_ADMIN_PENDING => SendAdminOrderPendingNotification::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_ADMIN_PAID => SendAdminOrderPaidNotification::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_ADMIN_EXPIRED => SendAdminOrderExpiredNotification::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_MANUAL_PAYMENT_PROOF => ForwardManualPaymentProof::dispatch(
+                (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
@@ -718,6 +932,180 @@ class TelegramOutboundEffectService
         }
     }
 
+    public function processAdminOrderNotification(TelegramOutboundEffect $effect): void
+    {
+        if (! in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
+            throw new InvalidArgumentException('Unsupported Telegram admin notification effect type.');
+        }
+
+        $claimed = $this->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return;
+        }
+
+        try {
+            $order = Order::query()
+                ->with(['customer', 'orderItems', 'payments'])
+                ->findOrFail($claimed->source_id);
+
+            if (blank(config('services.telegram.token'))
+                || preg_match('/^[1-9][0-9]*$/', trim((string) $claimed->telegram_chat_id)) !== 1) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'admin_target_missing',
+                    'Telegram admin notification has no usable delivery target.',
+                );
+
+                return;
+            }
+
+            if (! $this->adminNotificationEligible($order, (string) $claimed->effect_type)) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'admin_notification_not_eligible',
+                    'Telegram admin notification was no longer eligible for delivery.',
+                );
+
+                return;
+            }
+
+            if ($claimed->effect_type === self::TYPE_ADMIN_PAID) {
+                // The pending message is a cleanup side effect, not a durable
+                // business effect. Its failure must not reset the paid effect.
+                $this->adminOrderNotifier->deletePending($order);
+            }
+
+            $response = match ($claimed->effect_type) {
+                self::TYPE_ADMIN_PENDING => $this->adminOrderNotifier->sendPendingEffect(
+                    $order,
+                    (string) $claimed->telegram_chat_id,
+                ),
+                self::TYPE_ADMIN_PAID => $this->adminPaidOrderNotifier->sendEffect(
+                    $order,
+                    (string) $claimed->telegram_chat_id,
+                ),
+                self::TYPE_ADMIN_EXPIRED => $this->adminOrderNotifier->sendExpiredEffect(
+                    $order,
+                    (string) $claimed->telegram_chat_id,
+                ),
+                default => throw new InvalidArgumentException('Unsupported Telegram admin notification effect type.'),
+            };
+            $messageId = data_get($response, 'result.message_id');
+
+            if (! is_numeric($messageId)) {
+                throw new TelegramTransportException('sendMessage');
+            }
+
+            $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
+
+            if ($claimed->effect_type === self::TYPE_ADMIN_EXPIRED) {
+                $this->adminOrderNotifier->deletePending($order);
+            }
+        } catch (Throwable $exception) {
+            if ($this->isAmbiguous($exception)) {
+                $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+                return;
+            }
+
+            $this->finalizeFailed((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+            throw $exception;
+        }
+    }
+
+    public function processManualPaymentProof(TelegramOutboundEffect $effect): void
+    {
+        if ($effect->effect_type !== self::TYPE_MANUAL_PAYMENT_PROOF) {
+            throw new InvalidArgumentException('Unsupported Telegram manual payment proof effect type.');
+        }
+
+        $claimed = $this->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return;
+        }
+
+        try {
+            $payment = Payment::query()
+                ->with(['order.customer', 'order.orderItems'])
+                ->findOrFail($claimed->source_id);
+            $order = $payment->order;
+
+            if (blank(config('services.telegram.token'))
+                || preg_match('/^[1-9][0-9]*$/', trim((string) $claimed->telegram_chat_id)) !== 1) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'admin_target_missing',
+                    'Manual payment proof has no usable delivery target.',
+                );
+
+                return;
+            }
+
+            if ($order === null || ! $this->manualPaymentProofEligible($order, $payment)) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    $payment->payment_proof_forwarded_at !== null
+                        ? 'proof_already_forwarded'
+                        : 'proof_not_eligible',
+                    'Manual payment proof was no longer eligible for forwarding.',
+                );
+
+                return;
+            }
+
+            if (trim((string) $claimed->telegram_chat_id) === '') {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'admin_target_missing',
+                    'Manual payment proof has no configured admin target.',
+                );
+
+                return;
+            }
+
+            $photoFileId = trim((string) $payment->payment_proof_file_id);
+            if ($photoFileId === '') {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'proof_attachment_missing',
+                    'Manual payment proof attachment is no longer available.',
+                );
+
+                return;
+            }
+
+            $response = app(TelegramManualPaymentIntents::class)->sendManualPaymentProofEffect(
+                $order,
+                $payment,
+                (string) $claimed->telegram_chat_id,
+            );
+            $messageId = data_get($response, 'result.message_id');
+
+            if (! is_numeric($messageId)) {
+                throw new TelegramTransportException('sendPhoto');
+            }
+
+            $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
+        } catch (Throwable $exception) {
+            if ($this->isAmbiguous($exception)) {
+                $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+                return;
+            }
+
+            $this->finalizeFailed((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+            throw $exception;
+        }
+    }
+
     public function nextReceiptEffect(TelegramOutboundEffect $effect): ?TelegramOutboundEffect
     {
         if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS || $effect->effect_group_key === null) {
@@ -804,6 +1192,89 @@ class TelegramOutboundEffectService
         }
 
         return $first ?? throw new RuntimeException('Telegram receipt effect group was empty.');
+    }
+
+    private function recordAdminOrderNotification(
+        Order $order,
+        string $effectType,
+        string $templateVersion,
+        string $legacyStartedColumn,
+        string $legacySentColumn,
+        ?string $chatId = null,
+    ): ?TelegramOutboundEffect {
+        $chatId = $this->adminTargetChatId($chatId);
+        if ($chatId === null || blank(config('services.telegram.token'))) {
+            return null;
+        }
+
+        $effectKey = self::adminOrderEffectKey((string) $order->getKey(), $effectType);
+        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        // Legacy claim columns are compatibility evidence. If an old worker
+        // has already started or completed this unit, do not backfill another
+        // effect that could race it or resend its message.
+        if ($order->{$legacySentColumn} !== null || $order->{$legacyStartedColumn} !== null) {
+            return null;
+        }
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => $effectType,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'admin',
+                'telegram_chat_id' => $chatId,
+                'queue' => 'notifications',
+                'telegram_method' => 'sendMessage',
+                'locale' => null,
+                'template_version' => $templateVersion,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'order_lifecycle',
+                ],
+            ],
+        );
+    }
+
+    private function adminTargetChatId(?string $chatId = null): ?string
+    {
+        $chatId = trim((string) ($chatId ?? $this->adminAccess->adminChatId()));
+
+        return preg_match('/^[1-9][0-9]*$/', $chatId) === 1 ? $chatId : null;
+    }
+
+    private function adminNotificationEligible(Order $order, string $effectType): bool
+    {
+        return match ($effectType) {
+            self::TYPE_ADMIN_PENDING => $order->order_status === OrderStatus::PendingPayment
+                && $order->payment_status === PaymentStatus::Pending,
+            self::TYPE_ADMIN_PAID => in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
+                && $order->payment_status === PaymentStatus::Paid,
+            self::TYPE_ADMIN_EXPIRED => $order->order_status === OrderStatus::Expired
+                && $order->payment_status === PaymentStatus::Expired,
+            default => false,
+        };
+    }
+
+    private function manualPaymentProofEligible(Order $order, Payment $payment): bool
+    {
+        $lateEvidence = $payment->method === 'BINANCE_PAY_ID'
+            && in_array($payment->status, [PaymentStatus::Expired, PaymentStatus::Failed], true)
+            && in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+
+        return $payment->provider === 'manual'
+            && ($payment->status === PaymentStatus::Pending || $lateEvidence)
+            && $payment->payment_proof_file_id !== null
+            && $payment->payment_proof_submitted_at !== null
+            && $payment->payment_proof_forwarded_at === null;
     }
 
     private function firstReadyReceiptEffect(string $groupKey): ?TelegramOutboundEffect
@@ -1012,7 +1483,7 @@ class TelegramOutboundEffectService
 
     private function finalizeNotDeliverable(string $effectId, string $claimToken, string $reason, string $message = 'Telegram checkout instruction was no longer eligible for delivery.'): bool
     {
-        return DB::transaction(function () use ($effectId, $claimToken, $reason): bool {
+        return DB::transaction(function () use ($effectId, $claimToken, $reason, $message): bool {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if (! $this->claimMatches($effect, $claimToken)) {
                 return false;
@@ -1177,6 +1648,16 @@ class TelegramOutboundEffectService
             }
         }
 
+        if ($effect->source_type === Payment::class) {
+            $invoice = Payment::query()
+                ->whereKey($effect->source_id)
+                ->join('orders', 'orders.id', '=', 'payments.order_id')
+                ->value('orders.invoice_number');
+            if (is_string($invoice) && $invoice !== '') {
+                return 'Payment proof '.$invoice;
+            }
+        }
+
         $sourceType = class_basename((string) $effect->source_type);
         $sourceId = substr((string) $effect->source_id, 0, 8);
 
@@ -1224,10 +1705,13 @@ class TelegramOutboundEffectService
             } elseif (in_array($key, ['http_status', 'resolution_actor_id', 'receipt_chunk_index', 'receipt_chunk_count'], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
                 $safe[$key] = (int) $value;
+            } elseif (in_array($key, ['attachment_present', 'late_evidence'], true) && is_bool($value)) {
+                $safe[$key] = $value;
             } elseif ($key === 'exception' && is_string($value)
                 && preg_match('/\\A[A-Za-z_][A-Za-z0-9_\\\\]*\\z/', $value) === 1) {
                 $safe[$key] = class_basename($value);
-            } elseif (in_array($key, ['reason', 'delivery_context', 'resolution'], true)) {
+            } elseif (in_array($key, ['reason', 'delivery_context', 'resolution', 'attachment_type', 'payment_method', 'proof_status'], true)
+                && is_string($value)) {
                 $safeValue = $this->safeErrorCode(is_string($value) ? $value : null);
                 if ($safeValue !== null) {
                     $safe[$key] = $safeValue;
@@ -1261,6 +1745,22 @@ class TelegramOutboundEffectService
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte($at);
     }
 
+    private function isDispatchable(TelegramOutboundEffect $effect): bool
+    {
+        if (! in_array($this->stateValue($effect), [
+            TelegramOutboundEffectState::Pending->value,
+            TelegramOutboundEffectState::Failed->value,
+        ], true)) {
+            return false;
+        }
+
+        if (in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)) {
+            return false;
+        }
+
+        return $effect->next_attempt_at === null || $effect->next_attempt_at->lte(now());
+    }
+
     private function claimMatches(?TelegramOutboundEffect $effect, string $claimToken): bool
     {
         return $effect !== null
@@ -1274,6 +1774,33 @@ class TelegramOutboundEffectService
         if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
             Order::query()->whereKey($effect->source_id)->update([
                 'telegram_receipt_send_started_at' => $at,
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
+        if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
+            $startedColumn = match ($effect->effect_type) {
+                self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
+                self::TYPE_ADMIN_PAID => 'admin_paid_order_notification_started_at',
+                self::TYPE_ADMIN_EXPIRED => 'admin_expired_order_notification_started_at',
+                default => null,
+            };
+            if ($startedColumn !== null) {
+                Order::query()->whereKey($effect->source_id)->update([
+                    $startedColumn => $at,
+                    'updated_at' => now(),
+                ]);
+            }
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_MANUAL_PAYMENT_PROOF) {
+            Payment::query()->whereKey($effect->source_id)->update([
+                'payment_proof_forwarding_started_at' => $at,
+                'payment_proof_forwarding_token' => $effect->claim_token,
                 'updated_at' => now(),
             ]);
 
@@ -1321,6 +1848,48 @@ class TelegramOutboundEffectService
             return;
         }
 
+        if ($effect->effect_type === self::TYPE_MANUAL_PAYMENT_PROOF) {
+            Payment::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('payment_proof_forwarded_at')
+                ->update([
+                    'payment_proof_admin_chat_id' => $effect->telegram_chat_id,
+                    'payment_proof_forwarding_started_at' => null,
+                    'payment_proof_forwarding_token' => null,
+                    'payment_proof_forwarded_at' => $at,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
+            $values = match ($effect->effect_type) {
+                self::TYPE_ADMIN_PENDING => [
+                    'admin_pending_order_notified_at' => $at,
+                    'admin_pending_order_notification_started_at' => null,
+                    'admin_pending_order_notification_chat_id' => $effect->telegram_chat_id,
+                    'admin_pending_order_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
+                    'admin_pending_order_notification_deleted_at' => null,
+                ],
+                self::TYPE_ADMIN_PAID => [
+                    'admin_paid_order_notified_at' => $at,
+                    'admin_paid_order_notification_started_at' => null,
+                ],
+                self::TYPE_ADMIN_EXPIRED => [
+                    'admin_expired_order_notified_at' => $at,
+                    'admin_expired_order_notification_started_at' => null,
+                ],
+                default => [],
+            };
+
+            if ($values !== []) {
+                Order::query()->whereKey($effect->source_id)->update($values + ['updated_at' => now()]);
+            }
+
+            return;
+        }
+
         if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
@@ -1349,6 +1918,33 @@ class TelegramOutboundEffectService
             return;
         }
 
+        if ($effect->effect_type === self::TYPE_MANUAL_PAYMENT_PROOF) {
+            Payment::query()->whereKey($effect->source_id)->update([
+                'payment_proof_forwarding_started_at' => null,
+                'payment_proof_forwarding_token' => null,
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
+        if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
+            $startedColumn = match ($effect->effect_type) {
+                self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
+                self::TYPE_ADMIN_PAID => 'admin_paid_order_notification_started_at',
+                self::TYPE_ADMIN_EXPIRED => 'admin_expired_order_notification_started_at',
+                default => null,
+            };
+            if ($startedColumn !== null) {
+                Order::query()->whereKey($effect->source_id)->update([
+                    $startedColumn => null,
+                    'updated_at' => now(),
+                ]);
+            }
+
+            return;
+        }
+
         if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
@@ -1367,6 +1963,10 @@ class TelegramOutboundEffectService
             self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
+            self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
+            self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
+            self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,
+            self::TYPE_MANUAL_PAYMENT_PROOF => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
             default => 'checkout-payment-v1',
         };
     }

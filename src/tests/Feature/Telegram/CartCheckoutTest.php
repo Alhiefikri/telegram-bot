@@ -734,7 +734,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
         $order = Order::firstOrFail();
         Queue::assertPushedOn('telegram-outbound', SendManualCheckoutNotifications::class, fn (SendManualCheckoutNotifications $job): bool => $job->orderId === $order->id);
-        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
+        Queue::assertPushedOn('notifications', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id
+            && $job->effectId !== null);
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && str_contains($r->body(), '✅ Checkout berhasil dibuat'));
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -765,7 +766,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
 
         $order = Order::firstOrFail();
         Queue::assertPushedOn('telegram-outbound', SendBinanceCheckoutInstructions::class, fn (SendBinanceCheckoutInstructions $job): bool => $job->orderId === $order->id);
-        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
+        Queue::assertPushedOn('notifications', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id
+            && $job->effectId !== null);
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Binance Pay ID'));
     }

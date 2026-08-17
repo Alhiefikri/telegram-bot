@@ -4,8 +4,12 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Binance\BinancePaymentVerification;
 use Illuminate\Support\Arr;
@@ -22,6 +26,7 @@ class TelegramManualPaymentIntents
         private TelegramLocale $locale,
         private TelegramSupportContact $supportContact,
         private BinancePaymentVerification $verification,
+        private TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -100,9 +105,17 @@ class TelegramManualPaymentIntents
                 'payment_proof_admin_chat_id' => $adminTelegramChatId,
             ]);
 
+            $storedPayment = $payment->fresh();
+            $storedOrder = $lockedOrder->fresh(['customer', 'orderItems', 'payments']);
+
             return [
-                'order' => $lockedOrder->fresh(['customer', 'orderItems', 'payments']),
-                'payment' => $payment->fresh(),
+                'order' => $storedOrder,
+                'payment' => $storedPayment,
+                'effect' => $this->outboundEffects->recordManualPaymentProof(
+                    $storedOrder,
+                    $storedPayment,
+                    $adminTelegramChatId,
+                ),
                 'late' => $isLateBinanceOrder,
                 'status' => 'accepted',
             ];
@@ -138,7 +151,7 @@ class TelegramManualPaymentIntents
         $payment = $claim['payment'];
         $forwarded = false;
         try {
-            $forwarded = $this->forwardSubmittedManualPaymentProof($order, $payment);
+            $forwarded = $this->dispatchSubmittedManualPaymentProof($order, $payment, $claim['effect'] ?? null);
         } catch (\Throwable $exception) {
             report($exception);
         }
@@ -156,13 +169,62 @@ class TelegramManualPaymentIntents
             : 'payment.proof.forwarding'));
     }
 
-    public function forwardSubmittedManualPaymentProof(Order $order, $payment): bool
+    public function forwardSubmittedManualPaymentProof(Order $order, Payment $payment): bool
     {
         $order->loadMissing(['customer', 'orderItems']);
         $adminTelegramChatId = $this->adminTelegramChatId();
         if ($adminTelegramChatId === null) {
             throw new \RuntimeException('Manual payment proof cannot be forwarded without an admin chat and photo.');
         }
+
+        $effect = $this->outboundEffects->recordManualPaymentProof($order, $payment, $adminTelegramChatId);
+        if ($effect !== null) {
+            return $this->dispatchSubmittedManualPaymentProof($order, $payment, $effect);
+        }
+
+        return $this->forwardLegacyManualPaymentProof($order, $payment, $adminTelegramChatId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function sendManualPaymentProofEffect(Order $order, Payment $payment, string $adminTelegramChatId): array
+    {
+        if (blank(config('services.telegram.token'))
+            || preg_match('/^[1-9][0-9]*$/', trim($adminTelegramChatId)) !== 1) {
+            throw new TelegramOutboundPreSendException('Manual payment proof admin target is not configured.');
+        }
+
+        $order->loadMissing(['customer', 'orderItems']);
+        $photoFileId = trim((string) $payment->payment_proof_file_id);
+        if ($photoFileId === '') {
+            throw new TelegramOutboundPreSendException('Manual payment proof attachment is missing.');
+        }
+
+        [$caption, $replyMarkup] = $this->paymentProofPresentation($order, $payment);
+
+        return $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, $caption, $replyMarkup);
+    }
+
+    private function dispatchSubmittedManualPaymentProof(Order $order, Payment $payment, ?TelegramOutboundEffect $effect): bool
+    {
+        if ($effect === null) {
+            $adminTelegramChatId = $this->adminTelegramChatId();
+            if ($adminTelegramChatId === null) {
+                return false;
+            }
+
+            return $this->forwardLegacyManualPaymentProof($order, $payment, $adminTelegramChatId);
+        }
+
+        $this->outboundEffects->dispatch($effect);
+
+        return $effect->fresh()?->state === TelegramOutboundEffectState::Sent;
+    }
+
+    private function forwardLegacyManualPaymentProof(Order $order, Payment $payment, string $adminTelegramChatId): bool
+    {
+        $order->loadMissing(['customer', 'orderItems']);
 
         $token = (string) Str::uuid();
         $claimed = DB::table('payments')
@@ -190,16 +252,52 @@ class TelegramManualPaymentIntents
             return false;
         }
 
-        $photoFileId = (string) $payment->payment_proof_file_id;
+        try {
+            $this->sendManualPaymentProofEffect($order, $payment, $adminTelegramChatId);
+        } catch (\Throwable $exception) {
+            if (! $this->outboundEffects->isAmbiguous($exception)) {
+                DB::table('payments')
+                    ->where('id', $payment->id)
+                    ->where('payment_proof_forwarding_token', $token)
+                    ->update([
+                        'payment_proof_forwarding_started_at' => null,
+                        'payment_proof_forwarding_token' => null,
+                        'updated_at' => now(),
+                    ]);
+            }
 
+            throw $exception;
+        }
+
+        DB::table('payments')
+            ->where('id', $payment->id)
+            ->where('payment_proof_forwarding_token', $token)
+            ->update([
+                'payment_proof_admin_chat_id' => $adminTelegramChatId,
+                'payment_proof_forwarding_started_at' => null,
+                'payment_proof_forwarding_token' => null,
+                'payment_proof_forwarded_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        return true;
+    }
+
+    /**
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function paymentProofPresentation(Order $order, Payment $payment): array
+    {
         $isBinance = $payment->method === 'BINANCE_PAY_ID';
         $caption = [
             '📸 Bukti pembayaran masuk',
             '━━━━━━━━━━━━━━',
             '🧾 Invoice: '.$order->invoice_number,
             '👤 Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
-            '💳 Metode: '.($payment?->payment_method_label ?: 'manual'),
-            '💰 Total: '.($payment?->currency === 'USDT' ? number_format($payment->amount / 1_000_000, 6, '.', '').' USDT' : 'Rp '.number_format($order->total_amount, 0, ',', '.')),
+            '💳 Metode: '.($payment->payment_method_label ?: 'manual'),
+            '💰 Total: '.($payment->currency === 'USDT'
+                ? number_format($payment->amount / 1_000_000, 6, '.', '').' USDT'
+                : 'Rp '.number_format($order->total_amount, 0, ',', '.')),
             '',
             'Item:',
         ];
@@ -229,33 +327,7 @@ class TelegramManualPaymentIntents
             ]],
         ];
 
-        try {
-            $this->bot->sendPhotoReference($adminTelegramChatId, $photoFileId, implode("\n", $caption), $replyMarkup);
-        } catch (\Throwable $exception) {
-            DB::table('payments')
-                ->where('id', $payment->id)
-                ->where('payment_proof_forwarding_token', $token)
-                ->update([
-                    'payment_proof_forwarding_started_at' => null,
-                    'payment_proof_forwarding_token' => null,
-                    'updated_at' => now(),
-                ]);
-
-            throw $exception;
-        }
-
-        DB::table('payments')
-            ->where('id', $payment->id)
-            ->where('payment_proof_forwarding_token', $token)
-            ->update([
-                'payment_proof_admin_chat_id' => $adminTelegramChatId,
-                'payment_proof_forwarding_started_at' => null,
-                'payment_proof_forwarding_token' => null,
-                'payment_proof_forwarded_at' => now(),
-                'updated_at' => now(),
-            ]);
-
-        return true;
+        return [implode("\n", $caption), $replyMarkup];
     }
 
     public function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void

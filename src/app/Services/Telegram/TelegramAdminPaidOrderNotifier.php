@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -30,6 +31,29 @@ class TelegramAdminPaidOrderNotifier
                 && $locked->payment_status === PaymentStatus::Paid,
             message: fn (Order $claimed): string => $this->paidMessage($claimed),
         );
+    }
+
+    /**
+     * Send a paid notification for a claimed Telegram Outbound Effect.
+     * Claiming and finalization remain owned by TelegramOutboundEffectService.
+     *
+     * @return array<string, mixed>
+     */
+    public function sendEffect(Order $order, string $chatId): array
+    {
+        if (blank(config('services.telegram.token'))
+            || preg_match('/^[1-9][0-9]*$/', $chatId) !== 1) {
+            throw new TelegramOutboundPreSendException('Paid admin Telegram notification is not configured.');
+        }
+
+        $claimed = $order->fresh(['customer', 'orderItems', 'payments']) ?? $order;
+
+        return DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => 'admin_paid_order_notification',
+            'payment_mode' => $this->paymentMode($claimed),
+            'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
+            'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed)), $this->dashboardReplyMarkup($claimed)));
     }
 
     private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message): void

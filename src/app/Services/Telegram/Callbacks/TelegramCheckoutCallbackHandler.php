@@ -259,7 +259,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $this->dispatchCheckoutInstructions($order, $payment);
-        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+        $this->dispatchPendingAdminNotification($order);
     }
 
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
@@ -283,6 +283,19 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         };
 
         $job->onQueue('telegram-outbound')->afterCommit();
+    }
+
+    private function dispatchPendingAdminNotification(Order $order): void
+    {
+        if ($this->outboundEffects->dispatchPendingAdminNotification($order)) {
+            return;
+        }
+
+        // Compatibility path for deployments without the new effect target
+        // configuration and for orders created before the ledger migration.
+        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())
+            ->onQueue('telegram-outbound')
+            ->afterCommit();
     }
 
     private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void

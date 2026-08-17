@@ -5,7 +5,9 @@ namespace App\Console\Commands;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\Telegram\TelegramManualPaymentIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Console\Command;
+use Illuminate\Database\Query\Builder;
 
 class ForwardPendingManualPaymentProofs extends Command
 {
@@ -31,6 +33,14 @@ class ForwardPendingManualPaymentProofs extends Command
             ->whereNotNull('payment_proof_file_id')
             ->whereNotNull('payment_proof_submitted_at')
             ->whereNull('payment_proof_forwarded_at')
+            ->whereNotExists(function (Builder $query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects as proof_effects')
+                    ->where('proof_effects.source_type', Payment::class)
+                    ->where('proof_effects.effect_type', TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
+                    ->whereRaw('proof_effects.source_id = payments.id');
+            })
             ->where(fn ($query) => $query
                 ->whereNull('payment_proof_forwarding_started_at')
                 ->orWhere('payment_proof_forwarding_started_at', '<=', $cutoff))

@@ -42,19 +42,12 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+                TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+                TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+                TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+                TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
             ])
-            ->where('source_type', Order::class)
-            ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
-                foreach ($effects as $effect) {
-                    $outboundEffects->dispatch($effect, now()->toISOString());
-                    $dispatched++;
-                }
-            });
-
-        $outboundEffects->readyToDispatchQuery(now())
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-            ->where('source_type', Order::class)
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
                 foreach ($effects as $effect) {
@@ -64,15 +57,23 @@ class RecoverTelegramOutboundEffects extends Command
             });
 
         $effects = [
-            ['admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', SendAdminOrderPendingNotification::class],
-            ['admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', SendAdminOrderPaidNotification::class],
-            ['admin_expired_order_notification_started_at', 'admin_expired_order_notified_at', SendAdminOrderExpiredNotification::class],
+            ['admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', SendAdminOrderPendingNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_PENDING],
+            ['admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', SendAdminOrderPaidNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_PAID],
+            ['admin_expired_order_notification_started_at', 'admin_expired_order_notified_at', SendAdminOrderExpiredNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED],
         ];
 
-        foreach ($effects as [$startedAt, $sentAt, $job]) {
+        foreach ($effects as [$startedAt, $sentAt, $job, $effectType]) {
             Order::query()
                 ->whereNull($sentAt)
                 ->where($startedAt, '<=', $cutoff)
+                ->whereNotExists(function (Builder $query) use ($effectType): void {
+                    $query
+                        ->selectRaw('1')
+                        ->from('telegram_outbound_effects as migrated_effects')
+                        ->where('migrated_effects.source_type', Order::class)
+                        ->where('migrated_effects.effect_type', $effectType)
+                        ->whereRaw('migrated_effects.source_id = CAST(orders.id AS TEXT)');
+                })
                 ->orderBy('id')
                 ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $job): void {
                     foreach ($orders as $order) {

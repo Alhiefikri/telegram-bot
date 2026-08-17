@@ -21,6 +21,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -40,6 +41,7 @@ class StorefrontShopCheckout
         private readonly StorefrontOrderAccess $orderAccess,
         private readonly StorefrontFunnelEvents $events,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
@@ -115,7 +117,7 @@ class StorefrontShopCheckout
 
         if ($payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID') {
             $recoveryKey = $this->orderAccess->issue($order);
-            SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+            $this->dispatchPendingAdminNotification($order);
 
             return new StorefrontShopCheckoutResult(
                 redirectUrl: $this->invoiceUrls->show($order),
@@ -143,13 +145,26 @@ class StorefrontShopCheckout
         if ($this->hasPayableNativeQris($payment)) {
             $this->events->qrisCreated($order, $payment, ['source' => 'checkout_submit']);
         }
-        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())->onQueue('telegram-outbound')->afterCommit();
+        $this->dispatchPendingAdminNotification($order);
 
         return new StorefrontShopCheckoutResult(
             redirectUrl: $this->invoiceUrls->show($order),
             orderId: $order->getKey(),
             recoveryKey: $recoveryKey,
         );
+    }
+
+    private function dispatchPendingAdminNotification(Order $order): void
+    {
+        if ($this->outboundEffects->dispatchPendingAdminNotification($order)) {
+            return;
+        }
+
+        // Compatibility path for deployments without the new effect target
+        // configuration and for orders created before the ledger migration.
+        SendAdminOrderPendingNotification::dispatch($order->id, now()->toISOString())
+            ->onQueue('telegram-outbound')
+            ->afterCommit();
     }
 
     private function product(int $productId): Product

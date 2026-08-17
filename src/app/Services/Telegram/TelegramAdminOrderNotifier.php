@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Support\DogfoodTiming;
@@ -52,6 +53,35 @@ class TelegramAdminOrderNotifier
         );
 
         $this->deletePending($order);
+    }
+
+    /**
+     * Send an admin notification for a claimed Telegram Outbound Effect.
+     * Claiming and finalization remain owned by TelegramOutboundEffectService.
+     *
+     * @return array<string, mixed>
+     */
+    public function sendPendingEffect(Order $order, string $chatId): array
+    {
+        return $this->sendEffectMessage(
+            order: $order,
+            chatId: $chatId,
+            step: 'admin_pending_order_notification',
+            message: fn (Order $claimed): string => $this->pendingMessage($claimed),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function sendExpiredEffect(Order $order, string $chatId): array
+    {
+        return $this->sendEffectMessage(
+            order: $order,
+            chatId: $chatId,
+            step: 'admin_expired_order_notification',
+            message: fn (Order $claimed): string => $this->expiredMessage($claimed),
+        );
     }
 
     public function deletePending(Order $order): void
@@ -155,6 +185,26 @@ class TelegramAdminOrderNotifier
             ->whereNotNull($startedAtColumn)
             ->whereNull($sentAtColumn)
             ->update($updates);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sendEffectMessage(Order $order, string $chatId, string $step, callable $message): array
+    {
+        if (blank(config('services.telegram.token'))
+            || preg_match('/^[1-9][0-9]*$/', $chatId) !== 1) {
+            throw new TelegramOutboundPreSendException('Admin Telegram notification is not configured.');
+        }
+
+        $claimed = $order->fresh(['customer', 'orderItems', 'payments']) ?? $order;
+
+        return DogfoodTiming::time('dogfood.telegram.checkout_step', [
+            'step' => $step,
+            'payment_mode' => $this->paymentMode($claimed),
+            'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
+            'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
     }
 
     private function pendingMessageTrackingUpdates(array $response, string $chatId): array

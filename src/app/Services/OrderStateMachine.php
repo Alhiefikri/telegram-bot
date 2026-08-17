@@ -286,7 +286,7 @@ class OrderStateMachine implements OrderLifecycle
             PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
         }
 
-        SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+        $this->recordAndDispatchAdminOrderPaid($order);
 
         $paid = $order->fresh(['payments']);
         $this->recordAndDispatchReceipt($paid);
@@ -413,7 +413,7 @@ class OrderStateMachine implements OrderLifecycle
         ]);
         $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
-            $this->dispatchAdminExpiredNotification($order);
+            $this->recordAndDispatchAdminOrderExpired($order);
         }
 
         $released = $order->fresh(['payments']);
@@ -463,6 +463,38 @@ class OrderStateMachine implements OrderLifecycle
     private function dispatchAdminExpiredNotification(Order $order): void
     {
         SendAdminOrderExpiredNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+    }
+
+    private function recordAndDispatchAdminOrderPaid(Order $order): void
+    {
+        $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordAdminOrderPaidNotification($order);
+
+        if ($effect !== null) {
+            $outboundEffects->dispatch($effect);
+
+            return;
+        }
+
+        if (! $outboundEffects->hasConfiguredAdminTarget()) {
+            SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+        }
+    }
+
+    private function recordAndDispatchAdminOrderExpired(Order $order): void
+    {
+        $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordAdminOrderExpiredNotification($order);
+
+        if ($effect !== null) {
+            $outboundEffects->dispatch($effect);
+
+            return;
+        }
+
+        if (! $outboundEffects->hasConfiguredAdminTarget()) {
+            $this->dispatchAdminExpiredNotification($order);
+        }
     }
 
     private function recordAndDispatchReceipt(Order $order): void

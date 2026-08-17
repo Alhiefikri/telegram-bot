@@ -146,6 +146,7 @@ class OrderCheckoutService
         }
 
         $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
+        $this->outboundEffects->recordAdminOrderPendingNotification($order);
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
 

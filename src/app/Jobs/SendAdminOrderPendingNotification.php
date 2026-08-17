@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -20,11 +22,15 @@ class SendAdminOrderPendingNotification implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 3600;
 
-    public function __construct(public readonly string $orderId, public ?string $jobEnqueuedAt = null) {}
+    public function __construct(
+        public readonly string $orderId,
+        public ?string $jobEnqueuedAt = null,
+        public ?string $effectId = null,
+    ) {}
 
     public function uniqueId(): string
     {
-        return $this->orderId;
+        return $this->effectId === null ? $this->orderId : 'effect:'.$this->effectId;
     }
 
     public function backoff(): array
@@ -32,7 +38,7 @@ class SendAdminOrderPendingNotification implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramAdminOrderNotifier $notifier): void
+    public function handle(TelegramAdminOrderNotifier $notifier, ?TelegramOutboundEffectService $outboundEffects = null): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -46,6 +52,20 @@ class SendAdminOrderPendingNotification implements ShouldBeUnique, ShouldQueue
         ]);
 
         try {
+            $outboundEffects ??= app(TelegramOutboundEffectService::class);
+            $effect = $this->effectId === null
+                ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_ADMIN_PENDING)
+                : TelegramOutboundEffect::query()
+                    ->whereKey($this->effectId)
+                    ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PENDING)
+                    ->firstOrFail();
+
+            if ($effect !== null) {
+                $outboundEffects->processAdminOrderNotification($effect);
+
+                return;
+            }
+
             $notifier->sendPending(Order::findOrFail($this->orderId));
         } finally {
             DogfoodTiming::log('dogfood.telegram.admin_pending_order_notification_job_finished', DogfoodTiming::queryStats() + [

@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\PublishSalesProofPost;
@@ -21,6 +22,7 @@ use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramBroadcast;
+use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -449,6 +451,15 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             '--tries' => 1,
         ])->assertSuccessful();
 
+        $this->assertDatabaseHas('jobs', ['queue' => 'notifications']);
+
+        $this->artisan('queue:work', [
+            'connection' => 'database',
+            '--queue' => 'notifications',
+            '--once' => true,
+            '--tries' => 1,
+        ])->assertSuccessful();
+
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'large-photo');
@@ -487,7 +498,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && ($request['photo'] ?? null) === 'replied-proof');
     }
 
-    public function test_binance_payment_proof_is_recovered_after_admin_photo_delivery_fails(): void
+    public function test_binance_payment_proof_with_ambiguous_admin_delivery_stays_in_review_without_a_duplicate_send(): void
     {
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/sendPhoto' => Http::sequence()
@@ -512,18 +523,21 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $this->assertNotNull($payment->fresh()->payment_proof_submitted_at);
         $this->assertSame('large-photo', $payment->fresh()->payment_proof_file_id);
-        $this->assertNull($payment->fresh()->payment_proof_forwarding_started_at);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+        $this->assertNotNull($payment->fresh()->payment_proof_forwarding_started_at);
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12345'
             && str_contains((string) ($request['text'] ?? ''), 'Bukti pembayaran sudah masuk'));
 
         $this->artisan('telegram:forward-payment-proofs', ['--chunk' => 1])
-            ->expectsOutputToContain('telegram:forward-payment-proofs completed: forwarded=1 failed=0')
+            ->expectsOutputToContain('telegram:forward-payment-proofs completed: forwarded=0 failed=0')
             ->assertSuccessful();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+        $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999'
             && ($request['photo'] ?? null) === 'large-photo');
+        $this->assertCount(1, $adminPhotos);
     }
 
     public function test_approved_binance_payment_deletes_the_buyers_checkout_instruction(): void
