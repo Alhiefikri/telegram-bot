@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Telegram Delivery Review</title>
+    <title>Manual Delivery Review</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen bg-brand-bg text-neo-ink">
@@ -11,7 +11,7 @@
         <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke dashboard</a>
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Operational queue</p>
-            <h1 class="mt-1 text-2xl font-black">Telegram Delivery Review</h1>
+            <h1 class="mt-1 text-2xl font-black">Manual Delivery Review</h1>
             <p class="mt-2 text-sm font-semibold text-brand-muted">Unknown dan Manual Delivery Review tidak dikirim ulang otomatis. Target Telegram dan metadata sensitif ditampilkan dalam bentuk tereduksi.</p>
 
             <div class="mt-5 space-y-3">
