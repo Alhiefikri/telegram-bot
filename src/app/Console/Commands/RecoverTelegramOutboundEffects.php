@@ -17,21 +17,38 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
+use Illuminate\Database\Query\Builder;
 
 class RecoverTelegramOutboundEffects extends Command
 {
     protected $signature = 'telegram:recover-outbound {--chunk=100} {--queue=notifications}';
 
-    protected $description = 'Redispatch Telegram order effects whose delivery lease expired.';
+    protected $description = 'Recover Telegram outbound effects and redispatch eligible pending work.';
 
     public function handle(): int
     {
         $cutoff = now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)));
         $dispatched = 0;
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $staleLeases = $outboundEffects->recoverExpiredLeases(now());
+
+        $outboundEffects->readyToDispatchQuery(now())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+            ->where('source_type', Order::class)
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched): void {
+                foreach ($effects as $effect) {
+                    SendManualCheckoutNotifications::dispatch($effect->source_id, now()->toISOString())
+                        ->onQueue((string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE));
+                    $dispatched++;
+                }
+            });
 
         $effects = [
             ['telegram_receipt_send_started_at', 'telegram_receipt_sent_at', SendTelegramReceipt::class],
@@ -59,6 +76,14 @@ class RecoverTelegramOutboundEffects extends Command
         Order::query()
             ->whereNull('manual_checkout_customer_notified_at')
             ->where('manual_checkout_customer_notification_started_at', '<=', $cutoff)
+            ->whereNotExists(function (Builder $query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects as migrated_effects')
+                    ->where('migrated_effects.source_type', Order::class)
+                    ->where('migrated_effects.effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+                    ->whereRaw('migrated_effects.source_id = CAST(orders.id AS TEXT)');
+            })
             ->where('order_status', 'pending_payment')
             ->where(function ($query): void {
                 $query->whereNull('expires_at')
@@ -167,6 +192,10 @@ class RecoverTelegramOutboundEffects extends Command
             });
 
         $this->info("telegram:recover-outbound completed cleanly: dispatched={$dispatched}");
+
+        if ($staleLeases > 0) {
+            $this->info("telegram:recover-outbound stale_unknown={$staleLeases}");
+        }
 
         return self::SUCCESS;
     }

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -33,7 +34,7 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramCheckoutIntents $checkoutIntents): void
+    public function handle(TelegramCheckoutIntents $checkoutIntents, ?TelegramOutboundEffectService $outboundEffects = null): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -47,42 +48,21 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
         ]);
 
         try {
-            $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
-            $chatId = (string) $order->customer->telegram_id;
+            $outboundEffects ??= app(TelegramOutboundEffectService::class);
+            $effect = $outboundEffects->forOrder($this->orderId);
 
-            $claimed = DB::transaction(function () use ($order): ?Order {
-                $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->manual_checkout_customer_notified_at !== null
-                    || $this->hasActiveClaim($locked->manual_checkout_customer_notification_started_at)) {
-                    return null;
+            if ($effect !== null) {
+                // A legacy claim can represent a worker from the expand phase
+                // that started before the effect ledger became authoritative.
+                // Never race that worker with a new send.
+                if (! $outboundEffects->hasActiveLegacyClaim($effect)) {
+                    $outboundEffects->processManualCheckout($effect, $checkoutIntents);
                 }
 
-                $locked->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
-
-                return $locked->fresh(['customer', 'orderItems']);
-            });
-            if ($claimed !== null) {
-                $order = $claimed;
-                $chatId = (string) $order->customer->telegram_id;
-                // Claim before Telegram I/O. If the worker dies after Telegram accepts
-                // the photo but before notified_at is written, retries skip this
-                // customer effect instead of sending duplicate payment instructions.
-                try {
-                    DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                        'step' => 'manual_payment_instructions',
-                        'payment_mode' => 'manual',
-                        'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
-                        'order_correlation_id' => DogfoodTiming::correlation($order->id),
-                    ], fn () => $checkoutIntents->sendPaymentInstructions($chatId, $order));
-                } catch (\Throwable $e) {
-                    $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
-
-                    throw $e;
-                }
-
-                $order->forceFill(['manual_checkout_customer_notified_at' => now(), 'manual_checkout_customer_notification_started_at' => null])->save();
+                return;
             }
 
+            $this->handleLegacy($checkoutIntents);
         } finally {
             DogfoodTiming::log('dogfood.telegram.manual_checkout_notifications_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),
@@ -91,6 +71,47 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
                 'memory_after_bytes' => memory_get_usage(true),
             ]);
         }
+    }
+
+    private function handleLegacy(TelegramCheckoutIntents $checkoutIntents): void
+    {
+        $order = Order::with(['customer', 'orderItems'])->findOrFail($this->orderId);
+        $chatId = (string) $order->customer->telegram_id;
+
+        $claimed = DB::transaction(function () use ($order): ?Order {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            if ($locked->manual_checkout_customer_notified_at !== null
+                || $this->hasActiveClaim($locked->manual_checkout_customer_notification_started_at)) {
+                return null;
+            }
+
+            $locked->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
+
+            return $locked->fresh(['customer', 'orderItems']);
+        });
+        if ($claimed === null) {
+            return;
+        }
+
+        $order = $claimed;
+        $chatId = (string) $order->customer->telegram_id;
+        // This fallback is retained only for orders created before the
+        // expand-phase effect ledger. New QR Manual checkouts always use the
+        // token-checked ledger path above.
+        try {
+            DogfoodTiming::time('dogfood.telegram.checkout_step', [
+                'step' => 'manual_payment_instructions',
+                'payment_mode' => 'manual',
+                'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
+                'order_correlation_id' => DogfoodTiming::correlation($order->id),
+            ], fn () => $checkoutIntents->sendPaymentInstructions($chatId, $order));
+        } catch (\Throwable $e) {
+            $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
+
+            throw $e;
+        }
+
+        $order->forceFill(['manual_checkout_customer_notified_at' => now(), 'manual_checkout_customer_notification_started_at' => null])->save();
     }
 
     private function hasActiveClaim($startedAt): bool

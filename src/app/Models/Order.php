@@ -89,6 +89,12 @@ class Order extends Model
         return $this->hasOne(SalesProofPost::class);
     }
 
+    public function telegramOutboundEffects()
+    {
+        return $this->hasMany(TelegramOutboundEffect::class, 'source_id')
+            ->where('source_type', self::class);
+    }
+
     public function inventoryMovements()
     {
         return $this->hasMany(InventoryMovement::class);

@@ -36,7 +36,7 @@ class TelegramCheckoutIntents
         private PaymentProviderResolver $providerResolver,
     ) {}
 
-    public function sendPaymentInstructions(string $chatId, Order $order): void
+    public function sendPaymentInstructions(string $chatId, Order $order): array
     {
         $order->loadMissing('customer');
         $instruction = $this->paymentInstructions->manual(
@@ -46,7 +46,7 @@ class TelegramCheckoutIntents
             $this->locale->code($order->customer),
         );
 
-        $this->sendPaymentInstruction($chatId, $instruction, [
+        return $this->sendPaymentInstruction($chatId, $instruction, [
             'step' => 'manual_customer_send_photo',
             'payment_mode' => 'manual',
             'order_correlation_id' => DogfoodTiming::correlation($order->id),

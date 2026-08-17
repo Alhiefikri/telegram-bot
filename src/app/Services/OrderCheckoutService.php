@@ -18,6 +18,7 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -31,6 +32,7 @@ class OrderCheckoutService
         private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
@@ -120,7 +122,7 @@ class OrderCheckoutService
                 ? (string) config('services.binance.pay_id')
                 : (string) config('services.binance.pay_uid');
         }
-        Payment::create([
+        $payment = Payment::create([
             'order_id' => $order->id,
             'provider' => $paymentIntent->provider(),
             'merchant_ref' => $this->numbers->merchantReference(),
@@ -142,6 +144,8 @@ class OrderCheckoutService
             $this->credentials->allocate($orderItem, $product, $item->quantity);
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
+
+        $this->outboundEffects->recordManualCheckout($order, $payment, $lockedCart->customer);
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
 

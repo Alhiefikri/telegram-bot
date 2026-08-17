@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Exceptions\TelegramTransportException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
@@ -23,11 +24,7 @@ class TelegramBotApiRequestFactory
 
     public function transportException(string $operation, ConnectionException $exception): RuntimeException
     {
-        return new RuntimeException(sprintf(
-            'Telegram Bot API %s request failed: %s.',
-            $operation,
-            class_basename($exception),
-        ));
+        return new TelegramTransportException($operation, $exception);
     }
 
     private function positiveFloatConfig(string $key, float $default): float
