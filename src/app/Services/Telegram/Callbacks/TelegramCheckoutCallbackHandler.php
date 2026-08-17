@@ -29,6 +29,7 @@ use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -46,6 +47,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private CheckoutMaintenance $maintenance,
+        private TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -262,6 +264,17 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
     {
+        $effectType = TelegramOutboundEffectService::typeForPayment($payment);
+        $effect = $effectType === null
+            ? null
+            : $this->outboundEffects->forOrder($order->id, $effectType);
+
+        if ($effect !== null) {
+            $this->outboundEffects->dispatch($effect);
+
+            return;
+        }
+
         $job = match (true) {
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::KLIKQRIS => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),

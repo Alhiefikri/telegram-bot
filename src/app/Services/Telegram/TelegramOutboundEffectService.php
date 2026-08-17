@@ -2,10 +2,17 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Exceptions\TelegramTransportException;
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
@@ -29,7 +36,35 @@ class TelegramOutboundEffectService
 {
     public const TYPE_MANUAL_CHECKOUT = TelegramOutboundEffectType::ManualCheckoutInstructions->value;
 
+    public const TYPE_KLIKQRIS_CHECKOUT = TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value;
+
+    public const TYPE_PAKASIR_CHECKOUT = TelegramOutboundEffectType::PakasirCheckoutInstructions->value;
+
+    public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
+
     public const TEMPLATE_MANUAL_CHECKOUT = 'manual-payment-v1';
+
+    public const TEMPLATE_KLIKQRIS_CHECKOUT = 'klikqris-payment-v1';
+
+    public const TEMPLATE_PAKASIR_CHECKOUT = 'pakasir-payment-v1';
+
+    public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
+
+    /** @var list<string> */
+    private const CHECKOUT_EFFECT_TYPES = [
+        self::TYPE_MANUAL_CHECKOUT,
+        self::TYPE_KLIKQRIS_CHECKOUT,
+        self::TYPE_PAKASIR_CHECKOUT,
+        self::TYPE_BINANCE_CHECKOUT,
+    ];
+
+    /** @var list<string> */
+    private const NON_RETRYABLE_FAILURE_CODES = [
+        'checkout_expired',
+        'checkout_not_pending',
+        'checkout_payment_missing',
+        'checkout_payment_not_pending',
+    ];
 
     /** @var list<string> */
     private const REVIEW_STATES = [
@@ -52,24 +87,23 @@ class TelegramOutboundEffectService
 
     public function __construct(private readonly AuditLogger $auditLogger) {}
 
-    public function recordManualCheckout(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
+    public function recordCheckoutInstructions(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
     {
         $customer ??= $order->customer;
+        $effectType = self::typeForPayment($payment);
 
-        if ($customer?->telegram_id === null
-            || $payment->provider !== PaymentProvider::MANUAL
-            || $payment->method !== 'QR_MANUAL') {
+        if ($customer?->telegram_id === null || $effectType === null) {
             return null;
         }
 
-        $effectKey = self::manualCheckoutEffectKey((string) $order->getKey());
+        $effectKey = self::checkoutEffectKey((string) $order->getKey(), $effectType);
 
         return TelegramOutboundEffect::query()->firstOrCreate(
             ['effect_key' => $effectKey],
             [
                 'effect_group_key' => $effectKey,
                 'sequence' => 1,
-                'effect_type' => self::TYPE_MANUAL_CHECKOUT,
+                'effect_type' => $effectType,
                 'source_type' => Order::class,
                 'source_id' => (string) $order->getKey(),
                 'target_type' => 'customer',
@@ -77,7 +111,7 @@ class TelegramOutboundEffectService
                 'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
                 'telegram_method' => 'sendPhoto',
                 'locale' => $customer->locale,
-                'template_version' => self::TEMPLATE_MANUAL_CHECKOUT,
+                'template_version' => self::templateVersion($effectType),
                 'state' => TelegramOutboundEffectState::Pending->value,
                 'attempts' => 0,
                 'next_attempt_at' => now(),
@@ -85,19 +119,46 @@ class TelegramOutboundEffectService
         );
     }
 
-    public static function manualCheckoutEffectKey(string $orderId): string
+    /**
+     * Compatibility name retained for the first ledger rollout slice.
+     */
+    public function recordManualCheckout(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
     {
-        return 'order:'.$orderId.':'.self::TYPE_MANUAL_CHECKOUT.':v1';
+        return $this->recordCheckoutInstructions($order, $payment, $customer);
     }
 
-    public function forOrder(string $orderId): ?TelegramOutboundEffect
+    public static function typeForPayment(Payment $payment): ?string
     {
-        return TelegramOutboundEffect::query()
+        return match (true) {
+            $payment->provider === PaymentProvider::MANUAL && $payment->method === 'QR_MANUAL' => self::TYPE_MANUAL_CHECKOUT,
+            $payment->provider === PaymentProvider::KLIKQRIS => self::TYPE_KLIKQRIS_CHECKOUT,
+            $payment->provider === PaymentProvider::PAKASIR => self::TYPE_PAKASIR_CHECKOUT,
+            $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => self::TYPE_BINANCE_CHECKOUT,
+            default => null,
+        };
+    }
+
+    public static function checkoutEffectKey(string $orderId, string $effectType): string
+    {
+        return 'order:'.$orderId.':'.$effectType.':v1';
+    }
+
+    public static function manualCheckoutEffectKey(string $orderId): string
+    {
+        return self::checkoutEffectKey($orderId, self::TYPE_MANUAL_CHECKOUT);
+    }
+
+    public function forOrder(string $orderId, ?string $effectType = null): ?TelegramOutboundEffect
+    {
+        $query = TelegramOutboundEffect::query()
             ->where('source_type', Order::class)
             ->where('source_id', $orderId)
-            ->where('effect_type', self::TYPE_MANUAL_CHECKOUT)
-            ->latest('created_at')
-            ->first();
+            ->when($effectType !== null, fn (Builder $query) => $query->where('effect_type', $effectType))
+            ->when($effectType === null, fn (Builder $query) => $query->whereIn('effect_type', self::CHECKOUT_EFFECT_TYPES))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        return $query->first();
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -253,17 +314,39 @@ class TelegramOutboundEffectService
         });
     }
 
+    public function dispatch(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null): void
+    {
+        $jobEnqueuedAt ??= now()->toISOString();
+        $pending = match ($effect->effect_type) {
+            self::TYPE_MANUAL_CHECKOUT => SendManualCheckoutNotifications::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_KLIKQRIS_CHECKOUT => SendKlikQrisCheckoutInstructions::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_PAKASIR_CHECKOUT => SendPakasirCheckoutInstructions::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            self::TYPE_BINANCE_CHECKOUT => SendBinanceCheckoutInstructions::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            default => null,
+        };
+
+        $pending?->onQueue((string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE))->afterCommit();
+    }
+
     public function dispatchExplicitResend(TelegramOutboundEffect $effect): void
     {
-        if ($effect->effect_type !== self::TYPE_MANUAL_CHECKOUT) {
-            return;
-        }
-
-        SendManualCheckoutNotifications::dispatch(
-            (string) $effect->source_id,
-            now()->toISOString(),
-            (string) $effect->getKey(),
-        )->onQueue((string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE));
+        $this->dispatch($effect);
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -272,7 +355,19 @@ class TelegramOutboundEffectService
         $at ??= now();
 
         return TelegramOutboundEffect::query()
-            ->whereIn('state', [TelegramOutboundEffectState::Pending->value, TelegramOutboundEffectState::Failed->value])
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('state', TelegramOutboundEffectState::Pending->value)
+                    ->orWhere(function (Builder $failed): void {
+                        $failed
+                            ->where('state', TelegramOutboundEffectState::Failed->value)
+                            ->where(function (Builder $error): void {
+                                $error
+                                    ->whereNull('last_error_code')
+                                    ->orWhereNotIn('last_error_code', self::NON_RETRYABLE_FAILURE_CODES);
+                            });
+                    });
+            })
             ->where(function (Builder $query) use ($at): void {
                 $query->whereNull('next_attempt_at')
                     ->orWhere('next_attempt_at', '<=', $at);
@@ -308,7 +403,7 @@ class TelegramOutboundEffectService
         });
     }
 
-    public function processManualCheckout(TelegramOutboundEffect $effect, TelegramCheckoutIntents $checkoutIntents): void
+    public function processCheckout(TelegramOutboundEffect $effect, TelegramCheckoutIntents $checkoutIntents): void
     {
         $claimed = $this->claim((string) $effect->getKey());
         if ($claimed === null) {
@@ -317,15 +412,36 @@ class TelegramOutboundEffectService
 
         try {
             $order = Order::query()->with(['customer', 'orderItems'])->findOrFail($claimed->source_id);
+            if ($order->order_status !== OrderStatus::PendingPayment
+                || ($order->expires_at !== null && $order->expires_at->lte(now()))) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    $order->expires_at !== null && $order->expires_at->lte(now())
+                        ? 'checkout_expired'
+                        : 'checkout_not_pending',
+                );
+
+                return;
+            }
+
+            $payment = $this->paymentForCheckoutEffect($order, $claimed);
+            if ($payment === null || $payment->status !== PaymentStatus::Pending) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    $payment === null ? 'checkout_payment_missing' : 'checkout_payment_not_pending',
+                );
+
+                return;
+            }
+
             $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => 'manual_payment_instructions',
-                'payment_mode' => 'manual',
+                'step' => $this->timingStep($claimed),
+                'payment_mode' => $this->timingPaymentMode($claimed),
                 'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
                 'order_correlation_id' => DogfoodTiming::correlation($order->id),
-            ], fn () => $checkoutIntents->sendPaymentInstructions(
-                (string) $claimed->telegram_chat_id,
-                $order,
-            ));
+            ], fn () => $this->sendCheckoutInstructions($claimed, $checkoutIntents, $order, $payment));
             $messageId = data_get($response, 'result.message_id');
 
             if (! is_numeric($messageId)) {
@@ -333,6 +449,14 @@ class TelegramOutboundEffectService
             }
 
             $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
+
+            if ($claimed->effect_type === self::TYPE_BINANCE_CHECKOUT) {
+                $terminalOrder = $order->fresh(['payments']);
+                if (in_array($terminalOrder->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)) {
+                    DeleteBuyerBinanceCheckoutInstruction::dispatch($terminalOrder->id, now()->toISOString())
+                        ->onQueue('notifications');
+                }
+            }
         } catch (Throwable $exception) {
             if ($this->isAmbiguous($exception)) {
                 $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
@@ -344,6 +468,89 @@ class TelegramOutboundEffectService
 
             throw $exception;
         }
+    }
+
+    public function processManualCheckout(TelegramOutboundEffect $effect, TelegramCheckoutIntents $checkoutIntents): void
+    {
+        $this->processCheckout($effect, $checkoutIntents);
+    }
+
+    private function paymentForCheckoutEffect(Order $order, TelegramOutboundEffect $effect): ?Payment
+    {
+        return match ($effect->effect_type) {
+            self::TYPE_MANUAL_CHECKOUT => $order->payments()
+                ->where('provider', PaymentProvider::MANUAL)
+                ->where('method', 'QR_MANUAL')
+                ->latest('created_at')
+                ->first(),
+            self::TYPE_KLIKQRIS_CHECKOUT => $order->payments()
+                ->where('provider', PaymentProvider::KLIKQRIS)
+                ->latest('created_at')
+                ->first(),
+            self::TYPE_PAKASIR_CHECKOUT => $order->payments()
+                ->where('provider', PaymentProvider::PAKASIR)
+                ->latest('created_at')
+                ->first(),
+            self::TYPE_BINANCE_CHECKOUT => $order->payments()
+                ->where('provider', PaymentProvider::MANUAL)
+                ->where('method', 'BINANCE_PAY_ID')
+                ->latest('created_at')
+                ->first(),
+            default => null,
+        };
+    }
+
+    private function sendCheckoutInstructions(
+        TelegramOutboundEffect $effect,
+        TelegramCheckoutIntents $checkoutIntents,
+        Order $order,
+        Payment $payment,
+    ): array {
+        return match ($effect->effect_type) {
+            self::TYPE_MANUAL_CHECKOUT => $checkoutIntents->sendPaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+            ),
+            self::TYPE_KLIKQRIS_CHECKOUT => $checkoutIntents->sendKlikQrisPaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+                $payment,
+            ),
+            self::TYPE_PAKASIR_CHECKOUT => $checkoutIntents->sendPakasirPaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+                $payment,
+            ),
+            self::TYPE_BINANCE_CHECKOUT => $checkoutIntents->sendBinancePaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+                $payment,
+                $order->customer ?? throw new RuntimeException('Checkout customer is missing.'),
+            ),
+            default => throw new RuntimeException('Unsupported Telegram checkout effect type.'),
+        };
+    }
+
+    private function timingStep(TelegramOutboundEffect $effect): string
+    {
+        return match ($effect->effect_type) {
+            self::TYPE_MANUAL_CHECKOUT => 'manual_payment_instructions',
+            self::TYPE_KLIKQRIS_CHECKOUT => 'klikqris_payment_instructions',
+            self::TYPE_PAKASIR_CHECKOUT => 'pakasir_payment_instructions',
+            self::TYPE_BINANCE_CHECKOUT => 'binance_payment_instructions',
+            default => 'checkout_payment_instructions',
+        };
+    }
+
+    private function timingPaymentMode(TelegramOutboundEffect $effect): string
+    {
+        return match ($effect->effect_type) {
+            self::TYPE_MANUAL_CHECKOUT => PaymentProvider::MANUAL,
+            self::TYPE_KLIKQRIS_CHECKOUT => PaymentProvider::KLIKQRIS,
+            self::TYPE_PAKASIR_CHECKOUT => PaymentProvider::PAKASIR,
+            self::TYPE_BINANCE_CHECKOUT => 'binance',
+            default => 'unknown',
+        };
     }
 
     public function finalizeSent(string $effectId, string $claimToken, string $messageId): bool
@@ -397,6 +604,35 @@ class TelegramOutboundEffectService
                 'last_error_code' => $this->failureCode($exception),
                 'last_error' => 'Telegram delivery failed before completion.',
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
+            ])->save();
+
+            $this->clearLegacyClaim($effect);
+
+            return true;
+        });
+    }
+
+    private function finalizeNotDeliverable(string $effectId, string $claimToken, string $reason): bool
+    {
+        return DB::transaction(function () use ($effectId, $claimToken, $reason): bool {
+            $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
+            if (! $this->claimMatches($effect, $claimToken)) {
+                return false;
+            }
+
+            $now = now();
+            $effect->forceFill([
+                'state' => TelegramOutboundEffectState::Failed->value,
+                'lease_until' => null,
+                'claim_token' => null,
+                'sent_at' => null,
+                'failed_at' => $now,
+                'unknown_at' => null,
+                'manual_review_at' => null,
+                'next_attempt_at' => null,
+                'last_error_code' => $reason,
+                'last_error' => 'Telegram checkout instruction was no longer eligible for delivery.',
+                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['reason' => $reason]),
             ])->save();
 
             $this->clearLegacyClaim($effect);
@@ -481,7 +717,7 @@ class TelegramOutboundEffectService
 
     public function hasActiveLegacyClaim(TelegramOutboundEffect $effect): bool
     {
-        if ($effect->effect_type !== self::TYPE_MANUAL_CHECKOUT) {
+        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return false;
         }
 
@@ -493,6 +729,10 @@ class TelegramOutboundEffectService
 
     public function isAmbiguous(Throwable $exception): bool
     {
+        if ($exception instanceof TelegramOutboundPreSendException) {
+            return false;
+        }
+
         for ($candidate = $exception; $candidate !== null; $candidate = $candidate->getPrevious()) {
             if ($candidate instanceof TelegramTransportException || $candidate instanceof ConnectionException) {
                 return true;
@@ -615,7 +855,8 @@ class TelegramOutboundEffectService
 
     private function isClaimable(TelegramOutboundEffect $effect, CarbonInterface $at): bool
     {
-        if (! in_array($effect->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)) {
+        if (! in_array($effect->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)
+            || in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)) {
             return false;
         }
 
@@ -632,7 +873,7 @@ class TelegramOutboundEffectService
 
     private function markLegacyClaim(TelegramOutboundEffect $effect, CarbonInterface $at): void
     {
-        if ($effect->effect_type !== self::TYPE_MANUAL_CHECKOUT) {
+        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
 
@@ -644,7 +885,7 @@ class TelegramOutboundEffectService
 
     private function markLegacySent(TelegramOutboundEffect $effect, string $messageId, CarbonInterface $at): void
     {
-        if ($effect->effect_type !== self::TYPE_MANUAL_CHECKOUT) {
+        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
 
@@ -653,6 +894,9 @@ class TelegramOutboundEffectService
             'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,
             'manual_checkout_customer_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
+            'manual_checkout_customer_notification_deleted_at' => null,
+            'manual_checkout_customer_notification_deletion_started_at' => null,
+            'manual_checkout_customer_notification_deletion_token' => null,
         ];
 
         Order::query()->whereKey($effect->source_id)->update($values + ['updated_at' => now()]);
@@ -660,7 +904,7 @@ class TelegramOutboundEffectService
 
     private function clearLegacyClaim(TelegramOutboundEffect $effect): void
     {
-        if ($effect->effect_type !== self::TYPE_MANUAL_CHECKOUT) {
+        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
 
@@ -668,6 +912,17 @@ class TelegramOutboundEffectService
             'manual_checkout_customer_notification_started_at' => null,
             'updated_at' => now(),
         ]);
+    }
+
+    private static function templateVersion(string $effectType): string
+    {
+        return match ($effectType) {
+            self::TYPE_MANUAL_CHECKOUT => self::TEMPLATE_MANUAL_CHECKOUT,
+            self::TYPE_KLIKQRIS_CHECKOUT => self::TEMPLATE_KLIKQRIS_CHECKOUT,
+            self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
+            self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
+            default => 'checkout-payment-v1',
+        };
     }
 
     private function retryDelaySeconds(int $attempts): int

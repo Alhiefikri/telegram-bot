@@ -4,7 +4,9 @@ namespace App\Jobs;
 
 use App\Enums\OrderStatus;
 use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -22,11 +24,15 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 3600;
 
-    public function __construct(public readonly string $orderId, public ?string $jobEnqueuedAt = null) {}
+    public function __construct(
+        public readonly string $orderId,
+        public ?string $jobEnqueuedAt = null,
+        public ?string $effectId = null,
+    ) {}
 
     public function uniqueId(): string
     {
-        return $this->orderId;
+        return $this->effectId === null ? $this->orderId : 'effect:'.$this->effectId;
     }
 
     public function backoff(): array
@@ -34,7 +40,26 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramCheckoutIntents $checkoutIntents): void
+    public function handle(TelegramCheckoutIntents $checkoutIntents, ?TelegramOutboundEffectService $outboundEffects = null): void
+    {
+        $outboundEffects ??= app(TelegramOutboundEffectService::class);
+        $effect = $this->effectId === null
+            ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
+            : TelegramOutboundEffect::query()
+                ->whereKey($this->effectId)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
+                ->firstOrFail();
+
+        if ($effect !== null) {
+            $outboundEffects->processCheckout($effect, $checkoutIntents);
+
+            return;
+        }
+
+        $this->handleLegacy($checkoutIntents);
+    }
+
+    private function handleLegacy(TelegramCheckoutIntents $checkoutIntents): void
     {
         $order = DB::transaction(function (): ?Order {
             $order = Order::whereKey($this->orderId)->lockForUpdate()->firstOrFail();

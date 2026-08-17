@@ -55,15 +55,18 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
         try {
             $outboundEffects ??= app(TelegramOutboundEffectService::class);
             $effect = $this->effectId === null
-                ? $outboundEffects->forOrder($this->orderId)
-                : TelegramOutboundEffect::query()->findOrFail($this->effectId);
+                ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+                : TelegramOutboundEffect::query()
+                    ->whereKey($this->effectId)
+                    ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+                    ->firstOrFail();
 
             if ($effect !== null) {
                 // A legacy claim can represent a worker from the expand phase
                 // that started before the effect ledger became authoritative.
                 // Never race that worker with a new send.
                 if ($this->effectId !== null || ! $outboundEffects->hasActiveLegacyClaim($effect)) {
-                    $outboundEffects->processManualCheckout($effect, $checkoutIntents);
+                    $outboundEffects->processCheckout($effect, $checkoutIntents);
                 }
 
                 return;

@@ -17,7 +17,6 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\StoreChannelSetting;
-use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -39,13 +38,17 @@ class RecoverTelegramOutboundEffects extends Command
         $staleLeases = $outboundEffects->recoverExpiredLeases(now());
 
         $outboundEffects->readyToDispatchQuery(now())
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+            ->whereIn('effect_type', [
+                TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+            ])
             ->where('source_type', Order::class)
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched): void {
+            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
                 foreach ($effects as $effect) {
-                    SendManualCheckoutNotifications::dispatch($effect->source_id, now()->toISOString())
-                        ->onQueue((string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE));
+                    $outboundEffects->dispatch($effect, now()->toISOString());
                     $dispatched++;
                 }
             });
@@ -81,7 +84,12 @@ class RecoverTelegramOutboundEffects extends Command
                     ->selectRaw('1')
                     ->from('telegram_outbound_effects as migrated_effects')
                     ->where('migrated_effects.source_type', Order::class)
-                    ->where('migrated_effects.effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+                    ->whereIn('migrated_effects.effect_type', [
+                        TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+                        TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+                        TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
+                        TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+                    ])
                     ->whereRaw('migrated_effects.source_id = CAST(orders.id AS TEXT)');
             })
             ->where('order_status', 'pending_payment')

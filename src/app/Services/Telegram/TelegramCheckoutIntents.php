@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -54,7 +55,7 @@ class TelegramCheckoutIntents
         ]);
     }
 
-    public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): void
+    public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');
         $locale = $this->locale->code($order->customer);
@@ -63,18 +64,17 @@ class TelegramCheckoutIntents
                 $transaction = $this->nativeQris->ensureCreated($payment);
             } catch (Throwable $e) {
                 report($e);
-                $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale, true);
 
-                return;
+                return $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale, true);
+
             }
 
             $payment->refresh();
-            $this->sendNativePakasirPaymentInstructions($chatId, $order, $payment, $transaction, $locale);
 
-            return;
+            return $this->sendNativePakasirPaymentInstructions($chatId, $order, $payment, $transaction, $locale);
         }
 
-        $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
+        return $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
     }
 
     public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
@@ -82,7 +82,11 @@ class TelegramCheckoutIntents
         $order->loadMissing('customer');
         $locale = $this->locale->code($order->customer);
         try {
-            $result = $this->klikQris->lifecycle($payment);
+            try {
+                $result = $this->klikQris->lifecycle($payment);
+            } catch (Throwable $exception) {
+                throw new TelegramOutboundPreSendException('KlikQRIS checkout preparation failed before Telegram delivery.', $exception);
+            }
         } finally {
             $this->klikQrisAlerts->notifyFor($payment);
         }
@@ -95,7 +99,11 @@ class TelegramCheckoutIntents
         try {
             $imageContents = $this->klikQrisImages->contents($payable);
         } catch (InvalidArgumentException $exception) {
-            $recoveredPayable = $this->klikQris->recoverPresentationImage($payment);
+            try {
+                $recoveredPayable = $this->klikQris->recoverPresentationImage($payment);
+            } catch (Throwable $recoveryException) {
+                throw new TelegramOutboundPreSendException('KlikQRIS QR presentation recovery failed before Telegram delivery.', $recoveryException);
+            }
             if ($recoveredPayable === null) {
                 throw $exception;
             }
@@ -198,9 +206,9 @@ class TelegramCheckoutIntents
         return intdiv(strlen(mb_convert_encoding($value, 'UTF-16LE', 'UTF-8')), 2);
     }
 
-    private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, string $locale, bool $fallback = false): void
+    private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, string $locale, bool $fallback = false): array
     {
-        $this->sendPaymentInstruction(
+        return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->hostedPakasir(
                 $order,
@@ -212,9 +220,9 @@ class TelegramCheckoutIntents
         );
     }
 
-    private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $locale): void
+    private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $locale): array
     {
-        $this->sendPaymentInstruction(
+        return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->nativePakasir(
                 $order,

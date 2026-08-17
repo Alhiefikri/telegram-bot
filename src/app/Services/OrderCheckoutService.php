@@ -145,7 +145,7 @@ class OrderCheckoutService
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
 
-        $this->outboundEffects->recordManualCheckout($order, $payment, $lockedCart->customer);
+        $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
 
