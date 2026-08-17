@@ -8,6 +8,7 @@
                     <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-brand-muted">
                         <p>Order masuk dan diproses</p>
                         <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="font-black text-neo-ink underline">Manual Fulfillment Review</a>
+                        <a href="{{ route('admin.telegram-outbound-effects.index') }}" class="font-black text-neo-ink underline">Telegram Delivery Review</a>
                     </div>
                 </div>
 

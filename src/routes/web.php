@@ -25,6 +25,7 @@ use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
+use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
@@ -128,6 +129,13 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('/', [AdminManualFulfillmentReviewController::class, 'index'])->name('index');
                 Route::get('{review}', [AdminManualFulfillmentReviewController::class, 'show'])->name('show');
                 Route::post('{review}/resolve', [AdminManualFulfillmentReviewController::class, 'resolve'])->name('resolve');
+            });
+
+            Route::prefix('telegram-outbound-effects')->name('telegram-outbound-effects.')->group(function (): void {
+                Route::get('/', [AdminTelegramOutboundEffectController::class, 'index'])->name('index');
+                Route::get('{effect}', [AdminTelegramOutboundEffectController::class, 'show'])->name('show');
+                Route::post('{effect}/mark-sent', [AdminTelegramOutboundEffectController::class, 'markSent'])->name('mark-sent');
+                Route::post('{effect}/resend', [AdminTelegramOutboundEffectController::class, 'resend'])->name('resend');
             });
 
             Route::prefix('products')->name('products.')->group(function (): void {

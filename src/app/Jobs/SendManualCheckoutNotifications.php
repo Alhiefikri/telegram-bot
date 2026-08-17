@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
@@ -22,11 +23,15 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 3600;
 
-    public function __construct(public readonly string $orderId, public ?string $jobEnqueuedAt = null) {}
+    public function __construct(
+        public readonly string $orderId,
+        public ?string $jobEnqueuedAt = null,
+        public ?string $effectId = null,
+    ) {}
 
     public function uniqueId(): string
     {
-        return $this->orderId;
+        return $this->effectId === null ? $this->orderId : 'effect:'.$this->effectId;
     }
 
     public function backoff(): array
@@ -49,13 +54,15 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
 
         try {
             $outboundEffects ??= app(TelegramOutboundEffectService::class);
-            $effect = $outboundEffects->forOrder($this->orderId);
+            $effect = $this->effectId === null
+                ? $outboundEffects->forOrder($this->orderId)
+                : TelegramOutboundEffect::query()->findOrFail($this->effectId);
 
             if ($effect !== null) {
                 // A legacy claim can represent a worker from the expand phase
                 // that started before the effect ledger became authoritative.
                 // Never race that worker with a new send.
-                if (! $outboundEffects->hasActiveLegacyClaim($effect)) {
+                if ($this->effectId !== null || ! $outboundEffects->hasActiveLegacyClaim($effect)) {
                     $outboundEffects->processManualCheckout($effect, $checkoutIntents);
                 }
 

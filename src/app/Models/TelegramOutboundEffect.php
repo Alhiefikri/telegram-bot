@@ -8,10 +8,13 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'effect_key',
     'effect_group_key',
+    'supersedes_effect_id',
     'sequence',
     'effect_type',
     'source_type',
@@ -62,6 +65,16 @@ class TelegramOutboundEffect extends Model
     public function source()
     {
         return $this->morphTo(__FUNCTION__, 'source_type', 'source_id');
+    }
+
+    public function supersedes(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'supersedes_effect_id');
+    }
+
+    public function supersededBy(): HasMany
+    {
+        return $this->hasMany(self::class, 'supersedes_effect_id');
     }
 
     protected static function newFactory(): TelegramOutboundEffectFactory
