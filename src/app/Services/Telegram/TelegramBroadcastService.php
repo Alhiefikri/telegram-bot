@@ -33,6 +33,7 @@ class TelegramBroadcastService
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramBroadcastRateLimiter $rateLimiter,
+        private TelegramLocale $locale,
     ) {}
 
     /**
@@ -245,16 +246,14 @@ class TelegramBroadcastService
                     try {
                         $resolvedMessage = is_string($message) ? $message : $message($customer);
                         $resolvedTitle = $title === null
-                            ? ($customer->locale === 'en' ? '📣 Info from Admin' : '📣 Info dari Admin')
+                            ? $this->locale->translate($customer, 'notification.broadcast.title')
                             : (is_string($title) ? $title : $title($customer));
                         $resolvedReplyMarkup = is_array($replyMarkup) ? $replyMarkup : $replyMarkup($customer);
-                        $text = implode("\n", [
+                        $text = $this->wrapBroadcastText(
                             $resolvedTitle,
-                            '━━━━━━━━━━━━━━',
                             $resolvedMessage,
-                            '',
-                            $customer->locale === 'en' ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.',
-                        ]);
+                            $this->locale->translate($customer, 'notification.broadcast.help'),
+                        );
                         $this->bot->sendMessage($chatId, $text, $resolvedReplyMarkup);
                         $sent++;
                     } catch (Throwable $e) {
@@ -302,7 +301,7 @@ class TelegramBroadcastService
                         'broadcast_id' => $broadcast->id,
                         'customer_id' => $customer->id,
                         'telegram_id' => (string) $customer->telegram_id,
-                        'locale' => $customer->locale === 'en' ? 'en' : 'id',
+                        'locale' => $this->locale->code($customer),
                         'created_at' => $now,
                         'updated_at' => $now,
                     ])
@@ -391,7 +390,7 @@ class TelegramBroadcastService
         try {
             // Telegram sendMessage has no idempotency key. A stored sent_at prevents normal
             // duplicate or retried jobs from resending successful recipients.
-            $replyMarkup = $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale === 'en');
+            $replyMarkup = $this->adminBroadcastReplyMarkup($broadcast->reply_markup, $claimed->locale);
             if (filled($broadcast->photo_file_id)) {
                 $this->bot->sendPhotoReference(
                     $claimed->telegram_id,
@@ -400,7 +399,7 @@ class TelegramBroadcastService
                     $replyMarkup,
                 );
             } else {
-                $this->bot->sendMessage($claimed->telegram_id, $broadcast->message, $replyMarkup);
+                $this->bot->sendMessage($claimed->telegram_id, $this->adminBroadcastText($broadcast->message, $claimed->locale), $replyMarkup);
             }
         } catch (Throwable $e) {
             $terminal = $this->isPermanentRecipientFailure($e) || $claimed->attempts >= self::MAX_RECIPIENT_ATTEMPTS;
@@ -533,24 +532,45 @@ class TelegramBroadcastService
 
     /**
      * Broadcast buttons may be stored either as one Telegram reply markup or
-     * as an `id` / `en` map when the button label is localized per recipient.
+     * as an `id` / `en` / `ms` map when the button label is localized per recipient.
      *
      * @param  array<string, mixed>|null  $replyMarkup
      * @return array<string, mixed>
      */
-    private function adminBroadcastReplyMarkup(?array $replyMarkup, bool $english): array
+    private function adminBroadcastReplyMarkup(?array $replyMarkup, string $locale): array
     {
         if ($replyMarkup === null || $replyMarkup === []) {
             return [];
         }
 
-        if (array_key_exists('id', $replyMarkup) || array_key_exists('en', $replyMarkup)) {
-            $localized = $replyMarkup[$english ? 'en' : 'id'] ?? [];
+        if (array_key_exists('id', $replyMarkup) || array_key_exists('en', $replyMarkup) || array_key_exists('ms', $replyMarkup)) {
+            $locale = $this->locale->codeForLocale($locale);
+            $localized = $replyMarkup[$locale] ?? $replyMarkup['en'] ?? $replyMarkup['id'] ?? [];
 
             return is_array($localized) ? $localized : [];
         }
 
         return $replyMarkup;
+    }
+
+    private function adminBroadcastText(string $message, string $locale): string
+    {
+        return $this->wrapBroadcastText(
+            $this->locale->translateLocale($locale, 'notification.broadcast.title'),
+            $message,
+            $this->locale->translateLocale($locale, 'notification.broadcast.help'),
+        );
+    }
+
+    private function wrapBroadcastText(string $title, string $message, string $help): string
+    {
+        return implode("\n", [
+            $title,
+            '━━━━━━━━━━━━━━',
+            $message,
+            '',
+            $help,
+        ]);
     }
 
     private function isPermanentRecipientFailure(Throwable $e): bool

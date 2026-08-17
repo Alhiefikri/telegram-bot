@@ -19,7 +19,22 @@ class TelegramLocale
 
     public function code(?Customer $customer): string
     {
-        $locale = (string) ($customer?->locale ?? '');
+        return $this->normalize($customer?->locale);
+    }
+
+    public function translateLocale(?string $locale, string $key, array $replace = []): string
+    {
+        return $this->catalog->translate($key, $this->normalize($locale), $replace);
+    }
+
+    public function codeForLocale(?string $locale): string
+    {
+        return $this->normalize($locale);
+    }
+
+    private function normalize(?string $locale): string
+    {
+        $locale = (string) ($locale ?? '');
 
         return $this->isSupported($locale) ? $locale : self::DEFAULT_LOCALE;
     }

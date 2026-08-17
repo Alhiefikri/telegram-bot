@@ -333,6 +333,11 @@ class TelegramBroadcastIntents
                         ['text' => '🛍️ Buy: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
+                'ms' => [
+                    'inline_keyboard' => [[
+                        ['text' => '🛍️ Beli: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                    ]],
+                ],
             ] : [];
 
             try {

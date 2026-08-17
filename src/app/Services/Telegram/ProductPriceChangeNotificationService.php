@@ -27,7 +27,10 @@ class ProductPriceChangeNotificationService
 
     public const MAX_STORE_CHANNEL_ATTEMPTS = 1;
 
-    public function __construct(private readonly TelegramBotClient $bot) {}
+    public function __construct(
+        private readonly TelegramBotClient $bot,
+        private readonly TelegramLocale $locale,
+    ) {}
 
     public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
     {
@@ -147,7 +150,7 @@ class ProductPriceChangeNotificationService
         }
 
         try {
-            $response = $this->bot->sendMessage($chatId, $this->message($claimed, true));
+            $response = $this->bot->sendMessage($chatId, $this->message($claimed, 'en'));
             $messageId = data_get($response, 'result.message_id');
             if (data_get($response, 'ok') !== true || ! $messageId) {
                 throw new RuntimeException('Telegram sendMessage did not return a successful Store Channel message ID.');
@@ -208,7 +211,7 @@ class ProductPriceChangeNotificationService
                         'event_id' => $event->id,
                         'customer_id' => $customer->id,
                         'telegram_id' => (string) $customer->telegram_id,
-                        'locale' => $customer->locale === 'en' ? 'en' : 'id',
+                        'locale' => $this->locale->code($customer),
                         'created_at' => $now,
                         'updated_at' => $now,
                     ])
@@ -261,10 +264,11 @@ class ProductPriceChangeNotificationService
             // Telegram has no transactional exactly-once send. The durable recipient row prevents normal
             // retries from resending once sent_at is stored, but a process crash after this sendMessage call
             // and before the sent_at update below can still produce one duplicate message on recovery.
+            $locale = $this->locale->codeForLocale($claimed->locale);
             $this->bot->sendMessage(
                 $claimed->telegram_id,
-                $this->message($event, $claimed->locale === 'en'),
-                $this->replyMarkup($event, $claimed->locale === 'en'),
+                $this->message($event, $locale),
+                $this->replyMarkup($event, $locale),
             );
         } catch (Throwable $e) {
             $terminal = $e instanceof RequestException && $e->response?->status() === 403;
@@ -339,50 +343,44 @@ class ProductPriceChangeNotificationService
         return $target === '' ? null : $target;
     }
 
-    private function message(ProductPriceChangeEvent $event, bool $english): string
+    private function message(ProductPriceChangeEvent $event, string $locale): string
     {
         $decrease = $this->isPureDecrease($event);
-        $title = $english
-            ? ($decrease ? '🏷️ Price Drop' : '📢 Price Update')
-            : ($decrease ? '🏷️ Harga Turun' : '📢 Update Harga');
+        $title = $this->locale->translateLocale($locale, $decrease
+            ? 'notification.price.title.drop'
+            : 'notification.price.title.update');
 
         $lines = [
             $title,
             '━━━━━━━━━━━━━━',
-            $english
-                ? ($decrease ? 'Good news for you.' : 'A product price has been updated.')
-                : ($decrease ? 'Kabar bagus buat kamu.' : 'Ada update harga produk.'),
+            $this->locale->translateLocale($locale, $decrease
+                ? 'notification.price.lead.drop'
+                : 'notification.price.lead.update'),
             '📦 '.$event->product_name,
             '',
-            '💵 QRIS',
-            $this->formatIdr($event->old_price_amount, $english).' → '.$this->formatIdr($event->new_price_amount, $english),
+            $this->locale->translateLocale($locale, 'notification.price.qris.label'),
+            $this->formatIdr($event->old_price_amount, $locale).' → '.$this->formatIdr($event->new_price_amount, $locale),
         ];
 
-        $usdtLine = $this->usdtLine($event, $english);
+        $usdtLine = $this->usdtLine($event, $locale);
         if ($usdtLine !== null) {
             $lines[] = '';
-            $lines[] = '💎 Binance Pay';
+            $lines[] = $this->locale->translateLocale($locale, 'notification.price.binance.label');
             $lines[] = $usdtLine;
         }
 
         $lines[] = '';
-        $savingsLine = $this->savingsLine($event, $english);
+        $savingsLine = $this->savingsLine($event, $locale);
         if ($decrease && $savingsLine !== null) {
             $lines[] = $savingsLine;
-            $lines[] = $english
-                ? 'The new price is ready for your next checkout.'
-                : 'Harga baru sudah siap untuk checkout berikutnya.';
+            $lines[] = $this->locale->translateLocale($locale, 'notification.price.new_price_ready');
         } else {
-            $lines[] = $english
-                ? 'The new price applies to future checkouts.'
-                : 'Harga baru berlaku untuk checkout berikutnya.';
-            $lines[] = $english
-                ? 'Existing orders keep their previous price.'
-                : 'Order yang sudah dibuat tetap memakai harga sebelumnya.';
+            $lines[] = $this->locale->translateLocale($locale, 'notification.price.future_checkout');
+            $lines[] = $this->locale->translateLocale($locale, 'notification.price.existing_orders');
         }
 
         $lines[] = '';
-        $lines[] = $english ? 'Need help? Reply with /support.' : 'Butuh bantuan? Balas /support ya.';
+        $lines[] = $this->locale->translateLocale($locale, 'notification.price.help');
 
         return implode("\n", $lines);
     }
@@ -403,30 +401,30 @@ class ProductPriceChangeNotificationService
         return $directions !== [] && collect($directions)->every(fn (string $direction): bool => $direction === 'down');
     }
 
-    private function usdtLine(ProductPriceChangeEvent $event, bool $english): ?string
+    private function usdtLine(ProductPriceChangeEvent $event, string $locale): ?string
     {
         if ($event->old_usdt_price_amount === $event->new_usdt_price_amount) {
             return null;
         }
 
         if ($event->old_usdt_price_amount === null && $event->new_usdt_price_amount !== null) {
-            return $english
-                ? 'Now available at '.Money::usdt($event->new_usdt_price_amount)
-                : 'Sekarang tersedia di '.Money::usdt($event->new_usdt_price_amount);
+            return $this->locale->translateLocale($locale, 'notification.price.usdt.now_available', [
+                'amount' => Money::usdt($event->new_usdt_price_amount),
+            ]);
         }
 
         if ($event->old_usdt_price_amount !== null && $event->new_usdt_price_amount === null) {
-            return $english ? 'No longer available for Binance Pay.' : 'Tidak tersedia lagi untuk Binance Pay.';
+            return $this->locale->translateLocale($locale, 'notification.price.usdt.unavailable');
         }
 
         return Money::usdt($event->old_usdt_price_amount).' → '.Money::usdt($event->new_usdt_price_amount);
     }
 
-    private function savingsLine(ProductPriceChangeEvent $event, bool $english): ?string
+    private function savingsLine(ProductPriceChangeEvent $event, string $locale): ?string
     {
         $savings = [];
         if ($event->new_price_amount < $event->old_price_amount) {
-            $savings[] = $this->formatIdr($event->old_price_amount - $event->new_price_amount, $english);
+            $savings[] = $this->formatIdr($event->old_price_amount - $event->new_price_amount, $locale);
         }
         if ($event->old_usdt_price_amount !== null
             && $event->new_usdt_price_amount !== null
@@ -438,20 +436,22 @@ class ProductPriceChangeNotificationService
             return null;
         }
 
-        return ($english ? 'You save ' : 'Lebih hemat ').implode(' + ', $savings).'.';
+        return $this->locale->translateLocale($locale, 'notification.price.savings', [
+            'amount' => implode(' + ', $savings),
+        ]);
     }
 
-    private function replyMarkup(ProductPriceChangeEvent $event, bool $english): array
+    private function replyMarkup(ProductPriceChangeEvent $event, string $locale): array
     {
         return [
             'inline_keyboard' => [[
-                ['text' => $english ? '🛒 View Product' : '🛒 Lihat Produk', 'callback_data' => 'product:'.$event->product_id],
+                ['text' => $this->locale->translateLocale($locale, 'notification.price.cta'), 'callback_data' => 'product:'.$event->product_id],
             ]],
         ];
     }
 
-    private function formatIdr(int $amount, bool $english): string
+    private function formatIdr(int $amount, string $locale): string
     {
-        return Money::rupiah($amount, $english ? ',' : '.');
+        return Money::rupiah($amount, $locale === 'en' ? ',' : '.');
     }
 }

@@ -82,7 +82,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $this->assertCount(10, $sentChatIds);
         Http::assertSentCount(10);
         Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
-            && $request['text'] === 'Batch me');
+            && $request['text'] === "📣 Info from Admin\n━━━━━━━━━━━━━━\nBatch me\n\nNeed help? Reply with /support.");
         $this->assertSame(50, $broadcast->recipient_count);
         $this->assertSame(10, $broadcast->sent_count);
         $this->assertSame(40, $broadcast->pending_count);
@@ -103,6 +103,7 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         ])]);
         Customer::factory()->create(['telegram_id' => 111111111, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 222222222, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 333333333, 'locale' => 'ms']);
         $broadcast = TelegramBroadcast::create([
             'broadcast_key' => (string) Str::uuid(),
             'source' => 'admin',
@@ -111,20 +112,66 @@ class AdminTelegramBroadcastQueueTest extends TestCase
             'reply_markup' => [
                 'id' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'product:1']]]],
                 'en' => ['inline_keyboard' => [[['text' => 'Buy', 'callback_data' => 'product:1']]]],
+                'ms' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'product:1']]]],
             ],
             'status' => TelegramBroadcast::STATUS_QUEUED,
         ]);
 
         $result = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
 
-        $this->assertSame(2, $result->sent);
+        $this->assertSame(3, $result->sent);
         $requests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
-        $this->assertCount(2, $requests);
-        $this->assertSame(['111111111', '222222222'], $requests->map(fn (array $record): string => (string) $record[0]['chat_id'])->all());
+        $this->assertCount(3, $requests);
+        $this->assertSame(['111111111', '222222222', '333333333'], $requests->map(fn (array $record): string => (string) $record[0]['chat_id'])->all());
         $this->assertSame('bot-owned-photo-file-id', $requests->first()[0]['photo']);
         $this->assertSame('Promo foto literal', $requests->first()[0]['caption']);
         $this->assertSame('Beli', $requests->first()[0]['reply_markup']['inline_keyboard'][0][0]['text']);
-        $this->assertSame('Buy', $requests->last()[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Buy', $requests->get(1)[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Beli', $requests->get(2)[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+    }
+
+    public function test_admin_broadcast_text_wrappers_follow_each_snapshot_locale_while_body_stays_literal(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 123],
+        ])]);
+        Customer::factory()->create(['telegram_id' => 111111111, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 222222222, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 333333333, 'locale' => 'ms']);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Admin-authored body — Keep this exact.',
+            'reply_markup' => [
+                'id' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'product:1']]]],
+                'en' => ['inline_keyboard' => [[['text' => 'Buy', 'callback_data' => 'product:1']]]],
+                'ms' => ['inline_keyboard' => [[['text' => 'Beli', 'callback_data' => 'product:1']]]],
+            ],
+            'status' => TelegramBroadcast::STATUS_QUEUED,
+        ]);
+
+        app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+
+        $requests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(3, $requests);
+        $this->assertSame(
+            "📣 Info dari Admin\n━━━━━━━━━━━━━━\nAdmin-authored body — Keep this exact.\n\nButuh bantuan? Balas /support ya.",
+            $requests->first()[0]['text'],
+        );
+        $this->assertSame(
+            "📣 Info from Admin\n━━━━━━━━━━━━━━\nAdmin-authored body — Keep this exact.\n\nNeed help? Reply with /support.",
+            $requests->get(1)[0]['text'],
+        );
+        $this->assertSame(
+            "📣 Maklumat daripada Admin\n━━━━━━━━━━━━━━\nAdmin-authored body — Keep this exact.\n\nPerlukan bantuan? Balas /support.",
+            $requests->get(2)[0]['text'],
+        );
+        $this->assertSame('Beli', $requests->first()[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Buy', $requests->get(1)[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Beli', $requests->get(2)[0]['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame('Admin-authored body — Keep this exact.', $broadcast->fresh()->message);
     }
 
     public function test_shared_broadcast_rate_limit_leaves_unclaimed_recipients_pending(): void

@@ -17,6 +17,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramLocale;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -38,6 +39,7 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         Customer::factory()->create(['telegram_id' => 7001, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 7002, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 7003, 'locale' => 'ms']);
         $product = Product::factory()->create([
             'name' => 'ChatGPT Premium',
             'price_amount' => 35000,
@@ -61,6 +63,7 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $idRequest = $this->telegramSendFor(7001);
         $enRequest = $this->telegramSendFor(7002);
+        $msRequest = $this->telegramSendFor(7003);
 
         $this->assertStringContainsString('🏷️ Harga Turun', (string) $idRequest['text']);
         $this->assertStringContainsString('Kabar bagus buat kamu.', (string) $idRequest['text']);
@@ -74,6 +77,16 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertStringContainsString('Rp35,000 → Rp30,000', (string) $enRequest['text']);
         $this->assertStringContainsString('You save Rp5,000 + 0.25 USDT.', (string) $enRequest['text']);
         $this->assertSame('🛒 View Product', $enRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertStringContainsString('🏷️ Harga Turun', (string) $msRequest['text']);
+        $this->assertStringContainsString('Berita baik untuk anda.', (string) $msRequest['text']);
+        $this->assertStringContainsString('Rp35.000 → Rp30.000', (string) $msRequest['text']);
+        $this->assertStringContainsString('2.5 USDT → 2.25 USDT', (string) $msRequest['text']);
+        $this->assertStringContainsString('Anda jimat Rp5.000 + 0.25 USDT.', (string) $msRequest['text']);
+        $this->assertStringContainsString('Harga baharu sedia digunakan untuk checkout seterusnya.', (string) $msRequest['text']);
+        $this->assertStringContainsString('Perlukan bantuan? Balas /support.', (string) $msRequest['text']);
+        $this->assertSame('🛒 Lihat Produk', $msRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertStringNotContainsString('Price Drop', (string) $msRequest['text']);
+        $this->assertStringNotContainsString('You save', (string) $msRequest['text']);
     }
 
     public function test_committed_decrease_also_publishes_the_english_price_drop_to_the_store_channel_once(): void
@@ -301,6 +314,7 @@ class ProductPriceChangeNotificationTest extends TestCase
         config()->set('services.telegram.token', 'bot-token');
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
         Customer::factory()->create(['telegram_id' => 8001, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 8002, 'locale' => 'ms']);
 
         $product = Product::factory()->create(['name' => 'Mixed Price', 'stock' => 1, 'reserved_stock' => 0]);
         $increase = ProductPriceChangeEvent::create([
@@ -317,13 +331,20 @@ class ProductPriceChangeNotificationTest extends TestCase
         app(ProductPriceChangeNotificationService::class)->processBatch($increase->id);
 
         $request = $this->telegramSendFor(8001);
+        $msRequest = $this->telegramSendFor(8002);
         $this->assertStringContainsString('📢 Price Update', (string) $request['text']);
         $this->assertStringContainsString('Now available at 2 USDT', (string) $request['text']);
         $this->assertStringContainsString('Existing orders keep their previous price.', (string) $request['text']);
         $this->assertStringNotContainsString('You save', (string) $request['text']);
         $this->assertStringNotContainsString('null', strtolower((string) $request['text']));
-        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')));
-        $this->assertSame(1, ProductPriceChangeNotificationRecipient::where('event_id', $increase->id)->whereNotNull('sent_at')->count());
+        $this->assertStringContainsString('📢 Kemas Kini Harga', (string) $msRequest['text']);
+        $this->assertStringContainsString('Kini tersedia pada 2 USDT', (string) $msRequest['text']);
+        $this->assertStringContainsString('Harga baharu digunakan untuk checkout akan datang.', (string) $msRequest['text']);
+        $this->assertStringContainsString('Pesanan sedia ada kekal dengan harga sebelumnya.', (string) $msRequest['text']);
+        $this->assertStringNotContainsString('Price Update', (string) $msRequest['text']);
+        $this->assertStringNotContainsString('null', strtolower((string) $msRequest['text']));
+        $this->assertCount(2, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')));
+        $this->assertSame(2, ProductPriceChangeNotificationRecipient::where('event_id', $increase->id)->whereNotNull('sent_at')->count());
     }
 
     public function test_transient_failure_is_retried_without_resending_successful_recipients(): void
@@ -561,7 +582,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class)) extends ProductPriceChangeNotificationService
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class)) extends ProductPriceChangeNotificationService
         {
             public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
             {

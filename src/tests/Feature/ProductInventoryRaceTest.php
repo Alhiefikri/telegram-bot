@@ -127,7 +127,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     public function test_stock_ready_notification_requires_active_product_with_available_stock_and_hides_secrets(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 399001]);
+        Customer::factory()->create(['telegram_id' => 399001, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 1, reservedStock: 1, secrets: ['notify-secret']);
 
         app(TelegramProductNotificationService::class)->notifyStockAdded($product, 1);
@@ -281,7 +281,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
     public function test_stock_notification_snapshots_recipients_and_retries_a_transient_failure(): void
     {
-        Customer::factory()->create(['telegram_id' => 991001, 'locale' => 'id']);
+        $customer = Customer::factory()->create(['telegram_id' => 991001, 'locale' => 'ms']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
         $admin = User::factory()->create();
         $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'durable restock', $admin, '127.0.0.1', ['durable-secret'])['movement_id'];
@@ -293,20 +293,26 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $event = StockNotificationEvent::where('inventory_movement_id', $movementId)->sole();
         $recipient = StockNotificationRecipient::where('stock_notification_event_id', $event->id)->where('telegram_id', '991001')->sole();
         $this->assertNotNull($event->recipients_snapshotted_at);
+        $this->assertSame('ms', $recipient->locale);
         $this->assertSame(1, $recipient->attempts);
         $this->assertNotNull($recipient->failed_at);
+        $this->assertStringContainsString('✅ Stok Tersedia Semula', (string) $recipient->text);
+        $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
         $this->assertTrue($first['has_more']);
 
+        $customer->update(['locale' => 'en']);
         $second = $pipeline->deliver($movementId);
         $recipient->refresh();
+        $this->assertSame('ms', $recipient->locale);
         $this->assertSame(2, $recipient->attempts);
         $this->assertNotNull($recipient->sent_at);
+        $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
         $this->assertFalse($second['has_more']);
     }
 
     public function test_permanent_stock_notification_failure_is_recorded_for_operator_follow_up(): void
     {
-        Customer::factory()->create(['telegram_id' => 991002]);
+        Customer::factory()->create(['telegram_id' => 991002, 'locale' => 'ms']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
         $admin = User::factory()->create();
         $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'lease recovery', $admin, '127.0.0.1', ['lease-secret'])['movement_id'];
@@ -316,8 +322,41 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $pipeline->deliver($movementId, 1);
         $event = StockNotificationEvent::where('inventory_movement_id', $movementId)->sole();
         $recipient = StockNotificationRecipient::where('stock_notification_event_id', $event->id)->where('telegram_id', '991002')->sole();
+        $this->assertSame('ms', $recipient->locale);
+        $this->assertStringContainsString('✅ Stok Tersedia Semula', (string) $recipient->text);
         $this->assertNotNull($recipient->terminal_failed_at);
         $this->assertNotEmpty($recipient->last_error);
+
+        $second = $pipeline->deliver($movementId, 1);
+
+        $this->assertSame(0, $second['processed']);
+        $this->assertCount(1, Http::recorded());
+    }
+
+    public function test_duplicate_restock_delivery_execution_sends_each_localized_recipient_once(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 991003, 'locale' => 'ms']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'duplicate restock', $admin, '127.0.0.1', ['duplicate-secret'])['movement_id'];
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+
+        $first = $pipeline->deliver($movementId);
+        $second = $pipeline->deliver($movementId);
+
+        $customerMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage')
+                && (string) ($request[0]['chat_id'] ?? '') === '991003');
+        $recipient = StockNotificationRecipient::query()->where('telegram_id', '991003')->sole();
+
+        $this->assertSame(1, $first['processed']);
+        $this->assertSame(0, $second['processed']);
+        $this->assertCount(1, $customerMessages);
+        $this->assertSame('ms', $recipient->locale);
+        $this->assertNotNull($recipient->sent_at);
+        $this->assertFalse($first['has_more']);
+        $this->assertFalse($second['has_more']);
     }
 
     public function test_restock_channel_notification_includes_added_stock_available_stock_and_current_prices(): void

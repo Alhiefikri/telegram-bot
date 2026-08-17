@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['stock_notification_event_id', 'customer_id', 'recipient_type', 'telegram_id', 'text', 'reply_markup', 'claim_expires_at', 'claim_token', 'sent_at', 'failed_at', 'terminal_failed_at', 'last_error', 'attempts'])]
+#[Fillable(['stock_notification_event_id', 'customer_id', 'recipient_type', 'telegram_id', 'locale', 'text', 'reply_markup', 'claim_expires_at', 'claim_token', 'sent_at', 'failed_at', 'terminal_failed_at', 'last_error', 'attempts'])]
 class StockNotificationRecipient extends Model
 {
     protected function casts(): array

@@ -149,6 +149,7 @@ class StockNotificationDeliveryPipeline
                 'customer_id' => $delivery['customer_id'],
                 'recipient_type' => $delivery['recipient_type'],
                 'telegram_id' => $delivery['telegram_id'],
+                'locale' => $delivery['locale'],
                 'text' => $delivery['text'],
                 'reply_markup' => $delivery['reply_markup'] === [] ? null : json_encode($delivery['reply_markup'], JSON_THROW_ON_ERROR),
                 'created_at' => $now,

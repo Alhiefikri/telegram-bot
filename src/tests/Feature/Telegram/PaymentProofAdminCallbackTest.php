@@ -1138,12 +1138,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertCount(2, $localizedRecipientMessages);
         $this->assertSame([
             '111' => [
-                'text' => 'Stok Canva ready malam ini.',
+                'text' => "📣 Info dari Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nButuh bantuan? Balas /support ya.",
                 'button_text' => '🛍️ Beli: Canva Pro',
                 'callback_data' => 'product:'.$product->id,
             ],
             '222' => [
-                'text' => 'Stok Canva ready malam ini.',
+                'text' => "📣 Info from Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nNeed help? Reply with /support.",
                 'button_text' => '🛍️ Buy: Canva Pro',
                 'callback_data' => 'product:'.$product->id,
             ],

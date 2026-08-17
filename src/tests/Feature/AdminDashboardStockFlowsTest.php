@@ -315,7 +315,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        Customer::factory()->create(['telegram_id' => 333]);
+        Customer::factory()->create(['telegram_id' => 333, 'locale' => 'id']);
         Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $this->actingAs($admin)

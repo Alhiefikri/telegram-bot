@@ -513,6 +513,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 7001, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 7002, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => 7003, 'locale' => 'ms']);
         $created = Product::factory()->create([
             'name' => 'Notion Plus Launch',
             'description' => 'Merchant-authored launch copy.',
@@ -534,7 +535,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $notifications->notifyProductCreated($created);
         $notifications->notifyStockAdded($restocked, 1, 0);
 
-        $this->assertCount(4, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')));
+        $this->assertCount(6, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')));
         $requestFor = function (int $chatId, string $productName) {
             $matches = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
                 && (string) ($request['chat_id'] ?? '') === (string) $chatId
@@ -547,8 +548,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $createdId = $requestFor(7001, $created->name);
         $createdEn = $requestFor(7002, $created->name);
+        $createdMs = $requestFor(7003, $created->name);
         $restockedId = $requestFor(7001, $restocked->name);
         $restockedEn = $requestFor(7002, $restocked->name);
+        $restockedMs = $requestFor(7003, $restocked->name);
 
         $this->assertStringContainsString('🆕 Produk Baru', (string) $createdId['text']);
         $this->assertStringContainsString('Produk baru sudah masuk', (string) $createdId['text']);
@@ -567,6 +570,17 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('👀 View Product', $createdEn['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
         $this->assertStringNotContainsString('👀', (string) $createdEn['text']);
         $this->assertStringContainsString('A new product just arrived', (string) $createdEn['text']);
+
+        $this->assertStringContainsString('🆕 Produk Baharu', (string) $createdMs['text']);
+        $this->assertStringContainsString('Produk baharu baru sahaja tiba', (string) $createdMs['text']);
+        $this->assertStringContainsString('💰 Harga: Rp30.000', (string) $createdMs['text']);
+        $this->assertStringContainsString('📦 Stok: 2', (string) $createdMs['text']);
+        $this->assertStringContainsString('📝 Penerangan', (string) $createdMs['text']);
+        $this->assertStringContainsString('Perlukan bantuan? Balas /support.', (string) $createdMs['text']);
+        $this->assertSame('👀 Lihat Produk', $createdMs['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertStringNotContainsString('Produk Baru', (string) $createdMs['text']);
+        $this->assertStringNotContainsString('New Product', (string) $createdMs['text']);
+
         $this->assertStringContainsString('✅ Stok Tersedia', (string) $restockedId['text']);
         $this->assertStringContainsString('Stok tersedia lagi', (string) $restockedId['text']);
         $this->assertStringNotContainsString('ready', strtolower((string) $restockedId['text']));
@@ -586,6 +600,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Need help? Reply with /support.', (string) $restockedEn['text']);
         $this->assertSame('👀 View Product', $restockedEn['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
 
+        $this->assertStringContainsString('✅ Stok Tersedia Semula', (string) $restockedMs['text']);
+        $this->assertStringContainsString('Stok tersedia semula', (string) $restockedMs['text']);
+        $this->assertStringContainsString('💰 Harga: Rp45.000', (string) $restockedMs['text']);
+        $this->assertStringContainsString('📦 Stok: 1', (string) $restockedMs['text']);
+        $this->assertStringContainsString('📝 Penerangan', (string) $restockedMs['text']);
+        $this->assertStringContainsString('Perlukan bantuan? Balas /support.', (string) $restockedMs['text']);
+        $this->assertSame('👀 Lihat Produk', $restockedMs['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
+        $this->assertStringNotContainsString('Stok tersedia lagi', (string) $restockedMs['text']);
+
         foreach ([$createdEn, $restockedEn] as $englishRequest) {
             $englishPayload = json_encode($englishRequest->data());
             foreach (['Produk Baru', 'Harga:', 'Stok:', 'Deskripsi', 'Butuh bantuan', 'Lihat Produk'] as $indonesianSystemCopy) {
@@ -597,6 +620,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertNotSame($createdId['reply_markup'], $createdEn['reply_markup']);
         $this->assertNotSame($restockedId['text'], $restockedEn['text']);
         $this->assertNotSame($restockedId['reply_markup'], $restockedEn['reply_markup']);
+        $this->assertNotSame($createdEn['text'], $createdMs['text']);
+        $this->assertNotSame($restockedEn['text'], $restockedMs['text']);
     }
 
     public function test_product_restock_notification_has_localized_look_button_and_description(): void
@@ -684,6 +709,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Netflix Premium')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
+
     public function test_catalog_and_search_copy_follow_each_locale_without_translating_merchant_content(): void
     {
         $this->fakeTelegramHttp();
