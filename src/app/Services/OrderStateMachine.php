@@ -10,12 +10,12 @@ use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine implements OrderLifecycle
@@ -24,6 +24,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly InventoryLedger $inventory,
         private readonly ?ProductCredentialAllocator $credentials = null,
         private readonly ?ProviderCancellationAttempts $providerCancellationAttempts = null,
+        private readonly ?TelegramOutboundEffectService $outboundEffects = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -86,8 +87,6 @@ class OrderStateMachine implements OrderLifecycle
 
                 $lockedOrder->refresh();
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
-
-                SendTelegramReceipt::dispatch($lockedOrder->getKey(), false, now()->toISOString())->onQueue('notifications')->afterCommit();
 
                 $completed = $lockedOrder->fresh(['payments']);
 
@@ -290,6 +289,7 @@ class OrderStateMachine implements OrderLifecycle
         SendAdminOrderPaidNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
 
         $paid = $order->fresh(['payments']);
+        $this->recordAndDispatchReceipt($paid);
 
         return new OrderLifecycleResult(
             order: $paid,
@@ -463,5 +463,15 @@ class OrderStateMachine implements OrderLifecycle
     private function dispatchAdminExpiredNotification(Order $order): void
     {
         SendAdminOrderExpiredNotification::dispatch($order->id, now()->toISOString())->onQueue('notifications')->afterCommit();
+    }
+
+    private function recordAndDispatchReceipt(Order $order): void
+    {
+        $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordReceipt($order);
+
+        if ($effect !== null) {
+            $outboundEffects->dispatch($effect);
+        }
     }
 }

@@ -8,4 +8,5 @@ enum TelegramOutboundEffectType: string
     case KlikQrisCheckoutInstructions = 'checkout.klikqris_payment_instructions';
     case PakasirCheckoutInstructions = 'checkout.pakasir_payment_instructions';
     case BinanceCheckoutInstructions = 'checkout.binance_payment_instructions';
+    case ReceiptCredentials = 'receipt.credentials';
 }

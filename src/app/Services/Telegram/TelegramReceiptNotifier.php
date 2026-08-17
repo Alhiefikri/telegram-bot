@@ -2,14 +2,12 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\PaymentStatus;
-use App\Jobs\DeleteBuyerCheckoutMessages;
+use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\ProductUsageGuide;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 class TelegramReceiptNotifier
 {
@@ -22,111 +20,123 @@ class TelegramReceiptNotifier
         private TelegramSupportContact $supportContact,
     ) {}
 
+    /**
+     * Compatibility entry point for callers that still invoke the notifier
+     * directly. New queued delivery is owned by TelegramOutboundEffectService.
+     */
     public function send(Order $order, bool $force = false): void
     {
         if (blank(config('services.telegram.token'))) {
             return;
         }
 
-        $lock = Cache::lock('telegram-receipt:'.$order->id, 60);
-        if (! $lock->get()) {
-            return;
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $effect = $force
+            ? $outboundEffects->recordReceiptResend($order)
+            : $outboundEffects->recordReceipt($order);
+
+        while ($effect !== null) {
+            $outboundEffects->processReceipt(
+                $effect,
+                $this,
+                dispatchNext: false,
+                throwOnAmbiguous: true,
+            );
+            $effect = $outboundEffects->nextReceiptEffect($effect);
+        }
+    }
+
+    /**
+     * Render a receipt in memory. The returned credential-bearing strings are
+     * deliberately never persisted in the outbound effect ledger.
+     *
+     * @return array{chunks: list<string>, guides: list<array{title: string, url: string}>}
+     */
+    public function render(Order $order): array
+    {
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
+
+        $customer = $order->customer;
+        if (! $customer instanceof Customer) {
+            return ['chunks' => [''], 'guides' => []];
         }
 
-        try {
-            $claimed = DB::transaction(function () use ($order, $force) {
-                $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->payment_status !== PaymentStatus::Paid) {
-                    return null;
-                }
-
-                if (! $force && ($locked->telegram_receipt_sent_at !== null || $this->hasActiveClaim($locked->telegram_receipt_send_started_at))) {
-                    return null;
-                }
-
-                // Claim before Telegram I/O. If the worker dies after Telegram accepts
-                // the message but before sent_at is written, retries skip this effect
-                // instead of sending duplicate account credentials.
-                $locked->forceFill(['telegram_receipt_send_started_at' => now()])->save();
-
-                return $locked->fresh();
-            });
-
-            if (! $claimed) {
-                return;
-            }
-
-            $claimed->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
-            if (! $claimed->customer?->telegram_id) {
-                Order::whereKey($claimed->id)
-                    ->whereNull('telegram_receipt_sent_at')
-                    ->update(['telegram_receipt_send_started_at' => null]);
-
-                return;
-            }
-
-            $guides = $this->usageGuides->forOrder($claimed);
-            $lines = [
-                $this->locale->translate($claimed->customer, 'receipt.title'),
-                '━━━━━━━━━━━━━━',
-                $this->locale->translate($claimed->customer, 'payment.invoice', ['invoice' => $claimed->invoice_number]),
-                '',
-                $this->locale->translate($claimed->customer, 'receipt.products'),
-            ];
-            foreach ($claimed->orderItems as $item) {
-                $lines[] = '- '.$item->product_name.' x '.$item->quantity;
-            }
-            $accountLines = $this->accountSecretLines($claimed);
-            if ($accountLines !== []) {
-                $lines[] = '';
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.account_details');
-                $lines[] = '━━━━━━━━━━━━━━';
-                array_push($lines, ...$accountLines);
-                $lines[] = '';
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.save_details');
-                foreach ($guides as $guide) {
-                    $lines[] = '';
-                    $lines[] = '📘 '.$guide['title'];
-                    $lines[] = $guide['url'];
-                }
-                $lines[] = '';
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.login_help');
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.thanks');
-            } else {
-                $lines[] = '';
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.recorded');
-                $lines[] = '';
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.support_help');
-                $lines[] = $this->locale->translate($claimed->customer, 'receipt.thanks');
-            }
-
-            try {
-                $chunks = $this->messageChunker->fromLines($lines);
-                foreach ($chunks as $index => $chunk) {
-                    $this->bot->sendMessage(
-                        $claimed->customer->telegram_id,
-                        $chunk,
-                        $index === array_key_last($chunks) ? $this->receiptReplyMarkup($claimed->customer, $guides) : [],
-                        $this->credentialOptions($chunk),
-                    );
-                }
-            } catch (\Throwable $e) {
-                Order::whereKey($claimed->id)
-                    ->whereNull('telegram_receipt_sent_at')
-                    ->update(['telegram_receipt_send_started_at' => null]);
-
-                throw $e;
-            }
-
-            $receiptSentAt = Order::whereKey($claimed->id);
-            if (! $force) {
-                $receiptSentAt->whereNotNull('telegram_receipt_send_started_at')->whereNull('telegram_receipt_sent_at');
-            }
-            $receiptSentAt->update(['telegram_receipt_sent_at' => now(), 'telegram_receipt_send_started_at' => null]);
-            DeleteBuyerCheckoutMessages::dispatch($claimed->id, now()->toISOString())->onQueue('notifications');
-        } finally {
-            $lock->release();
+        $guides = $this->usageGuides->forOrder($order);
+        $lines = [
+            $this->locale->translate($customer, 'receipt.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            '',
+            $this->locale->translate($customer, 'receipt.products'),
+        ];
+        foreach ($order->orderItems as $item) {
+            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
+
+        $accountLines = $this->accountSecretLines($order);
+        if ($accountLines !== []) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.account_details');
+            $lines[] = '━━━━━━━━━━━━━━';
+            array_push($lines, ...$accountLines);
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.save_details');
+            foreach ($guides as $guide) {
+                $lines[] = '';
+                $lines[] = '📘 '.$guide['title'];
+                $lines[] = $guide['url'];
+            }
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.login_help');
+            $lines[] = $this->locale->translate($customer, 'receipt.thanks');
+        } else {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.recorded');
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.support_help');
+            $lines[] = $this->locale->translate($customer, 'receipt.thanks');
+        }
+
+        return [
+            'chunks' => $this->messageChunker->fromLines($lines),
+            'guides' => $guides,
+        ];
+    }
+
+    /**
+     * Send exactly one ordered delivery unit. Claiming and finalization stay
+     * in TelegramOutboundEffectService so a transport ambiguity is recorded
+     * against this unit only.
+     *
+     * @return array<string, mixed>
+     */
+    public function sendEffect(Order $order, TelegramOutboundEffect $effect): array
+    {
+        if (blank(config('services.telegram.token'))) {
+            throw new TelegramOutboundPreSendException('Telegram receipt delivery is not configured.');
+        }
+
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
+        $customer = $order->customer;
+        if (! $customer instanceof Customer || $customer->telegram_id === null) {
+            throw new TelegramOutboundPreSendException('Telegram receipt target is missing.');
+        }
+
+        $rendered = $this->render($order);
+        $index = max(0, (int) $effect->sequence - 1);
+        $chunk = $rendered['chunks'][$index] ?? null;
+        if (! is_string($chunk)) {
+            throw new TelegramOutboundPreSendException('Telegram receipt delivery unit is no longer renderable.');
+        }
+
+        $isFinal = $index === array_key_last($rendered['chunks']);
+
+        return $this->bot->sendMessage(
+            $customer->telegram_id,
+            $chunk,
+            $isFinal ? $this->receiptReplyMarkup($customer, $rendered['guides']) : [],
+            $this->credentialOptions($chunk),
+        );
     }
 
     private function accountSecretLines(Order $order): array
@@ -185,11 +195,5 @@ class TelegramReceiptNotifier
         $entities = $this->credentialFormatter->codeEntities($text);
 
         return $entities === [] ? [] : ['entities' => $entities];
-    }
-
-    private function hasActiveClaim($startedAt): bool
-    {
-        return $startedAt !== null
-            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 }

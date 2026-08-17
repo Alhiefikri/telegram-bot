@@ -3,7 +3,6 @@
 namespace App\Services\KlikQris;
 
 use App\Enums\PaymentStatus;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\OrderLifecycle;
@@ -147,10 +146,7 @@ class KlikQrisCallbackProcessor
                 return $lockedEvent->fresh();
             }
 
-            $result = $this->orders->applyPaymentPaid($payment);
-            if ($result->shouldDispatchReceipt()) {
-                SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
-            }
+            $this->orders->applyPaymentPaid($payment);
 
             $lockedEvent->update(['processed_at' => now()]);
 

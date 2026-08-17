@@ -9,10 +9,12 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Exceptions\TelegramTransportException;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
@@ -42,6 +44,11 @@ class TelegramOutboundEffectService
 
     public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
 
+    public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
+
+    /** Compatibility alias for callers that refer to the receipt family directly. */
+    public const TYPE_RECEIPT = self::TYPE_RECEIPT_CREDENTIALS;
+
     public const TEMPLATE_MANUAL_CHECKOUT = 'manual-payment-v1';
 
     public const TEMPLATE_KLIKQRIS_CHECKOUT = 'klikqris-payment-v1';
@@ -49,6 +56,10 @@ class TelegramOutboundEffectService
     public const TEMPLATE_PAKASIR_CHECKOUT = 'pakasir-payment-v1';
 
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
+
+    public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
+
+    public const RECEIPT_QUEUE = 'notifications';
 
     /** @var list<string> */
     private const CHECKOUT_EFFECT_TYPES = [
@@ -59,11 +70,18 @@ class TelegramOutboundEffectService
     ];
 
     /** @var list<string> */
+    private const RECEIPT_EFFECT_TYPES = [
+        self::TYPE_RECEIPT_CREDENTIALS,
+    ];
+
+    /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
         'checkout_expired',
         'checkout_not_pending',
         'checkout_payment_missing',
         'checkout_payment_not_pending',
+        'receipt_not_eligible',
+        'receipt_render_changed',
     ];
 
     /** @var list<string> */
@@ -83,9 +101,14 @@ class TelegramOutboundEffectService
         'resolution',
         'resolution_actor_id',
         'resolution_at',
+        'receipt_chunk_index',
+        'receipt_chunk_count',
     ];
 
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly AuditLogger $auditLogger,
+        private readonly TelegramReceiptNotifier $receiptNotifier,
+    ) {}
 
     public function recordCheckoutInstructions(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
     {
@@ -125,6 +148,73 @@ class TelegramOutboundEffectService
     public function recordManualCheckout(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
     {
         return $this->recordCheckoutInstructions($order, $payment, $customer);
+    }
+
+    /**
+     * Materialize the paid customer receipt as an ordered effect group.
+     *
+     * The caller may already be inside the paid-lifecycle transaction. The
+     * nested transaction keeps direct legacy callers atomic as well, while
+     * Laravel's afterCommit dispatch remains owned by the caller.
+     */
+    public function recordReceipt(Order $order, ?Customer $customer = null): ?TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($order, $customer): ?TelegramOutboundEffect {
+            $locked = Order::query()->lockForUpdate()->findOrFail($order->getKey());
+            $customer ??= $locked->customer;
+
+            if (! $this->receiptEligible($locked, $customer)) {
+                return null;
+            }
+
+            $groupKey = self::receiptEffectGroupKey((string) $locked->getKey());
+            $existing = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $groupKey)
+                ->orderBy('sequence')
+                ->first();
+
+            if ($existing !== null) {
+                return $this->firstReadyReceiptEffect($groupKey);
+            }
+
+            // A legacy claim is evidence that a pre-ledger worker may already
+            // have called Telegram. Do not silently backfill it as pending.
+            if ($locked->telegram_receipt_sent_at !== null
+                || $locked->telegram_receipt_send_started_at !== null) {
+                return null;
+            }
+
+            return $this->createReceiptEffectGroup($locked, $customer);
+        }, 5);
+    }
+
+    /**
+     * Create an explicit, duplicate-risk-acknowledged receipt resend group.
+     * This is intentionally separate from the deterministic first-delivery
+     * group so the original effect history remains immutable.
+     */
+    public function recordReceiptResend(Order $order): TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($order): TelegramOutboundEffect {
+            $locked = Order::query()->lockForUpdate()->findOrFail($order->getKey());
+            $customer = $locked->customer;
+
+            if (! $this->receiptEligible($locked, $customer)) {
+                throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+            }
+
+            return $this->createReceiptEffectGroup($locked, $customer, explicit: true, supersedes: $this->latestReceiptEffect($locked));
+        }, 5);
+    }
+
+    public static function receiptEffectGroupKey(string $orderId): string
+    {
+        return 'order:'.$orderId.':'.self::TYPE_RECEIPT_CREDENTIALS.':v1';
+    }
+
+    public static function receiptEffectKey(string $orderId, int $sequence): string
+    {
+        return self::receiptEffectGroupKey($orderId).':unit:'.$sequence;
     }
 
     public static function typeForPayment(Payment $payment): ?string
@@ -247,12 +337,25 @@ class TelegramOutboundEffectService
                 $ip,
             );
 
+            if ($locked->effect_type === self::TYPE_RECEIPT_CREDENTIALS) {
+                $next = $this->nextReceiptEffect($locked);
+                if ($next !== null) {
+                    $this->dispatch($next);
+                } elseif ($this->isExplicitReceiptEffect($locked)) {
+                    $this->dispatchReceiptCleanup($locked->source_id);
+                }
+            }
+
             return true;
         });
     }
 
     public function resend(TelegramOutboundEffect $effect, User $actor, ?string $ip = null): TelegramOutboundEffect
     {
+        if ($effect->effect_type === self::TYPE_RECEIPT_CREDENTIALS) {
+            return $this->resendReceiptEffect($effect, $actor, $ip);
+        }
+
         return DB::transaction(function () use ($effect, $actor, $ip): TelegramOutboundEffect {
             $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->getKey());
             if (! $this->isReviewable($locked)) {
@@ -314,7 +417,45 @@ class TelegramOutboundEffectService
         });
     }
 
-    public function dispatch(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null): void
+    private function resendReceiptEffect(TelegramOutboundEffect $effect, User $actor, ?string $ip = null): TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($effect, $actor, $ip): TelegramOutboundEffect {
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->getKey());
+            if (! $this->isReviewable($locked)) {
+                throw new InvalidArgumentException('Only unknown or manual-review effects can be resent.');
+            }
+
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($locked->source_id);
+            $customer = $lockedOrder->customer;
+            if (! $this->receiptEligible($lockedOrder, $customer) || $customer === null) {
+                throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+            }
+
+            $resend = $this->createReceiptEffectGroup(
+                $lockedOrder,
+                $customer,
+                explicit: true,
+                supersedes: $locked,
+            );
+
+            $this->auditLogger->logWithResolvedContext(
+                'telegram_outbound_effect.resent',
+                $locked,
+                ['state' => $this->stateValue($locked)],
+                [
+                    'new_effect_id' => (string) $resend->getKey(),
+                    'sequence' => (int) $resend->sequence,
+                    'duplicate_risk_acknowledged' => true,
+                ],
+                $actor,
+                $ip,
+            );
+
+            return $resend;
+        }, 5);
+    }
+
+    public function dispatch(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null, bool $force = false): void
     {
         $jobEnqueuedAt ??= now()->toISOString();
         $pending = match ($effect->effect_type) {
@@ -338,6 +479,12 @@ class TelegramOutboundEffectService
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
+            self::TYPE_RECEIPT_CREDENTIALS => SendTelegramReceipt::dispatch(
+                (string) $effect->source_id,
+                $force,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
             default => null,
         };
 
@@ -346,7 +493,7 @@ class TelegramOutboundEffectService
 
     public function dispatchExplicitResend(TelegramOutboundEffect $effect): void
     {
-        $this->dispatch($effect);
+        $this->dispatch($effect, force: true);
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -371,6 +518,26 @@ class TelegramOutboundEffectService
             ->where(function (Builder $query) use ($at): void {
                 $query->whereNull('next_attempt_at')
                     ->orWhere('next_attempt_at', '<=', $at);
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_RECEIPT_CREDENTIALS)
+                    ->orWhere(function (Builder $receipt): void {
+                        $receipt
+                            ->where('effect_type', self::TYPE_RECEIPT_CREDENTIALS)
+                            ->where(function (Builder $sequence): void {
+                                $sequence
+                                    ->where('sequence', '<=', 1)
+                                    ->orWhereNotExists(function ($predecessor): void {
+                                        $predecessor
+                                            ->selectRaw('1')
+                                            ->from('telegram_outbound_effects as receipt_predecessors')
+                                            ->whereColumn('receipt_predecessors.effect_group_key', 'telegram_outbound_effects.effect_group_key')
+                                            ->whereColumn('receipt_predecessors.sequence', '<', 'telegram_outbound_effects.sequence')
+                                            ->where('receipt_predecessors.state', '<>', TelegramOutboundEffectState::Sent->value);
+                                    });
+                            });
+                    });
             });
     }
 
@@ -381,6 +548,10 @@ class TelegramOutboundEffectService
             $now = now();
 
             if (! $this->isClaimable($effect, $now)) {
+                return null;
+            }
+
+            if (! $this->receiptEffectIsOrderedReady($effect)) {
                 return null;
             }
 
@@ -473,6 +644,233 @@ class TelegramOutboundEffectService
     public function processManualCheckout(TelegramOutboundEffect $effect, TelegramCheckoutIntents $checkoutIntents): void
     {
         $this->processCheckout($effect, $checkoutIntents);
+    }
+
+    public function processReceipt(
+        TelegramOutboundEffect $effect,
+        ?TelegramReceiptNotifier $notifier = null,
+        bool $dispatchNext = true,
+        bool $throwOnAmbiguous = false,
+    ): void {
+        if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS) {
+            throw new InvalidArgumentException('Unsupported Telegram receipt effect type.');
+        }
+
+        $claimed = $this->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return;
+        }
+
+        try {
+            $order = Order::query()
+                ->with(['customer', 'orderItems.stockItems', 'orderItems.product'])
+                ->findOrFail($claimed->source_id);
+
+            if (! $this->receiptEligible($order, $order->customer)
+                || (string) $order->customer->telegram_id !== (string) $claimed->telegram_chat_id) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'receipt_not_eligible',
+                    'Telegram receipt was no longer eligible for delivery.',
+                );
+
+                return;
+            }
+
+            $response = DogfoodTiming::time('dogfood.telegram.receipt_step', [
+                'step' => 'receipt_chunk',
+                'sequence' => (int) $claimed->sequence,
+                'chunk_group_correlation_id' => DogfoodTiming::correlation($claimed->effect_group_key),
+                'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
+                'order_correlation_id' => DogfoodTiming::correlation($order->id),
+            ], fn () => ($notifier ?? $this->receiptNotifier)->sendEffect($order, $claimed));
+            $messageId = data_get($response, 'result.message_id');
+
+            if (! is_numeric($messageId)) {
+                throw new TelegramTransportException('sendMessage');
+            }
+
+            if ($this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId)) {
+                if ($dispatchNext) {
+                    $next = $this->nextReceiptEffect($claimed->fresh());
+                    if ($next !== null) {
+                        $this->dispatch($next);
+                    }
+                }
+
+                if ($this->isExplicitReceiptEffect($claimed)) {
+                    $this->dispatchReceiptCleanup($order->id);
+                }
+            }
+        } catch (Throwable $exception) {
+            if ($this->isAmbiguous($exception)) {
+                $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+                if ($throwOnAmbiguous) {
+                    throw $exception;
+                }
+
+                return;
+            }
+
+            $this->finalizeFailed((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+        }
+    }
+
+    public function nextReceiptEffect(TelegramOutboundEffect $effect): ?TelegramOutboundEffect
+    {
+        if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS || $effect->effect_group_key === null) {
+            return null;
+        }
+
+        $candidates = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $effect->effect_group_key)
+            ->where('sequence', '>', $effect->sequence)
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->orderBy('sequence')
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            $orderedReady = $this->receiptEffectIsOrderedReady($candidate);
+            $claimable = $this->isClaimable($candidate, now());
+            if ($orderedReady && $claimable) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function createReceiptEffectGroup(
+        Order $order,
+        Customer $customer,
+        bool $explicit = false,
+        ?TelegramOutboundEffect $supersedes = null,
+    ): TelegramOutboundEffect {
+        $rendered = $this->receiptNotifier->render($order);
+        $chunkCount = max(1, count($rendered['chunks']));
+        $baseGroupKey = self::receiptEffectGroupKey((string) $order->getKey());
+        $groupKey = $baseGroupKey;
+
+        if ($explicit) {
+            $version = 2;
+            do {
+                $groupKey = $baseGroupKey.':resend:v'.$version;
+                $version++;
+            } while (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists());
+        }
+
+        $first = null;
+        for ($sequence = 1; $sequence <= $chunkCount; $sequence++) {
+            $metadata = [
+                'delivery_context' => $explicit ? 'explicit_resend' : 'receipt',
+                'receipt_chunk_index' => $sequence - 1,
+                'receipt_chunk_count' => $chunkCount,
+            ];
+            if ($explicit) {
+                $metadata['duplicate_risk_acknowledged'] = true;
+                if ($supersedes !== null) {
+                    $metadata['supersedes_effect_id'] = (string) $supersedes->getKey();
+                }
+            }
+
+            $effect = TelegramOutboundEffect::query()->firstOrCreate(
+                ['effect_key' => self::receiptEffectKeyForGroup($groupKey, $sequence)],
+                [
+                    'effect_group_key' => $groupKey,
+                    'supersedes_effect_id' => $sequence === 1 ? $supersedes?->getKey() : null,
+                    'sequence' => $sequence,
+                    'effect_type' => self::TYPE_RECEIPT_CREDENTIALS,
+                    'source_type' => Order::class,
+                    'source_id' => (string) $order->getKey(),
+                    'target_type' => 'customer',
+                    'telegram_chat_id' => (string) $customer->telegram_id,
+                    'queue' => self::RECEIPT_QUEUE,
+                    'telegram_method' => 'sendMessage',
+                    'locale' => $customer->locale,
+                    'template_version' => self::TEMPLATE_RECEIPT_CREDENTIALS,
+                    'state' => TelegramOutboundEffectState::Pending->value,
+                    'attempts' => 0,
+                    'next_attempt_at' => now(),
+                    'outcome_metadata' => $metadata,
+                ],
+            );
+
+            $first ??= $effect;
+        }
+
+        return $first ?? throw new RuntimeException('Telegram receipt effect group was empty.');
+    }
+
+    private function firstReadyReceiptEffect(string $groupKey): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('effect_group_key', $groupKey)
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->orderBy('sequence')
+            ->get()
+            ->first(fn (TelegramOutboundEffect $candidate): bool => $this->receiptEffectIsOrderedReady($candidate)
+                && $this->isClaimable($candidate, now()));
+    }
+
+    private function latestReceiptEffect(Order $order): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->getKey())
+            ->where('effect_type', self::TYPE_RECEIPT_CREDENTIALS)
+            ->orderByDesc('created_at')
+            ->orderByDesc('sequence')
+            ->first();
+    }
+
+    private function receiptEligible(Order $order, ?Customer $customer): bool
+    {
+        return $order->payment_status === PaymentStatus::Paid
+            && in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
+            && $customer?->telegram_id !== null;
+    }
+
+    private function receiptEffectIsOrderedReady(TelegramOutboundEffect $effect): bool
+    {
+        if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS
+            || $effect->effect_group_key === null
+            || (int) $effect->sequence <= 1) {
+            return true;
+        }
+
+        return ! TelegramOutboundEffect::query()
+            ->where('effect_group_key', $effect->effect_group_key)
+            ->where('sequence', '<', $effect->sequence)
+            ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
+            ->exists();
+    }
+
+    private static function receiptEffectKeyForGroup(string $groupKey, int $sequence): string
+    {
+        return $groupKey.':unit:'.$sequence;
+    }
+
+    private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+
+        return $effect->effect_type === self::TYPE_RECEIPT_CREDENTIALS
+            && ($metadata['delivery_context'] ?? null) === 'explicit_resend';
+    }
+
+    private function dispatchReceiptCleanup(int|string $orderId): void
+    {
+        DeleteBuyerCheckoutMessages::dispatch((string) $orderId, now()->toISOString())
+            ->onQueue('notifications')
+            ->afterCommit();
     }
 
     private function paymentForCheckoutEffect(Order $order, TelegramOutboundEffect $effect): ?Payment
@@ -612,7 +1010,7 @@ class TelegramOutboundEffectService
         });
     }
 
-    private function finalizeNotDeliverable(string $effectId, string $claimToken, string $reason): bool
+    private function finalizeNotDeliverable(string $effectId, string $claimToken, string $reason, string $message = 'Telegram checkout instruction was no longer eligible for delivery.'): bool
     {
         return DB::transaction(function () use ($effectId, $claimToken, $reason): bool {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
@@ -631,7 +1029,7 @@ class TelegramOutboundEffectService
                 'manual_review_at' => null,
                 'next_attempt_at' => null,
                 'last_error_code' => $reason,
-                'last_error' => 'Telegram checkout instruction was no longer eligible for delivery.',
+                'last_error' => $message,
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['reason' => $reason]),
             ])->save();
 
@@ -823,7 +1221,7 @@ class TelegramOutboundEffectService
             $value = $metadata[$key];
             if ($key === 'duplicate_risk_acknowledged' && is_bool($value)) {
                 $safe[$key] = $value;
-            } elseif (in_array($key, ['http_status', 'resolution_actor_id'], true)
+            } elseif (in_array($key, ['http_status', 'resolution_actor_id', 'receipt_chunk_index', 'receipt_chunk_count'], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
                 $safe[$key] = (int) $value;
             } elseif ($key === 'exception' && is_string($value)
@@ -873,6 +1271,15 @@ class TelegramOutboundEffectService
 
     private function markLegacyClaim(TelegramOutboundEffect $effect, CarbonInterface $at): void
     {
+        if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
+            Order::query()->whereKey($effect->source_id)->update([
+                'telegram_receipt_send_started_at' => $at,
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
         if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
@@ -885,6 +1292,35 @@ class TelegramOutboundEffectService
 
     private function markLegacySent(TelegramOutboundEffect $effect, string $messageId, CarbonInterface $at): void
     {
+        if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
+            if ($effect->effect_group_key !== self::receiptEffectGroupKey((string) $effect->source_id)) {
+                return;
+            }
+
+            $hasUnsentUnit = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $effect->effect_group_key)
+                ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
+                ->exists();
+            if ($hasUnsentUnit) {
+                return;
+            }
+
+            $updated = Order::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('telegram_receipt_sent_at')
+                ->update([
+                    'telegram_receipt_sent_at' => $at,
+                    'telegram_receipt_send_started_at' => null,
+                    'updated_at' => now(),
+                ]);
+
+            if ($updated === 1) {
+                $this->dispatchReceiptCleanup($effect->source_id);
+            }
+
+            return;
+        }
+
         if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
@@ -904,6 +1340,15 @@ class TelegramOutboundEffectService
 
     private function clearLegacyClaim(TelegramOutboundEffect $effect): void
     {
+        if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
+            Order::query()->whereKey($effect->source_id)->update([
+                'telegram_receipt_send_started_at' => null,
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
         if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
             return;
         }
@@ -921,6 +1366,7 @@ class TelegramOutboundEffectService
             self::TYPE_KLIKQRIS_CHECKOUT => self::TEMPLATE_KLIKQRIS_CHECKOUT,
             self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
+            self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             default => 'checkout-payment-v1',
         };
     }
@@ -936,6 +1382,11 @@ class TelegramOutboundEffectService
 
     private function failureCode(Throwable $exception): string
     {
+        if ($exception instanceof TelegramOutboundPreSendException
+            && str_contains(strtolower($exception->getMessage()), 'no longer renderable')) {
+            return 'receipt_render_changed';
+        }
+
         if ($exception instanceof RequestException && $exception->response !== null) {
             return 'telegram_http_'.(int) $exception->response->status();
         }

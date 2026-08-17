@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
@@ -15,6 +14,7 @@ use App\Services\AuditLogger;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
 class ManualFulfillmentResolutionService
@@ -24,6 +24,7 @@ class ManualFulfillmentResolutionService
         private readonly InventoryLedger $inventory,
         private readonly OrderLifecycle $orders,
         private readonly ProductCredentialAllocator $credentials,
+        private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
@@ -60,7 +61,10 @@ class ManualFulfillmentResolutionService
         $order->update(['order_status' => OrderStatus::Completed]);
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
         $this->audit->log('manual_fulfillment_review.fulfilled', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'order_status' => OrderStatus::Completed->value], $actor, $ip);
-        SendTelegramReceipt::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
+        $effect = $this->outboundEffects->recordReceipt($order);
+        if ($effect !== null) {
+            $this->outboundEffects->dispatch($effect);
+        }
 
         return $resolved;
     }

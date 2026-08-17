@@ -13,7 +13,6 @@ use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\StoreChannelSetting;
@@ -53,8 +52,18 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
+        $outboundEffects->readyToDispatchQuery(now())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->where('source_type', Order::class)
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
+                foreach ($effects as $effect) {
+                    $outboundEffects->dispatch($effect, now()->toISOString());
+                    $dispatched++;
+                }
+            });
+
         $effects = [
-            ['telegram_receipt_send_started_at', 'telegram_receipt_sent_at', SendTelegramReceipt::class],
             ['admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', SendAdminOrderPendingNotification::class],
             ['admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', SendAdminOrderPaidNotification::class],
             ['admin_expired_order_notification_started_at', 'admin_expired_order_notified_at', SendAdminOrderExpiredNotification::class],
@@ -67,9 +76,7 @@ class RecoverTelegramOutboundEffects extends Command
                 ->orderBy('id')
                 ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $job): void {
                     foreach ($orders as $order) {
-                        $dispatch = $job === SendTelegramReceipt::class
-                            ? SendTelegramReceipt::dispatch($order->id, false, now()->toISOString())
-                            : $job::dispatch($order->id, now()->toISOString());
+                        $dispatch = $job::dispatch($order->id, now()->toISOString());
                         $dispatch->onQueue((string) $this->option('queue'));
                         $dispatched++;
                     }

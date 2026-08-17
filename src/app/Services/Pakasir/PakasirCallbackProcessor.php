@@ -4,7 +4,6 @@ namespace App\Services\Pakasir;
 
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
@@ -122,12 +121,7 @@ class PakasirCallbackProcessor
     private function applyPaid(PaymentEvent $event): void
     {
         $payment = Payment::query()->whereKey($event->payment_id)->firstOrFail();
-        $result = $this->orders->applyPaymentPaid($payment);
-
-        $payment->refresh();
-        if ($result->shouldDispatchReceipt()) {
-            SendTelegramReceipt::dispatch($payment->order_id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
-        }
+        $this->orders->applyPaymentPaid($payment);
 
         $event->update(['processed_at' => now()]);
     }

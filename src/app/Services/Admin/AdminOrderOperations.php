@@ -5,16 +5,20 @@ namespace App\Services\Admin;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\OrderLifecycle;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use InvalidArgumentException;
 
 class AdminOrderOperations
 {
-    public function __construct(private readonly AuditLogger $audit, private readonly OrderLifecycle $orders) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly OrderLifecycle $orders,
+        private readonly TelegramOutboundEffectService $outboundEffects,
+    ) {}
 
     public function canCompleteManualOrder(Order $order): bool
     {
@@ -103,7 +107,8 @@ class AdminOrderOperations
             throw new InvalidArgumentException('Receipt can only be resent for paid orders with a Telegram customer.');
         }
 
-        SendTelegramReceipt::dispatch($order->getKey(), true, now()->toISOString())->onQueue('notifications');
+        $effect = $this->outboundEffects->recordReceiptResend($order);
+        $this->outboundEffects->dispatchExplicitResend($effect);
 
         $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
     }
