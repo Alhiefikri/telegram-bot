@@ -33,8 +33,10 @@ use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Carbon\Carbon;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -1097,7 +1099,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('sale proof', (string) $post->last_error);
     }
 
-    public function test_sales_proof_post_retry_skips_in_progress_send_after_worker_crash(): void
+    public function test_sales_proof_post_retry_moves_legacy_in_progress_send_to_manual_review(): void
     {
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         $customer = Customer::factory()->create(['username' => 'CrashBuyer']);
@@ -1109,7 +1111,69 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
 
         Http::assertNothingSent();
-        $this->assertSame(SalesProofPost::STATUS_SENDING, $order->salesProofPost()->firstOrFail()->status);
+        $this->assertSame(SalesProofPost::STATUS_UNKNOWN, $order->salesProofPost()->firstOrFail()->status);
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', 'sales_proof.post')
+            ->where('source_id', $order->id)
+            ->sole();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+    }
+
+    public function test_sales_proof_ambiguous_delivery_becomes_unknown_without_a_duplicate_send(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'AmbiguousBuyer']);
+        $product = Product::factory()->create(['name' => 'Ambiguous Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Ambiguous Product');
+        $post = SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        $sendCount = 0;
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => function () use (&$sendCount): never {
+                $sendCount++;
+                throw new ConnectionException('connection closed after Telegram accepted the request');
+            },
+            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+        ]);
+
+        $job = new PublishSalesProofPost($order->id);
+        app()->call([$job, 'handle']);
+        app()->call([$job, 'handle']);
+
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+            ->where('source_id', $order->id)
+            ->sole();
+
+        $this->assertSame(1, $sendCount);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+        $this->assertSame(SalesProofPost::STATUS_UNKNOWN, $post->fresh()->status);
+        $this->assertNull($effect->claim_token);
+    }
+
+    public function test_sales_proof_lease_recovery_rejects_an_old_worker_finalize(): void
+    {
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $customer = Customer::factory()->create(['username' => 'LeaseBuyer']);
+        $product = Product::factory()->create(['name' => 'Lease Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Lease Product');
+        $post = SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        $effects = app(TelegramOutboundEffectService::class);
+        $effect = $effects->recordSalesProofPost($order, $post);
+        $claimed = $effects->claim((string) $effect?->getKey());
+
+        $this->assertNotNull($claimed);
+        $oldToken = (string) $claimed?->claim_token;
+        $effect->fresh()->forceFill([
+            'claim_token' => 'new-owner-token',
+            'lease_until' => now()->subSecond(),
+        ])->save();
+
+        $this->assertFalse($effects->finalizeSent($effect->id, $oldToken, '700001'));
+        $this->assertSame(1, $effects->recoverExpiredLeases(now()));
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertSame(SalesProofPost::STATUS_UNKNOWN, $post->fresh()->status);
     }
 
     public function test_admin_can_broadcast_message_from_bot_to_active_users(): void

@@ -32,4 +32,8 @@
             <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full justify-center text-xs">Retry Sales Proof Post</x-admin-dashboard.button>
         </form>
     @endif
+
+    @if ($proof['review_url'])
+        <a href="{{ $proof['review_url'] }}" class="mt-3 inline-flex text-xs font-black text-neo-ink underline">Open Manual Delivery Review</a>
+    @endif
 </x-admin-dashboard.card>

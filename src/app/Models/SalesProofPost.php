@@ -16,6 +16,10 @@ class SalesProofPost extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    public const STATUS_UNKNOWN = 'unknown';
+
+    public const STATUS_MANUAL_REVIEW = 'manual_review';
+
     protected function casts(): array
     {
         return ['attempts' => 'integer', 'sent_at' => 'datetime'];

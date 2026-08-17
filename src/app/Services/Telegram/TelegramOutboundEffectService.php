@@ -11,6 +11,7 @@ use App\Exceptions\TelegramTransportException;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\ForwardManualPaymentProof;
+use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -22,9 +23,13 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\InventoryLedger;
+use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Carbon\Carbon;
@@ -58,6 +63,8 @@ class TelegramOutboundEffectService
 
     public const TYPE_MANUAL_PAYMENT_PROOF = TelegramOutboundEffectType::ManualPaymentProof->value;
 
+    public const TYPE_SALES_PROOF = TelegramOutboundEffectType::SalesProofPost->value;
+
     /** Compatibility aliases for callers that use the longer effect names. */
     public const TYPE_ADMIN_ORDER_PENDING_NOTIFICATION = self::TYPE_ADMIN_PENDING;
 
@@ -86,7 +93,13 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_MANUAL_PAYMENT_PROOF = 'manual-payment-proof-v1';
 
+    public const TEMPLATE_SALES_PROOF = 'sales-proof-post-v1';
+
     public const RECEIPT_QUEUE = 'notifications';
+
+    public const SALES_PROOF_QUEUE = 'notifications';
+
+    private const SALES_PROOF_MAX_ATTEMPTS = 3;
 
     /** @var list<string> */
     private const CHECKOUT_EFFECT_TYPES = [
@@ -109,6 +122,11 @@ class TelegramOutboundEffectService
     ];
 
     /** @var list<string> */
+    private const SALES_PROOF_EFFECT_TYPES = [
+        self::TYPE_SALES_PROOF,
+    ];
+
+    /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
         'checkout_expired',
         'checkout_not_pending',
@@ -121,6 +139,8 @@ class TelegramOutboundEffectService
         'proof_not_eligible',
         'proof_attachment_missing',
         'proof_already_forwarded',
+        'proof_disabled',
+        'proof_target_missing',
     ];
 
     /** @var list<string> */
@@ -290,6 +310,185 @@ class TelegramOutboundEffectService
                 ],
             ],
         );
+    }
+
+    /**
+     * Materialize the Sales Proof delivery unit in the same transaction as
+     * the Paid Order Proof Event. SalesProofPost remains a projection of the
+     * ledger outcome; it is not a second send claim.
+     */
+    public function recordSalesProofPost(Order $order, ?SalesProofPost $post = null): ?TelegramOutboundEffect
+    {
+        $post ??= SalesProofPost::query()->where('order_id', $order->getKey())->first();
+        if ($post === null) {
+            return null;
+        }
+
+        $setting = StoreChannelSetting::current();
+        if (! $setting->sales_proof_enabled) {
+            return null;
+        }
+
+        $chatId = trim((string) ($setting->telegram_chat_id ?: $setting->channel_username));
+        if ($chatId === '') {
+            $this->markSalesProofUnpublishable($post, 'Store Channel chat is not configured.');
+
+            return null;
+        }
+
+        $effectKey = self::salesProofEffectKey((string) $order->getKey());
+        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
+        if ($existing !== null) {
+            $this->synchronizeSalesProofProjection($existing, $post);
+
+            return $existing;
+        }
+
+        $projectionState = $this->salesProofProjectionState($post);
+        $now = now();
+
+        $effect = TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_SALES_PROOF,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'store_channel',
+                'telegram_chat_id' => $chatId,
+                'queue' => self::SALES_PROOF_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => 'en',
+                'template_version' => self::TEMPLATE_SALES_PROOF,
+                'state' => $projectionState,
+                'attempts' => (int) $post->attempts,
+                'next_attempt_at' => in_array($projectionState, [
+                    TelegramOutboundEffectState::Pending->value,
+                    TelegramOutboundEffectState::Failed->value,
+                ], true) ? $now : null,
+                'telegram_message_id' => $post->telegram_message_id,
+                'sent_at' => $post->sent_at,
+                'unknown_at' => in_array($projectionState, self::REVIEW_STATES, true) ? ($post->updated_at ?? $now) : null,
+                'manual_review_at' => $projectionState === TelegramOutboundEffectState::ManualReview->value ? ($post->updated_at ?? $now) : null,
+                'last_error_code' => match ($projectionState) {
+                    TelegramOutboundEffectState::Unknown->value, TelegramOutboundEffectState::ManualReview->value => 'legacy_sending_ambiguous',
+                    TelegramOutboundEffectState::Failed->value => 'legacy_sales_proof_failure',
+                    default => null,
+                },
+                'last_error' => match ($projectionState) {
+                    TelegramOutboundEffectState::Unknown->value, TelegramOutboundEffectState::ManualReview->value => 'Sales Proof delivery outcome is ambiguous and requires review.',
+                    TelegramOutboundEffectState::Failed->value => $post->last_error ?: 'Sales Proof delivery failed before completion.',
+                    default => null,
+                },
+                'outcome_metadata' => [
+                    'delivery_context' => 'sales_proof',
+                    'reason' => in_array($projectionState, self::REVIEW_STATES, true)
+                        ? 'legacy_sending_ambiguous'
+                        : 'sales_proof',
+                ],
+            ],
+        );
+
+        if ($projectionState === TelegramOutboundEffectState::Unknown->value) {
+            $this->markSalesProofUnknown(
+                $effect,
+                $post->updated_at ?? $now,
+                'Legacy Sales Proof delivery outcome is ambiguous and requires review.',
+            );
+        } elseif ($projectionState === TelegramOutboundEffectState::ManualReview->value) {
+            $this->markSalesProofManualReview($effect, $post->updated_at ?? $now);
+        }
+
+        return $effect;
+    }
+
+    /**
+     * Resolve a Sales Proof job's source row and effect. This compatibility
+     * seam lets pre-ledger jobs finish safely while new callers always pass
+     * the effect identifier explicitly.
+     */
+    public function materializeSalesProofPostEffect(Order $order, bool $manualRetry = false): ?TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($order, $manualRetry): ?TelegramOutboundEffect {
+            $lockedOrder = Order::query()->lockForUpdate()->find($order->getKey());
+            if ($lockedOrder === null) {
+                return null;
+            }
+
+            $post = SalesProofPost::query()
+                ->where('order_id', $lockedOrder->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($post === null) {
+                return null;
+            }
+
+            $effect = TelegramOutboundEffect::query()
+                ->where('effect_key', self::salesProofEffectKey((string) $lockedOrder->getKey()))
+                ->lockForUpdate()
+                ->first();
+            $effect ??= $this->recordSalesProofPost($lockedOrder, $post);
+
+            if ($effect !== null) {
+                $this->synchronizeSalesProofProjection($effect, $post);
+            }
+
+            if ($effect !== null && $manualRetry && $this->stateValue($effect) === TelegramOutboundEffectState::Failed->value) {
+                $effect = $this->resetSalesProofForRetry($effect);
+            }
+
+            return $effect?->fresh();
+        }, 5);
+    }
+
+    /**
+     * Reset only a definite Sales Proof failure. Unknown and manual-review
+     * effects must go through the explicit duplicate-risk resend flow.
+     */
+    public function resetSalesProofForRetry(TelegramOutboundEffect $effect): TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($effect): TelegramOutboundEffect {
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->getKey());
+            if ($locked->effect_type !== self::TYPE_SALES_PROOF
+                || $this->stateValue($locked) !== TelegramOutboundEffectState::Failed->value) {
+                throw new InvalidArgumentException('Only a failed Sales Proof effect can be retried.');
+            }
+
+            $locked->forceFill([
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'next_attempt_at' => now(),
+                'failed_at' => null,
+                'last_error_code' => null,
+                'last_error' => null,
+                'outcome_metadata' => $this->mergeOutcomeMetadata($locked, [
+                    'manual_retry_requested' => true,
+                    'delivery_context' => 'sales_proof',
+                ]),
+            ])->save();
+
+            SalesProofPost::query()
+                ->where('order_id', $locked->source_id)
+                ->where('status', SalesProofPost::STATUS_FAILED)
+                ->update([
+                    'status' => SalesProofPost::STATUS_PENDING,
+                    'last_error' => null,
+                    'updated_at' => now(),
+                ]);
+
+            return $locked->fresh();
+        }, 5);
+    }
+
+    public static function salesProofEffectKey(string $orderId): string
+    {
+        return 'order:'.$orderId.':'.self::TYPE_SALES_PROOF.':v1';
+    }
+
+    /** Compatibility alias for callers that name the projection explicitly. */
+    public static function salesProofPostEffectKey(string $orderId): string
+    {
+        return self::salesProofEffectKey($orderId);
     }
 
     /**
@@ -699,6 +898,12 @@ class TelegramOutboundEffectService
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
+            self::TYPE_SALES_PROOF => PublishSalesProofPost::dispatch(
+                (string) $effect->source_id,
+                false,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
             default => null,
         };
 
@@ -726,6 +931,18 @@ class TelegramOutboundEffectService
                                 $error
                                     ->whereNull('last_error_code')
                                     ->orWhereNotIn('last_error_code', self::NON_RETRYABLE_FAILURE_CODES);
+                            });
+                    });
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_SALES_PROOF)
+                    ->orWhere(function (Builder $salesProof): void {
+                        $salesProof->where('effect_type', self::TYPE_SALES_PROOF)
+                            ->where(function (Builder $attempts): void {
+                                $attempts
+                                    ->where('attempts', '<', self::SALES_PROOF_MAX_ATTEMPTS)
+                                    ->orWhereJsonContains('outcome_metadata', ['manual_retry_requested' => true]);
                             });
                     });
             })
@@ -780,6 +997,9 @@ class TelegramOutboundEffectService
                 'claim_token' => $token,
                 'last_error_code' => null,
                 'last_error' => null,
+                'outcome_metadata' => $effect->effect_type === self::TYPE_SALES_PROOF
+                    ? $this->mergeOutcomeMetadata($effect, ['manual_retry_requested' => false])
+                    : $effect->outcome_metadata,
             ])->save();
 
             $this->markLegacyClaim($effect, $now);
@@ -1106,6 +1326,91 @@ class TelegramOutboundEffectService
         }
     }
 
+    public function processSalesProofPost(
+        TelegramOutboundEffect $effect,
+        TelegramBotClient $bot,
+        SalesProofPostFormatter $formatter,
+        SalesProofPostNumbering $numbering,
+        InventoryLedger $inventory,
+    ): void {
+        if ($effect->effect_type !== self::TYPE_SALES_PROOF) {
+            throw new InvalidArgumentException('Unsupported Telegram Sales Proof effect type.');
+        }
+
+        $claimed = $this->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return;
+        }
+
+        try {
+            $order = Order::query()
+                ->with(['customer', 'orderItems', 'salesProofPost', 'payments'])
+                ->findOrFail($claimed->source_id);
+            $setting = StoreChannelSetting::current();
+            $chatId = trim((string) ($setting->telegram_chat_id ?: $setting->channel_username));
+
+            if (! $setting->sales_proof_enabled) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'proof_disabled',
+                    'Sales Proof Post is disabled.',
+                );
+
+                return;
+            }
+
+            if ($chatId === '') {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'proof_target_missing',
+                    'Store Channel chat is not configured.',
+                );
+
+                return;
+            }
+
+            $invariantFailure = $this->paidOrderProofInvariantFailure($order, $inventory);
+            if ($invariantFailure !== null) {
+                $this->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'proof_not_eligible',
+                    $invariantFailure,
+                );
+
+                return;
+            }
+
+            $successfulPostNumber = $numbering->reserveNextNumber();
+            $response = $bot->sendMessage(
+                (string) $claimed->telegram_chat_id,
+                $formatter->format($order, $successfulPostNumber),
+                [
+                    'inline_keyboard' => [[[
+                        'text' => '🛒 Shop Now',
+                        'url' => $this->salesProofShoppingButtonUrl($order),
+                    ]]],
+                ],
+            );
+            $messageId = data_get($response, 'result.message_id');
+            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
+                throw new RuntimeException('Telegram Sales Proof sendMessage did not return a successful message id.');
+            }
+
+            $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
+        } catch (Throwable $exception) {
+            if ($this->isAmbiguous($exception)) {
+                $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+
+                return;
+            }
+
+            $this->finalizeFailed((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
+        }
+    }
+
     public function nextReceiptEffect(TelegramOutboundEffect $effect): ?TelegramOutboundEffect
     {
         if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS || $effect->effect_group_key === null) {
@@ -1275,6 +1580,118 @@ class TelegramOutboundEffectService
             && $payment->payment_proof_file_id !== null
             && $payment->payment_proof_submitted_at !== null
             && $payment->payment_proof_forwarded_at === null;
+    }
+
+    private function salesProofProjectionState(SalesProofPost $post): string
+    {
+        return match ($post->status) {
+            SalesProofPost::STATUS_SENT => TelegramOutboundEffectState::Sent->value,
+            SalesProofPost::STATUS_FAILED => TelegramOutboundEffectState::Failed->value,
+            SalesProofPost::STATUS_SENDING => TelegramOutboundEffectState::Unknown->value,
+            SalesProofPost::STATUS_UNKNOWN => TelegramOutboundEffectState::Unknown->value,
+            SalesProofPost::STATUS_MANUAL_REVIEW => TelegramOutboundEffectState::ManualReview->value,
+            default => TelegramOutboundEffectState::Pending->value,
+        };
+    }
+
+    private function markSalesProofUnpublishable(SalesProofPost $post, string $message): void
+    {
+        if (in_array($post->status, [
+            SalesProofPost::STATUS_SENT,
+            SalesProofPost::STATUS_UNKNOWN,
+            SalesProofPost::STATUS_MANUAL_REVIEW,
+        ], true)) {
+            return;
+        }
+
+        $post->forceFill([
+            'status' => SalesProofPost::STATUS_FAILED,
+            'attempts' => ((int) $post->attempts) + 1,
+            'last_error' => mb_substr($message, 0, 1000),
+        ])->save();
+    }
+
+    private function synchronizeSalesProofProjection(TelegramOutboundEffect $effect, SalesProofPost $post): void
+    {
+        $state = $this->stateValue($effect);
+
+        if ($state === TelegramOutboundEffectState::Unknown->value && $post->status !== SalesProofPost::STATUS_UNKNOWN) {
+            $this->markSalesProofUnknown(
+                $effect,
+                $effect->unknown_at ?? $post->updated_at ?? now(),
+                $effect->last_error ?: 'Sales Proof delivery outcome is unknown and requires review.',
+            );
+        } elseif ($state === TelegramOutboundEffectState::ManualReview->value && $post->status !== SalesProofPost::STATUS_MANUAL_REVIEW) {
+            $this->markSalesProofManualReview($effect, $effect->manual_review_at ?? $post->updated_at ?? now());
+        } elseif ($state === TelegramOutboundEffectState::Sent->value
+            && $post->status !== SalesProofPost::STATUS_SENT
+            && filled($effect->telegram_message_id)) {
+            $this->markLegacySent(
+                $effect,
+                (string) $effect->telegram_message_id,
+                $effect->sent_at ?? now(),
+            );
+        } elseif ($state === TelegramOutboundEffectState::Failed->value
+            && $post->status === SalesProofPost::STATUS_SENDING) {
+            $this->clearLegacyClaim($effect);
+        }
+    }
+
+    private function paidOrderProofInvariantFailure(Order $order, InventoryLedger $inventory): ?string
+    {
+        $isPaid = $order->payment_status === PaymentStatus::Paid
+            && $order->payments->contains(fn (Payment $payment): bool => $payment->status === PaymentStatus::Paid);
+        $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
+        if (! $isPaid || ! $isProcessable) {
+            return 'Sales Proof Post requires a paid processable order.';
+        }
+
+        if (! $inventory->hasSaleProofForOrder($order)) {
+            return 'Sales Proof Post requires matching inventory sale proof.';
+        }
+
+        return null;
+    }
+
+    private function salesProofShoppingButtonUrl(Order $order): string
+    {
+        $productId = $order->orderItems->first()?->product_id;
+
+        return $productId
+            ? app(StorefrontUrl::class)->telegramProductStartUrlForId((int) $productId)
+            : (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+    }
+
+    private function markSalesProofUnknown(TelegramOutboundEffect $effect, CarbonInterface $at, string $message): void
+    {
+        if (! in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
+            return;
+        }
+
+        SalesProofPost::query()
+            ->where('order_id', $effect->source_id)
+            ->update([
+                'status' => SalesProofPost::STATUS_UNKNOWN,
+                'attempts' => (int) $effect->attempts,
+                'last_error' => mb_substr($message, 0, 1000),
+                'updated_at' => $at,
+            ]);
+    }
+
+    private function markSalesProofManualReview(TelegramOutboundEffect $effect, CarbonInterface $at): void
+    {
+        if (! in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
+            return;
+        }
+
+        SalesProofPost::query()
+            ->where('order_id', $effect->source_id)
+            ->update([
+                'status' => SalesProofPost::STATUS_MANUAL_REVIEW,
+                'attempts' => (int) $effect->attempts,
+                'last_error' => 'Sales Proof delivery requires manual review.',
+                'updated_at' => $at,
+            ]);
     }
 
     private function firstReadyReceiptEffect(string $groupKey): ?TelegramOutboundEffect
@@ -1469,7 +1886,9 @@ class TelegramOutboundEffectService
                 'failed_at' => $now,
                 'unknown_at' => null,
                 'manual_review_at' => null,
-                'next_attempt_at' => $now->copy()->addSeconds($this->retryDelaySeconds($effect->attempts)),
+                'next_attempt_at' => $effect->effect_type === self::TYPE_SALES_PROOF
+                    ? ((int) $effect->attempts < self::SALES_PROOF_MAX_ATTEMPTS ? $now : null)
+                    : $now->copy()->addSeconds($this->retryDelaySeconds($effect->attempts)),
                 'last_error_code' => $this->failureCode($exception),
                 'last_error' => 'Telegram delivery failed before completion.',
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
@@ -1533,6 +1952,8 @@ class TelegramOutboundEffectService
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
             ])->save();
 
+            $this->markSalesProofUnknown($effect, $now, 'Sales Proof delivery outcome is unknown and requires review.');
+
             // Keep the legacy claim as a compatibility projection. The
             // effect ledger is authoritative and prevents the old recovery
             // branch from blindly sending this effect again.
@@ -1566,6 +1987,8 @@ class TelegramOutboundEffectService
                     'last_error' => 'Worker lease expired before Telegram delivery was finalized.',
                     'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['reason' => 'worker_lease_expired']),
                 ])->save();
+
+                $this->markSalesProofUnknown($effect, $now, 'Worker lease expired before Sales Proof delivery was finalized.');
             }
 
             return $effects->count();
@@ -1574,14 +1997,22 @@ class TelegramOutboundEffectService
 
     public function promoteToManualReview(string $effectId): bool
     {
-        return TelegramOutboundEffect::query()
-            ->whereKey($effectId)
-            ->where('state', TelegramOutboundEffectState::Unknown->value)
-            ->update([
+        return DB::transaction(function () use ($effectId): bool {
+            $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
+            if ($effect === null || $this->stateValue($effect) !== TelegramOutboundEffectState::Unknown->value) {
+                return false;
+            }
+
+            $now = now();
+            $effect->forceFill([
                 'state' => TelegramOutboundEffectState::ManualReview->value,
-                'manual_review_at' => now(),
-                'updated_at' => now(),
-            ]) === 1;
+                'manual_review_at' => $now,
+                'updated_at' => $now,
+            ])->save();
+            $this->markSalesProofManualReview($effect, $now);
+
+            return true;
+        });
     }
 
     public function hasActiveLegacyClaim(TelegramOutboundEffect $effect): bool
@@ -1742,6 +2173,12 @@ class TelegramOutboundEffectService
             return false;
         }
 
+        if ($effect->effect_type === self::TYPE_SALES_PROOF
+            && (int) $effect->attempts >= self::SALES_PROOF_MAX_ATTEMPTS
+            && (($effect->outcome_metadata['manual_retry_requested'] ?? false) !== true)) {
+            return false;
+        }
+
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte($at);
     }
 
@@ -1758,6 +2195,11 @@ class TelegramOutboundEffectService
             return false;
         }
 
+        if ($effect->effect_type === self::TYPE_SALES_PROOF
+            && (int) $effect->attempts >= self::SALES_PROOF_MAX_ATTEMPTS) {
+            return false;
+        }
+
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte(now());
     }
 
@@ -1771,6 +2213,19 @@ class TelegramOutboundEffectService
 
     private function markLegacyClaim(TelegramOutboundEffect $effect, CarbonInterface $at): void
     {
+        if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
+            SalesProofPost::query()
+                ->where('order_id', $effect->source_id)
+                ->update([
+                    'status' => SalesProofPost::STATUS_SENDING,
+                    'attempts' => (int) $effect->attempts,
+                    'last_error' => null,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
             Order::query()->whereKey($effect->source_id)->update([
                 'telegram_receipt_send_started_at' => $at,
@@ -1819,6 +2274,21 @@ class TelegramOutboundEffectService
 
     private function markLegacySent(TelegramOutboundEffect $effect, string $messageId, CarbonInterface $at): void
     {
+        if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
+            SalesProofPost::query()
+                ->where('order_id', $effect->source_id)
+                ->update([
+                    'status' => SalesProofPost::STATUS_SENT,
+                    'attempts' => (int) $effect->attempts,
+                    'telegram_message_id' => $messageId,
+                    'sent_at' => $at,
+                    'last_error' => null,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
             if ($effect->effect_group_key !== self::receiptEffectGroupKey((string) $effect->source_id)) {
                 return;
@@ -1909,6 +2379,24 @@ class TelegramOutboundEffectService
 
     private function clearLegacyClaim(TelegramOutboundEffect $effect): void
     {
+        if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
+            SalesProofPost::query()
+                ->where('order_id', $effect->source_id)
+                ->whereNotIn('status', [
+                    SalesProofPost::STATUS_SENT,
+                    SalesProofPost::STATUS_UNKNOWN,
+                    SalesProofPost::STATUS_MANUAL_REVIEW,
+                ])
+                ->update([
+                    'status' => SalesProofPost::STATUS_FAILED,
+                    'attempts' => (int) $effect->attempts,
+                    'last_error' => mb_substr((string) ($effect->last_error ?: 'Sales Proof delivery failed before completion.'), 0, 1000),
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
             Order::query()->whereKey($effect->source_id)->update([
                 'telegram_receipt_send_started_at' => null,
@@ -1967,6 +2455,7 @@ class TelegramOutboundEffectService
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
             self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,
             self::TYPE_MANUAL_PAYMENT_PROOF => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
+            self::TYPE_SALES_PROOF => self::TEMPLATE_SALES_PROOF,
             default => 'checkout-payment-v1',
         };
     }

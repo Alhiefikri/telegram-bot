@@ -15,6 +15,7 @@ use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
+use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -36,6 +37,41 @@ class RecoverTelegramOutboundEffects extends Command
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $staleLeases = $outboundEffects->recoverExpiredLeases(now());
 
+        SalesProofPost::query()
+            ->whereIn('status', [
+                SalesProofPost::STATUS_PENDING,
+                SalesProofPost::STATUS_FAILED,
+                SalesProofPost::STATUS_SENDING,
+            ])
+            ->where(function ($query) use ($cutoff): void {
+                $query
+                    ->where('status', '<>', SalesProofPost::STATUS_SENDING)
+                    ->orWhere('updated_at', '<=', $cutoff);
+            })
+            ->whereNotExists(function (Builder $query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects as sales_proof_effects')
+                    ->where('sales_proof_effects.source_type', Order::class)
+                    ->where('sales_proof_effects.effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+                    ->whereRaw('sales_proof_effects.source_id = CAST(sales_proof_posts.order_id AS TEXT)');
+            })
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($posts) use (&$dispatched, $outboundEffects): void {
+                foreach ($posts as $post) {
+                    $order = Order::find($post->order_id);
+                    if ($order === null) {
+                        continue;
+                    }
+
+                    $effect = $outboundEffects->materializeSalesProofPostEffect($order);
+                    if ($effect !== null) {
+                        $outboundEffects->dispatch($effect, now()->toISOString());
+                        $dispatched++;
+                    }
+                }
+            });
+
         $outboundEffects->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
@@ -47,6 +83,7 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_ADMIN_PAID,
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
+                TelegramOutboundEffectService::TYPE_SALES_PROOF,
             ])
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {

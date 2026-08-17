@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\AuditLog;
@@ -21,6 +22,7 @@ use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -118,6 +120,22 @@ class AdminDashboardSalesRenderingTest extends TestCase
         OrderItem::factory()->create(['order_id' => $pendingOrder->id, 'product_name' => 'Pending Product']);
         SalesProofPost::create(['order_id' => $pendingOrder->id, 'status' => SalesProofPost::STATUS_PENDING]);
 
+        $unknownOrder = Order::factory()->create(['invoice_number' => 'INV-UNKNOWN', 'created_at' => now()->subMinutes(4)]);
+        OrderItem::factory()->create(['order_id' => $unknownOrder->id, 'product_name' => 'Unknown Product']);
+        $unknownPost = SalesProofPost::create([
+            'order_id' => $unknownOrder->id,
+            'status' => SalesProofPost::STATUS_UNKNOWN,
+            'attempts' => 1,
+            'last_error' => 'Telegram delivery outcome is unknown and requires review.',
+        ]);
+        $unknownEffect = app(TelegramOutboundEffectService::class)->recordSalesProofPost($unknownOrder, $unknownPost);
+        $unknownEffect?->forceFill([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+            'last_error_code' => 'telegram_transport_ambiguous',
+            'last_error' => 'Telegram delivery outcome is unknown and requires review.',
+        ])->save();
+
         $noPostOrder = Order::factory()->create(['invoice_number' => 'INV-NOPOST', 'created_at' => now()->subMinutes(3)]);
         OrderItem::factory()->create(['order_id' => $noPostOrder->id, 'product_name' => 'No Post Product']);
 
@@ -127,6 +145,8 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('Belum ada post')
             ->assertSee('Pending')
             ->assertSee('Sent')
+            ->assertSee('Unknown')
+            ->assertSee('Open Manual Delivery Review')
             ->assertSee('Telegram message ID: 777')
             ->assertSee('Failed')
             ->assertSee('Error: channel cannot post')
@@ -143,6 +163,13 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('Error: channel cannot post')
             ->assertSee('Retry Sales Proof Post')
             ->assertSee(route('admin.orders.sales-proof.retry', $failedOrder), false);
+
+        $this->assertNotNull($unknownEffect);
+        $this->get(route('admin.orders.show', $unknownOrder))
+            ->assertOk()
+            ->assertSee('Unknown')
+            ->assertSee('Open Manual Delivery Review')
+            ->assertSee(route('admin.telegram-outbound-effects.show', $unknownEffect), false);
     }
 
     public function test_admin_order_detail_shows_generic_qris_for_pakasir_hosted_payment(): void

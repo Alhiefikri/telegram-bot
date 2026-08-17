@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\ForwardManualPaymentProof;
+use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -16,6 +17,8 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -113,9 +116,45 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_paid_lifecycle_records_one_sales_proof_effect_and_dispatches_it_after_commit(): void
+    {
+        $this->configureAdminTarget();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        Queue::fake();
+
+        $order = $this->checkoutOrder();
+        $payment = $order->payments()->sole();
+
+        app(OrderStateMachine::class)->applyPaymentPaid($payment);
+        app(OrderStateMachine::class)->applyPaymentPaid($payment->fresh());
+
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_SALES_PROOF);
+
+        $this->assertNotNull($effect);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
+        $this->assertSame('store_channel', $effect->target_type);
+        $this->assertSame('notifications', $effect->queue);
+        $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
+        Queue::assertPushed(
+            PublishSalesProofPost::class,
+            fn (PublishSalesProofPost $job): bool => $job->orderId === $order->id
+                && $job->effectId === $effect->id,
+        );
+    }
+
     public function test_paid_lifecycle_rollback_reverts_business_state_and_paid_effect(): void
     {
         $this->configureAdminTarget();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
         config()->set('queue.default', 'database');
 
         $order = $this->checkoutOrder();
@@ -132,6 +171,11 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             'source_id' => $order->id,
             'effect_type' => TelegramOutboundEffectService::TYPE_ADMIN_PAID,
         ]);
+        $this->assertDatabaseMissing('telegram_outbound_effects', [
+            'source_id' => $order->id,
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+        ]);
+        $this->assertDatabaseMissing('sales_proof_posts', ['order_id' => $order->id]);
         $this->assertDatabaseCount('jobs', 0);
     }
 

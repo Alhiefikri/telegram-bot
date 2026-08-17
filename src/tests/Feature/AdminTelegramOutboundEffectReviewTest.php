@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
+use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\SalesProofPost;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\CartService;
@@ -227,6 +229,50 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $resend->fresh()->state);
         $this->assertSame('909090', $resend->fresh()->telegram_message_id);
+    }
+
+    public function test_sales_proof_review_resend_creates_an_explicit_version_and_queues_only_that_effect(): void
+    {
+        Queue::fake();
+        $order = Order::factory()->create();
+        SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_UNKNOWN,
+            'attempts' => 1,
+        ]);
+        $effect = TelegramOutboundEffect::factory()->create([
+            'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'target_type' => 'store_channel',
+            'telegram_chat_id' => '-100123',
+            'queue' => 'notifications',
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+        ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.telegram-outbound-effects.resend', $effect), [
+                'confirm_duplicate_risk' => '1',
+            ])
+            ->assertRedirect();
+
+        $resend = TelegramOutboundEffect::query()
+            ->where('supersedes_effect_id', $effect->id)
+            ->sole();
+
+        $this->assertSame(TelegramOutboundEffectService::TYPE_SALES_PROOF, $resend->effect_type);
+        $this->assertSame(2, $resend->sequence);
+        $this->assertTrue($resend->outcome_metadata['duplicate_risk_acknowledged']);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        Queue::assertPushed(
+            PublishSalesProofPost::class,
+            fn (PublishSalesProofPost $job): bool => $job->effectId === $resend->id
+                && $job->orderId === $order->id,
+        );
     }
 
     private function unknownEffect(array $attributes = []): TelegramOutboundEffect

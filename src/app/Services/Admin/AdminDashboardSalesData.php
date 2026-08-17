@@ -4,10 +4,13 @@ namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Services\PaymentReceiptReport;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use Illuminate\Pagination\LengthAwarePaginator;
 
@@ -60,6 +63,28 @@ final class AdminDashboardSalesData
                         'paid_at',
                     ]),
                 'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
+                'telegramOutboundEffects' => fn ($query) => $query
+                    ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+                    ->select([
+                        'id',
+                        'effect_group_key',
+                        'supersedes_effect_id',
+                        'sequence',
+                        'effect_type',
+                        'source_type',
+                        'source_id',
+                        'state',
+                        'attempts',
+                        'telegram_message_id',
+                        'sent_at',
+                        'unknown_at',
+                        'manual_review_at',
+                        'last_error',
+                        'last_error_code',
+                        'outcome_metadata',
+                        'created_at',
+                        'updated_at',
+                    ]),
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
             ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(fn (OrderStatus $status): string => $status->value, $statuses)))
@@ -260,6 +285,28 @@ final class AdminDashboardSalesData
                 'attempts' => 0,
                 'can_retry' => false,
                 'retry_url' => null,
+                'review_url' => null,
+            ];
+        }
+
+        $effect = $this->salesProofEffect($order);
+        $effectState = $effect?->state instanceof TelegramOutboundEffectState
+            ? $effect->state->value
+            : (string) $effect?->getRawOriginal('state');
+        if ($effect !== null && in_array($effectState, [
+            TelegramOutboundEffectState::Unknown->value,
+            TelegramOutboundEffectState::ManualReview->value,
+        ], true)) {
+            return [
+                'status' => $effectState,
+                'label' => $effectState === TelegramOutboundEffectState::ManualReview->value ? 'Manual Delivery Review' : 'Unknown',
+                'tone' => 'amber',
+                'message_id' => $effect->telegram_message_id,
+                'last_error' => $effect->last_error ?: 'Sales Proof delivery outcome requires review.',
+                'attempts' => (int) $effect->attempts,
+                'can_retry' => false,
+                'retry_url' => route('admin.orders.sales-proof.retry', $order),
+                'review_url' => route('admin.telegram-outbound-effects.show', $effect),
             ];
         }
 
@@ -277,7 +324,7 @@ final class AdminDashboardSalesData
         $tone = match ($post->status) {
             SalesProofPost::STATUS_SENT => 'emerald',
             SalesProofPost::STATUS_FAILED => 'rose',
-            SalesProofPost::STATUS_PENDING, SalesProofPost::STATUS_SENDING => 'amber',
+            SalesProofPost::STATUS_PENDING, SalesProofPost::STATUS_SENDING, SalesProofPost::STATUS_UNKNOWN, SalesProofPost::STATUS_MANUAL_REVIEW => 'amber',
             default => 'slate',
         };
 
@@ -288,6 +335,8 @@ final class AdminDashboardSalesData
                 SalesProofPost::STATUS_SENDING => 'Sending',
                 SalesProofPost::STATUS_SENT => 'Sent',
                 SalesProofPost::STATUS_FAILED => 'Failed',
+                SalesProofPost::STATUS_UNKNOWN => 'Unknown',
+                SalesProofPost::STATUS_MANUAL_REVIEW => 'Manual Delivery Review',
                 default => ucfirst((string) $post->status),
             },
             'tone' => $tone,
@@ -296,6 +345,10 @@ final class AdminDashboardSalesData
             'attempts' => $post->attempts,
             'can_retry' => $canRetrySalesProof && $post->status === SalesProofPost::STATUS_FAILED,
             'retry_url' => route('admin.orders.sales-proof.retry', $order),
+            'review_url' => $effect !== null && in_array($effectState, [
+                TelegramOutboundEffectState::Unknown->value,
+                TelegramOutboundEffectState::ManualReview->value,
+            ], true) ? route('admin.telegram-outbound-effects.show', $effect) : null,
         ];
     }
 
@@ -310,7 +363,26 @@ final class AdminDashboardSalesData
             'attempts' => $post->attempts,
             'can_retry' => $canRetry,
             'retry_url' => route('admin.orders.sales-proof.retry', $order),
+            'review_url' => null,
         ];
+    }
+
+    private function salesProofEffect(Order $order): ?TelegramOutboundEffect
+    {
+        if ($order->relationLoaded('telegramOutboundEffects')) {
+            return $order->telegramOutboundEffects
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+                ->sortByDesc(fn (TelegramOutboundEffect $effect): int => (int) $effect->sequence)
+                ->first();
+        }
+
+        return TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->getKey())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+            ->orderByDesc('sequence')
+            ->orderByDesc('created_at')
+            ->first();
     }
 
     private function storeChannelSetting(): StoreChannelSetting

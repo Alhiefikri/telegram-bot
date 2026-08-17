@@ -7,7 +7,6 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
-use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Models\ManualFulfillmentReview;
@@ -282,8 +281,16 @@ class OrderStateMachine implements OrderLifecycle
         $salesProofEnabled = (bool) StoreChannelSetting::current()->sales_proof_enabled;
 
         if ($salesProofEnabled) {
-            SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
-            PublishSalesProofPost::dispatch($order->id, false, now()->toISOString())->onQueue('notifications')->afterCommit();
+            $salesProofPost = SalesProofPost::query()->firstOrCreate(
+                ['order_id' => $order->id],
+                ['status' => SalesProofPost::STATUS_PENDING],
+            );
+
+            $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
+            $effect = $outboundEffects->recordSalesProofPost($order, $salesProofPost);
+            if ($effect !== null) {
+                $outboundEffects->dispatch($effect);
+            }
         }
 
         $this->recordAndDispatchAdminOrderPaid($order);
