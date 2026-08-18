@@ -81,6 +81,10 @@ class AdminLoginThrottleTest extends TestCase
             'admin-login:ip:203.0.113.12',
             $throttle->ipKey(' 203.0.113.12 '),
         );
+        $this->assertSame(
+            'admin-login:ip:2001:db8::1',
+            $throttle->ipKey('2001:0db8:0:0:0:0:0:1'),
+        );
     }
 
     /** @param array<string, int> $values */

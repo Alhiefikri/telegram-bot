@@ -104,6 +104,17 @@ final class AdminLoginThrottle
     {
         $ip = trim($ip);
 
-        return $ip !== '' ? $ip : 'unknown';
+        if ($ip === '') {
+            return 'unknown';
+        }
+
+        $packed = inet_pton($ip);
+        if ($packed === false) {
+            return $ip;
+        }
+
+        $normalized = inet_ntop($packed);
+
+        return $normalized === false ? $ip : $normalized;
     }
 }

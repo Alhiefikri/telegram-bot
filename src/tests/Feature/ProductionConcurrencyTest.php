@@ -142,26 +142,50 @@ class ProductionConcurrencyTest extends TestCase
         Cache::store('database')->flush();
 
         $ip = '198.51.100.90';
+        $login = 'concurrent@example.test';
         $attempts = 12;
         $results = $this->runConcurrently(array_map(
-            fn (int $attempt): callable => fn (): int => app(AdminLoginThrottle::class)
-                ->recordFailure("concurrent-{$attempt}@example.test", $ip)
-                ->ipAttempts,
+            fn (int $_attempt): callable => function () use ($login, $ip): array {
+                $decision = app(AdminLoginThrottle::class)->recordFailure($login, $ip);
+
+                return [
+                    'identity' => $decision->identityAttempts,
+                    'ip' => $decision->ipAttempts,
+                    'blocked' => $decision->blocked,
+                ];
+            },
             range(1, $attempts),
         ));
 
         $this->assertSame($attempts, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
 
-        $observedCounts = array_map(
-            fn (array $result): int => (int) ($result['value'] ?? 0),
+        $observedIdentityCounts = array_map(
+            fn (array $result): int => (int) ($result['value']['identity'] ?? 0),
             $results,
         );
-        sort($observedCounts);
+        $observedIpCounts = array_map(
+            fn (array $result): int => (int) ($result['value']['ip'] ?? 0),
+            $results,
+        );
+        $observedBlocked = array_map(
+            fn (array $result): bool => (bool) ($result['value']['blocked'] ?? false),
+            $results,
+        );
+        sort($observedIdentityCounts);
+        sort($observedIpCounts);
 
-        $this->assertSame(range(1, $attempts), $observedCounts);
+        $this->assertSame(range(1, $attempts), $observedIdentityCounts);
+        $this->assertSame(range(1, $attempts), $observedIpCounts);
+        $this->assertSame(7, count(array_filter($observedBlocked)));
+
+        $throttle = app(AdminLoginThrottle::class);
         $this->assertSame(
             $attempts,
-            Cache::store('database')->get(app(AdminLoginThrottle::class)->ipKey($ip)),
+            Cache::store('database')->get($throttle->identityKey($login, $ip)),
+        );
+        $this->assertSame(
+            $attempts,
+            Cache::store('database')->get($throttle->ipKey($ip)),
         );
     }
 
