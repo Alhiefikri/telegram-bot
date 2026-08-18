@@ -65,6 +65,27 @@ class CustomerAccountTest extends TestCase
             ->assertSessionHas('customer_login_error');
     }
 
+    public function test_login_link_used_state_cannot_be_mass_assigned(): void
+    {
+        $link = CustomerLoginLink::create([
+            'email' => 'customer@example.test',
+            'token_hash' => hash('sha256', str_repeat('a', 64)),
+            'expires_at' => now()->addMinutes(15),
+            'requested_ip' => '192.0.2.10',
+            'used_at' => now(),
+        ]);
+
+        $fresh = $link->fresh();
+
+        $this->assertNotNull($fresh);
+        $this->assertSame('customer@example.test', $fresh->email);
+        $this->assertSame('192.0.2.10', $fresh->requested_ip);
+        $this->assertNull(
+            $fresh->used_at,
+            'The one-time-used state must only be changed by the explicit consume flow.',
+        );
+    }
+
     public function test_customer_serialization_hides_sensitive_fields(): void
     {
         $customer = Customer::factory()->create([
