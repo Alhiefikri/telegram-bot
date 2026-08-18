@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\CheckoutInstructionDeliveryPipeline;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Bus\Queueable;
@@ -36,28 +36,13 @@ class SendKlikQrisCheckoutInstructions implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramCheckoutIntents $checkoutIntents, ?TelegramOutboundEffectService $outboundEffects = null): void
+    public function handle(TelegramCheckoutIntents $checkoutIntents, ?CheckoutInstructionDeliveryPipeline $delivery = null): void
     {
-        $outboundEffects ??= app(TelegramOutboundEffectService::class);
-        $effect = $this->effectId === null
-            ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
-            : TelegramOutboundEffect::query()
-                ->whereKey($this->effectId)
-                ->where('effect_type', TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
-                ->firstOrFail();
-
-        if ($effect !== null) {
-            $outboundEffects->processCheckout($effect, $checkoutIntents);
-
-            return;
-        }
-
-        $effect = $outboundEffects->materializeCheckoutEffectForOrder(
+        ($delivery ??= app(CheckoutInstructionDeliveryPipeline::class))->deliverOrder(
             $this->orderId,
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            $this->effectId,
+            $checkoutIntents,
         );
-        if ($effect !== null) {
-            $outboundEffects->processCheckout($effect, $checkoutIntents);
-        }
     }
 }

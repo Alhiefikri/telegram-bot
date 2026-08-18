@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\CheckoutInstructionDeliveryPipeline;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
@@ -37,7 +37,7 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramCheckoutIntents $checkoutIntents, ?TelegramOutboundEffectService $outboundEffects = null): void
+    public function handle(TelegramCheckoutIntents $checkoutIntents, ?CheckoutInstructionDeliveryPipeline $delivery = null): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -51,27 +51,13 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
         ]);
 
         try {
-            $outboundEffects ??= app(TelegramOutboundEffectService::class);
-            $effect = $this->effectId === null
-                ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
-                : TelegramOutboundEffect::query()
-                    ->whereKey($this->effectId)
-                    ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
-                    ->firstOrFail();
-
-            if ($effect !== null) {
-                $outboundEffects->processCheckout($effect, $checkoutIntents);
-
-                return;
-            }
-
-            $effect = $outboundEffects->materializeCheckoutEffectForOrder(
+            $delivery ??= app(CheckoutInstructionDeliveryPipeline::class);
+            $delivery->deliverOrder(
                 $this->orderId,
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+                $this->effectId,
+                $checkoutIntents,
             );
-            if ($effect !== null) {
-                $outboundEffects->processCheckout($effect, $checkoutIntents);
-            }
         } finally {
             DogfoodTiming::log('dogfood.telegram.manual_checkout_notifications_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),
@@ -81,5 +67,4 @@ class SendManualCheckoutNotifications implements ShouldBeUnique, ShouldQueue
             ]);
         }
     }
-
 }

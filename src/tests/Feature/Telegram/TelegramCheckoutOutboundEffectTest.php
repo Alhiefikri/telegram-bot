@@ -6,6 +6,8 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
+use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -19,6 +21,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
@@ -158,6 +161,107 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(1, $sendCount);
         $this->assertNotNull($effect->unknown_at);
         $this->assertSame('987654321', $order->payments()->sole()->binance_receiver_value);
+    }
+
+    public function test_checkout_delivery_pipeline_uses_the_shared_effect_protocol_for_each_payment_rail(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+
+        $orders = [
+            'manual' => $this->checkout(CheckoutPaymentIntents::manualQris()),
+            'klikqris' => $this->checkout(CheckoutPaymentIntents::klikQris()),
+            'pakasir' => $this->checkout(CheckoutPaymentIntents::pakasir()),
+            'binance' => $this->checkout(CheckoutPaymentIntents::binancePay(), usdt: true),
+        ];
+        $intents = $this->mock(TelegramCheckoutIntents::class);
+        $response = ['ok' => true, 'result' => ['message_id' => 654321]];
+        $intents->shouldReceive('sendPaymentInstructions')->once()->andReturn($response);
+        $intents->shouldReceive('sendKlikQrisPaymentInstructions')->once()->andReturn($response);
+        $intents->shouldReceive('sendPakasirPaymentInstructions')->once()->andReturn($response);
+        $intents->shouldReceive('sendBinancePaymentInstructions')->once()->andReturn($response);
+
+        (new SendManualCheckoutNotifications($orders['manual']->id))->handle($intents);
+        (new SendKlikQrisCheckoutInstructions($orders['klikqris']->id))->handle($intents);
+        (new SendPakasirCheckoutInstructions($orders['pakasir']->id))->handle($intents);
+        (new SendBinanceCheckoutInstructions($orders['binance']->id))->handle($intents);
+
+        $this->assertCount(4, TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent->value)->get());
+        $this->assertSame(4, TelegramOutboundEffect::query()->whereNotNull('telegram_message_id')->count());
+        foreach ($orders as $order) {
+            $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+        }
+    }
+
+    public function test_checkout_delivery_without_a_successful_message_id_stays_failed_and_retryable(): void
+    {
+        $order = $this->checkout(CheckoutPaymentIntents::manualQris());
+        $intents = $this->mock(TelegramCheckoutIntents::class);
+        $intents->shouldReceive('sendPaymentInstructions')
+            ->once()
+            ->andReturn(['ok' => true]);
+
+        try {
+            (new SendManualCheckoutNotifications($order->id))->handle($intents);
+            $this->fail('A checkout response without a message identifier must fail the effect.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('successful message ID', $exception->getMessage());
+        }
+
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNull($effect->claim_token);
+        $this->assertNotNull($effect->next_attempt_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+    }
+
+    public function test_checkout_delivery_with_a_non_positive_message_id_stays_failed_and_retryable(): void
+    {
+        $order = $this->checkout(CheckoutPaymentIntents::manualQris());
+        $intents = $this->mock(TelegramCheckoutIntents::class);
+        $intents->shouldReceive('sendPaymentInstructions')
+            ->once()
+            ->andReturn(['ok' => true, 'result' => ['message_id' => 0]]);
+
+        try {
+            (new SendManualCheckoutNotifications($order->id))->handle($intents);
+            $this->fail('A checkout response with a non-positive message identifier must fail the effect.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('successful message ID', $exception->getMessage());
+        }
+
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNotNull($effect->next_attempt_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+    }
+
+    public function test_checkout_worker_rejects_an_effect_id_owned_by_another_order(): void
+    {
+        $firstOrder = $this->checkout(CheckoutPaymentIntents::manualQris());
+        $secondOrder = $this->checkout(CheckoutPaymentIntents::manualQris());
+        $secondEffect = TelegramOutboundEffect::query()
+            ->where('source_id', $secondOrder->id)
+            ->sole();
+        $intents = $this->mock(TelegramCheckoutIntents::class);
+        $intents->shouldReceive('sendPaymentInstructions')->never();
+
+        try {
+            (new SendManualCheckoutNotifications($firstOrder->id, null, $secondEffect->id))->handle($intents);
+            $this->fail('A checkout worker must not deliver another order\'s effect.');
+        } catch (ModelNotFoundException) {
+            $this->assertSame(TelegramOutboundEffectState::Pending, $secondEffect->fresh()->state);
+            $this->assertNull($secondEffect->fresh()->claim_token);
+        }
     }
 
     private function checkout(CheckoutPaymentIntent $intent, bool $usdt = false): Order
