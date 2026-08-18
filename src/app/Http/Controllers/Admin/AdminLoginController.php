@@ -5,18 +5,21 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\LoginAdminRequest;
 use App\Models\User;
+use App\Services\Admin\AdminLoginThrottle;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class AdminLoginController extends Controller
 {
+    public function __construct(
+        private readonly AdminLoginThrottle $adminLoginThrottle,
+    ) {}
+
     public function create(Request $request): View|RedirectResponse
     {
         $user = $request->user();
@@ -39,14 +42,12 @@ class AdminLoginController extends Controller
 
         $credentials = $request->validated();
         $login = trim($credentials['email']);
-        $throttleKey = Str::lower($login).'|'.$request->ip();
+        $ip = $request->ip() ?? 'unknown';
+        $throttle = $this->adminLoginThrottle;
 
-        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
-
-            throw ValidationException::withMessages([
-                'email' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
-            ]);
+        $throttleStatus = $throttle->check($login, $ip);
+        if ($throttleStatus->blocked) {
+            throw $this->throttleException($throttleStatus->retryAfter);
         }
 
         $remember = $request->boolean('remember');
@@ -63,7 +64,12 @@ class AdminLoginController extends Controller
 
             if (! $user || ! $passwordMatches) {
                 $status = 'bad_credentials';
-                RateLimiter::hit($throttleKey, 60);
+                $throttleStatus = $throttle->recordFailure($login, $ip);
+                if ($throttleStatus->blocked) {
+                    $status = 'throttled';
+
+                    throw $this->throttleException($throttleStatus->retryAfter);
+                }
 
                 throw ValidationException::withMessages([
                     'email' => 'Email atau password admin tidak cocok.',
@@ -72,7 +78,12 @@ class AdminLoginController extends Controller
 
             if (! $user->canAccessAdmin()) {
                 $status = 'forbidden';
-                RateLimiter::hit($throttleKey, 60);
+                $throttleStatus = $throttle->recordFailure($login, $ip);
+                if ($throttleStatus->blocked) {
+                    $status = 'throttled';
+
+                    throw $this->throttleException($throttleStatus->retryAfter);
+                }
 
                 throw ValidationException::withMessages([
                     'email' => 'Akun ini tidak punya akses admin.',
@@ -86,7 +97,7 @@ class AdminLoginController extends Controller
             }
 
             Auth::login($user, $remember);
-            RateLimiter::clear($throttleKey);
+            $throttle->clearIdentity($login, $ip);
             $request->session()->regenerate();
 
             return redirect()->intended(route('admin.dashboard'));
@@ -97,6 +108,13 @@ class AdminLoginController extends Controller
                 'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
             ]);
         }
+    }
+
+    private function throttleException(int $seconds): ValidationException
+    {
+        return ValidationException::withMessages([
+            'email' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
+        ]);
     }
 
     public function destroy(Request $request): RedirectResponse

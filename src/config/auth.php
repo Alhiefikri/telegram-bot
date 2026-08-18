@@ -33,6 +33,13 @@ return [
 
     'admin_allowed_logins' => env('ADMIN_ALLOWED_LOGINS'),
 
+    'admin_login_throttle' => [
+        'identity_max_attempts' => (int) env('ADMIN_LOGIN_IDENTITY_MAX_ATTEMPTS', 5),
+        'identity_decay_seconds' => (int) env('ADMIN_LOGIN_IDENTITY_DECAY_SECONDS', 60),
+        'ip_max_attempts' => (int) env('ADMIN_LOGIN_IP_MAX_ATTEMPTS', 10),
+        'ip_decay_seconds' => (int) env('ADMIN_LOGIN_IP_DECAY_SECONDS', 60),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Authentication Guards

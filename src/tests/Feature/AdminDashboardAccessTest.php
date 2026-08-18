@@ -218,6 +218,114 @@ class AdminDashboardAccessTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_admin_login_throttle_blocks_the_sixth_failed_attempt_for_one_identity_and_ip(): void
+    {
+        $ip = '198.51.100.80';
+        $email = 'throttle@example.test';
+
+        foreach (range(1, 5) as $attempt) {
+            $this->withServerVariables(['REMOTE_ADDR' => $ip])
+                ->post(route('admin.login.store'), [
+                    'email' => $email,
+                    'password' => 'wrong-password',
+                ])
+                ->assertSessionHasErrors(['email' => 'Email atau password admin tidak cocok.']);
+        }
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => $email,
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email']);
+
+        $this->assertStringContainsString(
+            'Terlalu banyak percobaan login',
+            (string) collect($response->getSession()->get('errors')->get('email'))->first(),
+        );
+    }
+
+    public function test_admin_login_throttle_blocks_identifier_rotation_at_the_global_ip_limit(): void
+    {
+        $ip = '198.51.100.81';
+
+        foreach (range(1, 10) as $attempt) {
+            $this->withServerVariables(['REMOTE_ADDR' => $ip])
+                ->post(route('admin.login.store'), [
+                    'email' => "rotating-{$attempt}@example.test",
+                    'password' => 'wrong-password',
+                ])
+                ->assertSessionHasErrors(['email' => 'Email atau password admin tidak cocok.']);
+        }
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => 'rotating-eleventh@example.test',
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email']);
+
+        $this->assertStringContainsString(
+            'Terlalu banyak percobaan login',
+            (string) collect($response->getSession()->get('errors')->get('email'))->first(),
+        );
+    }
+
+    public function test_successful_admin_login_clears_only_identity_throttle_state(): void
+    {
+        config()->set('auth.admin_login_throttle.identity_max_attempts', 2);
+        config()->set('auth.admin_login_throttle.ip_max_attempts', 3);
+
+        $ip = '198.51.100.82';
+        $admin = User::factory()->create([
+            'email' => 'clear-throttle@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Owner,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => $admin->email,
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email' => 'Email atau password admin tidak cocok.']);
+
+        $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => $admin->email,
+                'password' => 'correct-password',
+            ])
+            ->assertRedirect(route('admin.dashboard'));
+
+        $this->post(route('admin.logout'))->assertRedirect(route('admin.login'));
+
+        $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => $admin->email,
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email' => 'Email atau password admin tidak cocok.']);
+
+        $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => $admin->email,
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email' => 'Email atau password admin tidak cocok.']);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => $ip])
+            ->post(route('admin.login.store'), [
+                'email' => 'after-clear@example.test',
+                'password' => 'wrong-password',
+            ])
+            ->assertSessionHasErrors(['email']);
+
+        $this->assertStringContainsString(
+            'Terlalu banyak percobaan login',
+            (string) collect($response->getSession()->get('errors')->get('email'))->first(),
+        );
+    }
+
     public function test_admin_login_validation_keeps_custom_messages(): void
     {
         $this->from(route('admin.login'))

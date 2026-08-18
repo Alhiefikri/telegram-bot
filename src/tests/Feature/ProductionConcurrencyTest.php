@@ -28,6 +28,7 @@ use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramUpdate;
 use App\Models\User;
+use App\Services\Admin\AdminLoginThrottle;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\Binance\BinanceOrderIdActivation;
@@ -47,6 +48,7 @@ use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramUpdateReplayGuard;
 use App\Support\PaymentProvider;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -131,6 +133,36 @@ class ProductionConcurrencyTest extends TestCase
     public function test_concurrent_admin_broadcast_photo_workers_share_one_database_cache_window(): void
     {
         $this->assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(true);
+    }
+
+    public function test_concurrent_admin_login_failures_share_one_atomic_database_cache_counter(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseRateLimiter();
+        Cache::store('database')->flush();
+
+        $ip = '198.51.100.90';
+        $attempts = 12;
+        $results = $this->runConcurrently(array_map(
+            fn (int $attempt): callable => fn (): int => app(AdminLoginThrottle::class)
+                ->recordFailure("concurrent-{$attempt}@example.test", $ip)
+                ->ipAttempts,
+            range(1, $attempts),
+        ));
+
+        $this->assertSame($attempts, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+
+        $observedCounts = array_map(
+            fn (array $result): int => (int) ($result['value'] ?? 0),
+            $results,
+        );
+        sort($observedCounts);
+
+        $this->assertSame(range(1, $attempts), $observedCounts);
+        $this->assertSame(
+            $attempts,
+            Cache::store('database')->get(app(AdminLoginThrottle::class)->ipKey($ip)),
+        );
     }
 
     private function assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(bool $photo): void
@@ -1163,6 +1195,13 @@ class ProductionConcurrencyTest extends TestCase
     {
         config()->set('cache.default', 'database');
         Cache::purge('database');
+    }
+
+    private function useDatabaseRateLimiter(): void
+    {
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        app()->forgetInstance(RateLimiter::class);
     }
 
     private function pakasirReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
