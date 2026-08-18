@@ -37,7 +37,7 @@ class ForwardPendingManualPaymentProofs extends Command
                     ->from('telegram_outbound_effects as proof_effects')
                     ->where('proof_effects.source_type', Payment::class)
                     ->where('proof_effects.effect_type', TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
-                    ->whereRaw('proof_effects.source_id = payments.id');
+                    ->whereRaw('proof_effects.source_id = CAST(payments.id AS TEXT)');
             })
             ->with(['order.customer', 'order.orderItems'])
             ->chunkById((int) $this->option('chunk'), function ($proofs) use ($payments, &$forwarded, &$failed): void {
