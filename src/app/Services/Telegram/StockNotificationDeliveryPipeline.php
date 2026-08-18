@@ -89,7 +89,7 @@ class StockNotificationDeliveryPipeline
         }
 
         $hasMore = $transientFailures > 0 || $this->hasPendingEffects($event->id);
-        $this->syncMovementProjection($movementId, $event->id);
+        $this->outboundEffects()->syncStockNotificationProjection($movementId);
 
         DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
             'sent' => $sent,
@@ -110,25 +110,9 @@ class StockNotificationDeliveryPipeline
 
     public function reconcile(int $chunk = 100): int
     {
-        $ledgerRecipientIds = TelegramOutboundEffect::query()
+        $ledgerRecipientIds = $this->outboundEffects()->readyToDispatchQuery()
+            ->where('source_type', StockNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'stock_notification_attempts_exhausted',
-                        'stock_notification_terminal_failure',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->orderBy('id')
             ->limit(max(1, $chunk))
             ->pluck('source_id');
@@ -215,29 +199,12 @@ class StockNotificationDeliveryPipeline
 
     private function dueEffects(int $eventId, int $batchSize)
     {
-        return TelegramOutboundEffect::query()
+        return $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'stock_notification_attempts_exhausted',
-                        'stock_notification_terminal_failure',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->orderByRaw('CAST(source_id AS BIGINT)')
             ->limit(max(1, $batchSize))
             ->get();
@@ -245,29 +212,12 @@ class StockNotificationDeliveryPipeline
 
     private function hasPendingEffects(int $eventId): bool
     {
-        return TelegramOutboundEffect::query()
+        return $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'stock_notification_attempts_exhausted',
-                        'stock_notification_terminal_failure',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->exists();
     }
 
@@ -382,47 +332,6 @@ class StockNotificationDeliveryPipeline
             $this->logEffectFailure($claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
 
             return $terminal ? 'terminal_failure' : 'transient_failure';
-        }
-    }
-
-    private function syncMovementProjection(int $movementId, int $eventId): void
-    {
-        $recipientCount = StockNotificationRecipient::query()
-            ->where('stock_notification_event_id', $eventId)
-            ->count();
-        $effectQuery = TelegramOutboundEffect::query()
-            ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
-            ->whereIn('source_id', StockNotificationRecipient::query()
-                ->where('stock_notification_event_id', $eventId)
-                ->selectRaw('CAST(id AS TEXT)'));
-        $effectCount = (clone $effectQuery)->count();
-        $resolvedCount = (clone $effectQuery)
-            ->where(function ($resolved): void {
-                $resolved
-                    ->where('state', TelegramOutboundEffectState::Sent->value)
-                    ->orWhere(function ($failed): void {
-                        $failed
-                            ->where('state', TelegramOutboundEffectState::Failed->value)
-                            ->where(function ($terminal): void {
-                                $terminal
-                                    ->whereIn('last_error_code', [
-                                        'telegram_http_400',
-                                        'telegram_http_403',
-                                        'stock_notification_attempts_exhausted',
-                                        'stock_notification_terminal_failure',
-                                    ])
-                                    ->orWhere('attempts', '>=', self::MAX_ATTEMPTS);
-                            });
-                    });
-            })
-            ->count();
-
-        if ($effectCount === $recipientCount && $resolvedCount === $recipientCount) {
-            InventoryMovement::query()
-                ->whereKey($movementId)
-                ->whereNull('stock_notification_sent_at')
-                ->update(['stock_notification_sent_at' => now()]);
         }
     }
 

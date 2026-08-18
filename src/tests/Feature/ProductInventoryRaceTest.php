@@ -455,8 +455,44 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertCount(1, $customerMessages);
         $this->assertSame('ms', $recipient->locale);
         $this->assertNotNull($recipient->sent_at);
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame('123457', $effect->telegram_message_id);
+        $this->assertNull($effect->claim_token);
+        $this->assertNull($effect->lease_until);
         $this->assertFalse($first['has_more']);
         $this->assertFalse($second['has_more']);
+    }
+
+    public function test_stock_notification_success_requires_valid_telegram_message_id(): void
+    {
+        Customer::factory()->create(['telegram_id' => 991005, 'locale' => 'id']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'missing message id', $admin, '127.0.0.1', ['missing-id-secret'])['movement_id'];
+
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true])]);
+
+        $result = app(StockNotificationDeliveryPipeline::class)->deliver($movementId);
+        $recipient = StockNotificationRecipient::query()->where('telegram_id', '991005')->sole();
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+
+        $this->assertSame(1, $result['processed']);
+        $this->assertSame(1, $result['transient_failures']);
+        $this->assertTrue($result['has_more']);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNull($effect->claim_token);
+        $this->assertNull($effect->lease_until);
+        $this->assertNull($recipient->sent_at);
+        $this->assertNull(InventoryMovement::findOrFail($movementId)->stock_notification_sent_at);
     }
 
     public function test_restock_channel_notification_includes_added_stock_available_stock_and_current_prices(): void

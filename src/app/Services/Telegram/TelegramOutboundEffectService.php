@@ -2643,7 +2643,7 @@ class TelegramOutboundEffectService
             : (int) $effect->attempts;
     }
 
-    private function syncStockNotificationProjection(int|string $movementId): void
+    public function syncStockNotificationProjection(int|string $movementId): void
     {
         $recipientIds = StockNotificationRecipient::query()
             ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
