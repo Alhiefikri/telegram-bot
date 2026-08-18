@@ -137,26 +137,10 @@ class StockNotificationDeliveryPipeline
             ->with('event:id,inventory_movement_id')
             ->get()
             ->pluck('event.inventory_movement_id')->filter()->unique()->values();
-
-        $legacyRecipientMovementIds = StockNotificationRecipient::query()
+        $unmaterializedMovementIds = StockNotificationRecipient::query()
             ->whereNull('sent_at')
             ->whereNull('terminal_failed_at')
-            ->where(function ($attempts): void {
-                $attempts
-                    ->where('attempts', '<', self::MAX_ATTEMPTS)
-                    ->orWhere(function ($staleClaim): void {
-                        $staleClaim
-                            ->where(function ($claim): void {
-                                $claim->whereNotNull('claim_token')
-                                    ->orWhereNotNull('claim_expires_at');
-                            })
-                            ->where(function ($expired): void {
-                                $expired->whereNull('claim_expires_at')
-                                    ->orWhere('claim_expires_at', '<=', now());
-                            });
-                    });
-            })
-            ->where(fn ($query) => $query->whereNull('claim_expires_at')->orWhere('claim_expires_at', '<=', now()))
+            ->where('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS)
             ->whereNotExists(function ($effects): void {
                 $effects
                     ->selectRaw('1')
@@ -165,18 +149,14 @@ class StockNotificationDeliveryPipeline
                     ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
                     ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
             })
-            ->with('event:id,inventory_movement_id')->orderBy('id')->limit(max(1, $chunk))->get()
+            ->with('event:id,inventory_movement_id')
+            ->orderBy('id')
+            ->limit(max(1, $chunk))
+            ->get()
             ->pluck('event.inventory_movement_id')->filter()->unique()->values();
 
-        // The old one-shot worker recorded a permanent started marker before it
-        // fanned out. Treat those in-flight rows as unmaterialized events so a
-        // deploy cannot leave them stranded forever.
-        $legacyMovementIds = InventoryMovement::query()
-            ->whereNotNull('stock_notification_started_at')->whereNull('stock_notification_sent_at')
-            ->orderBy('id')->limit(max(1, $chunk))->pluck('id');
         $movementIds = $recipientMovementIds
-            ->merge($legacyRecipientMovementIds)
-            ->merge($legacyMovementIds)
+            ->merge($unmaterializedMovementIds)
             ->unique()
             ->values();
 
@@ -304,15 +284,6 @@ class StockNotificationDeliveryPipeline
             return $existing;
         }
 
-        // A legacy worker may still own this row. Let its lease finish before
-        // creating a second delivery unit; an expired legacy claim is evidence
-        // of an unknown outcome and is never silently retried.
-        if ($recipient->sent_at === null
-            && $recipient->claim_expires_at !== null
-            && $recipient->claim_expires_at->isFuture()) {
-            return null;
-        }
-
         $state = TelegramOutboundEffectState::Pending->value;
         $sentAt = null;
         $failedAt = null;
@@ -325,12 +296,6 @@ class StockNotificationDeliveryPipeline
             $state = TelegramOutboundEffectState::Sent->value;
             $sentAt = $recipient->sent_at;
             $nextAttemptAt = null;
-        } elseif ($recipient->claim_token !== null || $recipient->claim_expires_at !== null) {
-            $state = TelegramOutboundEffectState::Unknown->value;
-            $unknownAt = $recipient->claim_expires_at ?? now();
-            $nextAttemptAt = null;
-            $lastErrorCode = 'legacy_stock_notification_claim_ambiguous';
-            $lastError = 'Legacy stock notification delivery outcome is unknown and requires review.';
         } elseif ($recipient->terminal_failed_at !== null) {
             $state = TelegramOutboundEffectState::Failed->value;
             $failedAt = $recipient->failed_at ?? $recipient->terminal_failed_at;

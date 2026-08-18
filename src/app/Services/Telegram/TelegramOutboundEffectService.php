@@ -41,7 +41,6 @@ use App\Services\InventoryLedger;
 use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
-use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\ConnectionException;
@@ -135,7 +134,7 @@ class TelegramOutboundEffectService
 
     public const SALES_PROOF_QUEUE = 'notifications';
 
-    private const SALES_PROOF_MAX_ATTEMPTS = 3;
+    public const SALES_PROOF_MAX_ATTEMPTS = 3;
 
     public const STOCK_NOTIFICATION_MAX_ATTEMPTS = 5;
 
@@ -269,6 +268,19 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function materializeCheckoutEffectForOrder(string $orderId, string $effectType): ?TelegramOutboundEffect
+    {
+        $order = Order::query()->with(['customer', 'payments'])->findOrFail($orderId);
+        $payment = $order->payments->first(
+            fn (Payment $candidate): bool => self::typeForPayment($candidate) === $effectType,
+        );
+        if ($payment === null) {
+            return null;
+        }
+
+        return $this->recordCheckoutInstructions($order, $payment, $order->customer);
+    }
+
     /**
      * Compatibility name retained for the first ledger rollout slice.
      */
@@ -283,7 +295,6 @@ class TelegramOutboundEffectService
             order: $order,
             effectType: self::TYPE_ADMIN_PENDING,
             templateVersion: self::TEMPLATE_ADMIN_ORDER_PENDING,
-            legacyStartedColumn: 'admin_pending_order_notification_started_at',
             legacySentColumn: 'admin_pending_order_notified_at',
             chatId: $chatId,
         );
@@ -295,7 +306,6 @@ class TelegramOutboundEffectService
             order: $order,
             effectType: self::TYPE_ADMIN_PAID,
             templateVersion: self::TEMPLATE_ADMIN_ORDER_PAID,
-            legacyStartedColumn: 'admin_paid_order_notification_started_at',
             legacySentColumn: 'admin_paid_order_notified_at',
             chatId: $chatId,
         );
@@ -307,7 +317,6 @@ class TelegramOutboundEffectService
             order: $order,
             effectType: self::TYPE_ADMIN_EXPIRED,
             templateVersion: self::TEMPLATE_ADMIN_ORDER_EXPIRED,
-            legacyStartedColumn: 'admin_expired_order_notification_started_at',
             legacySentColumn: 'admin_expired_order_notified_at',
             chatId: $chatId,
         );
@@ -545,10 +554,7 @@ class TelegramOutboundEffectService
             return $existing;
         }
 
-        // A legacy worker may already have ownership of this proof. Do not
-        // create a second delivery unit while it is still in flight.
-        if ($payment->payment_proof_forwarded_at !== null
-            || $payment->payment_proof_forwarding_started_at !== null) {
+        if ($payment->payment_proof_forwarded_at !== null) {
             return null;
         }
 
@@ -823,10 +829,7 @@ class TelegramOutboundEffectService
                 return $this->firstReadyReceiptEffect($groupKey);
             }
 
-            // A legacy claim is evidence that a pre-ledger worker may already
-            // have called Telegram. Do not silently backfill it as pending.
-            if ($locked->telegram_receipt_sent_at !== null
-                || $locked->telegram_receipt_send_started_at !== null) {
+            if ($locked->telegram_receipt_sent_at !== null) {
                 return null;
             }
 
@@ -1029,7 +1032,7 @@ class TelegramOutboundEffectService
                 ]),
             ])->save();
 
-            $this->markLegacySent($locked, $messageId, $now);
+            $this->synchronizeDeliveryProjection($locked, $messageId, $now);
             $this->auditLogger->logWithResolvedContext(
                 'telegram_outbound_effect.marked_sent',
                 $locked,
@@ -1361,8 +1364,6 @@ class TelegramOutboundEffectService
                     ? $this->mergeOutcomeMetadata($effect, ['manual_retry_requested' => false])
                     : $effect->outcome_metadata,
             ])->save();
-
-            $this->markLegacyClaim($effect, $now);
 
             return $effect->fresh();
         });
@@ -1863,7 +1864,6 @@ class TelegramOutboundEffectService
         Order $order,
         string $effectType,
         string $templateVersion,
-        string $legacyStartedColumn,
         string $legacySentColumn,
         ?string $chatId = null,
     ): ?TelegramOutboundEffect {
@@ -1878,10 +1878,7 @@ class TelegramOutboundEffectService
             return $existing;
         }
 
-        // Legacy claim columns are compatibility evidence. If an old worker
-        // has already started or completed this unit, do not backfill another
-        // effect that could race it or resend its message.
-        if ($order->{$legacySentColumn} !== null || $order->{$legacyStartedColumn} !== null) {
+        if ($order->{$legacySentColumn} !== null) {
             return null;
         }
 
@@ -1986,14 +1983,14 @@ class TelegramOutboundEffectService
         } elseif ($state === TelegramOutboundEffectState::Sent->value
             && $post->status !== SalesProofPost::STATUS_SENT
             && filled($effect->telegram_message_id)) {
-            $this->markLegacySent(
+            $this->synchronizeDeliveryProjection(
                 $effect,
                 (string) $effect->telegram_message_id,
                 $effect->sent_at ?? now(),
             );
         } elseif ($state === TelegramOutboundEffectState::Failed->value
             && $post->status === SalesProofPost::STATUS_SENDING) {
-            $this->clearLegacyClaim($effect);
+            $this->synchronizeFailedProjection($effect);
         }
     }
 
@@ -2223,7 +2220,7 @@ class TelegramOutboundEffectService
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['telegram_response' => 'ok']),
             ])->save();
 
-            $this->markLegacySent($effect, $messageId, $now);
+            $this->synchronizeDeliveryProjection($effect, $messageId, $now);
 
             return true;
         });
@@ -2266,7 +2263,7 @@ class TelegramOutboundEffectService
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
             ])->save();
 
-            $this->clearLegacyClaim($effect, $this->legacyProjectionError($exception));
+            $this->synchronizeFailedProjection($effect, $this->projectionError($exception));
 
             return true;
         });
@@ -2295,7 +2292,7 @@ class TelegramOutboundEffectService
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['reason' => $reason]),
             ])->save();
 
-            $this->clearLegacyClaim($effect);
+            $this->synchronizeFailedProjection($effect);
 
             return true;
         });
@@ -2325,10 +2322,7 @@ class TelegramOutboundEffectService
             ])->save();
 
             $this->markSalesProofUnknown($effect, $now, 'Sales Proof delivery outcome is unknown and requires review.');
-
-            // Keep the legacy claim as a compatibility projection. The
-            // effect ledger is authoritative and prevents the old recovery
-            // branch from blindly sending this effect again.
+            $this->synchronizeUnknownProjection($effect);
 
             return true;
         });
@@ -2385,18 +2379,6 @@ class TelegramOutboundEffectService
 
             return true;
         });
-    }
-
-    public function hasActiveLegacyClaim(TelegramOutboundEffect $effect): bool
-    {
-        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
-            return false;
-        }
-
-        $startedAt = Order::query()->whereKey($effect->source_id)->value('manual_checkout_customer_notification_started_at');
-
-        return $startedAt !== null
-            && Carbon::parse($startedAt)->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 
     public function isAmbiguous(Throwable $exception): bool
@@ -2667,135 +2649,7 @@ class TelegramOutboundEffectService
             && hash_equals((string) $effect->claim_token, $claimToken);
     }
 
-    private function markLegacyClaim(TelegramOutboundEffect $effect, CarbonInterface $at): void
-    {
-        if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
-            SalesProofPost::query()
-                ->where('order_id', $effect->source_id)
-                ->update([
-                    'status' => SalesProofPost::STATUS_SENDING,
-                    'attempts' => (int) $effect->attempts,
-                    'last_error' => null,
-                    'updated_at' => now(),
-                ]);
-
-            return;
-        }
-
-        if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
-            Order::query()->whereKey($effect->source_id)->update([
-                'telegram_receipt_send_started_at' => $at,
-                'updated_at' => now(),
-            ]);
-
-            return;
-        }
-
-        if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
-            $startedColumn = match ($effect->effect_type) {
-                self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
-                self::TYPE_ADMIN_PAID => 'admin_paid_order_notification_started_at',
-                self::TYPE_ADMIN_EXPIRED => 'admin_expired_order_notification_started_at',
-                default => null,
-            };
-            if ($startedColumn !== null) {
-                Order::query()->whereKey($effect->source_id)->update([
-                    $startedColumn => $at,
-                    'updated_at' => now(),
-                ]);
-            }
-
-            return;
-        }
-
-        if ($effect->effect_type === self::TYPE_MANUAL_PAYMENT_PROOF) {
-            Payment::query()->whereKey($effect->source_id)->update([
-                'payment_proof_forwarding_started_at' => $at,
-                'payment_proof_forwarding_token' => $effect->claim_token,
-                'updated_at' => now(),
-            ]);
-
-            return;
-        }
-
-        if ($effect->effect_type === self::TYPE_STOCK_NOTIFICATION) {
-            StockNotificationRecipient::query()
-                ->whereKey($effect->source_id)
-                ->update([
-                    'claim_expires_at' => $effect->lease_until ?? $at->copy()->addSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))),
-                    'claim_token' => (string) Str::uuid(),
-                    'failed_at' => null,
-                    'terminal_failed_at' => null,
-                    'last_error' => null,
-                    'attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
-                ]);
-
-            return;
-        }
-
-        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_NOTIFICATION) {
-            ProductPriceChangeNotificationRecipient::query()
-                ->whereKey($effect->source_id)
-                ->update([
-                    'send_started_at' => $at,
-                    'send_claim_token' => (string) Str::uuid(),
-                    'failed_at' => null,
-                    'last_error' => null,
-                    'attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
-                ]);
-
-            return;
-        }
-
-        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_STORE_CHANNEL) {
-            ProductPriceChangeEvent::query()
-                ->whereKey($effect->source_id)
-                ->update([
-                    'store_channel_send_started_at' => $at,
-                    'store_channel_send_claim_token' => (string) Str::uuid(),
-                    'store_channel_failed_at' => null,
-                    'store_channel_last_error' => null,
-                    'store_channel_attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
-                ]);
-
-            return;
-        }
-
-        if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
-            TelegramBroadcastRecipient::query()
-                ->whereKey($effect->source_id)
-                ->update([
-                    'send_started_at' => $at,
-                    'send_claim_token' => $effect->claim_token,
-                    'failed_at' => null,
-                    'retry_at' => null,
-                    'terminal_failed_at' => null,
-                    'last_error' => null,
-                    'attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
-                ]);
-            $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
-            if ($broadcastId !== null) {
-                $this->syncAdminBroadcastProjection((int) $broadcastId);
-            }
-
-            return;
-        }
-
-        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
-            return;
-        }
-
-        Order::query()->whereKey($effect->source_id)->update([
-            'manual_checkout_customer_notification_started_at' => $at,
-            'updated_at' => now(),
-        ]);
-    }
-
-    private function markLegacySent(TelegramOutboundEffect $effect, string $messageId, CarbonInterface $at): void
+    private function synchronizeDeliveryProjection(TelegramOutboundEffect $effect, string $messageId, CarbonInterface $at): void
     {
         if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
             SalesProofPost::query()
@@ -2830,7 +2684,6 @@ class TelegramOutboundEffectService
                 ->whereNull('telegram_receipt_sent_at')
                 ->update([
                     'telegram_receipt_sent_at' => $at,
-                    'telegram_receipt_send_started_at' => null,
                     'updated_at' => now(),
                 ]);
 
@@ -2847,8 +2700,6 @@ class TelegramOutboundEffectService
                 ->whereNull('payment_proof_forwarded_at')
                 ->update([
                     'payment_proof_admin_chat_id' => $effect->telegram_chat_id,
-                    'payment_proof_forwarding_started_at' => null,
-                    'payment_proof_forwarding_token' => null,
                     'payment_proof_forwarded_at' => $at,
                     'updated_at' => now(),
                 ]);
@@ -2862,8 +2713,6 @@ class TelegramOutboundEffectService
                 ->whereNull('sent_at')
                 ->update([
                     'sent_at' => $at,
-                    'claim_expires_at' => null,
-                    'claim_token' => null,
                     'failed_at' => null,
                     'terminal_failed_at' => null,
                     'last_error' => null,
@@ -2887,8 +2736,6 @@ class TelegramOutboundEffectService
                 ->whereNull('sent_at')
                 ->update([
                     'sent_at' => $at,
-                    'send_started_at' => null,
-                    'send_claim_token' => null,
                     'failed_at' => null,
                     'last_error' => null,
                     'attempts' => (int) $effect->attempts,
@@ -2903,8 +2750,6 @@ class TelegramOutboundEffectService
                 ->whereKey($effect->source_id)
                 ->update([
                     'store_channel_sent_at' => $at,
-                    'store_channel_send_started_at' => null,
-                    'store_channel_send_claim_token' => null,
                     'store_channel_failed_at' => null,
                     'store_channel_last_error' => null,
                     'store_channel_message_id' => $messageId,
@@ -2921,8 +2766,6 @@ class TelegramOutboundEffectService
                 ->whereNull('sent_at')
                 ->update([
                     'sent_at' => $at,
-                    'send_started_at' => null,
-                    'send_claim_token' => null,
                     'failed_at' => null,
                     'retry_at' => null,
                     'terminal_failed_at' => null,
@@ -2942,18 +2785,15 @@ class TelegramOutboundEffectService
             $values = match ($effect->effect_type) {
                 self::TYPE_ADMIN_PENDING => [
                     'admin_pending_order_notified_at' => $at,
-                    'admin_pending_order_notification_started_at' => null,
                     'admin_pending_order_notification_chat_id' => $effect->telegram_chat_id,
                     'admin_pending_order_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
                     'admin_pending_order_notification_deleted_at' => null,
                 ],
                 self::TYPE_ADMIN_PAID => [
                     'admin_paid_order_notified_at' => $at,
-                    'admin_paid_order_notification_started_at' => null,
                 ],
                 self::TYPE_ADMIN_EXPIRED => [
                     'admin_expired_order_notified_at' => $at,
-                    'admin_expired_order_notification_started_at' => null,
                 ],
                 default => [],
             };
@@ -2971,7 +2811,6 @@ class TelegramOutboundEffectService
 
         $values = [
             'manual_checkout_customer_notified_at' => $at,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,
             'manual_checkout_customer_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
             'manual_checkout_customer_notification_deleted_at' => null,
@@ -2982,7 +2821,7 @@ class TelegramOutboundEffectService
         Order::query()->whereKey($effect->source_id)->update($values + ['updated_at' => now()]);
     }
 
-    private function clearLegacyClaim(TelegramOutboundEffect $effect, ?string $legacyError = null): void
+    private function synchronizeFailedProjection(TelegramOutboundEffect $effect, ?string $projectionError = null): void
     {
         if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
             SalesProofPost::query()
@@ -3003,21 +2842,10 @@ class TelegramOutboundEffectService
         }
 
         if (in_array($effect->effect_type, self::RECEIPT_EFFECT_TYPES, true)) {
-            Order::query()->whereKey($effect->source_id)->update([
-                'telegram_receipt_send_started_at' => null,
-                'updated_at' => now(),
-            ]);
-
             return;
         }
 
         if ($effect->effect_type === self::TYPE_MANUAL_PAYMENT_PROOF) {
-            Payment::query()->whereKey($effect->source_id)->update([
-                'payment_proof_forwarding_started_at' => null,
-                'payment_proof_forwarding_token' => null,
-                'updated_at' => now(),
-            ]);
-
             return;
         }
 
@@ -3027,8 +2855,6 @@ class TelegramOutboundEffectService
                 ->whereKey($effect->source_id)
                 ->whereNull('sent_at')
                 ->update([
-                    'send_started_at' => null,
-                    'send_claim_token' => null,
                     'failed_at' => $effect->failed_at ?? now(),
                     'retry_at' => $terminal ? null : $effect->next_attempt_at,
                     'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
@@ -3050,11 +2876,9 @@ class TelegramOutboundEffectService
                 ->whereKey($effect->source_id)
                 ->whereNull('sent_at')
                 ->update([
-                    'claim_expires_at' => null,
-                    'claim_token' => null,
                     'failed_at' => $effect->failed_at ?? now(),
                     'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
-                    'last_error' => $legacyError ?: $effect->last_error ?: 'Telegram stock notification delivery failed before completion.',
+                    'last_error' => $projectionError ?: $effect->last_error ?: 'Telegram stock notification delivery failed before completion.',
                     'attempts' => (int) $effect->attempts,
                     'updated_at' => now(),
                 ]);
@@ -3074,11 +2898,9 @@ class TelegramOutboundEffectService
                 ->whereKey($effect->source_id)
                 ->whereNull('sent_at')
                 ->update([
-                    'send_started_at' => null,
-                    'send_claim_token' => null,
                     'failed_at' => $effect->failed_at ?? now(),
-                    'last_error' => $legacyError ?: $effect->last_error ?: 'Telegram price notification delivery failed before completion.',
-                    'attempts' => $this->legacyAttempts($effect, self::PRICE_CHANGE_MAX_ATTEMPTS),
+                    'last_error' => $projectionError ?: $effect->last_error ?: 'Telegram price notification delivery failed before completion.',
+                    'attempts' => $this->projectionAttempts($effect, self::PRICE_CHANGE_MAX_ATTEMPTS),
                     'updated_at' => now(),
                 ]);
 
@@ -3090,10 +2912,8 @@ class TelegramOutboundEffectService
                 ->whereKey($effect->source_id)
                 ->whereNull('store_channel_sent_at')
                 ->update([
-                    'store_channel_send_started_at' => null,
-                    'store_channel_send_claim_token' => null,
                     'store_channel_failed_at' => $effect->failed_at ?? now(),
-                    'store_channel_last_error' => $legacyError ?: $effect->last_error ?: 'Telegram price Store Channel delivery failed before completion.',
+                    'store_channel_last_error' => $projectionError ?: $effect->last_error ?: 'Telegram price Store Channel delivery failed before completion.',
                     'store_channel_attempts' => (int) $effect->attempts,
                     'updated_at' => now(),
                 ]);
@@ -3102,33 +2922,63 @@ class TelegramOutboundEffectService
         }
 
         if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
-            $startedColumn = match ($effect->effect_type) {
-                self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
-                self::TYPE_ADMIN_PAID => 'admin_paid_order_notification_started_at',
-                self::TYPE_ADMIN_EXPIRED => 'admin_expired_order_notification_started_at',
-                default => null,
-            };
-            if ($startedColumn !== null) {
-                Order::query()->whereKey($effect->source_id)->update([
-                    $startedColumn => null,
-                    'updated_at' => now(),
-                ]);
-            }
-
             return;
         }
 
-        if (! in_array($effect->effect_type, self::CHECKOUT_EFFECT_TYPES, true)) {
-            return;
-        }
-
-        Order::query()->whereKey($effect->source_id)->update([
-            'manual_checkout_customer_notification_started_at' => null,
-            'updated_at' => now(),
-        ]);
+        // Checkout, receipt, admin-order, and proof projections are either
+        // derived on success or intentionally left unchanged on failure.
     }
 
-    private function legacyProjectionError(Throwable $exception): string
+    private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
+    {
+        if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
+            TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_STOCK_NOTIFICATION) {
+            StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_NOTIFICATION) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_STORE_CHANNEL) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('store_channel_sent_at')
+                ->update([
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
+    private function projectionError(Throwable $exception): string
     {
         return mb_substr(
             TelegramBotApiRedactor::redactText($exception::class.': '.$exception->getMessage()),
@@ -3137,7 +2987,7 @@ class TelegramOutboundEffectService
         );
     }
 
-    private function legacyAttempts(TelegramOutboundEffect $effect, int $maximum): int
+    private function projectionAttempts(TelegramOutboundEffect $effect, int $maximum): int
     {
         return in_array($effect->last_error_code, ['telegram_http_400', 'telegram_http_403'], true)
             ? $maximum

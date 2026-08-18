@@ -182,7 +182,7 @@ class TelegramManualPaymentIntents
             return $this->dispatchSubmittedManualPaymentProof($order, $payment, $effect);
         }
 
-        return $this->forwardLegacyManualPaymentProof($order, $payment, $adminTelegramChatId);
+        return false;
     }
 
     /**
@@ -209,78 +209,12 @@ class TelegramManualPaymentIntents
     private function dispatchSubmittedManualPaymentProof(Order $order, Payment $payment, ?TelegramOutboundEffect $effect): bool
     {
         if ($effect === null) {
-            $adminTelegramChatId = $this->adminTelegramChatId();
-            if ($adminTelegramChatId === null) {
-                return false;
-            }
-
-            return $this->forwardLegacyManualPaymentProof($order, $payment, $adminTelegramChatId);
+            return false;
         }
 
         $this->outboundEffects->dispatch($effect);
 
         return $effect->fresh()?->state === TelegramOutboundEffectState::Sent;
-    }
-
-    private function forwardLegacyManualPaymentProof(Order $order, Payment $payment, string $adminTelegramChatId): bool
-    {
-        $order->loadMissing(['customer', 'orderItems']);
-
-        $token = (string) Str::uuid();
-        $claimed = DB::table('payments')
-            ->where('id', $payment->id)
-            ->where('provider', 'manual')
-            ->where(function ($query): void {
-                $query
-                    ->where('status', PaymentStatus::Pending->value)
-                    ->orWhere(fn ($late) => $late
-                        ->where('method', 'BINANCE_PAY_ID')
-                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value]));
-            })
-            ->whereNotNull('payment_proof_file_id')
-            ->whereNotNull('payment_proof_submitted_at')
-            ->whereNull('payment_proof_forwarded_at')
-            ->where(fn ($query) => $query
-                ->whereNull('payment_proof_forwarding_started_at')
-                ->orWhere('payment_proof_forwarding_started_at', '<=', now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)))))
-            ->update([
-                'payment_proof_forwarding_started_at' => now(),
-                'payment_proof_forwarding_token' => $token,
-                'updated_at' => now(),
-            ]);
-        if ($claimed !== 1) {
-            return false;
-        }
-
-        try {
-            $this->sendManualPaymentProofEffect($order, $payment, $adminTelegramChatId);
-        } catch (\Throwable $exception) {
-            if (! $this->outboundEffects->isAmbiguous($exception)) {
-                DB::table('payments')
-                    ->where('id', $payment->id)
-                    ->where('payment_proof_forwarding_token', $token)
-                    ->update([
-                        'payment_proof_forwarding_started_at' => null,
-                        'payment_proof_forwarding_token' => null,
-                        'updated_at' => now(),
-                    ]);
-            }
-
-            throw $exception;
-        }
-
-        DB::table('payments')
-            ->where('id', $payment->id)
-            ->where('payment_proof_forwarding_token', $token)
-            ->update([
-                'payment_proof_admin_chat_id' => $adminTelegramChatId,
-                'payment_proof_forwarding_started_at' => null,
-                'payment_proof_forwarding_token' => null,
-                'payment_proof_forwarded_at' => now(),
-                'updated_at' => now(),
-            ]);
-
-        return true;
     }
 
     /**

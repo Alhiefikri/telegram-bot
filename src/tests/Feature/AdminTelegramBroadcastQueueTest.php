@@ -3,13 +3,16 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\TelegramBroadcastRateLimiter;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Contracts\Bus\Dispatcher as DispatcherContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -411,6 +414,12 @@ class AdminTelegramBroadcastQueueTest extends TestCase
                 'failed_at' => now()->subSeconds(31),
                 'retry_at' => now()->subSecond(),
             ]);
+        TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST)
+            ->where('telegram_chat_id', '222222222')
+            ->sole()
+            ->forceFill(['next_attempt_at' => now()->subSecond()])
+            ->save();
 
         $second = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 2);
 
@@ -599,13 +608,11 @@ class AdminTelegramBroadcastQueueTest extends TestCase
             'status' => TelegramBroadcast::STATUS_IN_PROGRESS,
             'recipients_materialized_at' => now(),
         ]);
-        TelegramBroadcastRecipient::create([
+        $recipient = TelegramBroadcastRecipient::create([
             'broadcast_id' => $expiredClaim->id,
             'customer_id' => Customer::factory()->create()->id,
             'telegram_id' => '111111111',
             'locale' => 'id',
-            'send_started_at' => now()->subMinutes(16),
-            'send_claim_token' => (string) Str::uuid(),
             'attempts' => 1,
         ]);
 
@@ -628,15 +635,18 @@ class AdminTelegramBroadcastQueueTest extends TestCase
             'status' => TelegramBroadcast::STATUS_IN_PROGRESS,
             'recipients_materialized_at' => now(),
         ]);
-        TelegramBroadcastRecipient::create([
+        $recipient = TelegramBroadcastRecipient::create([
             'broadcast_id' => $broadcast->id,
             'customer_id' => Customer::factory()->create()->id,
             'telegram_id' => '111111111',
             'locale' => 'id',
-            'send_started_at' => now(),
-            'send_claim_token' => (string) Str::uuid(),
             'attempts' => 1,
         ]);
+        app(TelegramOutboundEffectService::class)->recordAdminBroadcastRecipient(
+            $broadcast,
+            $recipient,
+            TelegramOutboundEffectState::Sending,
+        );
 
         $this->artisan('telegram:recover-outbound')
             ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')

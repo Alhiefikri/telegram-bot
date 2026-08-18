@@ -14,10 +14,12 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Storefront\StorefrontUrl;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -393,6 +395,12 @@ class ProductPriceChangeNotificationTest extends TestCase
         $sendCountBeforeRetry = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->count();
         $failEnglishRecipient = false;
         $failedRecipient->forceFill(['failed_at' => now()->subMinute()])->save();
+        TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->where('source_id', (string) $failedRecipient->id)
+            ->sole()
+            ->forceFill(['next_attempt_at' => now()->subSecond()])
+            ->save();
         $secondBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
         $retrySends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));

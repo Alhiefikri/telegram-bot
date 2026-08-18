@@ -2,6 +2,11 @@
 
 namespace App\Services;
 
+use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
+use App\Models\StockNotificationRecipient;
+use App\Models\TelegramBroadcastRecipient;
+use App\Models\TelegramOutboundEffect;
 use Illuminate\Support\Facades\DB;
 
 final class PaymentLifecycleRolloutReport
@@ -22,14 +27,30 @@ final class PaymentLifecycleRolloutReport
             'cancellation_attempts' => DB::table('provider_cancellation_attempts')
                 ->whereIn('state', ['pending', 'processing', 'retryable_failure'])->count(),
             'notification_claims' => [
-                'stock_expired' => DB::table('stock_notification_recipients')
-                    ->whereNull('sent_at')->whereNull('terminal_failed_at')->whereNotNull('claim_expires_at')->where('claim_expires_at', '<=', now())->count(),
-                'broadcast_stale' => DB::table('telegram_broadcast_recipients')
-                    ->whereNull('sent_at')->whereNull('terminal_failed_at')->whereNotNull('send_started_at')->where('send_started_at', '<=', $staleClaimBefore)->count(),
-                'legacy_stock_unmaterialized' => DB::table('inventory_movements as movement')
-                    ->leftJoin('stock_notification_events as event', 'event.inventory_movement_id', '=', 'movement.id')
-                    ->whereNotNull('movement.stock_notification_started_at')->whereNull('movement.stock_notification_sent_at')
-                    ->whereNull('event.id')->count(),
+                'stock_expired' => TelegramOutboundEffect::query()
+                    ->where('source_type', StockNotificationRecipient::class)
+                    ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                    ->where('state', TelegramOutboundEffectState::Sending->value)
+                    ->whereNotNull('lease_until')
+                    ->where('lease_until', '<=', now())
+                    ->count(),
+                'broadcast_stale' => TelegramOutboundEffect::query()
+                    ->where('source_type', TelegramBroadcastRecipient::class)
+                    ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+                    ->where('state', TelegramOutboundEffectState::Sending->value)
+                    ->whereNotNull('lease_until')
+                    ->where('lease_until', '<=', $staleClaimBefore)
+                    ->count(),
+                'legacy_stock_unmaterialized' => DB::table('stock_notification_recipients as recipient')
+                    ->whereNotExists(function ($effects): void {
+                        $effects
+                            ->selectRaw('1')
+                            ->from('telegram_outbound_effects')
+                            ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
+                            ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                            ->whereRaw('telegram_outbound_effects.source_id = CAST(recipient.id AS TEXT)');
+                    })
+                    ->count(),
             ],
             'lifecycle_state_mismatches' => DB::table('payments')
                 ->join('orders', 'orders.id', '=', 'payments.order_id')

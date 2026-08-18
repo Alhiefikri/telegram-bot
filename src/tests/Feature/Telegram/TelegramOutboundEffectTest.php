@@ -58,7 +58,6 @@ class TelegramOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('123456', $effect->telegram_message_id);
         $this->assertNotNull($effect->sent_at);
         $this->assertNotNull($freshOrder->manual_checkout_customer_notified_at);
-        $this->assertNull($freshOrder->manual_checkout_customer_notification_started_at);
         $this->assertSame('12345', $freshOrder->manual_checkout_customer_notification_chat_id);
         $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
     }
@@ -87,15 +86,13 @@ class TelegramOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNotNull($effect->unknown_at);
         $this->assertSame('telegram_transport_ambiguous', $effect->last_error_code);
         $this->assertSame(1, $sendCount);
-        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_started_at);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
     public function test_recovery_rediscovers_a_pending_effect_without_a_legacy_claim(): void
     {
         Queue::fake();
         $order = $this->manualTelegramOrder();
-        $order->forceFill(['manual_checkout_customer_notification_started_at' => null])->save();
-
         Artisan::call('telegram:recover-outbound', [
             '--chunk' => 100,
             '--queue' => 'notifications',

@@ -7,8 +7,8 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -19,38 +19,40 @@ class TelegramAdminOrderNotifier
         private readonly TelegramAdminAccess $adminAccess,
     ) {}
 
+    /**
+     * Ledger-backed compatibility entry point for callers that still invoke
+     * the notifier directly instead of dispatching the admin notification job.
+     */
     public function sendPending(Order $order): void
     {
-        $this->sendOnce(
-            order: $order,
-            startedAtColumn: 'admin_pending_order_notification_started_at',
-            sentAtColumn: 'admin_pending_order_notified_at',
-            step: 'admin_pending_order_notification',
-            canSend: fn (Order $locked): bool => $locked->order_status === OrderStatus::PendingPayment
-                && $locked->payment_status === PaymentStatus::Pending,
-            message: fn (Order $claimed): string => $this->pendingMessage($claimed),
-            sentUpdates: fn (array $response, Order $claimed, string $chatId): array => $this->pendingMessageTrackingUpdates($response, $chatId),
-        );
+        $effects = app(TelegramOutboundEffectService::class);
+        $effect = $effects->recordAdminOrderPendingNotification($order);
 
-        $this->deletePending($order);
+        if ($effect !== null) {
+            $effects->processAdminOrderNotification($effect);
+        }
     }
 
+    /**
+     * Pending-message deletion is a cleanup projection, not a new outbound
+     * effect. Keep this compatibility entry point ledger-aware.
+     */
     public function sendPaid(Order $order): void
     {
         $this->deletePending($order);
     }
 
+    /**
+     * Ledger-backed compatibility entry point for direct expired notifications.
+     */
     public function sendExpired(Order $order): void
     {
-        $this->sendOnce(
-            order: $order,
-            startedAtColumn: 'admin_expired_order_notification_started_at',
-            sentAtColumn: 'admin_expired_order_notified_at',
-            step: 'admin_expired_order_notification',
-            canSend: fn (Order $locked): bool => $locked->order_status === OrderStatus::Expired
-                && $locked->payment_status === PaymentStatus::Expired,
-            message: fn (Order $claimed): string => $this->expiredMessage($claimed),
-        );
+        $effects = app(TelegramOutboundEffectService::class);
+        $effect = $effects->recordAdminOrderExpiredNotification($order);
+
+        if ($effect !== null) {
+            $effects->processAdminOrderNotification($effect);
+        }
 
         $this->deletePending($order);
     }
@@ -96,17 +98,25 @@ class TelegramAdminOrderNotifier
                 'id',
                 'order_status',
                 'payment_status',
+                'admin_pending_order_notification_deleted_at',
                 'admin_pending_order_notification_chat_id',
                 'admin_pending_order_notification_message_id',
-                'admin_pending_order_notification_deleted_at',
             ]);
 
         if (! $target || ! $this->shouldDeletePendingNotification($target)) {
             return;
         }
 
-        $chatId = $target->admin_pending_order_notification_chat_id ?: $this->privateAdminChatId();
-        $messageId = $target->admin_pending_order_notification_message_id;
+        $effect = TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $target->id)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PENDING)
+            ->where('state', 'sent')
+            ->whereNotNull('telegram_message_id')
+            ->latest('sent_at')
+            ->first(['telegram_chat_id', 'telegram_message_id']);
+        $chatId = $effect?->telegram_chat_id ?: $target->admin_pending_order_notification_chat_id ?: $this->privateAdminChatId();
+        $messageId = $effect?->telegram_message_id ?: $target->admin_pending_order_notification_message_id;
         if (! $chatId || ! $messageId || $target->admin_pending_order_notification_deleted_at !== null) {
             return;
         }
@@ -132,61 +142,6 @@ class TelegramAdminOrderNotifier
             ->update(['admin_pending_order_notification_deleted_at' => now()]);
     }
 
-    private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message, ?callable $sentUpdates = null): void
-    {
-        if (blank(config('services.telegram.token'))) {
-            return;
-        }
-
-        $chatId = $this->privateAdminChatId();
-        if (! $chatId) {
-            return;
-        }
-
-        $claimed = DB::transaction(function () use ($order, $startedAtColumn, $sentAtColumn, $canSend): ?Order {
-            $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($locked->{$sentAtColumn} !== null || $this->hasActiveClaim($locked->{$startedAtColumn}) || ! $canSend($locked)) {
-                return null;
-            }
-
-            $locked->forceFill([$startedAtColumn => now()])->save();
-
-            return $locked->fresh();
-        }, 5);
-
-        if (! $claimed) {
-            return;
-        }
-
-        try {
-            $claimed->loadMissing(['customer', 'orderItems', 'payments']);
-            $response = DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => $step,
-                'payment_mode' => $this->paymentMode($claimed),
-                'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
-                'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-            ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
-        } catch (Throwable $e) {
-            Order::query()
-                ->whereKey($claimed->id)
-                ->whereNull($sentAtColumn)
-                ->update([$startedAtColumn => null]);
-
-            throw $e;
-        }
-
-        $updates = [$sentAtColumn => now(), $startedAtColumn => null];
-        if ($sentUpdates !== null) {
-            $updates += $sentUpdates(is_array($response) ? $response : [], $claimed, $chatId);
-        }
-
-        Order::query()
-            ->whereKey($claimed->id)
-            ->whereNotNull($startedAtColumn)
-            ->whereNull($sentAtColumn)
-            ->update($updates);
-    }
-
     /**
      * @return array<string, mixed>
      */
@@ -205,17 +160,6 @@ class TelegramAdminOrderNotifier
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
         ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
-    }
-
-    private function pendingMessageTrackingUpdates(array $response, string $chatId): array
-    {
-        $messageId = data_get($response, 'result.message_id');
-
-        return [
-            'admin_pending_order_notification_chat_id' => (string) $chatId,
-            'admin_pending_order_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
-            'admin_pending_order_notification_deleted_at' => null,
-        ];
     }
 
     private function shouldDeletePendingNotification(Order $order): bool
@@ -387,9 +331,4 @@ class TelegramAdminOrderNotifier
             : null;
     }
 
-    private function hasActiveClaim($startedAt): bool
-    {
-        return $startedAt !== null
-            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
-    }
 }

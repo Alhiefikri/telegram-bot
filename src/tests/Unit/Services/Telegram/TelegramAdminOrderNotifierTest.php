@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -74,7 +75,6 @@ class TelegramAdminOrderNotifierTest extends TestCase
 
         $order = $this->expiredOrderWithItems(1);
 
-        app(TelegramAdminOrderNotifier::class)->sendExpired($order);
         app(TelegramAdminOrderNotifier::class)->sendExpired($order->fresh());
 
         $sends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
@@ -114,7 +114,6 @@ class TelegramAdminOrderNotifierTest extends TestCase
         app(TelegramAdminOrderNotifier::class)->sendExpired($order);
 
         Http::assertNothingSent();
-        $this->assertNull($order->fresh()->admin_expired_order_notification_started_at);
         $this->assertNull($order->fresh()->admin_expired_order_notified_at);
     }
 

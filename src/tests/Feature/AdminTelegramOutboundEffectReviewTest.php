@@ -216,7 +216,6 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
             'state' => TelegramOutboundEffectState::Unknown,
             'unknown_at' => now()->subMinute(),
         ])->save();
-        $order->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
         $resend = app(TelegramOutboundEffectService::class)->resend($effect, $owner);
 

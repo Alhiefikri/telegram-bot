@@ -2,28 +2,21 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
-use App\Jobs\SendAdminOrderExpiredNotification;
-use App\Jobs\SendAdminOrderPaidNotification;
-use App\Jobs\SendAdminOrderPendingNotification;
-use App\Jobs\SendBinanceCheckoutInstructions;
-use App\Jobs\SendKlikQrisCheckoutInstructions;
-use App\Jobs\SendManualCheckoutNotifications;
-use App\Jobs\SendPakasirCheckoutInstructions;
-use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
+use App\Jobs\SendProductPriceChangeNotifications;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
-use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
-use Illuminate\Database\Query\Builder;
 
 class RecoverTelegramOutboundEffects extends Command
 {
@@ -37,41 +30,6 @@ class RecoverTelegramOutboundEffects extends Command
         $dispatched = 0;
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $staleLeases = $outboundEffects->recoverExpiredLeases(now());
-
-        SalesProofPost::query()
-            ->whereIn('status', [
-                SalesProofPost::STATUS_PENDING,
-                SalesProofPost::STATUS_FAILED,
-                SalesProofPost::STATUS_SENDING,
-            ])
-            ->where(function ($query) use ($cutoff): void {
-                $query
-                    ->where('status', '<>', SalesProofPost::STATUS_SENDING)
-                    ->orWhere('updated_at', '<=', $cutoff);
-            })
-            ->whereNotExists(function (Builder $query): void {
-                $query
-                    ->selectRaw('1')
-                    ->from('telegram_outbound_effects as sales_proof_effects')
-                    ->where('sales_proof_effects.source_type', Order::class)
-                    ->where('sales_proof_effects.effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
-                    ->whereRaw('sales_proof_effects.source_id = CAST(sales_proof_posts.order_id AS TEXT)');
-            })
-            ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($posts) use (&$dispatched, $outboundEffects): void {
-                foreach ($posts as $post) {
-                    $order = Order::find($post->order_id);
-                    if ($order === null) {
-                        continue;
-                    }
-
-                    $effect = $outboundEffects->materializeSalesProofPostEffect($order);
-                    if ($effect !== null) {
-                        $outboundEffects->dispatch($effect, now()->toISOString());
-                        $dispatched++;
-                    }
-                }
-            });
 
         $outboundEffects->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
@@ -97,76 +55,145 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
-        $effects = [
-            ['admin_pending_order_notification_started_at', 'admin_pending_order_notified_at', SendAdminOrderPendingNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_PENDING],
-            ['admin_paid_order_notification_started_at', 'admin_paid_order_notified_at', SendAdminOrderPaidNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_PAID],
-            ['admin_expired_order_notification_started_at', 'admin_expired_order_notified_at', SendAdminOrderExpiredNotification::class, TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED],
-        ];
+        SalesProofPost::query()
+            ->whereIn('status', [
+                SalesProofPost::STATUS_PENDING,
+                SalesProofPost::STATUS_FAILED,
+                SalesProofPost::STATUS_SENDING,
+                SalesProofPost::STATUS_UNKNOWN,
+                SalesProofPost::STATUS_MANUAL_REVIEW,
+            ])
+            ->where('attempts', '<', TelegramOutboundEffectService::SALES_PROOF_MAX_ATTEMPTS)
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects as sales_proof_effects')
+                    ->where('sales_proof_effects.source_type', Order::class)
+                    ->where('sales_proof_effects.effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+                    ->whereRaw('sales_proof_effects.source_id = CAST(sales_proof_posts.order_id AS TEXT)');
+            })
+            ->with('order')
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($posts) use (&$dispatched, $outboundEffects): void {
+                foreach ($posts as $post) {
+                    if ($post->order === null) {
+                        continue;
+                    }
 
-        foreach ($effects as [$startedAt, $sentAt, $job, $effectType]) {
-            Order::query()
-                ->whereNull($sentAt)
-                ->where($startedAt, '<=', $cutoff)
-                ->whereNotExists(function (Builder $query) use ($effectType): void {
-                    $query
-                        ->selectRaw('1')
-                        ->from('telegram_outbound_effects as migrated_effects')
-                        ->where('migrated_effects.source_type', Order::class)
-                        ->where('migrated_effects.effect_type', $effectType)
-                        ->whereRaw('migrated_effects.source_id = CAST(orders.id AS TEXT)');
-                })
-                ->orderBy('id')
-                ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $job): void {
-                    foreach ($orders as $order) {
-                        $dispatch = $job::dispatch($order->id, now()->toISOString());
-                        $dispatch->onQueue((string) $this->option('queue'));
+                    $effect = $outboundEffects->materializeSalesProofPostEffect($post->order);
+                    if ($effect !== null
+                        && in_array($effect->state, [
+                            TelegramOutboundEffectState::Pending,
+                            TelegramOutboundEffectState::Failed,
+                        ], true)
+                        && ($effect->next_attempt_at === null || $effect->next_attempt_at->lte(now()))) {
+                        $outboundEffects->dispatch($effect, now()->toISOString());
                         $dispatched++;
                     }
-                });
-        }
+                }
+            });
 
+        $dispatched += app(StockNotificationDeliveryPipeline::class)
+            ->reconcile((int) $this->option('chunk'));
+
+        // Source discovery is ledger-only: committed lifecycle rows without
+        // an effect are materialized here, while every delivery attempt still
+        // goes through the shared claim/finalization protocol.
         Order::query()
-            ->whereNull('manual_checkout_customer_notified_at')
-            ->where('manual_checkout_customer_notification_started_at', '<=', $cutoff)
-            ->whereNotExists(function (Builder $query): void {
-                $query
-                    ->selectRaw('1')
-                    ->from('telegram_outbound_effects as migrated_effects')
-                    ->where('migrated_effects.source_type', Order::class)
-                    ->whereIn('migrated_effects.effect_type', [
-                        TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
-                        TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
-                        TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
-                        TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
-                    ])
-                    ->whereRaw('migrated_effects.source_id = CAST(orders.id AS TEXT)');
-            })
-            ->where('order_status', 'pending_payment')
-            ->where(function ($query): void {
-                $query->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
+            ->with(['customer', 'payments'])
+            ->where(function ($orders): void {
+                $orders
+                    ->where(function ($checkout): void {
+                        $checkout
+                            ->where('order_status', 'pending_payment')
+                            ->where(function ($expiry): void {
+                                $expiry->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                            });
+                    })
+                    ->orWhere(function ($paid): void {
+                        $paid
+                            ->whereIn('order_status', ['processing', 'completed'])
+                            ->where('payment_status', 'paid');
+                    })
+                    ->orWhere(function ($expired): void {
+                        $expired
+                            ->where('order_status', 'expired')
+                            ->where('payment_status', 'expired');
+                    });
             })
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
+            ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $outboundEffects): void {
                 foreach ($orders as $order) {
-                    $payment = $order->payments()->latest('created_at')->first();
-                    if ($payment?->provider === PaymentProvider::MANUAL && $payment?->method === 'BINANCE_PAY_ID') {
-                        $job = SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } elseif ($payment?->provider === PaymentProvider::KLIKQRIS) {
-                        $job = SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } elseif ($payment?->provider === PaymentProvider::PAKASIR) {
-                        $job = SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString());
-                    } else {
-                        $job = SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString());
+                    $payment = $order->payments->first(
+                        fn ($candidate): bool => TelegramOutboundEffectService::typeForPayment($candidate) !== null,
+                    );
+                    if ($payment !== null
+                        && $order->order_status->value === 'pending_payment'
+                        && $order->payment_status->value === 'pending') {
+                        $checkoutType = TelegramOutboundEffectService::typeForPayment($payment);
+                        if ($checkoutType !== null && $outboundEffects->forOrder($order->id, $checkoutType) === null) {
+                            $effect = $outboundEffects->recordCheckoutInstructions($order, $payment, $order->customer);
+                            if ($effect !== null) {
+                                $outboundEffects->dispatch($effect, now()->toISOString());
+                                $dispatched++;
+                            }
+                        }
                     }
-                    $job->onQueue((string) $this->option('queue'));
-                    $dispatched++;
+
+                    if (in_array($order->order_status->value, ['processing', 'completed'], true)
+                        && $order->payment_status->value === 'paid'
+                        && $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
+                        $effect = $outboundEffects->recordReceipt($order, $order->customer);
+                        if ($effect !== null) {
+                            $outboundEffects->dispatch($effect, now()->toISOString());
+                            $dispatched++;
+                        }
+                    }
+
+                    $adminType = match (true) {
+                        $order->order_status->value === 'pending_payment' && $order->payment_status->value === 'pending' => TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+                        in_array($order->order_status->value, ['processing', 'completed'], true) && $order->payment_status->value === 'paid' => TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+                        $order->order_status->value === 'expired' && $order->payment_status->value === 'expired' => TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+                        default => null,
+                    };
+                    if ($adminType !== null && $outboundEffects->forOrder($order->id, $adminType) === null) {
+                        $effect = match ($adminType) {
+                            TelegramOutboundEffectService::TYPE_ADMIN_PENDING => $outboundEffects->recordAdminOrderPendingNotification($order),
+                            TelegramOutboundEffectService::TYPE_ADMIN_PAID => $outboundEffects->recordAdminOrderPaidNotification($order),
+                            TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED => $outboundEffects->recordAdminOrderExpiredNotification($order),
+                            default => null,
+                        };
+                        if ($effect !== null) {
+                            $outboundEffects->dispatch($effect, now()->toISOString());
+                            $dispatched++;
+                        }
+                    }
                 }
             });
 
         Order::query()
             ->where(function ($query): void {
-                $query->whereNotNull('telegram_receipt_sent_at')
+                $query->where(function ($receipt): void {
+                    $receipt
+                        ->whereExists(function ($effects): void {
+                            $effects
+                                ->selectRaw('1')
+                                ->from('telegram_outbound_effects as receipt_effects')
+                                ->where('receipt_effects.source_type', Order::class)
+                                ->where('receipt_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+                                ->where('receipt_effects.state', 'sent')
+                                ->whereRaw('receipt_effects.source_id = CAST(orders.id AS TEXT)');
+                        })
+                        ->whereNotExists(function ($unfinished): void {
+                            $unfinished
+                                ->selectRaw('1')
+                                ->from('telegram_outbound_effects as unfinished_receipt_effects')
+                                ->where('unfinished_receipt_effects.source_type', Order::class)
+                                ->where('unfinished_receipt_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+                                ->where('unfinished_receipt_effects.state', '<>', 'sent')
+                                ->whereRaw('unfinished_receipt_effects.source_id = CAST(orders.id AS TEXT)');
+                        });
+                })
                     ->orWhere('order_status', 'cancelled')
                     ->orWhereHas('payments', fn ($payments) => $payments->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'));
             })
@@ -201,63 +228,43 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
-        $storeChannel = StoreChannelSetting::current();
-        $storeChannelConfigured = trim((string) ($storeChannel->telegram_chat_id ?: $storeChannel->channel_username)) !== '';
+        $storeChannelTargetConfigured = StoreChannelSetting::query()
+            ->where('singleton_key', StoreChannelSetting::SINGLETON_KEY)
+            ->where(function ($setting): void {
+                $setting->whereNotNull('telegram_chat_id')->where('telegram_chat_id', '<>', '')
+                    ->orWhere(fn ($username) => $username->whereNotNull('channel_username')->where('channel_username', '<>', ''));
+            })
+            ->exists();
 
         ProductPriceChangeEvent::query()
-            ->where(function ($query) use ($cutoff, $storeChannelConfigured): void {
-                $query->whereNull('recipients_materialized_at')
-                    ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
+            ->where(function ($query) use ($storeChannelTargetConfigured): void {
+                $query
+                    ->whereNull('recipients_materialized_at')
+                    ->orWhereHas('recipients', function ($recipients): void {
                         $recipients
                             ->whereNull('sent_at')
-                            ->where(function ($attempts) use ($cutoff): void {
-                                $attempts
-                                    ->where('attempts', '<', ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS)
-                                    ->orWhereNotNull('failed_at')
-                                    ->orWhere(function ($staleClaim) use ($cutoff): void {
-                                        $staleClaim
-                                            ->whereNotNull('send_started_at')
-                                            ->where('send_started_at', '<=', $cutoff);
-                                    });
-                            })
-                            ->whereNotExists(function (Builder $effects): void {
+                            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS)
+                            ->whereNotExists(function ($effects): void {
                                 $effects
                                     ->selectRaw('1')
                                     ->from('telegram_outbound_effects as price_recipient_effects')
                                     ->where('price_recipient_effects.source_type', ProductPriceChangeNotificationRecipient::class)
                                     ->where('price_recipient_effects.effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
                                     ->whereRaw('price_recipient_effects.source_id = CAST(product_price_change_notification_recipients.id AS TEXT)');
-                            })
-                            ->where(function ($recipient) use ($cutoff): void {
-                                $recipient->whereNull('send_started_at')
-                                    ->orWhere('send_started_at', '<=', $cutoff);
                             });
                     })
-                    ->when($storeChannelConfigured, function ($storeChannelQuery) use ($cutoff): void {
-                        $storeChannelQuery->orWhere(function ($storeChannelEffect) use ($cutoff): void {
-                            $storeChannelEffect
+                    ->when($storeChannelTargetConfigured, function ($query): void {
+                        $query->orWhere(function ($storeChannel): void {
+                            $storeChannel
                                 ->whereNull('store_channel_sent_at')
-                                ->where(function ($attempts) use ($cutoff): void {
-                                    $attempts
-                                        ->where('store_channel_attempts', '<', ProductPriceChangeNotificationService::MAX_STORE_CHANNEL_ATTEMPTS)
-                                        ->orWhereNotNull('store_channel_failed_at')
-                                        ->orWhere(function ($staleClaim) use ($cutoff): void {
-                                            $staleClaim
-                                                ->whereNotNull('store_channel_send_started_at')
-                                                ->where('store_channel_send_started_at', '<=', $cutoff);
-                                        });
-                                })
-                                ->whereNotExists(function (Builder $effects): void {
+                                ->where('store_channel_attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS)
+                                ->whereNotExists(function ($effects): void {
                                     $effects
                                         ->selectRaw('1')
                                         ->from('telegram_outbound_effects as price_channel_effects')
                                         ->where('price_channel_effects.source_type', ProductPriceChangeEvent::class)
                                         ->where('price_channel_effects.effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
                                         ->whereRaw('price_channel_effects.source_id = CAST(product_price_change_events.id AS TEXT)');
-                                })
-                                ->where(function ($storeChannelClaim) use ($cutoff): void {
-                                    $storeChannelClaim->whereNull('store_channel_send_started_at')
-                                        ->orWhere('store_channel_send_started_at', '<=', $cutoff);
                                 });
                         });
                     });
@@ -272,7 +279,7 @@ class RecoverTelegramOutboundEffects extends Command
             });
 
         app(TelegramBroadcastService::class)
-            ->recoverableBroadcastsQuery($cutoff, now())
+            ->recoverableBroadcastsQuery(now())
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($broadcasts) use (&$dispatched): void {
                 foreach ($broadcasts as $broadcast) {

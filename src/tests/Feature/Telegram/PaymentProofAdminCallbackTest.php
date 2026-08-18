@@ -527,7 +527,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('large-photo', $payment->fresh()->payment_proof_file_id);
         $effect = TelegramOutboundEffect::query()->sole();
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
-        $this->assertNotNull($payment->fresh()->payment_proof_forwarding_started_at);
+        $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12345'
             && str_contains((string) ($request['text'] ?? ''), 'Bukti pembayaran sudah masuk'));
@@ -1502,9 +1502,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'payment_status' => PaymentStatus::Paid,
-            'telegram_receipt_send_started_at' => now(),
         ]);
         Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+
+        $receiptEffects = app(\App\Services\Telegram\TelegramOutboundEffectService::class);
+        $receiptEffect = $receiptEffects->recordReceipt($order);
+        $receiptEffects->claim($receiptEffect->id);
 
         app(TelegramReceiptNotifier::class)->send($order);
 
@@ -1586,6 +1589,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'method' => 'BINANCE_PAY_ID',
             'status' => PaymentStatus::Paid,
         ]);
+
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        if ($receipt !== null) {
+            TelegramOutboundEffect::query()
+                ->where('effect_group_key', $receipt->effect_group_key)
+                ->update([
+                    'state' => TelegramOutboundEffectState::Sent->value,
+                    'sent_at' => now(),
+                    'next_attempt_at' => null,
+                ]);
+        }
 
         return $order;
     }

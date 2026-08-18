@@ -4,8 +4,6 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
-use App\Services\Telegram\TelegramAdminOrderNotifier;
-use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
@@ -40,8 +38,6 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
     }
 
     public function handle(
-        TelegramAdminOrderNotifier $pendingNotifier,
-        TelegramAdminPaidOrderNotifier $paidNotifier,
         ?TelegramOutboundEffectService $outboundEffects = null,
     ): void {
         $startedAt = DogfoodTiming::now();
@@ -66,13 +62,12 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
 
             if ($effect !== null) {
                 $outboundEffects->processAdminOrderNotification($effect);
-
-                return;
+            } else {
+                $effect = $outboundEffects->recordAdminOrderPaidNotification(Order::findOrFail($this->orderId));
+                if ($effect !== null) {
+                    $outboundEffects->processAdminOrderNotification($effect);
+                }
             }
-
-            $order = Order::findOrFail($this->orderId);
-            $pendingNotifier->deletePending($order);
-            $paidNotifier->send($order);
         } finally {
             DogfoodTiming::log('dogfood.telegram.admin_paid_order_notification_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

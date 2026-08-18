@@ -21,8 +21,6 @@ use Throwable;
 
 class ProductPriceChangeNotificationService
 {
-    private const CLAIM_TTL_MINUTES = 15;
-
     private const RETRY_DELAY_SECONDS = 30;
 
     public const BATCH_SIZE = 25;
@@ -187,22 +185,7 @@ class ProductPriceChangeNotificationService
         );
         $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
         if ($existing !== null) {
-            if ($existing->state === TelegramOutboundEffectState::Failed
-                && $recipient->failed_at !== null
-                && (int) $recipient->attempts < self::MAX_RECIPIENT_ATTEMPTS) {
-                $nextAttemptAt = $recipient->failed_at->copy()->addSeconds(self::RETRY_DELAY_SECONDS);
-                if ($existing->next_attempt_at?->ne($nextAttemptAt)) {
-                    $existing->forceFill(['next_attempt_at' => $nextAttemptAt])->save();
-                }
-            }
-
             return $existing;
-        }
-
-        if ($recipient->sent_at === null
-            && $recipient->send_started_at !== null
-            && $recipient->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
-            return null;
         }
 
         $state = TelegramOutboundEffectState::Pending->value;
@@ -217,12 +200,6 @@ class ProductPriceChangeNotificationService
             $state = TelegramOutboundEffectState::Sent->value;
             $sentAt = $recipient->sent_at;
             $nextAttemptAt = null;
-        } elseif ($recipient->send_started_at !== null) {
-            $state = TelegramOutboundEffectState::Unknown->value;
-            $unknownAt = $recipient->send_started_at;
-            $nextAttemptAt = null;
-            $lastErrorCode = 'legacy_price_change_claim_ambiguous';
-            $lastError = 'Legacy price notification delivery outcome is unknown and requires review.';
         } elseif ($recipient->failed_at !== null) {
             $state = TelegramOutboundEffectState::Failed->value;
             $failedAt = $recipient->failed_at;
@@ -261,12 +238,6 @@ class ProductPriceChangeNotificationService
             return $existing;
         }
 
-        if ($event->store_channel_sent_at === null
-            && $event->store_channel_send_started_at !== null
-            && $event->store_channel_send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
-            return null;
-        }
-
         $state = TelegramOutboundEffectState::Pending->value;
         $sentAt = null;
         $failedAt = null;
@@ -279,12 +250,6 @@ class ProductPriceChangeNotificationService
             $state = TelegramOutboundEffectState::Sent->value;
             $sentAt = $event->store_channel_sent_at;
             $nextAttemptAt = null;
-        } elseif ($event->store_channel_send_started_at !== null) {
-            $state = TelegramOutboundEffectState::Unknown->value;
-            $unknownAt = $event->store_channel_send_started_at;
-            $nextAttemptAt = null;
-            $lastErrorCode = 'legacy_price_change_store_channel_claim_ambiguous';
-            $lastError = 'Legacy price Store Channel delivery outcome is unknown and requires review.';
         } elseif ($event->store_channel_failed_at !== null) {
             $state = TelegramOutboundEffectState::Failed->value;
             $failedAt = $event->store_channel_failed_at;

@@ -229,7 +229,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
 
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         $this->assertSame(1, $sendCount);
-        $this->assertNotNull($order->fresh()->admin_paid_order_notification_started_at);
+        $this->assertNull($order->fresh()->admin_paid_order_notified_at);
     }
 
     public function test_manual_payment_proof_effect_is_attachment_safe_and_idempotent(): void
@@ -304,7 +304,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $freshEffect = $effect->fresh();
         $this->assertSame(TelegramOutboundEffectState::Unknown, $freshEffect->state);
         $this->assertSame('telegram_transport_ambiguous', $freshEffect->last_error_code);
-        $this->assertNotNull($payment->fresh()->payment_proof_forwarding_started_at);
+        $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
         $this->assertSame(1, $sendCount);
         $this->assertStringNotContainsString(
             'proof-file-secret',

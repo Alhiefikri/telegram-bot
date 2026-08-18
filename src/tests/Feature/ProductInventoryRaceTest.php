@@ -304,7 +304,6 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertSame('ms', $recipient->locale);
         $this->assertSame(1, $recipient->attempts);
         $this->assertNull($recipient->failed_at);
-        $this->assertNotNull($recipient->claim_token);
         $this->assertStringContainsString('✅ Stok Tersedia Semula', (string) $recipient->text);
         $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
         $this->assertFalse($first['has_more']);
@@ -351,8 +350,6 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             'locale' => null,
             'text' => 'Stok masuk',
             'reply_markup' => [],
-            'claim_token' => '00000000-0000-0000-0000-000000000004',
-            'claim_expires_at' => now()->addMinutes(5),
         ]);
 
         $migration = require database_path('migrations/2026_08_17_000002_finalize_legacy_stock_notification_recipients.php');
@@ -366,8 +363,6 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertNotNull($recipient->failed_at);
         $this->assertNotNull($recipient->terminal_failed_at);
         $this->assertNull($recipient->sent_at);
-        $this->assertSame('00000000-0000-0000-0000-000000000004', $recipient->claim_token);
-        $this->assertNotNull($recipient->claim_expires_at);
         $this->assertStringContainsString('locale rollout', (string) $recipient->last_error);
         $this->assertCount(0, Http::recorded());
     }

@@ -22,8 +22,6 @@ use Throwable;
 
 class TelegramBroadcastService
 {
-    private const CLAIM_TTL_MINUTES = 15;
-
     public const RECIPIENT_RETRY_DELAY_SECONDS = 30;
 
     private const MAX_PROVIDER_RETRY_AFTER_SECONDS = 300;
@@ -167,7 +165,7 @@ class TelegramBroadcastService
         );
     }
 
-    public function recoverableBroadcastsQuery(CarbonInterface $claimCutoff, CarbonInterface $at): Builder
+    public function recoverableBroadcastsQuery(CarbonInterface $at): Builder
     {
         return TelegramBroadcast::query()
             ->whereNotIn('status', [
@@ -176,7 +174,7 @@ class TelegramBroadcastService
                 TelegramBroadcast::STATUS_FAILED,
                 TelegramBroadcast::STATUS_SKIPPED,
             ])
-            ->where(function ($query) use ($claimCutoff, $at): void {
+            ->where(function ($query) use ($at): void {
                 $query->whereNull('recipients_materialized_at')
                     ->orWhereExists(function ($effects) use ($at): void {
                         $effects
@@ -212,11 +210,14 @@ class TelegramBroadcastService
                                     ->whereRaw('telegram_outbound_effects.source_id = CAST(telegram_broadcast_recipients.id AS TEXT)');
                             });
                     })
-                    ->orWhereHas('recipients', function ($recipients) use ($claimCutoff, $at): void {
+                    ->orWhereHas('recipients', function ($recipients) use ($at): void {
                         $recipients
                             ->whereNull('sent_at')
                             ->whereNull('terminal_failed_at')
                             ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
+                            ->where(function ($retry) use ($at): void {
+                                $retry->whereNull('retry_at')->orWhere('retry_at', '<=', $at);
+                            })
                             ->whereNotExists(function ($effects): void {
                                 $effects
                                     ->selectRaw('1')
@@ -224,12 +225,7 @@ class TelegramBroadcastService
                                     ->where('telegram_outbound_effects.source_type', TelegramBroadcastRecipient::class)
                                     ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST)
                                     ->whereRaw('telegram_outbound_effects.source_id = CAST(telegram_broadcast_recipients.id AS TEXT)');
-                            })
-                            ->where(function ($claim) use ($claimCutoff): void {
-                                $claim->whereNull('send_started_at')
-                                    ->orWhere('send_started_at', '<=', $claimCutoff);
                             });
-                        $this->constrainRecipientDue($recipients, $at);
                     });
             });
     }
@@ -385,25 +381,7 @@ class TelegramBroadcastService
         );
         $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
         if ($existing !== null) {
-            // During expand/contract, a legacy retry window may be adjusted
-            // by an older worker after the ledger row was first materialized.
-            // Mirror only this safe scheduling hint; state and delivery
-            // outcomes remain owned by the ledger.
-            if ($existing->state === TelegramOutboundEffectState::Failed
-                && $recipient->retry_at !== null
-                && $existing->next_attempt_at?->ne($recipient->retry_at)) {
-                $existing->forceFill(['next_attempt_at' => $recipient->retry_at])->save();
-            }
-
             return $existing;
-        }
-
-        // A live legacy worker still owns the old expand-phase claim. Do not
-        // create a pending ledger row that could race that worker.
-        if ($recipient->sent_at === null
-            && $recipient->send_started_at !== null
-            && $recipient->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
-            return null;
         }
 
         $state = TelegramOutboundEffectState::Pending->value;
@@ -424,14 +402,6 @@ class TelegramBroadcastService
             $nextAttemptAt = null;
             $lastErrorCode = 'broadcast_recipient_terminal_failure';
             $lastError = 'Legacy Admin Broadcast recipient failure is terminal.';
-        } elseif ($recipient->send_started_at !== null) {
-            // A stale claim is evidence that the request may have reached
-            // Telegram. It is never converted back to pending.
-            $state = TelegramOutboundEffectState::Unknown->value;
-            $unknownAt = $recipient->send_started_at;
-            $nextAttemptAt = null;
-            $lastErrorCode = 'legacy_broadcast_claim_ambiguous';
-            $lastError = 'Legacy Admin Broadcast delivery outcome is unknown and requires review.';
         } elseif ($recipient->failed_at !== null) {
             $state = TelegramOutboundEffectState::Failed->value;
             $failedAt = $recipient->failed_at;
@@ -491,27 +461,6 @@ class TelegramBroadcastService
             ->whereIn('source_id', TelegramBroadcastRecipient::query()
                 ->where('broadcast_id', $broadcastId)
                 ->selectRaw('CAST(id AS TEXT)'));
-    }
-
-    private function constrainRecipientDue(Builder $query, CarbonInterface $at): void
-    {
-        $query->where(function (Builder $due) use ($at): void {
-            $due
-                ->where(function (Builder $withoutProviderRetry) use ($at): void {
-                    $withoutProviderRetry
-                        ->whereNull('retry_at')
-                        ->where(function (Builder $failed) use ($at): void {
-                            $failed
-                                ->whereNull('failed_at')
-                                ->orWhere('failed_at', '<=', $at->copy()->subSeconds(self::RECIPIENT_RETRY_DELAY_SECONDS));
-                        });
-                })
-                ->orWhere(function (Builder $providerRetry) use ($at): void {
-                    $providerRetry
-                        ->whereNotNull('retry_at')
-                        ->where('retry_at', '<=', $at);
-                });
-        });
     }
 
     /**

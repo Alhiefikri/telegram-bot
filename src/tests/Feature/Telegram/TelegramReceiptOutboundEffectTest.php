@@ -54,6 +54,21 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_recovery_materializes_a_paid_receipt_without_a_legacy_claim(): void
+    {
+        Queue::fake();
+        $order = $this->multiChunkPaidOrder();
+
+        $this->artisan('telegram:recover-outbound')
+            ->assertSuccessful();
+
+        Queue::assertPushed(
+            SendTelegramReceipt::class,
+            fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id
+                && $job->effectId !== null,
+        );
+    }
+
     public function test_ordered_receipt_stops_after_an_ambiguous_chunk_without_resending_previous_credentials(): void
     {
         $order = $this->multiChunkPaidOrder();

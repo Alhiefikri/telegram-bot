@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
@@ -19,6 +20,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -27,6 +29,7 @@ use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelection;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramQrCodeRenderer;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -43,7 +46,6 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $order = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
         ]);
         Payment::factory()->for($order)->create(['provider' => 'pakasir']);
@@ -62,11 +64,16 @@ class CartCheckoutTest extends TelegramBotTestSupport
             $this->assertSame('Telegram sendPhoto temporarily failed.', $e->getMessage());
         }
 
-        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
 
+        TelegramOutboundEffect::query()->sole()->forceFill([
+            'next_attempt_at' => now()->subSecond(),
+        ])->save();
+
         $successfulIntents = $this->mock(TelegramCheckoutIntents::class);
-        $successfulIntents->shouldReceive('sendPakasirPaymentInstructions')->once();
+        $successfulIntents->shouldReceive('sendPakasirPaymentInstructions')
+            ->once()
+            ->andReturn(['ok' => true, 'result' => ['message_id' => 123456]]);
         $job->handle($successfulIntents);
 
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
@@ -783,7 +790,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem($cart, $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay());
 
-        (new SendAdminOrderPendingNotification($order->id))->handle(app(TelegramAdminOrderNotifier::class));
+        (new SendAdminOrderPendingNotification($order->id))->handle(app(TelegramOutboundEffectService::class));
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '999'
@@ -819,7 +826,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertCount(1, $photoSends);
     }
 
-    public function test_manual_checkout_notification_retry_skips_started_customer_effect_after_worker_crash(): void
+    public function test_manual_checkout_notification_skips_an_active_customer_effect_owned_by_another_worker(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
@@ -828,8 +835,17 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
-        $order->forceFill(['manual_checkout_customer_notification_started_at' => now()])->save();
         $this->fakeTelegramHttp();
+        TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+            ->where('source_id', (string) $order->id)
+            ->sole()
+            ->forceFill([
+                'state' => TelegramOutboundEffectState::Sending,
+                'claim_token' => 'active-worker-token',
+                'lease_until' => now()->addMinute(),
+            ])
+            ->save();
 
         (new SendManualCheckoutNotifications($order->id))->handle(app(TelegramCheckoutIntents::class));
 

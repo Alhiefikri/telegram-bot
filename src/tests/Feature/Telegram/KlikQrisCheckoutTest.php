@@ -12,6 +12,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
@@ -86,7 +87,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->for($customer)->create([
             'invoice_number' => 'INV-KLIK-600',
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
             'expires_at' => now()->addMinutes(14),
         ]);
@@ -155,7 +155,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->for($customer)->create([
             'invoice_number' => 'INV-KLIK-PROD',
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
             'expires_at' => now()->addMinutes(14),
         ]);
@@ -206,7 +205,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->for($customer)->create([
             'invoice_number' => 'INV-KLIK-PROD-RETRY',
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
             'expires_at' => $expiresAt->copy()->subMinute(),
         ]);
@@ -311,7 +309,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($base64, $messageRequest->body());
         $this->assertStringNotContainsString('MERCHANT_SECRET_TELEGRAM', $messageRequest->body());
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
-        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
     }
 
     public function test_klikqris_job_releases_claim_after_definite_send_failure_and_keeps_provider_transaction(): void
@@ -319,7 +316,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
         $order = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
         ]);
         $payment = Payment::factory()->for($order)->create(['provider' => 'klikqris']);
@@ -335,8 +331,11 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         } catch (RuntimeException $exception) {
             $this->assertSame('Telegram sendPhoto temporarily failed.', $exception->getMessage());
         }
-        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+
+        TelegramOutboundEffect::query()->sole()->forceFill([
+            'next_attempt_at' => now()->subSecond(),
+        ])->save();
 
         $successfulIntents = $this->mock(TelegramCheckoutIntents::class);
         $successfulIntents->shouldReceive('sendKlikQrisPaymentInstructions')
@@ -354,7 +353,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         Queue::fake();
         $order = Order::factory()->create([
             'order_status' => OrderStatus::PendingPayment,
-            'manual_checkout_customer_notification_started_at' => now()->subMinutes(2),
             'manual_checkout_customer_notified_at' => null,
         ]);
         Payment::factory()->for($order)->create(['provider' => 'klikqris']);
@@ -378,7 +376,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->create([
             'order_status' => OrderStatus::PendingPayment,
             'expires_at' => now()->subSecond(),
-            'manual_checkout_customer_notification_started_at' => now()->subMinutes(2),
             'manual_checkout_customer_notified_at' => null,
         ]);
         Payment::factory()->for($order)->create(['provider' => 'klikqris']);
@@ -395,7 +392,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $order = Order::factory()->create([
             'order_status' => OrderStatus::PendingPayment,
             'expires_at' => now()->subSecond(),
-            'manual_checkout_customer_notification_started_at' => null,
             'manual_checkout_customer_notified_at' => null,
         ]);
         Payment::factory()->for($order)->create(['provider' => 'klikqris']);
@@ -404,7 +400,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
 
         (new SendKlikQrisCheckoutInstructions($order->id))->handle($intents);
 
-        $this->assertNull($order->fresh()->manual_checkout_customer_notification_started_at);
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 

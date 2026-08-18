@@ -19,8 +19,6 @@ class ForwardPendingManualPaymentProofs extends Command
     {
         $forwarded = 0;
         $failed = 0;
-        $cutoff = now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)));
-
         Payment::query()
             ->where('provider', 'manual')
             ->where(function ($query): void {
@@ -41,9 +39,6 @@ class ForwardPendingManualPaymentProofs extends Command
                     ->where('proof_effects.effect_type', TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
                     ->whereRaw('proof_effects.source_id = payments.id');
             })
-            ->where(fn ($query) => $query
-                ->whereNull('payment_proof_forwarding_started_at')
-                ->orWhere('payment_proof_forwarding_started_at', '<=', $cutoff))
             ->with(['order.customer', 'order.orderItems'])
             ->chunkById((int) $this->option('chunk'), function ($proofs) use ($payments, &$forwarded, &$failed): void {
                 foreach ($proofs as $proof) {

@@ -2,7 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
@@ -10,7 +9,6 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Services\PaymentReceiptReport;
 use App\Support\DogfoodTiming;
-use Illuminate\Support\Facades\DB;
 
 class TelegramAdminPaidOrderNotifier
 {
@@ -20,17 +18,17 @@ class TelegramAdminPaidOrderNotifier
         private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
+    /**
+     * Ledger-backed compatibility entry point for direct callers.
+     */
     public function send(Order $order): void
     {
-        $this->sendOnce(
-            order: $order,
-            startedAtColumn: 'admin_paid_order_notification_started_at',
-            sentAtColumn: 'admin_paid_order_notified_at',
-            step: 'admin_paid_order_notification',
-            canSend: fn (Order $locked): bool => in_array($locked->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
-                && $locked->payment_status === PaymentStatus::Paid,
-            message: fn (Order $claimed): string => $this->paidMessage($claimed),
-        );
+        $effects = app(TelegramOutboundEffectService::class);
+        $effect = $effects->recordAdminOrderPaidNotification($order);
+
+        if ($effect !== null) {
+            $effects->processAdminOrderNotification($effect);
+        }
     }
 
     /**
@@ -54,53 +52,6 @@ class TelegramAdminPaidOrderNotifier
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
         ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed)), $this->dashboardReplyMarkup($claimed)));
-    }
-
-    private function sendOnce(Order $order, string $startedAtColumn, string $sentAtColumn, string $step, callable $canSend, callable $message): void
-    {
-        if (blank(config('services.telegram.token'))) {
-            return;
-        }
-
-        $chatId = $this->privateAdminChatId();
-        if (! $chatId) {
-            return;
-        }
-
-        $claimed = DB::transaction(function () use ($order, $startedAtColumn, $sentAtColumn, $canSend): ?Order {
-            $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($locked->{$sentAtColumn} !== null || $this->hasActiveClaim($locked->{$startedAtColumn}) || ! $canSend($locked)) {
-                return null;
-            }
-
-            $locked->forceFill([$startedAtColumn => now()])->save();
-
-            return $locked->fresh();
-        }, 5);
-
-        if (! $claimed) {
-            return;
-        }
-
-        try {
-            $claimed->loadMissing(['customer', 'orderItems', 'payments']);
-            DogfoodTiming::time('dogfood.telegram.checkout_step', [
-                'step' => $step,
-                'payment_mode' => $this->paymentMode($claimed),
-                'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
-                'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-            ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($message($claimed)), $this->dashboardReplyMarkup($claimed)));
-        } catch (\Throwable $exception) {
-            Order::query()->whereKey($claimed->id)->whereNull($sentAtColumn)->update([$startedAtColumn => null]);
-
-            throw $exception;
-        }
-
-        Order::query()
-            ->whereKey($claimed->id)
-            ->whereNotNull($startedAtColumn)
-            ->whereNull($sentAtColumn)
-            ->update([$sentAtColumn => now(), $startedAtColumn => null]);
     }
 
     private function paidMessage(Order $order): string
@@ -277,18 +228,4 @@ class TelegramAdminPaidOrderNotifier
             : mb_substr($message, 0, 3890).'...';
     }
 
-    private function privateAdminChatId(): ?string
-    {
-        $chatId = $this->adminAccess->adminChatId();
-
-        return $chatId !== null && preg_match('/^[1-9][0-9]*$/', $chatId) === 1
-            ? $chatId
-            : null;
-    }
-
-    private function hasActiveClaim($startedAt): bool
-    {
-        return $startedAt !== null
-            && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
-    }
 }

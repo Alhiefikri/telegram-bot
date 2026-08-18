@@ -95,30 +95,6 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
         $this->assertSame(TelegramOutboundEffectState::Unknown, $unknown->fresh()->state);
     }
 
-    public function test_stale_legacy_recipient_is_backfilled_as_unknown_without_a_blind_send(): void
-    {
-        Http::preventStrayRequests();
-        Http::fake();
-        $customer = Customer::factory()->create(['telegram_id' => 633333333]);
-        $broadcast = $this->broadcast('Stale legacy recipient', TelegramBroadcast::STATUS_IN_PROGRESS);
-        TelegramBroadcastRecipient::create([
-            'broadcast_id' => $broadcast->id,
-            'customer_id' => $customer->id,
-            'telegram_id' => (string) $customer->telegram_id,
-            'locale' => 'id',
-            'send_started_at' => now()->subMinutes(16),
-            'send_claim_token' => (string) Str::uuid(),
-            'attempts' => 1,
-        ]);
-
-        app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
-
-        $effect = TelegramOutboundEffect::query()->sole();
-        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
-        $this->assertSame('legacy_broadcast_claim_ambiguous', $effect->last_error_code);
-        Http::assertNothingSent();
-    }
-
     public function test_definite_forbidden_recipient_is_terminal_in_the_shared_ledger(): void
     {
         Http::fake(fn (HttpRequest $request) => (string) $request['chat_id'] === '644444444'
