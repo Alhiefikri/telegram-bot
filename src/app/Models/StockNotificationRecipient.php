@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['stock_notification_event_id', 'customer_id', 'recipient_type', 'telegram_id', 'locale', 'text', 'reply_markup', 'claim_expires_at', 'claim_token', 'sent_at', 'failed_at', 'terminal_failed_at', 'last_error', 'attempts'])]
 class StockNotificationRecipient extends Model
@@ -22,5 +23,11 @@ class StockNotificationRecipient extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    public function outboundEffect(): HasOne
+    {
+        return $this->hasOne(TelegramOutboundEffect::class, 'source_id')
+            ->where('source_type', self::class);
     }
 }

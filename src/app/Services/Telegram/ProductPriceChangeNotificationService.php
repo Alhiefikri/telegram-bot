@@ -2,12 +2,15 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\TelegramOutboundEffectState;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Storefront\StorefrontUrl;
+use App\Support\DogfoodTiming;
 use App\Support\Money;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +35,7 @@ class ProductPriceChangeNotificationService
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
+        private ?TelegramOutboundEffectService $outboundEffects = null,
     ) {}
 
     public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
@@ -49,15 +53,23 @@ class ProductPriceChangeNotificationService
             return null;
         }
 
-        return ProductPriceChangeEvent::create([
-            'event_key' => (string) Str::uuid(),
-            'product_id' => $product->id,
-            'product_name' => $product->name,
-            'old_price_amount' => $oldIdr,
-            'new_price_amount' => $newIdr,
-            'old_usdt_price_amount' => $oldUsdt,
-            'new_usdt_price_amount' => $newUsdt,
-        ]);
+        return DB::transaction(function () use ($product, $oldIdr, $newIdr, $oldUsdt, $newUsdt): ProductPriceChangeEvent {
+            $event = ProductPriceChangeEvent::create([
+                'event_key' => (string) Str::uuid(),
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'old_price_amount' => $oldIdr,
+                'new_price_amount' => $newIdr,
+                'old_usdt_price_amount' => $oldUsdt,
+                'new_usdt_price_amount' => $newUsdt,
+            ]);
+
+            // The event, its immutable audience snapshot, and the pending
+            // ledger units commit with the product price mutation.
+            $this->materializeEvent($event);
+
+            return $event;
+        }, 5);
     }
 
     public function processBatch(int $eventId, int $batchSize = self::BATCH_SIZE): ProductPriceChangeBatchResult
@@ -67,278 +79,419 @@ class ProductPriceChangeNotificationService
         }
 
         $event = ProductPriceChangeEvent::query()->findOrFail($eventId);
-        $storeChannelOutcome = $this->sendStoreChannel($event);
-        if ($event->recipients_materialized_at === null) {
-            $this->ensureRecipients($event);
-            $event->forceFill(['recipients_materialized_at' => now()])->save();
-        }
+        $this->materializeEvent($event);
 
-        $recipients = ProductPriceChangeNotificationRecipient::query()
-            ->where('event_id', $event->id)
-            ->whereNull('sent_at')
-            ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
-            ->where(function ($query): void {
-                $query->whereNull('send_started_at')
-                    ->orWhere('send_started_at', '<=', now()->subMinutes(self::CLAIM_TTL_MINUTES));
-            })
-            ->where(function ($query): void {
-                $query->whereNull('failed_at')
-                    ->orWhere('failed_at', '<=', now()->subSeconds(self::RETRY_DELAY_SECONDS));
-            })
-            ->orderBy('id')
-            ->limit(max(1, $batchSize))
-            ->get();
+        $storeChannelOutcome = $this->sendStoreChannelEffect($event);
+        $effects = $this->dueRecipientEffects($event->id, $batchSize);
 
         $transientFailures = $storeChannelOutcome === 'transient_failure' ? 1 : 0;
         $terminalFailures = $storeChannelOutcome === 'terminal_failure' ? 1 : 0;
 
-        foreach ($recipients as $recipient) {
-            $outcome = $this->sendRecipient($event, $recipient);
+        foreach ($effects as $effect) {
+            $outcome = $this->sendRecipientEffect($event, $effect);
             $transientFailures += $outcome === 'transient_failure' ? 1 : 0;
             $terminalFailures += $outcome === 'terminal_failure' ? 1 : 0;
         }
 
         return new ProductPriceChangeBatchResult(
-            processed: $recipients->count(),
+            processed: $effects->count(),
             transientFailures: $transientFailures,
             terminalFailures: $terminalFailures,
-            hasMore: $this->hasPendingRecipients($event->id) || $this->hasPendingStoreChannel($event->id),
+            hasMore: $transientFailures > 0 || $this->hasPendingEffects($event->id),
         );
     }
 
-    private function sendStoreChannel(ProductPriceChangeEvent $event): string
+    private function sendStoreChannelEffect(ProductPriceChangeEvent $event): string
     {
-        $chatId = $this->storeChannelTarget();
-        if ($chatId === null) {
+        $effect = TelegramOutboundEffect::query()
+            ->where('source_type', ProductPriceChangeEvent::class)
+            ->where('source_id', (string) $event->getKey())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS)
+            ->where(function ($error): void {
+                $error->whereNull('last_error_code')
+                    ->orWhereNotIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'price_change_store_channel_attempts_exhausted',
+                    ]);
+            })
+            ->where(function ($due): void {
+                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
+            })
+            ->first();
+        if ($effect === null) {
             return 'skipped';
         }
 
-        $token = (string) Str::uuid();
-        $claimed = DB::transaction(function () use ($event, $token): ?ProductPriceChangeEvent {
-            $locked = ProductPriceChangeEvent::query()
-                ->whereKey($event->id)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $locked || $locked->store_channel_sent_at !== null) {
-                return null;
-            }
-
-            if ($locked->store_channel_attempts >= self::MAX_STORE_CHANNEL_ATTEMPTS) {
-                return null;
-            }
-
-            if ($locked->store_channel_send_started_at !== null && $locked->store_channel_send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
-                return null;
-            }
-
-            if ($locked->store_channel_failed_at !== null && $locked->store_channel_failed_at->gt(now()->subSeconds(self::RETRY_DELAY_SECONDS))) {
-                return null;
-            }
-
-            $locked->forceFill([
-                'store_channel_send_started_at' => now(),
-                'store_channel_send_claim_token' => $token,
-                'store_channel_failed_at' => null,
-                'store_channel_last_error' => null,
-                'store_channel_attempts' => $locked->store_channel_attempts + 1,
-            ])->save();
-
-            return $locked->fresh();
-        }, 5);
-
-        if (! $claimed) {
-            return 'skipped';
-        }
-
-        try {
-            $response = $this->bot->sendMessage(
-                $chatId,
-                $this->message($claimed, TelegramLocale::STORE_CHANNEL_LOCALE),
-                $this->storeChannelReplyMarkup($claimed),
-            );
-            $messageId = data_get($response, 'result.message_id');
-            if (data_get($response, 'ok') !== true || ! $messageId) {
-                throw new RuntimeException('Telegram sendMessage did not return a successful Store Channel message ID.');
-            }
-        } catch (Throwable $e) {
-            $terminal = $e instanceof RequestException && $e->response?->status() === 403;
-            ProductPriceChangeEvent::query()
-                ->whereKey($claimed->id)
-                ->where('store_channel_send_claim_token', $token)
-                ->whereNull('store_channel_sent_at')
-                ->update([
-                    'store_channel_send_started_at' => null,
-                    'store_channel_send_claim_token' => null,
-                    'store_channel_failed_at' => now(),
-                    'store_channel_last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
-                    'store_channel_attempts' => $terminal ? self::MAX_STORE_CHANNEL_ATTEMPTS : $claimed->store_channel_attempts,
-                ]);
-
-            Log::warning('telegram.product_price_change_store_channel_notification_failed', [
-                'event_id' => $event->id,
-                'attempts' => $claimed->store_channel_attempts,
-                'terminal' => $terminal,
-                'status' => $e instanceof RequestException ? $e->response?->status() : null,
-                'exception' => $e::class,
-                'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
-            ]);
-
-            return $terminal ? 'terminal_failure' : 'transient_failure';
-        }
-
-        ProductPriceChangeEvent::query()
-            ->whereKey($claimed->id)
-            ->where('store_channel_send_claim_token', $token)
-            ->whereNull('store_channel_sent_at')
-            ->update([
-                'store_channel_sent_at' => now(),
-                'store_channel_send_started_at' => null,
-                'store_channel_send_claim_token' => null,
-                'store_channel_failed_at' => null,
-                'store_channel_last_error' => null,
-                'store_channel_message_id' => (string) $messageId,
-            ]);
-
-        return 'sent';
+        return $this->sendEffect($event, $effect, true);
     }
 
-    private function ensureRecipients(ProductPriceChangeEvent $event): void
+    private function materializeEvent(ProductPriceChangeEvent $event): void
     {
-        Customer::query()
-            ->whereNotNull('telegram_id')
-            ->select(['id', 'telegram_id', 'locale'])
-            ->orderBy('id')
-            ->chunkById(200, function ($customers) use ($event): void {
-                $now = now();
-                $rows = $customers
-                    ->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== '')
-                    ->map(fn (Customer $customer): array => [
-                        'event_id' => $event->id,
-                        'customer_id' => $customer->id,
-                        'telegram_id' => (string) $customer->telegram_id,
-                        'locale' => $this->locale->code($customer),
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ])
-                    ->values()
-                    ->all();
+        if ($event->recipients_materialized_at === null) {
+            Customer::query()
+                ->whereNotNull('telegram_id')
+                ->select(['id', 'telegram_id', 'locale'])
+                ->orderBy('id')
+                ->chunkById(200, function ($customers) use ($event): void {
+                    DB::transaction(function () use ($customers, $event): void {
+                        $now = now();
+                        $rows = $customers
+                            ->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== '')
+                            ->map(fn (Customer $customer): array => [
+                                'event_id' => $event->id,
+                                'customer_id' => $customer->id,
+                                'telegram_id' => (string) $customer->telegram_id,
+                                'locale' => $this->locale->code($customer),
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ])
+                            ->values()
+                            ->all();
 
-                if ($rows !== []) {
-                    ProductPriceChangeNotificationRecipient::query()->insertOrIgnore($rows);
-                }
-            });
-    }
+                        if ($rows !== []) {
+                            ProductPriceChangeNotificationRecipient::query()->insertOrIgnore($rows);
+                        }
+                    }, 5);
+                });
 
-    private function sendRecipient(ProductPriceChangeEvent $event, ProductPriceChangeNotificationRecipient $recipient): string
-    {
-        $token = (string) Str::uuid();
-        $claimed = DB::transaction(function () use ($recipient, $token): ?ProductPriceChangeNotificationRecipient {
-            $locked = ProductPriceChangeNotificationRecipient::query()
-                ->whereKey($recipient->id)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $locked || $locked->sent_at !== null) {
-                return null;
-            }
-
-            if ($locked->attempts >= self::MAX_RECIPIENT_ATTEMPTS) {
-                return null;
-            }
-
-            if ($locked->send_started_at !== null && $locked->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
-                return null;
-            }
-
-            $locked->forceFill([
-                'send_started_at' => now(),
-                'send_claim_token' => $token,
-                'failed_at' => null,
-                'last_error' => null,
-                'attempts' => $locked->attempts + 1,
-            ])->save();
-
-            return $locked->fresh();
-        }, 5);
-
-        if (! $claimed) {
-            return 'skipped';
-        }
-
-        try {
-            // Telegram has no transactional exactly-once send. The durable recipient row prevents normal
-            // retries from resending once sent_at is stored, but a process crash after this sendMessage call
-            // and before the sent_at update below can still produce one duplicate message on recovery.
-            $locale = $this->locale->codeForLocale($claimed->locale);
-            $this->bot->sendMessage(
-                $claimed->telegram_id,
-                $this->message($event, $locale),
-                $this->replyMarkup($event, $locale),
-            );
-        } catch (Throwable $e) {
-            $terminal = $e instanceof RequestException && $e->response?->status() === 403;
-            ProductPriceChangeNotificationRecipient::query()
-                ->whereKey($claimed->id)
-                ->where('send_claim_token', $token)
-                ->whereNull('sent_at')
-                ->update([
-                    'send_started_at' => null,
-                    'send_claim_token' => null,
-                    'failed_at' => now(),
-                    'last_error' => substr(TelegramBotApiRedactor::redactText($e::class.': '.$e->getMessage()), 0, 2000),
-                    'attempts' => $terminal ? self::MAX_RECIPIENT_ATTEMPTS : $claimed->attempts,
-                ]);
-
-            Log::warning('telegram.product_price_change_notification_failed', [
-                'event_id' => $event->id,
-                'recipient_id' => $claimed->id,
-                'customer_id' => $claimed->customer_id,
-                'attempts' => $claimed->attempts,
-                'terminal' => $terminal,
-                'status' => $e instanceof RequestException ? $e->response?->status() : null,
-                'exception' => $e::class,
-                'message' => TelegramBotApiRedactor::redactText($e->getMessage()),
-            ]);
-
-            return $terminal ? 'terminal_failure' : 'transient_failure';
+            $event->forceFill(['recipients_materialized_at' => now()])->save();
         }
 
         ProductPriceChangeNotificationRecipient::query()
-            ->whereKey($claimed->id)
-            ->where('send_claim_token', $token)
-            ->whereNull('sent_at')
-            ->update([
-                'sent_at' => now(),
-                'send_started_at' => null,
-                'send_claim_token' => null,
-                'failed_at' => null,
-                'last_error' => null,
-            ]);
+            ->where('event_id', $event->id)
+            ->orderBy('id')
+            ->chunkById(200, function ($recipients) use ($event): void {
+                DB::transaction(function () use ($recipients, $event): void {
+                    foreach ($recipients as $recipient) {
+                        $this->materializeRecipientEffect($event, $recipient);
+                    }
+                }, 5);
+            });
 
-        return 'sent';
+        $this->materializeStoreChannelEffect($event);
     }
 
-    private function hasPendingRecipients(int $eventId): bool
+    private function materializeRecipientEffect(
+        ProductPriceChangeEvent $event,
+        ProductPriceChangeNotificationRecipient $recipient,
+    ): ?TelegramOutboundEffect {
+        $effectKey = TelegramOutboundEffectService::priceChangeRecipientEffectKey(
+            (string) $event->getKey(),
+            (string) $recipient->getKey(),
+        );
+        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
+        if ($existing !== null) {
+            if ($existing->state === TelegramOutboundEffectState::Failed
+                && $recipient->failed_at !== null
+                && (int) $recipient->attempts < self::MAX_RECIPIENT_ATTEMPTS) {
+                $nextAttemptAt = $recipient->failed_at->copy()->addSeconds(self::RETRY_DELAY_SECONDS);
+                if ($existing->next_attempt_at?->ne($nextAttemptAt)) {
+                    $existing->forceFill(['next_attempt_at' => $nextAttemptAt])->save();
+                }
+            }
+
+            return $existing;
+        }
+
+        if ($recipient->sent_at === null
+            && $recipient->send_started_at !== null
+            && $recipient->send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
+            return null;
+        }
+
+        $state = TelegramOutboundEffectState::Pending->value;
+        $sentAt = null;
+        $failedAt = null;
+        $unknownAt = null;
+        $nextAttemptAt = now();
+        $lastErrorCode = null;
+        $lastError = null;
+
+        if ($recipient->sent_at !== null) {
+            $state = TelegramOutboundEffectState::Sent->value;
+            $sentAt = $recipient->sent_at;
+            $nextAttemptAt = null;
+        } elseif ($recipient->send_started_at !== null) {
+            $state = TelegramOutboundEffectState::Unknown->value;
+            $unknownAt = $recipient->send_started_at;
+            $nextAttemptAt = null;
+            $lastErrorCode = 'legacy_price_change_claim_ambiguous';
+            $lastError = 'Legacy price notification delivery outcome is unknown and requires review.';
+        } elseif ($recipient->failed_at !== null) {
+            $state = TelegramOutboundEffectState::Failed->value;
+            $failedAt = $recipient->failed_at;
+            $nextAttemptAt = (int) $recipient->attempts >= self::MAX_RECIPIENT_ATTEMPTS
+                ? null
+                : $recipient->failed_at->copy()->addSeconds(self::RETRY_DELAY_SECONDS);
+            $lastErrorCode = (int) $recipient->attempts >= self::MAX_RECIPIENT_ATTEMPTS
+                ? 'price_change_recipient_attempts_exhausted'
+                : 'legacy_price_change_failure';
+            $lastError = 'Legacy price notification delivery failed before completion.';
+        }
+
+        return $this->outboundEffects()->recordPriceChangeNotificationRecipient(
+            recipient: $recipient,
+            eventId: $event->getKey(),
+            state: $state,
+            sentAt: $sentAt,
+            failedAt: $failedAt,
+            unknownAt: $unknownAt,
+            nextAttemptAt: $nextAttemptAt,
+            lastErrorCode: $lastErrorCode,
+            lastError: $lastError,
+        );
+    }
+
+    private function materializeStoreChannelEffect(ProductPriceChangeEvent $event): ?TelegramOutboundEffect
     {
-        return ProductPriceChangeNotificationRecipient::query()
-            ->where('event_id', $eventId)
-            ->whereNull('sent_at')
-            ->where('attempts', '<', self::MAX_RECIPIENT_ATTEMPTS)
+        $chatId = $this->storeChannelTarget();
+        if ($chatId === null) {
+            return null;
+        }
+
+        $effectKey = TelegramOutboundEffectService::priceChangeStoreChannelEffectKey((string) $event->getKey());
+        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        if ($event->store_channel_sent_at === null
+            && $event->store_channel_send_started_at !== null
+            && $event->store_channel_send_started_at->gt(now()->subMinutes(self::CLAIM_TTL_MINUTES))) {
+            return null;
+        }
+
+        $state = TelegramOutboundEffectState::Pending->value;
+        $sentAt = null;
+        $failedAt = null;
+        $unknownAt = null;
+        $nextAttemptAt = now();
+        $lastErrorCode = null;
+        $lastError = null;
+
+        if ($event->store_channel_sent_at !== null) {
+            $state = TelegramOutboundEffectState::Sent->value;
+            $sentAt = $event->store_channel_sent_at;
+            $nextAttemptAt = null;
+        } elseif ($event->store_channel_send_started_at !== null) {
+            $state = TelegramOutboundEffectState::Unknown->value;
+            $unknownAt = $event->store_channel_send_started_at;
+            $nextAttemptAt = null;
+            $lastErrorCode = 'legacy_price_change_store_channel_claim_ambiguous';
+            $lastError = 'Legacy price Store Channel delivery outcome is unknown and requires review.';
+        } elseif ($event->store_channel_failed_at !== null) {
+            $state = TelegramOutboundEffectState::Failed->value;
+            $failedAt = $event->store_channel_failed_at;
+            $nextAttemptAt = null;
+            $lastErrorCode = 'price_change_store_channel_attempts_exhausted';
+            $lastError = 'Legacy price Store Channel delivery failed before completion.';
+        }
+
+        return $this->outboundEffects()->recordPriceChangeStoreChannel(
+            event: $event,
+            chatId: $chatId,
+            state: $state,
+            sentAt: $sentAt,
+            failedAt: $failedAt,
+            unknownAt: $unknownAt,
+            nextAttemptAt: $nextAttemptAt,
+            lastErrorCode: $lastErrorCode,
+            lastError: $lastError,
+        );
+    }
+
+    private function dueRecipientEffects(int $eventId, int $batchSize)
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', ProductPriceChangeNotificationRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
+                ->where('event_id', $eventId)
+                ->selectRaw('CAST(id AS TEXT)'))
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS)
+            ->where(function ($error): void {
+                $error->whereNull('last_error_code')
+                    ->orWhereNotIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'price_change_recipient_attempts_exhausted',
+                    ]);
+            })
+            ->where(function ($due): void {
+                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
+            })
+            ->orderByRaw('CAST(source_id AS BIGINT)')
+            ->limit(max(1, $batchSize))
+            ->get();
+    }
+
+    private function sendRecipientEffect(ProductPriceChangeEvent $event, TelegramOutboundEffect $effect): string
+    {
+        return $this->sendEffect($event, $effect, false);
+    }
+
+    private function sendEffect(ProductPriceChangeEvent $event, TelegramOutboundEffect $effect, bool $storeChannel): string
+    {
+        $claimed = $this->outboundEffects()->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return 'skipped';
+        }
+
+        try {
+            if (! $storeChannel) {
+                $recipient = ProductPriceChangeNotificationRecipient::query()->find($claimed->source_id);
+                if ($recipient === null) {
+                    throw new RuntimeException('price_change_recipient_missing');
+                }
+                $locale = $this->locale->codeForLocale((string) $claimed->locale);
+                $response = $this->bot->sendMessage(
+                    $claimed->telegram_chat_id,
+                    $this->message($event, $locale),
+                    $this->replyMarkup($event, $locale),
+                );
+            } else {
+                $response = $this->bot->sendMessage(
+                    $claimed->telegram_chat_id,
+                    $this->message($event, TelegramLocale::STORE_CHANNEL_LOCALE),
+                    $this->storeChannelReplyMarkup($event),
+                );
+            }
+
+            $messageId = data_get($response, 'result.message_id');
+            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
+                throw new RuntimeException('Telegram price notification did not return a successful message ID.');
+            }
+
+            return $this->outboundEffects()->finalizeSent(
+                (string) $claimed->getKey(),
+                (string) $claimed->claim_token,
+                (string) $messageId,
+            ) ? 'sent' : 'skipped';
+        } catch (Throwable $exception) {
+            if ($this->isPriceNotificationAmbiguous($exception)) {
+                $finalized = $this->outboundEffects()->finalizeUnknown(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    $exception,
+                );
+                $this->logEffectFailure($event, $claimed, $exception, 'unknown');
+
+                return $finalized ? 'unknown' : 'skipped';
+            }
+
+            $finalized = $this->outboundEffects()->finalizeFailed(
+                (string) $claimed->getKey(),
+                (string) $claimed->claim_token,
+                $exception,
+                self::RETRY_DELAY_SECONDS,
+            );
+            if (! $finalized) {
+                return 'skipped';
+            }
+
+            $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
+            $terminal = $fresh !== null && $this->outboundEffects()->isTerminalFailure($fresh);
+            $this->logEffectFailure($event, $claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
+
+            return $terminal ? 'terminal_failure' : 'transient_failure';
+        }
+    }
+
+    private function hasPendingEffects(int $eventId): bool
+    {
+        $recipientPending = TelegramOutboundEffect::query()
+            ->where('source_type', ProductPriceChangeNotificationRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
+                ->where('event_id', $eventId)
+                ->selectRaw('CAST(id AS TEXT)'))
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS)
+            ->where(function ($error): void {
+                $error->whereNull('last_error_code')
+                    ->orWhereNotIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'price_change_recipient_attempts_exhausted',
+                    ]);
+            })
+            ->where(function ($due): void {
+                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
+            })
+            ->exists();
+        if ($recipientPending) {
+            return true;
+        }
+
+        return TelegramOutboundEffect::query()
+            ->where('source_type', ProductPriceChangeEvent::class)
+            ->where('source_id', (string) $eventId)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+            ->whereIn('state', [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ])
+            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS)
+            ->where(function ($error): void {
+                $error->whereNull('last_error_code')
+                    ->orWhereNotIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'price_change_store_channel_attempts_exhausted',
+                    ]);
+            })
+            ->where(function ($due): void {
+                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
+            })
             ->exists();
     }
 
-    private function hasPendingStoreChannel(int $eventId): bool
+    private function isPriceNotificationAmbiguous(Throwable $exception): bool
     {
-        if ($this->storeChannelTarget() === null) {
+        if ($exception instanceof RequestException
+            && in_array($exception->response?->status(), [400, 403, 429], true)) {
             return false;
         }
 
-        return ProductPriceChangeEvent::query()
-            ->whereKey($eventId)
-            ->whereNull('store_channel_sent_at')
-            ->where('store_channel_attempts', '<', self::MAX_STORE_CHANNEL_ATTEMPTS)
-            ->exists();
+        return $this->outboundEffects()->isAmbiguous($exception);
+    }
+
+    private function logEffectFailure(
+        ProductPriceChangeEvent $event,
+        TelegramOutboundEffect $effect,
+        Throwable $exception,
+        string $status,
+    ): void {
+        Log::warning('telegram.product_price_change_effect_failed', [
+            'event_id' => $event->id,
+            'effect_id' => $effect->id,
+            'effect_type' => $effect->effect_type,
+            'recipient_correlation_id' => $effect->telegram_chat_id === ''
+                ? null
+                : DogfoodTiming::correlation($effect->telegram_chat_id),
+            'attempts' => $effect->attempts,
+            'status' => $status,
+            'http_status' => $exception instanceof RequestException ? $exception->response?->status() : null,
+            'exception' => $exception::class,
+        ]);
+    }
+
+    private function outboundEffects(): TelegramOutboundEffectService
+    {
+        return $this->outboundEffects ??= app(TelegramOutboundEffectService::class);
     }
 
     private function storeChannelTarget(): ?string

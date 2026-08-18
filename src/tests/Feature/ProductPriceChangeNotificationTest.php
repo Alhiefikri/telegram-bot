@@ -186,7 +186,8 @@ class ProductPriceChangeNotificationTest extends TestCase
         $firstBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
         $secondBatch = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
 
-        $this->assertSame(1, $firstBatch->transientFailures);
+        $this->assertSame(0, $firstBatch->transientFailures);
+        $this->assertSame(1, $firstBatch->terminalFailures);
         $this->assertFalse($firstBatch->hasMore);
         $this->assertFalse($secondBatch->hasMore);
         $this->assertSame(1, $sendAttempts);

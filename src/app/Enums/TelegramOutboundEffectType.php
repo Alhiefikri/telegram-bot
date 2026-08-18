@@ -15,4 +15,7 @@ enum TelegramOutboundEffectType: string
     case AdminBroadcastRecipient = 'admin.broadcast_recipient';
     case ManualPaymentProof = 'admin.manual_payment_proof';
     case SalesProofPost = 'sales_proof.post';
+    case StockNotificationRecipient = 'stock.notification_recipient';
+    case PriceChangeNotificationRecipient = 'price_change.notification_recipient';
+    case PriceChangeStoreChannel = 'price_change.store_channel';
 }

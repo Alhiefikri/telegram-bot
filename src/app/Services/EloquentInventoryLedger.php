@@ -11,11 +11,14 @@ use App\Jobs\SendProductStockNotifications;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class EloquentInventoryLedger implements InventoryLedger
 {
+    public function __construct(private readonly StockNotificationDeliveryPipeline $stockNotifications) {}
+
     /**
      * Callers must hold the product/order locks and wrap the operation in the
      * same transaction as the related order transition.
@@ -156,7 +159,8 @@ class EloquentInventoryLedger implements InventoryLedger
             );
 
             if ($sale->wasRecentlyCreated && $becameUnavailable) {
-                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue('notifications'));
+                $this->stockNotifications->materialize($sale->id);
+                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue(StockNotificationDeliveryPipeline::QUEUE));
             }
         }
     }
@@ -197,7 +201,8 @@ class EloquentInventoryLedger implements InventoryLedger
             );
 
             if ($sale->wasRecentlyCreated && $becameUnavailable) {
-                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue('notifications'));
+                $this->stockNotifications->materialize($sale->id);
+                DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue(StockNotificationDeliveryPipeline::QUEUE));
             }
         }
     }

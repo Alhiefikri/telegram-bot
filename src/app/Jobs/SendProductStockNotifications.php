@@ -3,16 +3,24 @@
 namespace App\Jobs;
 
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
-class SendProductStockNotifications implements ShouldQueue
+class SendProductStockNotifications implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
 
     public int $tries = 3;
 
-    public function __construct(public readonly int $movementId) {}
+    public int $uniqueFor = 300;
+
+    public function __construct(public readonly int $movementId, public ?string $jobEnqueuedAt = null) {}
+
+    public function uniqueId(): string
+    {
+        return (string) $this->movementId;
+    }
 
     public function backoff(): array
     {
@@ -27,7 +35,9 @@ class SendProductStockNotifications implements ShouldQueue
         }
         $result = $pipeline->deliver($this->movementId);
         if ($result['has_more']) {
-            self::dispatch($this->movementId)->onQueue('notifications')->delay(now()->addSeconds($result['transient_failures'] > 0 ? 30 : 0));
+            self::dispatch($this->movementId, now()->toISOString())
+                ->onQueue(StockNotificationDeliveryPipeline::QUEUE)
+                ->delay(now()->addSeconds($result['transient_failures'] > 0 ? 30 : 0));
         }
     }
 }

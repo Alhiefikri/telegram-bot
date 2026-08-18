@@ -7,12 +7,16 @@ use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class StockAdjustmentService
 {
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly AuditLogger $auditLogger,
+        private readonly StockNotificationDeliveryPipeline $stockNotifications,
+    ) {}
 
     /**
      * @param  list<string>  $stockItems
@@ -66,6 +70,10 @@ class StockAdjustmentService
                 'notes' => $notes,
                 'created_at' => now(),
             ]);
+
+            if ($delta > 0 && $availableBefore === 0) {
+                $this->stockNotifications->materialize($movement->id);
+            }
 
             $this->auditLogger->log('product.stock_adjusted', $locked, $old, ['stock' => $newStock, 'reserved_stock' => $locked->reserved_stock, 'delta' => $delta, 'notes' => $notes], $user, $ip);
 

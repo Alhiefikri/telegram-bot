@@ -15,6 +15,7 @@ use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
+use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
@@ -84,6 +85,9 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
                 TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION,
+                TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
+                TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
             ])
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
@@ -206,7 +210,24 @@ class RecoverTelegramOutboundEffects extends Command
                     ->orWhereHas('recipients', function ($recipients) use ($cutoff): void {
                         $recipients
                             ->whereNull('sent_at')
-                            ->where('attempts', '<', ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS)
+                            ->where(function ($attempts) use ($cutoff): void {
+                                $attempts
+                                    ->where('attempts', '<', ProductPriceChangeNotificationService::MAX_RECIPIENT_ATTEMPTS)
+                                    ->orWhereNotNull('failed_at')
+                                    ->orWhere(function ($staleClaim) use ($cutoff): void {
+                                        $staleClaim
+                                            ->whereNotNull('send_started_at')
+                                            ->where('send_started_at', '<=', $cutoff);
+                                    });
+                            })
+                            ->whereNotExists(function (Builder $effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as price_recipient_effects')
+                                    ->where('price_recipient_effects.source_type', ProductPriceChangeNotificationRecipient::class)
+                                    ->where('price_recipient_effects.effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+                                    ->whereRaw('price_recipient_effects.source_id = CAST(product_price_change_notification_recipients.id AS TEXT)');
+                            })
                             ->where(function ($recipient) use ($cutoff): void {
                                 $recipient->whereNull('send_started_at')
                                     ->orWhere('send_started_at', '<=', $cutoff);
@@ -216,7 +237,24 @@ class RecoverTelegramOutboundEffects extends Command
                         $storeChannelQuery->orWhere(function ($storeChannelEffect) use ($cutoff): void {
                             $storeChannelEffect
                                 ->whereNull('store_channel_sent_at')
-                                ->where('store_channel_attempts', '<', ProductPriceChangeNotificationService::MAX_STORE_CHANNEL_ATTEMPTS)
+                                ->where(function ($attempts) use ($cutoff): void {
+                                    $attempts
+                                        ->where('store_channel_attempts', '<', ProductPriceChangeNotificationService::MAX_STORE_CHANNEL_ATTEMPTS)
+                                        ->orWhereNotNull('store_channel_failed_at')
+                                        ->orWhere(function ($staleClaim) use ($cutoff): void {
+                                            $staleClaim
+                                                ->whereNotNull('store_channel_send_started_at')
+                                                ->where('store_channel_send_started_at', '<=', $cutoff);
+                                        });
+                                })
+                                ->whereNotExists(function (Builder $effects): void {
+                                    $effects
+                                        ->selectRaw('1')
+                                        ->from('telegram_outbound_effects as price_channel_effects')
+                                        ->where('price_channel_effects.source_type', ProductPriceChangeEvent::class)
+                                        ->where('price_channel_effects.effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+                                        ->whereRaw('price_channel_effects.source_id = CAST(product_price_change_events.id AS TEXT)');
+                                })
                                 ->where(function ($storeChannelClaim) use ($cutoff): void {
                                     $storeChannelClaim->whereNull('store_channel_send_started_at')
                                         ->orWhere('store_channel_send_started_at', '<=', $cutoff);

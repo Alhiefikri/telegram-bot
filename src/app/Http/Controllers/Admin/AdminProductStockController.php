@@ -8,6 +8,7 @@ use App\Jobs\SendProductStockNotifications;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\StockAdjustmentService;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Support\AdminTelegramDogfoodTiming;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
@@ -27,7 +28,7 @@ class AdminProductStockController extends Controller
         $adjustment = $stockAdjustment->adjustWithAvailability($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
         SendProductStockNotifications::dispatch(
             $adjustment['movement_id'],
-        )->onQueue('notifications')->afterCommit();
+        )->onQueue(StockNotificationDeliveryPipeline::QUEUE)->afterCommit();
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, ['queued' => true]);
 
         return $forms->stockAdded($product->fresh(), $itemCount);

@@ -19,12 +19,18 @@ use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
+use App\Jobs\SendProductPriceChangeNotifications;
+use App\Jobs\SendProductStockNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\ProductPriceChangeEvent;
+use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
+use App\Models\StockNotificationRecipient;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
@@ -73,6 +79,20 @@ class TelegramOutboundEffectService
 
     public const TYPE_SALES_PROOF = TelegramOutboundEffectType::SalesProofPost->value;
 
+    public const TYPE_STOCK_NOTIFICATION = TelegramOutboundEffectType::StockNotificationRecipient->value;
+
+    /** Compatibility alias for callers that name the delivery unit. */
+    public const TYPE_STOCK_NOTIFICATION_RECIPIENT = self::TYPE_STOCK_NOTIFICATION;
+
+    public const TYPE_PRICE_CHANGE_NOTIFICATION = TelegramOutboundEffectType::PriceChangeNotificationRecipient->value;
+
+    /** Compatibility aliases for price notification callers. */
+    public const TYPE_PRICE_NOTIFICATION = self::TYPE_PRICE_CHANGE_NOTIFICATION;
+
+    public const TYPE_PRICE_CHANGE_NOTIFICATION_RECIPIENT = self::TYPE_PRICE_CHANGE_NOTIFICATION;
+
+    public const TYPE_PRICE_CHANGE_STORE_CHANNEL = TelegramOutboundEffectType::PriceChangeStoreChannel->value;
+
     /** Compatibility aliases for callers that use the longer effect names. */
     public const TYPE_ADMIN_ORDER_PENDING_NOTIFICATION = self::TYPE_ADMIN_PENDING;
 
@@ -105,11 +125,23 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_SALES_PROOF = 'sales-proof-post-v1';
 
+    public const TEMPLATE_STOCK_NOTIFICATION = 'stock-notification-v1';
+
+    public const TEMPLATE_PRICE_CHANGE_NOTIFICATION = 'price-change-notification-v1';
+
+    public const TEMPLATE_PRICE_CHANGE_STORE_CHANNEL = 'price-change-store-channel-v1';
+
     public const RECEIPT_QUEUE = 'notifications';
 
     public const SALES_PROOF_QUEUE = 'notifications';
 
     private const SALES_PROOF_MAX_ATTEMPTS = 3;
+
+    public const STOCK_NOTIFICATION_MAX_ATTEMPTS = 5;
+
+    public const PRICE_CHANGE_MAX_ATTEMPTS = 5;
+
+    public const PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS = 1;
 
     /** @var list<string> */
     private const CHECKOUT_EFFECT_TYPES = [
@@ -162,6 +194,13 @@ class TelegramOutboundEffectService
         'telegram_http_403',
         'broadcast_recipient_attempts_exhausted',
         'broadcast_recipient_terminal_failure',
+        'stock_notification_recipient_missing',
+        'stock_notification_attempts_exhausted',
+        'stock_notification_terminal_failure',
+        'price_change_recipient_missing',
+        'price_change_event_missing',
+        'price_change_recipient_attempts_exhausted',
+        'price_change_store_channel_attempts_exhausted',
     ];
 
     /** @var list<string> */
@@ -325,6 +364,166 @@ class TelegramOutboundEffectService
             'outcome_metadata' => json_encode([
                 'delivery_context' => 'admin_broadcast',
                 'broadcast_source' => (string) ($broadcast->source ?: 'admin'),
+            ], JSON_THROW_ON_ERROR),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return TelegramOutboundEffect::query()->where('effect_key', $effectKey)->firstOrFail();
+    }
+
+    /**
+     * Materialize one stock movement delivery unit. The recipient row is the
+     * immutable rendered snapshot; the shared effect owns delivery state.
+     */
+    public function recordStockNotificationRecipient(
+        StockNotificationRecipient $recipient,
+        int|string $movementId,
+        string|TelegramOutboundEffectState|null $state = null,
+        ?CarbonInterface $sentAt = null,
+        ?CarbonInterface $failedAt = null,
+        ?CarbonInterface $unknownAt = null,
+        ?CarbonInterface $nextAttemptAt = null,
+        ?string $lastErrorCode = null,
+        ?string $lastError = null,
+    ): TelegramOutboundEffect {
+        $effectKey = self::stockNotificationEffectKey((string) $movementId, (string) $recipient->getKey());
+        $state = $state instanceof TelegramOutboundEffectState
+            ? $state->value
+            : ($state ?? TelegramOutboundEffectState::Pending->value);
+        $now = now();
+
+        TelegramOutboundEffect::query()->insertOrIgnore([
+            'id' => (string) Str::uuid(),
+            'effect_key' => $effectKey,
+            'effect_group_key' => 'inventory:'.$movementId.':'.self::TYPE_STOCK_NOTIFICATION.':v1',
+            'sequence' => 1,
+            'effect_type' => self::TYPE_STOCK_NOTIFICATION,
+            'source_type' => StockNotificationRecipient::class,
+            'source_id' => (string) $recipient->getKey(),
+            'target_type' => trim((string) $recipient->recipient_type) ?: 'customer',
+            'telegram_chat_id' => (string) $recipient->telegram_id,
+            'queue' => 'telegram-broadcast',
+            'telegram_method' => 'sendMessage',
+            'locale' => $recipient->locale,
+            'template_version' => self::TEMPLATE_STOCK_NOTIFICATION,
+            'state' => $state,
+            'attempts' => (int) $recipient->attempts,
+            'next_attempt_at' => $nextAttemptAt ?? ($state === TelegramOutboundEffectState::Pending->value ? $now : null),
+            'sent_at' => $sentAt,
+            'failed_at' => $failedAt,
+            'unknown_at' => $unknownAt,
+            'last_error_code' => $lastErrorCode,
+            'last_error' => $lastError,
+            'outcome_metadata' => json_encode([
+                'delivery_context' => 'stock_notification',
+                'recipient_type' => trim((string) $recipient->recipient_type) ?: 'customer',
+            ], JSON_THROW_ON_ERROR),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return TelegramOutboundEffect::query()->where('effect_key', $effectKey)->firstOrFail();
+    }
+
+    /**
+     * Materialize one localized product-price recipient delivery unit.
+     */
+    public function recordPriceChangeNotificationRecipient(
+        ProductPriceChangeNotificationRecipient $recipient,
+        int|string $eventId,
+        string|TelegramOutboundEffectState|null $state = null,
+        ?CarbonInterface $sentAt = null,
+        ?CarbonInterface $failedAt = null,
+        ?CarbonInterface $unknownAt = null,
+        ?CarbonInterface $nextAttemptAt = null,
+        ?string $lastErrorCode = null,
+        ?string $lastError = null,
+    ): TelegramOutboundEffect {
+        $effectKey = self::priceChangeRecipientEffectKey((string) $eventId, (string) $recipient->getKey());
+        $state = $state instanceof TelegramOutboundEffectState
+            ? $state->value
+            : ($state ?? TelegramOutboundEffectState::Pending->value);
+        $now = now();
+
+        TelegramOutboundEffect::query()->insertOrIgnore([
+            'id' => (string) Str::uuid(),
+            'effect_key' => $effectKey,
+            'effect_group_key' => 'price-change:'.$eventId.':v1',
+            'sequence' => 1,
+            'effect_type' => self::TYPE_PRICE_CHANGE_NOTIFICATION,
+            'source_type' => ProductPriceChangeNotificationRecipient::class,
+            'source_id' => (string) $recipient->getKey(),
+            'target_type' => 'customer',
+            'telegram_chat_id' => (string) $recipient->telegram_id,
+            'queue' => 'telegram-broadcast',
+            'telegram_method' => 'sendMessage',
+            'locale' => $recipient->locale,
+            'template_version' => self::TEMPLATE_PRICE_CHANGE_NOTIFICATION,
+            'state' => $state,
+            'attempts' => (int) $recipient->attempts,
+            'next_attempt_at' => $nextAttemptAt ?? ($state === TelegramOutboundEffectState::Pending->value ? $now : null),
+            'sent_at' => $sentAt,
+            'failed_at' => $failedAt,
+            'unknown_at' => $unknownAt,
+            'last_error_code' => $lastErrorCode,
+            'last_error' => $lastError,
+            'outcome_metadata' => json_encode([
+                'delivery_context' => 'price_change_notification',
+                'recipient_type' => 'customer',
+            ], JSON_THROW_ON_ERROR),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return TelegramOutboundEffect::query()->where('effect_key', $effectKey)->firstOrFail();
+    }
+
+    /**
+     * Materialize the single Store Channel unit for a price-change event.
+     */
+    public function recordPriceChangeStoreChannel(
+        ProductPriceChangeEvent $event,
+        string $chatId,
+        string|TelegramOutboundEffectState|null $state = null,
+        ?CarbonInterface $sentAt = null,
+        ?CarbonInterface $failedAt = null,
+        ?CarbonInterface $unknownAt = null,
+        ?CarbonInterface $nextAttemptAt = null,
+        ?string $lastErrorCode = null,
+        ?string $lastError = null,
+    ): TelegramOutboundEffect {
+        $effectKey = self::priceChangeStoreChannelEffectKey((string) $event->getKey());
+        $state = $state instanceof TelegramOutboundEffectState
+            ? $state->value
+            : ($state ?? TelegramOutboundEffectState::Pending->value);
+        $now = now();
+
+        TelegramOutboundEffect::query()->insertOrIgnore([
+            'id' => (string) Str::uuid(),
+            'effect_key' => $effectKey,
+            'effect_group_key' => 'price-change:'.$event->getKey().':v1',
+            'sequence' => 1,
+            'effect_type' => self::TYPE_PRICE_CHANGE_STORE_CHANNEL,
+            'source_type' => ProductPriceChangeEvent::class,
+            'source_id' => (string) $event->getKey(),
+            'target_type' => 'store_channel',
+            'telegram_chat_id' => $chatId,
+            'queue' => 'telegram-broadcast',
+            'telegram_method' => 'sendMessage',
+            'locale' => TelegramLocale::STORE_CHANNEL_LOCALE,
+            'template_version' => self::TEMPLATE_PRICE_CHANGE_STORE_CHANNEL,
+            'state' => $state,
+            'attempts' => (int) $event->store_channel_attempts,
+            'next_attempt_at' => $nextAttemptAt ?? ($state === TelegramOutboundEffectState::Pending->value ? $now : null),
+            'sent_at' => $sentAt,
+            'failed_at' => $failedAt,
+            'unknown_at' => $unknownAt,
+            'last_error_code' => $lastErrorCode,
+            'last_error' => $lastError,
+            'outcome_metadata' => json_encode([
+                'delivery_context' => 'price_change_store_channel',
+                'recipient_type' => 'store_channel',
             ], JSON_THROW_ON_ERROR),
             'created_at' => $now,
             'updated_at' => $now,
@@ -696,6 +895,33 @@ class TelegramOutboundEffectService
         return self::adminBroadcastRecipientEffectKey($broadcastKey, $recipientId);
     }
 
+    public static function stockNotificationEffectKey(string $movementId, string $recipientId): string
+    {
+        return 'inventory:'.$movementId.':'.self::TYPE_STOCK_NOTIFICATION.':recipient:'.$recipientId.':v1';
+    }
+
+    /** Compatibility alias for callers that use the shorter stock name. */
+    public static function stockRecipientEffectKey(string $movementId, string $recipientId): string
+    {
+        return self::stockNotificationEffectKey($movementId, $recipientId);
+    }
+
+    public static function priceChangeRecipientEffectKey(string $eventId, string $recipientId): string
+    {
+        return 'price-change:'.$eventId.':recipient:'.$recipientId.':v1';
+    }
+
+    /** Compatibility aliases for price notification callers. */
+    public static function productPriceChangeRecipientEffectKey(string $eventId, string $recipientId): string
+    {
+        return self::priceChangeRecipientEffectKey($eventId, $recipientId);
+    }
+
+    public static function priceChangeStoreChannelEffectKey(string $eventId): string
+    {
+        return 'price-change:'.$eventId.':store-channel:v1';
+    }
+
     public static function manualPaymentProofEffectKey(string $paymentId): string
     {
         return 'payment:'.$paymentId.':'.self::TYPE_MANUAL_PAYMENT_PROOF.':v1';
@@ -990,6 +1216,23 @@ class TelegramOutboundEffectService
                     ->value('broadcast_id'),
                 $jobEnqueuedAt,
             ),
+            self::TYPE_STOCK_NOTIFICATION => SendProductStockNotifications::dispatch(
+                (int) StockNotificationRecipient::query()
+                    ->whereKey($effect->source_id)
+                    ->with('event:id,inventory_movement_id')
+                    ->first()?->event?->inventory_movement_id,
+                $jobEnqueuedAt,
+            ),
+            self::TYPE_PRICE_CHANGE_NOTIFICATION => SendProductPriceChangeNotifications::dispatch(
+                (int) ProductPriceChangeNotificationRecipient::query()
+                    ->whereKey($effect->source_id)
+                    ->value('event_id'),
+                $jobEnqueuedAt,
+            ),
+            self::TYPE_PRICE_CHANGE_STORE_CHANNEL => SendProductPriceChangeNotifications::dispatch(
+                (int) $effect->source_id,
+                $jobEnqueuedAt,
+            ),
             self::TYPE_MANUAL_PAYMENT_PROOF => ForwardManualPaymentProof::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
@@ -1047,6 +1290,21 @@ class TelegramOutboundEffectService
                 $query
                     ->where('effect_type', '<>', self::TYPE_ADMIN_BROADCAST)
                     ->orWhere('attempts', '<', self::ADMIN_BROADCAST_MAX_ATTEMPTS);
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_STOCK_NOTIFICATION)
+                    ->orWhere('attempts', '<', self::STOCK_NOTIFICATION_MAX_ATTEMPTS);
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_PRICE_CHANGE_NOTIFICATION)
+                    ->orWhere('attempts', '<', self::PRICE_CHANGE_MAX_ATTEMPTS);
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('effect_type', '<>', self::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+                    ->orWhere('attempts', '<', self::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS);
             })
             ->where(function (Builder $query) use ($at): void {
                 $query->whereNull('next_attempt_at')
@@ -1985,9 +2243,11 @@ class TelegramOutboundEffectService
 
             $now = now();
             $failureCode = $this->failureCode($exception);
-            $isBroadcast = $effect->effect_type === self::TYPE_ADMIN_BROADCAST;
-            $attemptsExhausted = $isBroadcast && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS;
+            $attemptsExhausted = $this->effectAttemptsExhausted($effect);
             $terminal = in_array($failureCode, self::NON_RETRYABLE_FAILURE_CODES, true) || $attemptsExhausted;
+            $lastErrorCode = in_array($failureCode, self::NON_RETRYABLE_FAILURE_CODES, true)
+                ? $failureCode
+                : ($attemptsExhausted ? $this->attemptsExhaustedCode($effect) : $failureCode);
             $effect->forceFill([
                 'state' => TelegramOutboundEffectState::Failed->value,
                 'lease_until' => null,
@@ -2001,12 +2261,12 @@ class TelegramOutboundEffectService
                     : ($effect->effect_type === self::TYPE_SALES_PROOF
                         ? ((int) $effect->attempts < self::SALES_PROOF_MAX_ATTEMPTS ? $now : null)
                         : $now->copy()->addSeconds($retryAfterSeconds ?? $this->retryDelaySeconds($effect->attempts))),
-                'last_error_code' => $attemptsExhausted ? 'broadcast_recipient_attempts_exhausted' : $failureCode,
+                'last_error_code' => $lastErrorCode,
                 'last_error' => 'Telegram delivery failed before completion.',
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
             ])->save();
 
-            $this->clearLegacyClaim($effect);
+            $this->clearLegacyClaim($effect, $this->legacyProjectionError($exception));
 
             return true;
         });
@@ -2182,8 +2442,7 @@ class TelegramOutboundEffectService
         }
 
         return in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)
-            || ($effect->effect_type === self::TYPE_ADMIN_BROADCAST
-                && (int) $effect->attempts >= self::ADMIN_BROADCAST_MAX_ATTEMPTS);
+            || $this->effectAttemptsExhausted($effect);
     }
 
     private function stateValue(TelegramOutboundEffect $effect): string
@@ -2219,6 +2478,29 @@ class TelegramOutboundEffectService
             if ($broadcastId !== null) {
                 return 'Admin Broadcast #'.$broadcastId.' recipient #'.substr((string) $effect->source_id, 0, 8);
             }
+        }
+
+        if ($effect->source_type === StockNotificationRecipient::class) {
+            $movementId = StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->join('stock_notification_events', 'stock_notification_events.id', '=', 'stock_notification_recipients.stock_notification_event_id')
+                ->value('stock_notification_events.inventory_movement_id');
+            if ($movementId !== null) {
+                return 'Stock notification movement #'.$movementId.' recipient #'.substr((string) $effect->source_id, 0, 8);
+            }
+        }
+
+        if ($effect->source_type === ProductPriceChangeNotificationRecipient::class) {
+            $eventId = ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->value('event_id');
+            if ($eventId !== null) {
+                return 'Price change #'.$eventId.' recipient #'.substr((string) $effect->source_id, 0, 8);
+            }
+        }
+
+        if ($effect->source_type === ProductPriceChangeEvent::class) {
+            return 'Price change #'.$effect->source_id.' Store Channel';
         }
 
         $sourceType = class_basename((string) $effect->source_type);
@@ -2316,6 +2598,10 @@ class TelegramOutboundEffectService
             return false;
         }
 
+        if ($this->effectAttemptsExhausted($effect)) {
+            return false;
+        }
+
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte($at);
     }
 
@@ -2342,7 +2628,35 @@ class TelegramOutboundEffectService
             return false;
         }
 
+        if ($this->effectAttemptsExhausted($effect)) {
+            return false;
+        }
+
         return $effect->next_attempt_at === null || $effect->next_attempt_at->lte(now());
+    }
+
+    private function effectAttemptsExhausted(TelegramOutboundEffect $effect): bool
+    {
+        $maximum = match ($effect->effect_type) {
+            self::TYPE_ADMIN_BROADCAST => self::ADMIN_BROADCAST_MAX_ATTEMPTS,
+            self::TYPE_STOCK_NOTIFICATION => self::STOCK_NOTIFICATION_MAX_ATTEMPTS,
+            self::TYPE_PRICE_CHANGE_NOTIFICATION => self::PRICE_CHANGE_MAX_ATTEMPTS,
+            self::TYPE_PRICE_CHANGE_STORE_CHANNEL => self::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS,
+            default => null,
+        };
+
+        return $maximum !== null && (int) $effect->attempts >= $maximum;
+    }
+
+    private function attemptsExhaustedCode(TelegramOutboundEffect $effect): string
+    {
+        return match ($effect->effect_type) {
+            self::TYPE_ADMIN_BROADCAST => 'broadcast_recipient_attempts_exhausted',
+            self::TYPE_STOCK_NOTIFICATION => 'stock_notification_attempts_exhausted',
+            self::TYPE_PRICE_CHANGE_NOTIFICATION => 'price_change_recipient_attempts_exhausted',
+            self::TYPE_PRICE_CHANGE_STORE_CHANNEL => 'price_change_store_channel_attempts_exhausted',
+            default => 'telegram_attempts_exhausted',
+        };
     }
 
     private function claimMatches(?TelegramOutboundEffect $effect, string $claimToken): bool
@@ -2400,6 +2714,52 @@ class TelegramOutboundEffectService
                 'payment_proof_forwarding_token' => $effect->claim_token,
                 'updated_at' => now(),
             ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_STOCK_NOTIFICATION) {
+            StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'claim_expires_at' => $effect->lease_until ?? $at->copy()->addSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))),
+                    'claim_token' => (string) Str::uuid(),
+                    'failed_at' => null,
+                    'terminal_failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_NOTIFICATION) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'send_started_at' => $at,
+                    'send_claim_token' => (string) Str::uuid(),
+                    'failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_STORE_CHANNEL) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'store_channel_send_started_at' => $at,
+                    'store_channel_send_claim_token' => (string) Str::uuid(),
+                    'store_channel_failed_at' => null,
+                    'store_channel_last_error' => null,
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
 
             return;
         }
@@ -2496,6 +2856,65 @@ class TelegramOutboundEffectService
             return;
         }
 
+        if ($effect->effect_type === self::TYPE_STOCK_NOTIFICATION) {
+            StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'sent_at' => $at,
+                    'claim_expires_at' => null,
+                    'claim_token' => null,
+                    'failed_at' => null,
+                    'terminal_failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+            $movementId = StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->join('stock_notification_events', 'stock_notification_events.id', '=', 'stock_notification_recipients.stock_notification_event_id')
+                ->value('stock_notification_events.inventory_movement_id');
+            if ($movementId !== null) {
+                $this->syncStockNotificationProjection((int) $movementId);
+            }
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_NOTIFICATION) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'sent_at' => $at,
+                    'send_started_at' => null,
+                    'send_claim_token' => null,
+                    'failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_STORE_CHANNEL) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'store_channel_sent_at' => $at,
+                    'store_channel_send_started_at' => null,
+                    'store_channel_send_claim_token' => null,
+                    'store_channel_failed_at' => null,
+                    'store_channel_last_error' => null,
+                    'store_channel_message_id' => $messageId,
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::ADMIN_BROADCAST_EFFECT_TYPES, true)) {
             TelegramBroadcastRecipient::query()
                 ->whereKey($effect->source_id)
@@ -2563,7 +2982,7 @@ class TelegramOutboundEffectService
         Order::query()->whereKey($effect->source_id)->update($values + ['updated_at' => now()]);
     }
 
-    private function clearLegacyClaim(TelegramOutboundEffect $effect): void
+    private function clearLegacyClaim(TelegramOutboundEffect $effect, ?string $legacyError = null): void
     {
         if (in_array($effect->effect_type, self::SALES_PROOF_EFFECT_TYPES, true)) {
             SalesProofPost::query()
@@ -2625,6 +3044,63 @@ class TelegramOutboundEffectService
             return;
         }
 
+        if ($effect->effect_type === self::TYPE_STOCK_NOTIFICATION) {
+            $terminal = $this->isTerminalFailure($effect);
+            StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'claim_expires_at' => null,
+                    'claim_token' => null,
+                    'failed_at' => $effect->failed_at ?? now(),
+                    'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
+                    'last_error' => $legacyError ?: $effect->last_error ?: 'Telegram stock notification delivery failed before completion.',
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+            $movementId = StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->join('stock_notification_events', 'stock_notification_events.id', '=', 'stock_notification_recipients.stock_notification_event_id')
+                ->value('stock_notification_events.inventory_movement_id');
+            if ($movementId !== null) {
+                $this->syncStockNotificationProjection((int) $movementId);
+            }
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_NOTIFICATION) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'send_started_at' => null,
+                    'send_claim_token' => null,
+                    'failed_at' => $effect->failed_at ?? now(),
+                    'last_error' => $legacyError ?: $effect->last_error ?: 'Telegram price notification delivery failed before completion.',
+                    'attempts' => $this->legacyAttempts($effect, self::PRICE_CHANGE_MAX_ATTEMPTS),
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === self::TYPE_PRICE_CHANGE_STORE_CHANNEL) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('store_channel_sent_at')
+                ->update([
+                    'store_channel_send_started_at' => null,
+                    'store_channel_send_claim_token' => null,
+                    'store_channel_failed_at' => $effect->failed_at ?? now(),
+                    'store_channel_last_error' => $legacyError ?: $effect->last_error ?: 'Telegram price Store Channel delivery failed before completion.',
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
         if (in_array($effect->effect_type, self::ADMIN_NOTIFICATION_EFFECT_TYPES, true)) {
             $startedColumn = match ($effect->effect_type) {
                 self::TYPE_ADMIN_PENDING => 'admin_pending_order_notification_started_at',
@@ -2650,6 +3126,64 @@ class TelegramOutboundEffectService
             'manual_checkout_customer_notification_started_at' => null,
             'updated_at' => now(),
         ]);
+    }
+
+    private function legacyProjectionError(Throwable $exception): string
+    {
+        return mb_substr(
+            TelegramBotApiRedactor::redactText($exception::class.': '.$exception->getMessage()),
+            0,
+            2000,
+        );
+    }
+
+    private function legacyAttempts(TelegramOutboundEffect $effect, int $maximum): int
+    {
+        return in_array($effect->last_error_code, ['telegram_http_400', 'telegram_http_403'], true)
+            ? $maximum
+            : (int) $effect->attempts;
+    }
+
+    private function syncStockNotificationProjection(int|string $movementId): void
+    {
+        $recipientIds = StockNotificationRecipient::query()
+            ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
+            ->selectRaw('CAST(id AS TEXT)');
+        $recipientCount = StockNotificationRecipient::query()
+            ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
+            ->count();
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_type', StockNotificationRecipient::class)
+            ->where('effect_type', self::TYPE_STOCK_NOTIFICATION)
+            ->whereIn('source_id', $recipientIds);
+        $effectCount = (clone $effects)->count();
+        $resolvedCount = (clone $effects)
+            ->where(function (Builder $resolved): void {
+                $resolved
+                    ->where('state', TelegramOutboundEffectState::Sent->value)
+                    ->orWhere(function (Builder $terminal): void {
+                        $terminal
+                            ->where('state', TelegramOutboundEffectState::Failed->value)
+                            ->where(function (Builder $attempts): void {
+                                $attempts
+                                    ->whereIn('last_error_code', [
+                                        'telegram_http_400',
+                                        'telegram_http_403',
+                                        'stock_notification_attempts_exhausted',
+                                        'stock_notification_terminal_failure',
+                                    ])
+                                    ->orWhere('attempts', '>=', self::STOCK_NOTIFICATION_MAX_ATTEMPTS);
+                            });
+                    });
+            })
+            ->count();
+
+        if ($effectCount === $recipientCount && $resolvedCount === $recipientCount) {
+            InventoryMovement::query()
+                ->whereKey($movementId)
+                ->whereNull('stock_notification_sent_at')
+                ->update(['stock_notification_sent_at' => now()]);
+        }
     }
 
     private function syncAdminBroadcastProjection(int $broadcastId): void
@@ -2713,6 +3247,9 @@ class TelegramOutboundEffectService
             self::TYPE_ADMIN_BROADCAST => self::TEMPLATE_ADMIN_BROADCAST,
             self::TYPE_MANUAL_PAYMENT_PROOF => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
             self::TYPE_SALES_PROOF => self::TEMPLATE_SALES_PROOF,
+            self::TYPE_STOCK_NOTIFICATION => self::TEMPLATE_STOCK_NOTIFICATION,
+            self::TYPE_PRICE_CHANGE_NOTIFICATION => self::TEMPLATE_PRICE_CHANGE_NOTIFICATION,
+            self::TYPE_PRICE_CHANGE_STORE_CHANNEL => self::TEMPLATE_PRICE_CHANGE_STORE_CHANNEL,
             default => 'checkout-payment-v1',
         };
     }

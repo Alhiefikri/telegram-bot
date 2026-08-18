@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
+use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\InsufficientStock;
 use App\Jobs\SendProductStockNotifications;
 use App\Models\AuditLog;
@@ -18,6 +19,7 @@ use App\Models\ProductStockItem;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\OrderCheckoutService;
@@ -25,6 +27,7 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
@@ -198,7 +201,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             ->where('order_id', $order->id)
             ->where('type', InventoryMovementType::Sale)
             ->sole();
-        Queue::assertPushedOn('notifications', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $sale->id);
+        Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $sale->id);
 
         (new SendProductStockNotifications($sale->id))->handle(app(TelegramProductNotificationService::class));
 
@@ -284,7 +287,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertNotNull($sale->fresh()->stock_notification_sent_at);
     }
 
-    public function test_stock_notification_snapshots_recipients_and_retries_a_transient_failure(): void
+    public function test_stock_notification_snapshots_recipients_and_marks_ambiguous_delivery_unknown(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 991001, 'locale' => 'ms']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
@@ -300,27 +303,42 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertNotNull($event->recipients_snapshotted_at);
         $this->assertSame('ms', $recipient->locale);
         $this->assertSame(1, $recipient->attempts);
-        $this->assertNotNull($recipient->failed_at);
+        $this->assertNull($recipient->failed_at);
+        $this->assertNotNull($recipient->claim_token);
         $this->assertStringContainsString('✅ Stok Tersedia Semula', (string) $recipient->text);
         $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
-        $this->assertTrue($first['has_more']);
+        $this->assertFalse($first['has_more']);
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
 
         $customer->update(['locale' => 'en']);
         $second = $pipeline->deliver($movementId);
         $recipient->refresh();
         $this->assertSame('ms', $recipient->locale);
-        $this->assertSame(2, $recipient->attempts);
-        $this->assertNotNull($recipient->sent_at);
+        $this->assertSame(1, $recipient->attempts);
+        $this->assertNull($recipient->sent_at);
         $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
         $this->assertFalse($second['has_more']);
+        $this->assertCount(1, Http::recorded());
     }
 
     public function test_legacy_stock_notification_recipients_are_finalized_before_delivery(): void
     {
         $this->fakeTelegramHttp();
-        $product = $this->stockedProduct(stock: 0, secrets: []);
-        $admin = User::factory()->create();
-        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'legacy rollout', $admin, '127.0.0.1', ['legacy-secret'])['movement_id'];
+        $product = $this->stockedProduct(stock: 1, secrets: ['legacy-secret']);
+        $movement = InventoryMovement::create([
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Adjustment,
+            'quantity' => 1,
+            'stock_before' => 0,
+            'available_before' => 0,
+            'notes' => 'legacy rollout',
+            'created_at' => now(),
+        ]);
+        $movementId = $movement->id;
         $event = StockNotificationEvent::create([
             'inventory_movement_id' => $movementId,
             'kind' => InventoryMovementType::Adjustment->value,
