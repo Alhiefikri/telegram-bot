@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Enums\UserRole;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\UserRole;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\TelegramBroadcast;
@@ -55,7 +55,10 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $broadcast = TelegramBroadcast::query()->firstOrFail();
         $this->assertSame('Private launch note', $broadcast->message);
         $this->assertSame(TelegramBroadcast::STATUS_QUEUED, $broadcast->status);
+        // Admin Broadcast intentionally defers recipient/effect materialization
+        // until its worker, as the ADR-0007 migration exception requires.
         $this->assertSame(0, TelegramBroadcastRecipient::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
 
         Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
         Http::assertNothingSent();

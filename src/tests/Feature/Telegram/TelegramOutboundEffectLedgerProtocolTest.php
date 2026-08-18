@@ -86,6 +86,24 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertFalse($protocol->isTerminalFailure($failed));
     }
 
+    public function test_retryable_query_keeps_scheduled_failures_visible_without_dispatching_them_early(): void
+    {
+        $effect = TelegramOutboundEffect::factory()->create();
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $protocol->claim($effect->id);
+
+        $failed = $protocol->finalizeFailed(
+            $effect->id,
+            (string) $claimed->claim_token,
+            new RuntimeException('Telegram response missing message id'),
+        );
+
+        $this->assertNotNull($failed);
+        $this->assertTrue($protocol->retryableQuery()->whereKey($effect->id)->exists());
+        $this->assertFalse($protocol->readyToDispatchQuery(now())->whereKey($effect->id)->exists());
+        $this->assertTrue($protocol->readyToDispatchQuery(now()->addMinutes(1))->whereKey($effect->id)->exists());
+    }
+
     public function test_non_retryable_failure_is_terminal_and_not_dispatchable(): void
     {
         $effect = TelegramOutboundEffect::factory()->create();

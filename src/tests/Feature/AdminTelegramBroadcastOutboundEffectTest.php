@@ -8,7 +8,9 @@ use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
+use App\Services\Telegram\AdminBroadcastDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -112,6 +114,55 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
         $this->assertSame('telegram_http_403', $effect->last_error_code);
         $this->assertSame(TelegramOutboundEffectService::ADMIN_BROADCAST_MAX_ATTEMPTS, $recipient->attempts);
         $this->assertNotNull($recipient->terminal_failed_at);
+    }
+
+    public function test_http_429_is_a_definite_retryable_broadcast_failure_not_an_ambiguous_delivery(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => false,
+            'description' => 'Too Many Requests',
+            'parameters' => ['retry_after' => 7],
+        ], 429)]);
+        Customer::factory()->create(['telegram_id' => 644444445]);
+        $broadcast = $this->broadcast('Flood controlled recipient');
+
+        $result = app(AdminBroadcastDeliveryPipeline::class)->deliver($broadcast->id, 25);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $recipient = TelegramBroadcastRecipient::query()->sole();
+
+        $this->assertSame(1, $result->transientFailures);
+        $this->assertSame(0, $result->unknown);
+        $this->assertTrue($result->hasMore);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertSame('telegram_http_429', $effect->last_error_code);
+        $this->assertNull($effect->unknown_at);
+        $this->assertNotNull($effect->next_attempt_at);
+        $this->assertNotNull($recipient->failed_at);
+        $this->assertNotNull($recipient->retry_at);
+        $this->assertNull($recipient->terminal_failed_at);
+    }
+
+    public function test_expired_broadcast_lease_becomes_unknown_and_recomputes_the_aggregate_projection(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 644444446]);
+        $broadcast = $this->broadcast('Expired lease recipient');
+        $recipient = TelegramBroadcastRecipient::create([
+            'broadcast_id' => $broadcast->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => (string) $customer->telegram_id,
+            'locale' => 'id',
+        ]);
+        $effect = app(TelegramOutboundEffectService::class)->recordAdminBroadcastRecipient($broadcast, $recipient);
+        $claimed = app(TelegramOutboundEffectLedgerProtocol::class)->claim((string) $effect->getKey());
+        $effect->fresh()->forceFill(['lease_until' => now()->subSecond()])->save();
+
+        app(TelegramOutboundEffectService::class)->recoverExpiredLeases();
+
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertSame(1, $recipient->fresh()->attempts);
+        $this->assertSame(TelegramBroadcast::STATUS_QUEUED, $broadcast->fresh()->status);
+        $this->assertSame(1, $broadcast->fresh()->pending_count);
+        $this->assertNotNull($claimed);
     }
 
     public function test_operator_can_mark_an_ambiguous_broadcast_recipient_sent_without_resending(): void

@@ -51,10 +51,8 @@ class TelegramOutboundEffectLedgerProtocol
     ];
 
     /** @return Builder<TelegramOutboundEffect> */
-    public function readyToDispatchQuery(?CarbonInterface $at = null): Builder
+    public function retryableQuery(): Builder
     {
-        $at ??= now();
-
         return TelegramOutboundEffect::query()
             ->where(function (Builder $query): void {
                 $query
@@ -101,10 +99,6 @@ class TelegramOutboundEffectLedgerProtocol
                     ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
                     ->orWhere('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS);
             })
-            ->where(function (Builder $query) use ($at): void {
-                $query->whereNull('next_attempt_at')
-                    ->orWhere('next_attempt_at', '<=', $at);
-            })
             ->where(function (Builder $query): void {
                 $query
                     ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
@@ -124,6 +118,18 @@ class TelegramOutboundEffectLedgerProtocol
                                     });
                             });
                     });
+            });
+    }
+
+    /** @return Builder<TelegramOutboundEffect> */
+    public function readyToDispatchQuery(?CarbonInterface $at = null): Builder
+    {
+        $at ??= now();
+
+        return $this->retryableQuery()
+            ->where(function (Builder $query) use ($at): void {
+                $query->whereNull('next_attempt_at')
+                    ->orWhere('next_attempt_at', '<=', $at);
             });
     }
 

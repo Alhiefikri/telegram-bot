@@ -1985,6 +1985,17 @@ class TelegramOutboundEffectService
                     $query->whereNull('unknown_at')
                         ->orWhere('unknown_at', '<=', $before ?? now());
                 })
+                ->where('effect_type', self::TYPE_ADMIN_BROADCAST)
+                ->get()
+                ->each(fn (TelegramOutboundEffect $effect) => $this->synchronizeUnknownProjection($effect));
+
+            TelegramOutboundEffect::query()
+                ->where('state', TelegramOutboundEffectState::Unknown->value)
+                ->where('last_error_code', 'lease_expired')
+                ->where(function (Builder $query) use ($before): void {
+                    $query->whereNull('unknown_at')
+                        ->orWhere('unknown_at', '<=', $before ?? now());
+                })
                 ->where('effect_type', self::TYPE_SALES_PROOF)
                 ->get()
                 ->each(fn (TelegramOutboundEffect $effect) => $this->markSalesProofUnknown(
@@ -2437,6 +2448,10 @@ class TelegramOutboundEffectService
                     'attempts' => (int) $effect->attempts,
                     'updated_at' => now(),
                 ]);
+            $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
+            if ($broadcastId !== null) {
+                $this->syncAdminBroadcastProjection((int) $broadcastId);
+            }
 
             return;
         }
@@ -2534,8 +2549,13 @@ class TelegramOutboundEffectService
         }
     }
 
-    private function syncAdminBroadcastProjection(int $broadcastId): void
+    public function syncAdminBroadcastProjection(int $broadcastId, bool $materialized = false): bool
     {
+        $broadcast = TelegramBroadcast::query()->lockForUpdate()->find($broadcastId);
+        if ($broadcast === null) {
+            return false;
+        }
+
         $recipientIds = TelegramBroadcastRecipient::query()
             ->where('broadcast_id', $broadcastId)
             ->selectRaw('CAST(id AS TEXT)');
@@ -2558,6 +2578,13 @@ class TelegramOutboundEffectService
                     ->orWhere('attempts', '>=', self::ADMIN_BROADCAST_MAX_ATTEMPTS);
             })
             ->count();
+        $retryableCount = $this->ledger->retryableQuery()
+            ->where('source_type', TelegramBroadcastRecipient::class)
+            ->where('effect_type', self::TYPE_ADMIN_BROADCAST)
+            ->whereIn('source_id', TelegramBroadcastRecipient::query()
+                ->where('broadcast_id', $broadcastId)
+                ->selectRaw('CAST(id AS TEXT)'))
+            ->count();
         $pendingCount = max(0, $recipientCount - $sentCount - $terminalFailedCount);
         $complete = $recipientCount > 0 && $pendingCount === 0;
         $status = match (true) {
@@ -2569,7 +2596,7 @@ class TelegramOutboundEffectService
             default => TelegramBroadcast::STATUS_QUEUED,
         };
 
-        TelegramBroadcast::query()->whereKey($broadcastId)->update([
+        $updates = [
             'status' => $status,
             'recipient_count' => $recipientCount,
             'sent_count' => $sentCount,
@@ -2578,7 +2605,14 @@ class TelegramOutboundEffectService
             'pending_count' => $pendingCount,
             'completed_at' => $complete || $recipientCount === 0 ? now() : null,
             'updated_at' => now(),
-        ]);
+        ];
+        if ($materialized) {
+            $updates['recipients_materialized_at'] = now();
+        }
+
+        TelegramBroadcast::query()->whereKey($broadcastId)->update($updates);
+
+        return $retryableCount > 0;
     }
 
     private static function templateVersion(string $effectType): string
