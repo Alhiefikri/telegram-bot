@@ -182,12 +182,33 @@ verify_release_gates() {
   wait_for_health || return 1
 
   if [ "${RECOVER_FAILED_TELEGRAM_UPDATES:-false}" = "true" ]; then
-    compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable
+    if ! compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable; then
+      echo "Release gate failed: Telegram update recovery failed." >&2
+      return 1
+    fi
   fi
 
-  compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"
-  compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null
-  compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null
+  if ! compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"; then
+    echo "Release gate failed: candidate failed jobs exceeded the pre-release baseline." >&2
+    return 1
+  fi
+
+  if ! compose exec -T app php artisan ops:check-queue-depth \
+    --max=50 \
+    --max-oldest-age=120 \
+    --queue=default \
+    --queue=telegram-outbound \
+    --queue=notifications \
+    --queue=telegram-broadcast \
+    --queue=binance-verification </dev/null; then
+    echo "Release gate failed: an operational queue exceeded its threshold." >&2
+    return 1
+  fi
+
+  if ! compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null; then
+    echo "Release gate failed: Telegram webhook observation failed." >&2
+    return 1
+  fi
 }
 
 restore_previous_release() {

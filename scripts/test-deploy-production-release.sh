@@ -119,6 +119,9 @@ case "$command" in
     ;;
   exec)
     current_image=$(cat "$MOCK_WORKSPACE/current-image")
+    if [ "$scenario" = "queue-failure" ] && printf '%s' "$*" | grep -q 'ops:check-queue-depth'; then
+      exit 1
+    fi
     if printf '%s' "$*" | grep -q 'ops:health'; then
       if [ "$scenario" = "application-health-failure" ] && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
       if [ "$scenario" = "rollback-failure" ]; then exit 1; fi
@@ -176,6 +179,10 @@ SCRIPT
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "external smoke rollback did not restore previous image"
       grep -q 'external-smoke-failed' "$workspace/stderr" || fail "external smoke rollback reason was not explicit"
       ;;
+    queue-failure)
+      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "queue gate failure did not restore previous image"
+      grep -q 'rollback succeeded' "$workspace/stderr" || fail "queue gate failure did not report rollback"
+      ;;
   esac
 
   rm -rf "$workspace"
@@ -188,3 +195,4 @@ run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario queue-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"

@@ -16,8 +16,18 @@ class ReleaseHealthSummary extends Command
     public function handle(): int
     {
         try {
-            $jobs = DB::table('jobs');
-            $oldestCreatedAt = $jobs->min('created_at');
+            $operationalQueues = [
+                'default',
+                'telegram-outbound',
+                'notifications',
+                'telegram-broadcast',
+                (string) config('services.binance.verification_queue', 'binance-verification'),
+            ];
+            $queue = $this->queueSummary();
+            $queue['operational_queues'] = $operationalQueues;
+            $queue['operational'] = $this->queueSummary($operationalQueues);
+            $queue['unrecognized'] = $this->queueSummary($operationalQueues, true);
+
             $failedJobs = DB::table('failed_jobs');
             $baseline = $this->baselineMaxId();
             if ($baseline === null) {
@@ -34,10 +44,7 @@ class ReleaseHealthSummary extends Command
 
             $this->line(json_encode([
                 'generated_at' => now()->utc()->toIso8601String(),
-                'queue' => [
-                    'depth' => $jobs->count(),
-                    'oldest_job_age_seconds' => $oldestCreatedAt === null ? null : max(0, now()->timestamp - (int) $oldestCreatedAt),
-                ],
+                'queue' => $queue,
                 'failed_jobs' => [
                     'total_retained' => $failedJobs->count(),
                     'candidate_release' => $candidateFailedJobs,
@@ -50,6 +57,28 @@ class ReleaseHealthSummary extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /** @param list<string>|null $queues */
+    private function queueSummary(?array $queues = null, bool $exclude = false): array
+    {
+        $query = DB::table('jobs');
+
+        if ($queues !== null) {
+            $query = $exclude
+                ? $query->whereNotIn('queue', $queues)
+                : $query->whereIn('queue', $queues);
+        }
+
+        $depth = (int) $query->count();
+        $oldestCreatedAt = $depth > 0 ? $query->min('created_at') : null;
+
+        return [
+            'depth' => $depth,
+            'oldest_job_age_seconds' => $oldestCreatedAt === null
+                ? null
+                : max(0, now()->timestamp - (int) $oldestCreatedAt),
+        ];
     }
 
     private function baselineMaxId(): ?int

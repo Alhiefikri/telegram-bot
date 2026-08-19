@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Providers\AppServiceProvider;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Tests\TestCase;
 
 class ProductionReleaseHardeningTest extends TestCase
@@ -260,6 +262,35 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->artisan('ops:release-health-summary')
             ->expectsOutputToContain('"candidate_release": null')
             ->assertSuccessful();
+    }
+
+    public function test_release_health_summary_separates_operational_and_unrecognized_queue_backlog(): void
+    {
+        DB::table('jobs')->insert([
+            'queue' => 'default',
+            'payload' => '{}',
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => now()->timestamp,
+            'created_at' => now()->timestamp,
+        ]);
+        DB::table('jobs')->insert([
+            'queue' => 'legacy-queue',
+            'payload' => '{}',
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => now()->timestamp,
+            'created_at' => now()->subDays(3)->timestamp,
+        ]);
+
+        $buffer = new BufferedOutput;
+        $exitCode = $this->app->make(Kernel::class)->call('ops:release-health-summary', [], $buffer);
+        $output = $buffer->fetch();
+
+        $this->assertSame(0, $exitCode, $output);
+        $this->assertStringContainsString('"operational":', $output, $output);
+        $this->assertStringContainsString('"unrecognized":', $output, $output);
+        $this->assertStringContainsString('"depth": 1', $output, $output);
     }
 
     public function test_failed_job_release_gate_uses_id_watermark_instead_of_failure_timestamp(): void
@@ -628,7 +659,6 @@ SH);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --snapshot', $release);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
-        $this->assertStringContainsString('php artisan ops:check-queue-depth --max=50 --max-oldest-age=120', $release);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
         $this->assertMatchesRegularExpression(
             '/actions\/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+)*/',
@@ -646,11 +676,19 @@ SH);
             'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
             'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
             'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
-            'queue depth check is non-interactive' => 'compose exec -T app php artisan ops:check-queue-depth --max=50 --max-oldest-age=120 </dev/null',
             'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
             $this->assertStringContainsString($command, $release, $contract);
         }
+
+        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-failed-jobs', $release);
+        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-queue-depth', $release);
+        $this->assertStringContainsString('--queue=default', $release);
+        $this->assertStringContainsString('--queue=telegram-outbound', $release);
+        $this->assertStringContainsString('--queue=notifications', $release);
+        $this->assertStringContainsString('--queue=telegram-broadcast', $release);
+        $this->assertStringContainsString('--queue=binance-verification', $release);
+        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-telegram-webhook', $release);
 
         $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
         $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
