@@ -20,6 +20,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AdminTelegramOutboundEffectReviewTest extends TestCase
@@ -135,6 +136,22 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         Http::assertNothingSent();
+    }
+
+    #[DataProvider('invalidOperatorMessageIds')]
+    public function test_operator_cannot_mark_an_effect_sent_with_an_invalid_message_id(string $messageId): void
+    {
+        $effect = $this->unknownEffect();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.telegram-outbound-effects.mark-sent', $effect), [
+                'telegram_message_id' => $messageId,
+            ])
+            ->assertSessionHasErrors('telegram_message_id');
+
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertNull($effect->fresh()->telegram_message_id);
     }
 
     public function test_resend_requires_explicit_duplicate_risk_confirmation(): void
@@ -290,5 +307,15 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
             'last_error' => 'Telegram delivery outcome is unknown and requires review.',
             'outcome_metadata' => ['exception' => 'ConnectionException'],
         ], $attributes));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function invalidOperatorMessageIds(): iterable
+    {
+        yield 'zero' => ['0'];
+        yield 'negative' => ['-1'];
+        yield 'fractional' => ['1.5'];
+        yield 'empty' => [''];
+        yield 'non numeric' => ['not-a-message-id'];
     }
 }

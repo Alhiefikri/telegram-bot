@@ -65,7 +65,7 @@
                     <form method="POST" action="{{ route('admin.telegram-outbound-effects.mark-sent', $effect) }}" class="mt-4 grid gap-3 sm:max-w-md">
                         @csrf
                         <label class="text-sm font-bold">Telegram message identifier
-                            <input name="telegram_message_id" inputmode="numeric" pattern="[0-9]+" required maxlength="64" class="mt-1 block w-full rounded border-brand-border">
+                            <input name="telegram_message_id" inputmode="numeric" pattern="0*[1-9][0-9]*" required maxlength="64" class="mt-1 block w-full rounded border-brand-border">
                         </label>
                         <button class="rounded bg-neo-ink px-4 py-2 font-black text-white">Mark as sent, no Telegram request</button>
                     </form>

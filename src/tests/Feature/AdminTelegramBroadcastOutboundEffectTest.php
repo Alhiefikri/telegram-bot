@@ -17,6 +17,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AdminTelegramBroadcastOutboundEffectTest extends TestCase
@@ -58,6 +59,24 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
             ),
             $effects->first()->effect_key,
         );
+    }
+
+    #[DataProvider('invalidTelegramResponses')]
+    public function test_invalid_telegram_responses_never_mark_a_broadcast_recipient_sent(array $response): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
+        Customer::factory()->create(['telegram_id' => 611111112]);
+        $broadcast = $this->broadcast('Invalid response recipient');
+
+        $result = app(TelegramBroadcastService::class)->processAdminBroadcastBatch($broadcast->id, 25);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $recipient = TelegramBroadcastRecipient::query()->sole();
+
+        $this->assertSame(0, $result->sent);
+        $this->assertSame(1, $result->transientFailures);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNull($recipient->sent_at);
     }
 
     public function test_ambiguous_recipient_becomes_unknown_and_later_batches_do_not_resend_it(): void
@@ -224,5 +243,16 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
             'message' => $message,
             'status' => $status,
         ]);
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidTelegramResponses(): iterable
+    {
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

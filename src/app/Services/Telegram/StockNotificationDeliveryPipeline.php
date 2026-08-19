@@ -27,6 +27,7 @@ class StockNotificationDeliveryPipeline
         private TelegramProductNotificationService $notifications,
         private TelegramBotClient $bot,
         private ?TelegramOutboundEffectService $outboundEffects = null,
+        private ?TelegramOutboundResponseValidator $responseValidator = null,
     ) {}
 
     public function materialize(int $movementId): ?StockNotificationEvent
@@ -295,10 +296,7 @@ class StockNotificationDeliveryPipeline
                 (string) $recipient->text,
                 $recipient->reply_markup ?? [],
             );
-            $messageId = data_get($response, 'result.message_id');
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
-                throw new \RuntimeException('Telegram stock notification did not return a successful message ID.');
-            }
+            $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram stock notification');
 
             return $this->outboundEffects()->finalizeSent(
                 (string) $claimed->getKey(),
@@ -374,6 +372,11 @@ class StockNotificationDeliveryPipeline
     private function outboundEffects(): TelegramOutboundEffectService
     {
         return $this->outboundEffects ??= app(TelegramOutboundEffectService::class);
+    }
+
+    private function responseValidator(): TelegramOutboundResponseValidator
+    {
+        return $this->responseValidator ??= app(TelegramOutboundResponseValidator::class);
     }
 
     private function isNotifiable(InventoryMovement $movement): bool

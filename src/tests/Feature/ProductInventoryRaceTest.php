@@ -32,6 +32,7 @@ use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -467,14 +468,15 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertFalse($second['has_more']);
     }
 
-    public function test_stock_notification_success_requires_valid_telegram_message_id(): void
+    #[DataProvider('invalidTelegramResponses')]
+    public function test_stock_notification_rejects_invalid_telegram_responses(array $response): void
     {
         Customer::factory()->create(['telegram_id' => 991005, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
         $admin = User::factory()->create();
         $movementId = app(StockAdjustmentService::class)->adjustWithAvailability($product, 1, 'missing message id', $admin, '127.0.0.1', ['missing-id-secret'])['movement_id'];
 
-        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
 
         $result = app(StockNotificationDeliveryPipeline::class)->deliver($movementId);
         $recipient = StockNotificationRecipient::query()->where('telegram_id', '991005')->sole();
@@ -755,5 +757,16 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             return true;
         });
         $this->assertSame($expected, $count);
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidTelegramResponses(): iterable
+    {
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

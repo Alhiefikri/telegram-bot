@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
-use App\Exceptions\TelegramTransportException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\ForwardManualPaymentProof;
 use App\Jobs\PublishSalesProofPost;
@@ -37,7 +36,6 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\InventoryLedger;
 use App\Storefront\StorefrontUrl;
-use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -198,6 +196,7 @@ class TelegramOutboundEffectService
 
     public function __construct(
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly AuditLogger $auditLogger,
         private readonly TelegramReceiptNotifier $receiptNotifier,
         private readonly TelegramAdminAccess $adminAccess,
@@ -976,6 +975,10 @@ class TelegramOutboundEffectService
 
     public function markSent(TelegramOutboundEffect $effect, string $messageId, ?User $actor = null, ?string $ip = null): bool
     {
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return false;
+        }
+
         return DB::transaction(function () use ($effect, $messageId, $actor, $ip): bool {
             $locked = TelegramOutboundEffect::query()->lockForUpdate()->find($effect->getKey());
             if ($locked === null || ! $this->isReviewable($locked)) {
@@ -1299,11 +1302,7 @@ class TelegramOutboundEffectService
                 ),
                 default => throw new InvalidArgumentException('Unsupported Telegram admin notification effect type.'),
             };
-            $messageId = data_get($response, 'result.message_id');
-
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId) || (int) $messageId <= 0) {
-                throw new TelegramTransportException('sendMessage');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram admin notification');
 
             $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
 
@@ -1393,11 +1392,7 @@ class TelegramOutboundEffectService
                 $payment,
                 (string) $claimed->telegram_chat_id,
             );
-            $messageId = data_get($response, 'result.message_id');
-
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId) || (int) $messageId <= 0) {
-                throw new TelegramTransportException('sendPhoto');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram manual payment proof');
 
             $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
         } catch (Throwable $exception) {
@@ -1481,10 +1476,7 @@ class TelegramOutboundEffectService
                     ]]],
                 ],
             );
-            $messageId = data_get($response, 'result.message_id');
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
-                throw new RuntimeException('Telegram Sales Proof sendMessage did not return a successful message id.');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Sales Proof');
 
             $this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId);
         } catch (Throwable $exception) {
@@ -2250,7 +2242,7 @@ class TelegramOutboundEffectService
                 self::TYPE_ADMIN_PENDING => [
                     'admin_pending_order_notified_at' => $at,
                     'admin_pending_order_notification_chat_id' => $effect->telegram_chat_id,
-                    'admin_pending_order_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
+                    'admin_pending_order_notification_message_id' => $this->responseValidator->isValidMessageId($messageId) ? (int) $messageId : null,
                     'admin_pending_order_notification_deleted_at' => null,
                 ],
                 self::TYPE_ADMIN_PAID => [
@@ -2276,7 +2268,7 @@ class TelegramOutboundEffectService
         $values = [
             'manual_checkout_customer_notified_at' => $at,
             'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,
-            'manual_checkout_customer_notification_message_id' => is_numeric($messageId) ? (int) $messageId : null,
+            'manual_checkout_customer_notification_message_id' => $this->responseValidator->isValidMessageId($messageId) ? (int) $messageId : null,
             'manual_checkout_customer_notification_deleted_at' => null,
             'manual_checkout_customer_notification_deletion_started_at' => null,
             'manual_checkout_customer_notification_deletion_token' => null,

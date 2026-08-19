@@ -22,6 +22,10 @@ use Throwable;
  */
 class TelegramOutboundEffectLedgerProtocol
 {
+    public function __construct(
+        private readonly TelegramOutboundResponseValidator $responseValidator,
+    ) {}
+
     /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
         'checkout_expired',
@@ -162,6 +166,10 @@ class TelegramOutboundEffectLedgerProtocol
 
     public function finalizeSent(string $effectId, string $claimToken, string $messageId): ?TelegramOutboundEffect
     {
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return null;
+        }
+
         return DB::transaction(function () use ($effectId, $claimToken, $messageId): ?TelegramOutboundEffect {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if (! $this->claimMatches($effect, $claimToken)) {
@@ -192,13 +200,17 @@ class TelegramOutboundEffectLedgerProtocol
      * Telegram's API. This uses the same durable transition boundary as a
      * worker finalization, but does not require a claim token.
      *
-     * @param array<string, mixed> $metadata
+     * @param  array<string, mixed>  $metadata
      */
     public function finalizeOperatorSent(
         string $effectId,
         string $messageId,
         array $metadata = [],
     ): ?TelegramOutboundEffect {
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return null;
+        }
+
         return DB::transaction(function () use ($effectId, $messageId, $metadata): ?TelegramOutboundEffect {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if ($effect === null || ! in_array($this->stateValue($effect), [

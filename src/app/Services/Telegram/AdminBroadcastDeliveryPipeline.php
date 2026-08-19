@@ -13,7 +13,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -40,6 +39,7 @@ final class AdminBroadcastDeliveryPipeline
         private readonly TelegramBroadcastRateLimiter $rateLimiter,
         private readonly TelegramLocale $locale,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
     public function deliver(int $broadcastId, int $batchSize = self::BATCH_SIZE): TelegramBroadcastBatchResult
@@ -323,11 +323,7 @@ final class AdminBroadcastDeliveryPipeline
                     $this->adminBroadcastText($broadcast->message, (string) $claimed->locale),
                     $replyMarkup,
                 );
-            $messageId = data_get($response, 'result.message_id');
-
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
-                throw new RuntimeException('Telegram Admin Broadcast response did not return a successful message ID.');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Admin Broadcast');
 
             if (! $this->outboundEffects->finalizeSent(
                 (string) $claimed->getKey(),

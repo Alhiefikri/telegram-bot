@@ -9,6 +9,7 @@ use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -84,6 +85,32 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertSame('operator_marked_sent', $resolved->outcome_metadata['resolution']);
         $this->assertNull($resolved->unknown_at);
         $this->assertNull($resolved->next_attempt_at);
+    }
+
+    #[DataProvider('invalidMessageIds')]
+    public function test_successful_finalization_rejects_invalid_message_ids(mixed $messageId): void
+    {
+        $effect = TelegramOutboundEffect::factory()->create();
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $protocol->claim($effect->id);
+
+        $this->assertNull($protocol->finalizeSent($effect->id, (string) $claimed->claim_token, (string) $messageId));
+        $this->assertSame(TelegramOutboundEffectState::Sending, $effect->fresh()->state);
+        $this->assertNull($effect->fresh()->telegram_message_id);
+    }
+
+    #[DataProvider('invalidMessageIds')]
+    public function test_operator_resolution_rejects_invalid_message_ids(mixed $messageId): void
+    {
+        $effect = TelegramOutboundEffect::factory()->create([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+        ]);
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertNull($protocol->finalizeOperatorSent($effect->id, (string) $messageId));
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertNull($effect->fresh()->telegram_message_id);
     }
 
     public function test_definite_failure_records_retry_schedule_until_terminal(): void
@@ -213,5 +240,15 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $protocol->finalizeSent($first->id, (string) $claimedFirst->claim_token, '100001');
 
         $this->assertSame($second->id, $protocol->claim($second->id)?->id);
+    }
+
+    /** @return iterable<string, array{mixed}> */
+    public static function invalidMessageIds(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+        yield 'fractional' => [1.5];
+        yield 'empty' => [''];
+        yield 'non numeric' => ['not-a-message-id'];
     }
 }

@@ -20,6 +20,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
@@ -149,6 +150,23 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Sent, $current->fresh()->state);
     }
 
+    #[DataProvider('invalidTelegramResponses')]
+    public function test_invalid_telegram_responses_never_mark_a_receipt_chunk_sent(array $response): void
+    {
+        $order = $this->multiChunkPaidOrder();
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordReceipt($order);
+        $this->assertNotNull($effect);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
+
+        $outboundEffects->processReceipt($effect, dispatchNext: false);
+
+        $freshEffect = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $freshEffect->state);
+        $this->assertNull($freshEffect->telegram_message_id);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
     private function multiChunkPaidOrder(): Order
     {
         $customer = Customer::factory()->create(['telegram_id' => 98765, 'locale' => 'id']);
@@ -176,5 +194,16 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
 
         return $order->fresh();
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidTelegramResponses(): iterable
+    {
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

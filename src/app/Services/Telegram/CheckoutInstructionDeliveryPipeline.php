@@ -33,6 +33,7 @@ final class CheckoutInstructionDeliveryPipeline
 
     public function __construct(
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
     public function deliverOrder(
@@ -102,11 +103,10 @@ final class CheckoutInstructionDeliveryPipeline
                 'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
                 'order_correlation_id' => DogfoodTiming::correlation($order->id),
             ], fn () => $this->sendInstructions($claimed, $checkoutIntents, $order, $payment));
-            $messageId = data_get($response, 'result.message_id');
-
-            if (data_get($response, 'ok') !== true || ! $this->validMessageId($messageId)) {
-                throw new RuntimeException('Telegram checkout instruction did not return a successful message ID.');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse(
+                $response,
+                'Telegram checkout instruction',
+            );
 
             if (! $this->outboundEffects->finalizeSent(
                 (string) $claimed->getKey(),
@@ -227,11 +227,5 @@ final class CheckoutInstructionDeliveryPipeline
         if (! in_array($effectType, self::EFFECT_TYPES, true)) {
             throw new RuntimeException('Unsupported Telegram checkout effect type.');
         }
-    }
-
-    private function validMessageId(mixed $messageId): bool
-    {
-        return (is_int($messageId) && $messageId > 0)
-            || (is_string($messageId) && preg_match('/\A0*[1-9]\d*\z/', $messageId) === 1);
     }
 }

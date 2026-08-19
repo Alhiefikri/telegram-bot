@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Models\Customer;
@@ -28,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -90,6 +92,38 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertSame('🛒 Lihat Produk', $msRequest['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
         $this->assertStringNotContainsString('Price Drop', (string) $msRequest['text']);
         $this->assertStringNotContainsString('You save', (string) $msRequest['text']);
+    }
+
+    #[DataProvider('invalidTelegramResponses')]
+    public function test_invalid_telegram_responses_never_mark_a_price_change_recipient_sent(array $response): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
+        Customer::factory()->create(['telegram_id' => 7011, 'locale' => 'id']);
+        $product = Product::factory()->create(['name' => 'Invalid Price Response Product']);
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 35000,
+            'new_price_amount' => 30000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+        ]);
+
+        $result = app(ProductPriceChangeNotificationService::class)->processBatch($event->id);
+        $recipient = ProductPriceChangeNotificationRecipient::query()->where('event_id', $event->id)->sole();
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+
+        $this->assertSame(1, $result->processed);
+        $this->assertSame(1, $result->transientFailures);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNull($recipient->sent_at);
+        $this->assertTrue($result->hasMore);
     }
 
     public function test_committed_decrease_also_publishes_the_english_price_drop_to_the_store_channel_once(): void
@@ -633,5 +667,16 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertCount(1, $matches, "Expected one Telegram send for {$chatId}.");
 
         return $matches->first()[0];
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidTelegramResponses(): iterable
+    {
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

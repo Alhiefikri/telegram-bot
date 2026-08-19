@@ -34,6 +34,7 @@ class ProductPriceChangeNotificationService
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
         private ?TelegramOutboundEffectService $outboundEffects = null,
+        private ?TelegramOutboundResponseValidator $responseValidator = null,
     ) {}
 
     public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
@@ -300,10 +301,7 @@ class ProductPriceChangeNotificationService
                 );
             }
 
-            $messageId = data_get($response, 'result.message_id');
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
-                throw new RuntimeException('Telegram price notification did not return a successful message ID.');
-            }
+            $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram price notification');
 
             return $this->outboundEffects()->finalizeSent(
                 (string) $claimed->getKey(),
@@ -393,6 +391,11 @@ class ProductPriceChangeNotificationService
     private function outboundEffects(): TelegramOutboundEffectService
     {
         return $this->outboundEffects ??= app(TelegramOutboundEffectService::class);
+    }
+
+    private function responseValidator(): TelegramOutboundResponseValidator
+    {
+        return $this->responseValidator ??= app(TelegramOutboundResponseValidator::class);
     }
 
     private function storeChannelTarget(): ?string

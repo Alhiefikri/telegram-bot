@@ -2,7 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use App\Exceptions\TelegramTransportException;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
@@ -18,6 +17,7 @@ final class ReceiptDeliveryPipeline
     public function __construct(
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramReceiptNotifier $notifier,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
     public function deliver(
@@ -59,11 +59,7 @@ final class ReceiptDeliveryPipeline
                 'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
                 'order_correlation_id' => DogfoodTiming::correlation($order->id),
             ], fn () => ($notifier ?? $this->notifier)->sendEffect($order, $claimed));
-            $messageId = data_get($response, 'result.message_id');
-
-            if (! is_numeric($messageId)) {
-                throw new TelegramTransportException('sendMessage');
-            }
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram receipt');
 
             if ($this->outboundEffects->finalizeSent(
                 (string) $claimed->getKey(),

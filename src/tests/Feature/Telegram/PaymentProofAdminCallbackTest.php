@@ -587,7 +587,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
                 return Http::response(['ok' => true, 'result' => ['message_id' => 703]]);
             }
 
-            return Http::response(['ok' => true]);
+            return Http::response(['ok' => true, 'result' => ['message_id' => 704]]);
         });
 
         (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
@@ -1039,6 +1039,31 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('99', $post->telegram_message_id);
         $this->assertNull($post->last_error);
         $this->assertNotNull($post->sent_at);
+    }
+
+    #[DataProvider('invalidSalesProofTelegramResponses')]
+    public function test_invalid_sales_proof_telegram_responses_never_mark_the_post_sent(array $response): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['username' => 'InvalidProofBuyer']);
+        $product = Product::factory()->create(['name' => 'Invalid Proof Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Invalid Proof Product');
+        SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
+
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        $post = SalesProofPost::query()->where('order_id', $order->id)->sole();
+        $effect = TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)->sole();
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $this->assertNull($post->telegram_message_id);
+        $this->assertNull($effect->telegram_message_id);
+        $this->assertNull($post->sent_at);
     }
 
     public function test_sales_proof_post_refuses_unpaid_order_without_sending_public_message(): void
@@ -1505,7 +1530,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
         Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
 
-        $receiptEffects = app(\App\Services\Telegram\TelegramOutboundEffectService::class);
+        $receiptEffects = app(TelegramOutboundEffectService::class);
         $receiptEffect = $receiptEffects->recordReceipt($order);
         $receiptEffects->claim($receiptEffect->id);
 
@@ -1602,5 +1627,16 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         }
 
         return $order;
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidSalesProofTelegramResponses(): iterable
+    {
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

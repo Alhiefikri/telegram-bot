@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramOutboundResponseValidator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -36,12 +37,25 @@ class AdminTelegramOutboundEffectController extends Controller
         ]);
     }
 
-    public function markSent(Request $request, TelegramOutboundEffect $effect, TelegramOutboundEffectService $effects): RedirectResponse
-    {
+    public function markSent(
+        Request $request,
+        TelegramOutboundEffect $effect,
+        TelegramOutboundEffectService $effects,
+        TelegramOutboundResponseValidator $responseValidator,
+    ): RedirectResponse {
         Gate::authorize('markSent', $effect);
 
         $data = $request->validate([
-            'telegram_message_id' => ['required', 'string', 'max:64', 'regex:/^[0-9]+$/'],
+            'telegram_message_id' => [
+                'required',
+                'string',
+                'max:64',
+                function (string $attribute, mixed $value, \Closure $fail) use ($responseValidator): void {
+                    if (! $responseValidator->isValidMessageId($value)) {
+                        $fail($attribute.' must be a positive integer Telegram message ID.');
+                    }
+                },
+            ],
         ]);
 
         /** @var User $actor */
