@@ -12,10 +12,13 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -91,12 +94,17 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
 
-        $outboundEffects->processReceipt($first, dispatchNext: false);
-        $second = $outboundEffects->nextReceiptEffect($first->fresh());
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $pipeline->deliver($first, dispatchNext: false);
+        $second = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', '>', $first->sequence)
+            ->orderBy('sequence')
+            ->first();
 
         $this->assertNotNull($second);
-        $outboundEffects->processReceipt($second, dispatchNext: false);
-        $outboundEffects->processReceipt($second, dispatchNext: false);
+        $pipeline->deliver($second, dispatchNext: false);
+        $pipeline->deliver($second, dispatchNext: false);
 
         $this->assertSame(2, $sendCount);
         $this->assertSame(TelegramOutboundEffectState::Sent, $first->fresh()->state);
@@ -122,8 +130,13 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             ]),
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
-        $outboundEffects->processReceipt($first, dispatchNext: false);
-        $current = $outboundEffects->nextReceiptEffect($first->fresh());
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $pipeline->deliver($first, dispatchNext: false);
+        $current = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', '>', $first->sequence)
+            ->orderBy('sequence')
+            ->first();
         $this->assertNotNull($current);
 
         while (true) {
@@ -132,7 +145,12 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
                 'sent_at' => now(),
             ])->save();
 
-            $next = $outboundEffects->nextReceiptEffect($current->fresh());
+            $next = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $current->effect_group_key)
+                ->where('sequence', '>', $current->sequence)
+                ->whereIn('state', [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed])
+                ->orderBy('sequence')
+                ->first();
             if ($next === null) {
                 break;
             }
@@ -145,7 +163,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             'unknown_at' => now(),
         ])->save();
 
-        $this->assertTrue($outboundEffects->markSent($current, '900002'));
+        $this->assertTrue(app(TelegramOutboundEffectReviewService::class)->markSent($current, '900002'));
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertSame(TelegramOutboundEffectState::Sent, $current->fresh()->state);
     }
@@ -159,7 +177,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNotNull($effect);
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
 
-        $outboundEffects->processReceipt($effect, dispatchNext: false);
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
 
         $freshEffect = $effect->fresh();
         $this->assertSame(TelegramOutboundEffectState::Failed, $freshEffect->state);

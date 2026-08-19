@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
@@ -25,15 +26,16 @@ class ProductPriceChangeNotificationService
 
     public const BATCH_SIZE = 25;
 
-    public const MAX_RECIPIENT_ATTEMPTS = 5;
+    public const MAX_RECIPIENT_ATTEMPTS = TelegramOutboundEffectPolicy::PRICE_CHANGE_MAX_ATTEMPTS;
 
-    public const MAX_STORE_CHANNEL_ATTEMPTS = 1;
+    public const MAX_STORE_CHANNEL_ATTEMPTS = TelegramOutboundEffectPolicy::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS;
 
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
         private ?TelegramOutboundEffectService $outboundEffects = null,
+        private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
     ) {}
 
@@ -102,10 +104,10 @@ class ProductPriceChangeNotificationService
 
     private function sendStoreChannelEffect(ProductPriceChangeEvent $event): string
     {
-        $effect = $this->outboundEffects()->readyToDispatchQuery()
+        $effect = $this->ledger()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $event->getKey())
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+            ->where('effect_type', TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->first();
         if ($effect === null) {
             return 'skipped';
@@ -258,9 +260,9 @@ class ProductPriceChangeNotificationService
 
     private function dueRecipientEffects(int $eventId, int $batchSize)
     {
-        return $this->outboundEffects()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->where('effect_type', TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -276,7 +278,7 @@ class ProductPriceChangeNotificationService
 
     private function sendEffect(ProductPriceChangeEvent $event, TelegramOutboundEffect $effect, bool $storeChannel): string
     {
-        $claimed = $this->outboundEffects()->claim((string) $effect->getKey());
+        $claimed = $this->ledger()->claim((string) $effect->getKey());
         if ($claimed === null) {
             return 'skipped';
         }
@@ -303,35 +305,46 @@ class ProductPriceChangeNotificationService
 
             $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram price notification');
 
-            return $this->outboundEffects()->finalizeSent(
+            $finalized = $this->ledger()->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 (string) $messageId,
-            ) ? 'sent' : 'skipped';
+            );
+            if ($finalized === null) {
+                return 'skipped';
+            }
+
+            $this->synchronizeSentProjection($finalized, (string) $messageId);
+
+            return 'sent';
         } catch (Throwable $exception) {
-            if ($this->isPriceNotificationAmbiguous($exception)) {
-                $finalized = $this->outboundEffects()->finalizeUnknown(
+            if ($this->ledger()->isAmbiguous($exception)) {
+                $finalized = $this->ledger()->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                if ($finalized !== null) {
+                    $this->synchronizeUnknownProjection($finalized);
+                }
                 $this->logEffectFailure($event, $claimed, $exception, 'unknown');
 
                 return $finalized ? 'unknown' : 'skipped';
             }
 
-            $finalized = $this->outboundEffects()->finalizeFailed(
+            $finalized = $this->ledger()->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
-                self::RETRY_DELAY_SECONDS,
             );
             if (! $finalized) {
                 return 'skipped';
             }
 
+            $this->synchronizeFailedProjection($finalized, $exception);
+
             $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
-            $terminal = $fresh !== null && $this->outboundEffects()->isTerminalFailure($fresh);
+            $terminal = $fresh !== null && $this->ledger()->isTerminalFailure($fresh);
             $this->logEffectFailure($event, $claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
 
             return $terminal ? 'terminal_failure' : 'transient_failure';
@@ -340,9 +353,9 @@ class ProductPriceChangeNotificationService
 
     private function hasPendingEffects(int $eventId): bool
     {
-        $recipientPending = $this->outboundEffects()->readyToDispatchQuery()
+        $recipientPending = $this->ledger()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->where('effect_type', TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -351,21 +364,11 @@ class ProductPriceChangeNotificationService
             return true;
         }
 
-        return $this->outboundEffects()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $eventId)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
+            ->where('effect_type', TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->exists();
-    }
-
-    private function isPriceNotificationAmbiguous(Throwable $exception): bool
-    {
-        if ($exception instanceof RequestException
-            && in_array($exception->response?->status(), [400, 403, 429], true)) {
-            return false;
-        }
-
-        return $this->outboundEffects()->isAmbiguous($exception);
     }
 
     private function logEffectFailure(
@@ -391,6 +394,107 @@ class ProductPriceChangeNotificationService
     private function outboundEffects(): TelegramOutboundEffectService
     {
         return $this->outboundEffects ??= app(TelegramOutboundEffectService::class);
+    }
+
+    private function ledger(): TelegramOutboundEffectLedgerProtocol
+    {
+        return $this->ledger ??= app(TelegramOutboundEffectLedgerProtocol::class);
+    }
+
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect, string $messageId): void
+    {
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeNotificationRecipient->value) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'sent_at' => $effect->sent_at ?? now(),
+                    'failed_at' => null,
+                    'last_error' => null,
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeStoreChannel->value) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->update([
+                    'store_channel_sent_at' => $effect->sent_at ?? now(),
+                    'store_channel_failed_at' => null,
+                    'store_channel_last_error' => null,
+                    'store_channel_message_id' => $messageId,
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
+    private function synchronizeFailedProjection(TelegramOutboundEffect $effect, Throwable $exception): void
+    {
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeNotificationRecipient->value) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'failed_at' => $effect->failed_at ?? now(),
+                    'last_error' => $this->projectionError($exception),
+                    'attempts' => in_array($effect->last_error_code, ['telegram_http_400', 'telegram_http_403'], true)
+                        ? self::MAX_RECIPIENT_ATTEMPTS
+                        : (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeStoreChannel->value) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('store_channel_sent_at')
+                ->update([
+                    'store_channel_failed_at' => $effect->failed_at ?? now(),
+                    'store_channel_last_error' => $this->projectionError($exception),
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
+    private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
+    {
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeNotificationRecipient->value) {
+            ProductPriceChangeNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('sent_at')
+                ->update([
+                    'attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+
+            return;
+        }
+
+        if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeStoreChannel->value) {
+            ProductPriceChangeEvent::query()
+                ->whereKey($effect->source_id)
+                ->whereNull('store_channel_sent_at')
+                ->update([
+                    'store_channel_attempts' => (int) $effect->attempts,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
+    private function projectionError(Throwable $exception): string
+    {
+        return mb_substr(
+            TelegramBotApiRedactor::redactText($exception::class.': '.$exception->getMessage()),
+            0,
+            2000,
+        );
     }
 
     private function responseValidator(): TelegramOutboundResponseValidator

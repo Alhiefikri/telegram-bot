@@ -33,6 +33,8 @@ use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
+use App\Services\Telegram\TelegramOutboundEffectRecovery;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Carbon\Carbon;
@@ -1186,7 +1188,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $post = SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
         $effects = app(TelegramOutboundEffectService::class);
         $effect = $effects->recordSalesProofPost($order, $post);
-        $claimed = $effects->claim((string) $effect?->getKey());
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect?->getKey());
 
         $this->assertNotNull($claimed);
         $oldToken = (string) $claimed?->claim_token;
@@ -1195,8 +1198,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'lease_until' => now()->subSecond(),
         ])->save();
 
-        $this->assertFalse($effects->finalizeSent($effect->id, $oldToken, '700001'));
-        $this->assertSame(1, $effects->recoverExpiredLeases(now()));
+        $this->assertNull($ledger->finalizeSent($effect->id, $oldToken, '700001'));
+        $this->assertSame(1, app(TelegramOutboundEffectRecovery::class)->recoverExpiredLeases(now()));
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         $this->assertSame(SalesProofPost::STATUS_UNKNOWN, $post->fresh()->status);
     }
@@ -1532,7 +1535,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $receiptEffects = app(TelegramOutboundEffectService::class);
         $receiptEffect = $receiptEffects->recordReceipt($order);
-        $receiptEffects->claim($receiptEffect->id);
+        app(TelegramOutboundEffectLedgerProtocol::class)->claim($receiptEffect->id);
 
         app(TelegramReceiptNotifier::class)->send($order);
 

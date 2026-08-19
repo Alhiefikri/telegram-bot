@@ -5,8 +5,8 @@ namespace App\Console\Commands;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
-use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendProductPriceChangeNotifications;
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
@@ -14,7 +14,9 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
+use App\Services\Telegram\TelegramOutboundEffectRecovery;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
@@ -31,7 +33,8 @@ class RecoverTelegramOutboundEffects extends Command
         $dispatched = 0;
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
-        $staleLeases = $outboundEffects->recoverExpiredLeases(now());
+        $dispatcher = app(TelegramOutboundEffectDispatcher::class);
+        $staleLeases = app(TelegramOutboundEffectRecovery::class)->recoverExpiredLeases(now());
 
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
@@ -50,9 +53,9 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
             ])
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $outboundEffects): void {
+            ->chunkById((int) $this->option('chunk'), function ($effects) use (&$dispatched, $dispatcher): void {
                 foreach ($effects as $effect) {
-                    $outboundEffects->dispatch($effect, now()->toISOString());
+                    $dispatcher->dispatch($effect, now()->toISOString());
                     $dispatched++;
                 }
             });
@@ -76,7 +79,7 @@ class RecoverTelegramOutboundEffects extends Command
             })
             ->with('order')
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($posts) use (&$dispatched, $outboundEffects): void {
+            ->chunkById((int) $this->option('chunk'), function ($posts) use (&$dispatched, $outboundEffects, $dispatcher): void {
                 foreach ($posts as $post) {
                     if ($post->order === null) {
                         continue;
@@ -89,7 +92,7 @@ class RecoverTelegramOutboundEffects extends Command
                             TelegramOutboundEffectState::Failed,
                         ], true)
                         && ($effect->next_attempt_at === null || $effect->next_attempt_at->lte(now()))) {
-                        $outboundEffects->dispatch($effect, now()->toISOString());
+                        $dispatcher->dispatch($effect, now()->toISOString());
                         $dispatched++;
                     }
                 }
@@ -124,7 +127,7 @@ class RecoverTelegramOutboundEffects extends Command
                     });
             })
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $outboundEffects): void {
+            ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched, $outboundEffects, $dispatcher): void {
                 foreach ($orders as $order) {
                     $payment = $order->payments->first(
                         fn ($candidate): bool => TelegramOutboundEffectService::typeForPayment($candidate) !== null,
@@ -136,7 +139,7 @@ class RecoverTelegramOutboundEffects extends Command
                         if ($checkoutType !== null && $outboundEffects->forOrder($order->id, $checkoutType) === null) {
                             $effect = $outboundEffects->recordCheckoutInstructions($order, $payment, $order->customer);
                             if ($effect !== null) {
-                                $outboundEffects->dispatch($effect, now()->toISOString());
+                                $dispatcher->dispatch($effect, now()->toISOString());
                                 $dispatched++;
                             }
                         }
@@ -147,7 +150,7 @@ class RecoverTelegramOutboundEffects extends Command
                         && $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
                         $effect = $outboundEffects->recordReceipt($order, $order->customer);
                         if ($effect !== null) {
-                            $outboundEffects->dispatch($effect, now()->toISOString());
+                            $dispatcher->dispatch($effect, now()->toISOString());
                             $dispatched++;
                         }
                     }
@@ -166,7 +169,7 @@ class RecoverTelegramOutboundEffects extends Command
                             default => null,
                         };
                         if ($effect !== null) {
-                            $outboundEffects->dispatch($effect, now()->toISOString());
+                            $dispatcher->dispatch($effect, now()->toISOString());
                             $dispatched++;
                         }
                     }

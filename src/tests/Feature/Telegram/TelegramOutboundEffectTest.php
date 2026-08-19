@@ -12,6 +12,7 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
@@ -108,7 +109,7 @@ class TelegramOutboundEffectTest extends TelegramBotTestSupport
     public function test_old_claim_token_cannot_finalize_a_reclaimed_effect_and_expired_lease_becomes_unknown(): void
     {
         $order = $this->manualTelegramOrder();
-        $effects = app(TelegramOutboundEffectService::class);
+        $effects = app(TelegramOutboundEffectLedgerProtocol::class);
         $effect = TelegramOutboundEffect::query()->sole();
         $claimed = $effects->claim($effect->id);
 
@@ -119,7 +120,7 @@ class TelegramOutboundEffectTest extends TelegramBotTestSupport
             'lease_until' => now()->addMinute(),
         ])->save();
 
-        $this->assertFalse($effects->finalizeSent($effect->id, $oldToken, '100001'));
+        $this->assertNull($effects->finalizeSent($effect->id, $oldToken, '100001'));
         $this->assertSame(TelegramOutboundEffectState::Sending, $effect->fresh()->state);
 
         $effect->fresh()->forceFill(['lease_until' => now()->subSecond()])->save();

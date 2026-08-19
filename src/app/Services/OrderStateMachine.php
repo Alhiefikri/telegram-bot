@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
@@ -24,6 +25,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly ?ProductCredentialAllocator $credentials = null,
         private readonly ?ProviderCancellationAttempts $providerCancellationAttempts = null,
         private readonly ?TelegramOutboundEffectService $outboundEffects = null,
+        private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -289,7 +291,7 @@ class OrderStateMachine implements OrderLifecycle
             $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
             $effect = $outboundEffects->recordSalesProofPost($order, $salesProofPost);
             if ($effect !== null) {
-                $outboundEffects->dispatch($effect);
+                ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
             }
         }
 
@@ -478,7 +480,7 @@ class OrderStateMachine implements OrderLifecycle
         $effect = $outboundEffects->recordAdminOrderPaidNotification($order);
 
         if ($effect !== null) {
-            $outboundEffects->dispatch($effect);
+            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
 
             return;
         }
@@ -494,7 +496,7 @@ class OrderStateMachine implements OrderLifecycle
         $effect = $outboundEffects->recordAdminOrderExpiredNotification($order);
 
         if ($effect !== null) {
-            $outboundEffects->dispatch($effect);
+            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
 
             return;
         }
@@ -510,7 +512,7 @@ class OrderStateMachine implements OrderLifecycle
         $effect = $outboundEffects->recordReceipt($order);
 
         if ($effect !== null) {
-            $outboundEffects->dispatch($effect);
+            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
         }
     }
 }

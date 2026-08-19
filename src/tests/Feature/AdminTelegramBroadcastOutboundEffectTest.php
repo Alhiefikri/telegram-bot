@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Services\Telegram\AdminBroadcastDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
+use App\Services\Telegram\TelegramOutboundEffectRecovery;
+use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -175,7 +177,7 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
         $claimed = app(TelegramOutboundEffectLedgerProtocol::class)->claim((string) $effect->getKey());
         $effect->fresh()->forceFill(['lease_until' => now()->subSecond()])->save();
 
-        app(TelegramOutboundEffectService::class)->recoverExpiredLeases();
+        app(TelegramOutboundEffectRecovery::class)->recoverExpiredLeases();
 
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         $this->assertSame(1, $recipient->fresh()->attempts);
@@ -199,7 +201,7 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
         $effect = TelegramOutboundEffect::query()->sole();
         $owner = User::factory()->create();
 
-        $this->assertTrue(app(TelegramOutboundEffectService::class)->markSent($effect, '905', $owner));
+        $this->assertTrue(app(TelegramOutboundEffectReviewService::class)->markSent($effect, '905', $owner));
 
         $this->assertSame(1, $calls);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);

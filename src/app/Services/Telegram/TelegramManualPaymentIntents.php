@@ -27,6 +27,7 @@ class TelegramManualPaymentIntents
         private TelegramSupportContact $supportContact,
         private BinancePaymentVerification $verification,
         private TelegramOutboundEffectService $outboundEffects,
+        private TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -212,7 +213,7 @@ class TelegramManualPaymentIntents
             return false;
         }
 
-        $this->outboundEffects->dispatch($effect);
+        $this->dispatcher->dispatch($effect);
 
         return $effect->fresh()?->state === TelegramOutboundEffectState::Sent;
     }

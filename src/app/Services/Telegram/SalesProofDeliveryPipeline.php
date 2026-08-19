@@ -1,0 +1,201 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectType;
+use App\Models\Order;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
+use App\Services\InventoryLedger;
+use App\Storefront\StorefrontUrl;
+use InvalidArgumentException;
+use Throwable;
+
+/**
+ * Adapter for the public Store Channel Sales Proof delivery. The Sales Proof
+ * row is a read projection; only the ledger protocol owns delivery state.
+ */
+final class SalesProofDeliveryPipeline
+{
+    public function __construct(
+        private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
+        private readonly TelegramBotClient $bot,
+        private readonly SalesProofPostFormatter $formatter,
+        private readonly SalesProofPostNumbering $numbering,
+        private readonly InventoryLedger $inventory,
+        private readonly StorefrontUrl $urls,
+    ) {}
+
+    public function deliver(TelegramOutboundEffect $effect): void
+    {
+        if ($effect->effect_type !== TelegramOutboundEffectType::SalesProofPost->value) {
+            throw new InvalidArgumentException('Unsupported Telegram Sales Proof effect type.');
+        }
+
+        $claimed = $this->ledger->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            return;
+        }
+
+        try {
+            $order = Order::query()
+                ->with(['customer', 'orderItems', 'salesProofPost', 'payments'])
+                ->findOrFail($claimed->source_id);
+            $setting = StoreChannelSetting::current();
+            $chatId = trim((string) ($setting->telegram_chat_id ?: $setting->channel_username));
+
+            if (! $setting->sales_proof_enabled) {
+                $this->finalizeNotDeliverable($claimed, 'proof_disabled', 'Sales Proof Post is disabled.');
+
+                return;
+            }
+
+            if ($chatId === '') {
+                $this->finalizeNotDeliverable($claimed, 'proof_target_missing', 'Store Channel chat is not configured.');
+
+                return;
+            }
+
+            $invariantFailure = $this->paidOrderProofInvariantFailure($order);
+            if ($invariantFailure !== null) {
+                $this->finalizeNotDeliverable($claimed, 'proof_not_eligible', $invariantFailure);
+
+                return;
+            }
+
+            $postNumber = $this->numbering->reserveNextNumber();
+            $response = $this->bot->sendMessage(
+                (string) $claimed->telegram_chat_id,
+                $this->formatter->format($order, $postNumber),
+                [
+                    'inline_keyboard' => [[[
+                        'text' => '🛒 Shop Now',
+                        'url' => $this->salesProofShoppingButtonUrl($order),
+                    ]]],
+                ],
+            );
+            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Sales Proof');
+            $finalized = $this->ledger->finalizeSent(
+                (string) $claimed->getKey(),
+                (string) $claimed->claim_token,
+                $messageId,
+            );
+
+            if ($finalized !== null) {
+                $this->synchronizeSentProjection($finalized);
+            }
+        } catch (Throwable $exception) {
+            if ($this->ledger->isAmbiguous($exception)) {
+                $finalized = $this->ledger->finalizeUnknown(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    $exception,
+                );
+                if ($finalized !== null) {
+                    $this->synchronizeUnknownProjection($finalized);
+                }
+
+                return;
+            }
+
+            $finalized = $this->ledger->finalizeFailed(
+                (string) $claimed->getKey(),
+                (string) $claimed->claim_token,
+                $exception,
+            );
+            if ($finalized !== null) {
+                $this->synchronizeFailedProjection($finalized);
+            }
+        }
+    }
+
+    public function synchronizeRecoveredUnknown(TelegramOutboundEffect $effect): void
+    {
+        if ($effect->effect_type === TelegramOutboundEffectType::SalesProofPost->value) {
+            $this->synchronizeUnknownProjection($effect);
+        }
+    }
+
+    private function paidOrderProofInvariantFailure(Order $order): ?string
+    {
+        $isPaid = $order->payment_status === PaymentStatus::Paid
+            && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Paid);
+        $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
+        if (! $isPaid || ! $isProcessable) {
+            return 'Sales Proof Post requires a paid processable order.';
+        }
+
+        return $this->inventory->hasSaleProofForOrder($order)
+            ? null
+            : 'Sales Proof Post requires matching inventory sale proof.';
+    }
+
+    private function salesProofShoppingButtonUrl(Order $order): string
+    {
+        $productId = $order->orderItems->first()?->product_id;
+
+        return $productId
+            ? $this->urls->telegramProductStartUrlForId((int) $productId)
+            : (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+    }
+
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
+    {
+        SalesProofPost::query()
+            ->where('order_id', $effect->source_id)
+            ->update([
+                'status' => SalesProofPost::STATUS_SENT,
+                'attempts' => (int) $effect->attempts,
+                'telegram_message_id' => $effect->telegram_message_id,
+                'sent_at' => $effect->sent_at ?? now(),
+                'last_error' => null,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
+    {
+        SalesProofPost::query()
+            ->where('order_id', $effect->source_id)
+            ->update([
+                'status' => SalesProofPost::STATUS_UNKNOWN,
+                'attempts' => (int) $effect->attempts,
+                'last_error' => mb_substr($effect->last_error ?: 'Sales Proof delivery outcome is unknown and requires review.', 0, 1000),
+                'updated_at' => $effect->unknown_at ?? now(),
+            ]);
+    }
+
+    private function synchronizeFailedProjection(TelegramOutboundEffect $effect): void
+    {
+        SalesProofPost::query()
+            ->where('order_id', $effect->source_id)
+            ->whereNotIn('status', [
+                SalesProofPost::STATUS_SENT,
+                SalesProofPost::STATUS_UNKNOWN,
+                SalesProofPost::STATUS_MANUAL_REVIEW,
+            ])
+            ->update([
+                'status' => SalesProofPost::STATUS_FAILED,
+                'attempts' => (int) $effect->attempts,
+                'last_error' => mb_substr($effect->last_error ?: 'Sales Proof delivery failed before completion.', 0, 1000),
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function finalizeNotDeliverable(TelegramOutboundEffect $effect, string $reason, string $message): void
+    {
+        $finalized = $this->ledger->finalizeNotDeliverable(
+            (string) $effect->getKey(),
+            (string) $effect->claim_token,
+            $reason,
+            $message,
+        );
+        if ($finalized !== null) {
+            $this->synchronizeFailedProjection($finalized);
+        }
+    }
+}

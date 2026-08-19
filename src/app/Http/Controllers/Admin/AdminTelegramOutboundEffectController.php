@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramOutboundResponseValidator;
 use Illuminate\Http\RedirectResponse;
@@ -40,7 +42,7 @@ class AdminTelegramOutboundEffectController extends Controller
     public function markSent(
         Request $request,
         TelegramOutboundEffect $effect,
-        TelegramOutboundEffectService $effects,
+        TelegramOutboundEffectReviewService $review,
         TelegramOutboundResponseValidator $responseValidator,
     ): RedirectResponse {
         Gate::authorize('markSent', $effect);
@@ -60,7 +62,7 @@ class AdminTelegramOutboundEffectController extends Controller
 
         /** @var User $actor */
         $actor = $request->attributes->get('adminUser');
-        $marked = $effects->markSent($effect, (string) $data['telegram_message_id'], $actor, $request->ip());
+        $marked = $review->markSent($effect, (string) $data['telegram_message_id'], $actor, $request->ip());
 
         if (! $marked) {
             return back()->withErrors(['effect' => 'Effect sudah tidak berada dalam antrean review.']);
@@ -71,8 +73,12 @@ class AdminTelegramOutboundEffectController extends Controller
             ->with('status', 'Effect ditandai sent tanpa mengirim request Telegram.');
     }
 
-    public function resend(Request $request, TelegramOutboundEffect $effect, TelegramOutboundEffectService $effects): RedirectResponse
-    {
+    public function resend(
+        Request $request,
+        TelegramOutboundEffect $effect,
+        TelegramOutboundEffectService $effects,
+        TelegramOutboundEffectDispatcher $dispatcher,
+    ): RedirectResponse {
         Gate::authorize('resend', $effect);
 
         $request->validate([
@@ -88,7 +94,7 @@ class AdminTelegramOutboundEffectController extends Controller
             return back()->withErrors(['effect' => $exception->getMessage()]);
         }
 
-        $effects->dispatchExplicitResend($resend);
+        $dispatcher->dispatchExplicitResend($resend);
 
         return redirect()
             ->route('admin.telegram-outbound-effects.show', $resend)

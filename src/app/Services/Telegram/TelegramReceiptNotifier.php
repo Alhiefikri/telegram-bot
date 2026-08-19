@@ -22,7 +22,7 @@ class TelegramReceiptNotifier
 
     /**
      * Compatibility entry point for callers that still invoke the notifier
-     * directly. New queued delivery is owned by TelegramOutboundEffectService.
+     * directly. New queued delivery is owned by ReceiptDeliveryPipeline.
      */
     public function send(Order $order, bool $force = false): void
     {
@@ -35,14 +35,16 @@ class TelegramReceiptNotifier
             ? $outboundEffects->recordReceiptResend($order)
             : $outboundEffects->recordReceipt($order);
 
+        $pipeline = app(ReceiptDeliveryPipeline::class);
         while ($effect !== null) {
-            $outboundEffects->processReceipt(
-                $effect,
-                $this,
-                dispatchNext: false,
-                throwOnAmbiguous: true,
-            );
-            $effect = $outboundEffects->nextReceiptEffect($effect);
+            $pipeline->deliver($effect, $this, dispatchNext: false, throwOnAmbiguous: true);
+            $effect = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $effect->effect_group_key)
+                ->where('sequence', '>', $effect->sequence)
+                ->whereIn('state', ['pending', 'failed'])
+                ->orderBy('sequence')
+                ->get()
+                ->first(fn (TelegramOutboundEffect $candidate): bool => app(TelegramOutboundEffectLedgerProtocol::class)->isDispatchable($candidate));
         }
     }
 
@@ -105,7 +107,7 @@ class TelegramReceiptNotifier
 
     /**
      * Send exactly one ordered delivery unit. Claiming and finalization stay
-     * in TelegramOutboundEffectService so a transport ambiguity is recorded
+     * in TelegramOutboundEffectLedgerProtocol so a transport ambiguity is recorded
      * against this unit only.
      *
      * @return array<string, mixed>

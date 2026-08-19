@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\OrderLifecycle;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use InvalidArgumentException;
 
@@ -18,6 +19,7 @@ class AdminOrderOperations
         private readonly AuditLogger $audit,
         private readonly OrderLifecycle $orders,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
     public function canCompleteManualOrder(Order $order): bool
@@ -108,7 +110,7 @@ class AdminOrderOperations
         }
 
         $effect = $this->outboundEffects->recordReceiptResend($order);
-        $this->outboundEffects->dispatchExplicitResend($effect);
+        $this->dispatcher->dispatchExplicitResend($effect);
 
         $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
     }

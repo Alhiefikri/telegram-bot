@@ -27,13 +27,13 @@ class TelegramAdminPaidOrderNotifier
         $effect = $effects->recordAdminOrderPaidNotification($order);
 
         if ($effect !== null) {
-            $effects->processAdminOrderNotification($effect);
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         }
     }
 
     /**
      * Send a paid notification for a claimed Telegram Outbound Effect.
-     * Claiming and finalization remain owned by TelegramOutboundEffectService.
+     * Claiming and finalization remain owned by TelegramOutboundEffectLedgerProtocol.
      *
      * @return array<string, mixed>
      */
@@ -227,5 +227,4 @@ class TelegramAdminPaidOrderNotifier
             ? $message
             : mb_substr($message, 0, 3890).'...';
     }
-
 }

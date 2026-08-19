@@ -10,13 +10,14 @@ use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
+use Carbon\CarbonInterface;
 use RuntimeException;
 use Throwable;
 
 /**
- * Checkout is an effect-family adapter. The shared outbound-effect service
- * remains the ledger/projection facade while this module owns checkout source
- * loading, eligibility, provider selection, rendering, and cleanup policy.
+ * Checkout is an effect-family adapter. The materializer supplies the durable
+ * effect row; this module owns checkout source loading, eligibility, provider
+ * selection, rendering, and projection synchronization.
  *
  * Claim ownership, leases, ambiguity classification, and token-checked state
  * transitions are deliberately delegated to the shared ledger protocol seam.
@@ -33,6 +34,7 @@ final class CheckoutInstructionDeliveryPipeline
 
     public function __construct(
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
@@ -66,7 +68,7 @@ final class CheckoutInstructionDeliveryPipeline
     {
         $this->assertCheckoutEffectType((string) $effect->effect_type);
 
-        $claimed = $this->outboundEffects->claim((string) $effect->getKey());
+        $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
             return;
         }
@@ -75,7 +77,7 @@ final class CheckoutInstructionDeliveryPipeline
             $order = Order::query()->with(['customer', 'orderItems'])->findOrFail($claimed->source_id);
             if ($order->order_status !== OrderStatus::PendingPayment
                 || ($order->expires_at !== null && $order->expires_at->lte(now()))) {
-                $this->outboundEffects->finalizeNotDeliverable(
+                $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $order->expires_at !== null && $order->expires_at->lte(now())
@@ -88,7 +90,7 @@ final class CheckoutInstructionDeliveryPipeline
 
             $payment = $this->paymentForEffect($order, $claimed);
             if ($payment === null || $payment->status !== PaymentStatus::Pending) {
-                $this->outboundEffects->finalizeNotDeliverable(
+                $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $payment === null ? 'checkout_payment_missing' : 'checkout_payment_not_pending',
@@ -108,13 +110,16 @@ final class CheckoutInstructionDeliveryPipeline
                 'Telegram checkout instruction',
             );
 
-            if (! $this->outboundEffects->finalizeSent(
+            $finalized = $this->ledger->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 (string) $messageId,
-            )) {
+            );
+            if ($finalized === null) {
                 return;
             }
+
+            $this->synchronizeSentProjection($finalized, $messageId, $finalized->sent_at ?? now());
 
             if ($claimed->effect_type === TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT) {
                 $terminalOrder = $order->fresh(['payments']);
@@ -124,8 +129,8 @@ final class CheckoutInstructionDeliveryPipeline
                 }
             }
         } catch (Throwable $exception) {
-            if ($this->outboundEffects->isAmbiguous($exception)) {
-                $this->outboundEffects->finalizeUnknown(
+            if ($this->ledger->isAmbiguous($exception)) {
+                $this->ledger->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
@@ -134,7 +139,7 @@ final class CheckoutInstructionDeliveryPipeline
                 return;
             }
 
-            if ($this->outboundEffects->finalizeFailed(
+            if ($this->ledger->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
@@ -227,5 +232,27 @@ final class CheckoutInstructionDeliveryPipeline
         if (! in_array($effectType, self::EFFECT_TYPES, true)) {
             throw new RuntimeException('Unsupported Telegram checkout effect type.');
         }
+    }
+
+    private function synchronizeSentProjection(
+        TelegramOutboundEffect $effect,
+        string $messageId,
+        CarbonInterface $at,
+    ): void {
+        if (! in_array($effect->effect_type, self::EFFECT_TYPES, true)) {
+            return;
+        }
+
+        Order::query()
+            ->whereKey($effect->source_id)
+            ->update([
+                'manual_checkout_customer_notified_at' => $at,
+                'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,
+                'manual_checkout_customer_notification_message_id' => $this->responseValidator->isValidMessageId($messageId) ? (int) $messageId : null,
+                'manual_checkout_customer_notification_deleted_at' => null,
+                'manual_checkout_customer_notification_deletion_started_at' => null,
+                'manual_checkout_customer_notification_deletion_token' => null,
+                'updated_at' => now(),
+            ]);
     }
 }

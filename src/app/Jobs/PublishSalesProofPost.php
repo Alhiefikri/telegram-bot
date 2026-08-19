@@ -4,10 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
-use App\Services\InventoryLedger;
-use App\Services\Telegram\SalesProofPostFormatter;
-use App\Services\Telegram\SalesProofPostNumbering;
-use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\SalesProofDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
@@ -43,11 +40,8 @@ class PublishSalesProofPost implements ShouldBeUnique, ShouldQueue
     }
 
     public function handle(
-        TelegramBotClient $bot,
-        SalesProofPostFormatter $formatter,
-        SalesProofPostNumbering $numbering,
-        InventoryLedger $inventory,
         TelegramOutboundEffectService $outboundEffects,
+        SalesProofDeliveryPipeline $pipeline,
     ): void {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -71,7 +65,7 @@ class PublishSalesProofPost implements ShouldBeUnique, ShouldQueue
                     ->firstOrFail();
 
             if ($effect !== null) {
-                $outboundEffects->processSalesProofPost($effect, $bot, $formatter, $numbering, $inventory);
+                $pipeline->deliver($effect);
             }
         } finally {
             DogfoodTiming::log('dogfood.telegram.sales_proof_job_finished', DogfoodTiming::queryStats() + [

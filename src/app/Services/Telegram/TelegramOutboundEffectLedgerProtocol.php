@@ -24,105 +24,13 @@ class TelegramOutboundEffectLedgerProtocol
 {
     public function __construct(
         private readonly TelegramOutboundResponseValidator $responseValidator,
+        private readonly TelegramOutboundEffectPolicy $policy,
     ) {}
-
-    /** @var list<string> */
-    private const NON_RETRYABLE_FAILURE_CODES = [
-        'checkout_expired',
-        'checkout_not_pending',
-        'checkout_payment_missing',
-        'checkout_payment_not_pending',
-        'receipt_not_eligible',
-        'receipt_render_changed',
-        'admin_notification_not_eligible',
-        'admin_target_missing',
-        'proof_not_eligible',
-        'proof_attachment_missing',
-        'proof_already_forwarded',
-        'proof_disabled',
-        'proof_target_missing',
-        'telegram_http_400',
-        'telegram_http_403',
-        'broadcast_recipient_attempts_exhausted',
-        'broadcast_recipient_terminal_failure',
-        'stock_notification_recipient_missing',
-        'stock_notification_attempts_exhausted',
-        'stock_notification_terminal_failure',
-        'price_change_recipient_missing',
-        'price_change_event_missing',
-        'price_change_recipient_attempts_exhausted',
-        'price_change_store_channel_attempts_exhausted',
-    ];
 
     /** @return Builder<TelegramOutboundEffect> */
     public function retryableQuery(): Builder
     {
-        return TelegramOutboundEffect::query()
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('state', TelegramOutboundEffectState::Pending->value)
-                    ->orWhere(function (Builder $failed): void {
-                        $failed
-                            ->where('state', TelegramOutboundEffectState::Failed->value)
-                            ->where(function (Builder $error): void {
-                                $error
-                                    ->whereNull('last_error_code')
-                                    ->orWhereNotIn('last_error_code', self::NON_RETRYABLE_FAILURE_CODES);
-                            });
-                    });
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_SALES_PROOF)
-                    ->orWhere(function (Builder $salesProof): void {
-                        $salesProof->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
-                            ->where(function (Builder $attempts): void {
-                                $attempts
-                                    ->where('attempts', '<', TelegramOutboundEffectService::SALES_PROOF_MAX_ATTEMPTS)
-                                    ->orWhereJsonContains('outcome_metadata', ['manual_retry_requested' => true]);
-                            });
-                    });
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST)
-                    ->orWhere('attempts', '<', TelegramOutboundEffectService::ADMIN_BROADCAST_MAX_ATTEMPTS);
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
-                    ->orWhere('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS);
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
-                    ->orWhere('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS);
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
-                    ->orWhere('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS);
-            })
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('effect_type', '<>', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-                    ->orWhere(function (Builder $receipt): void {
-                        $receipt
-                            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-                            ->where(function (Builder $sequence): void {
-                                $sequence
-                                    ->where('sequence', '<=', 1)
-                                    ->orWhereNotExists(function ($predecessor): void {
-                                        $predecessor
-                                            ->selectRaw('1')
-                                            ->from('telegram_outbound_effects as receipt_predecessors')
-                                            ->whereColumn('receipt_predecessors.effect_group_key', 'telegram_outbound_effects.effect_group_key')
-                                            ->whereColumn('receipt_predecessors.sequence', '<', 'telegram_outbound_effects.sequence')
-                                            ->where('receipt_predecessors.state', '<>', TelegramOutboundEffectState::Sent->value);
-                                    });
-                            });
-                    });
-            });
+        return $this->policy->applyRetryableConstraints(TelegramOutboundEffect::query());
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -143,10 +51,11 @@ class TelegramOutboundEffectLedgerProtocol
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effectId);
             $now = now();
 
-            if (! $this->isClaimable($effect, $now) || ! $this->receiptEffectIsOrderedReady($effect)) {
+            if (! $this->policy->canClaim($effect, $now)) {
                 return null;
             }
 
+            $claimMetadata = $this->policy->claimMetadata($effect);
             $effect->forceFill([
                 'state' => TelegramOutboundEffectState::Sending->value,
                 'attempts' => $effect->attempts + 1,
@@ -155,9 +64,9 @@ class TelegramOutboundEffectLedgerProtocol
                 'claim_token' => Str::random(64),
                 'last_error_code' => null,
                 'last_error' => null,
-                'outcome_metadata' => $effect->effect_type === TelegramOutboundEffectService::TYPE_SALES_PROOF
-                    ? $this->mergeOutcomeMetadata($effect, ['manual_retry_requested' => false])
-                    : $effect->outcome_metadata,
+                'outcome_metadata' => $claimMetadata === []
+                    ? $effect->outcome_metadata
+                    : $this->mergeOutcomeMetadata($effect, $claimMetadata),
             ])->save();
 
             return $effect->fresh();
@@ -252,8 +161,8 @@ class TelegramOutboundEffectLedgerProtocol
             }
 
             $failureCode = $this->failureCode($exception);
-            $attemptsExhausted = $this->effectAttemptsExhausted($effect);
-            $terminal = in_array($failureCode, self::NON_RETRYABLE_FAILURE_CODES, true) || $attemptsExhausted;
+            $attemptsExhausted = $this->policy->attemptsExhausted($effect);
+            $terminal = $this->policy->isNonRetryableFailure($failureCode) || $attemptsExhausted;
 
             $effect->forceFill([
                 'state' => TelegramOutboundEffectState::Failed->value,
@@ -263,14 +172,10 @@ class TelegramOutboundEffectLedgerProtocol
                 'failed_at' => now(),
                 'unknown_at' => null,
                 'manual_review_at' => null,
-                'next_attempt_at' => $terminal
-                    ? null
-                    : ($effect->effect_type === TelegramOutboundEffectService::TYPE_SALES_PROOF
-                        ? ((int) $effect->attempts < TelegramOutboundEffectService::SALES_PROOF_MAX_ATTEMPTS ? now() : null)
-                        : now()->copy()->addSeconds($retryAfterSeconds ?? $this->retryDelaySeconds($effect->attempts))),
-                'last_error_code' => in_array($failureCode, self::NON_RETRYABLE_FAILURE_CODES, true)
+                'next_attempt_at' => $this->policy->nextAttemptAt($effect, $terminal, $retryAfterSeconds, now()),
+                'last_error_code' => $this->policy->isNonRetryableFailure($failureCode)
                     ? $failureCode
-                    : ($attemptsExhausted ? $this->attemptsExhaustedCode($effect) : $failureCode),
+                    : ($attemptsExhausted ? $this->policy->attemptsExhaustedCode($effect) : $failureCode),
                 'last_error' => 'Telegram delivery failed before completion.',
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->safeExceptionMetadata($exception)),
             ])->save();
@@ -279,8 +184,12 @@ class TelegramOutboundEffectLedgerProtocol
         });
     }
 
-    public function finalizeNotDeliverable(string $effectId, string $claimToken, string $reason, string $message): ?TelegramOutboundEffect
-    {
+    public function finalizeNotDeliverable(
+        string $effectId,
+        string $claimToken,
+        string $reason,
+        string $message = 'Telegram delivery was no longer eligible for delivery.',
+    ): ?TelegramOutboundEffect {
         return DB::transaction(function () use ($effectId, $claimToken, $reason, $message): ?TelegramOutboundEffect {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if (! $this->claimMatches($effect, $claimToken)) {
@@ -299,6 +208,27 @@ class TelegramOutboundEffectLedgerProtocol
                 'last_error_code' => $reason,
                 'last_error' => $message,
                 'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['reason' => $reason]),
+            ])->save();
+
+            return $effect->fresh();
+        });
+    }
+
+    public function requestManualRetry(string $effectId): ?TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($effectId): ?TelegramOutboundEffect {
+            $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
+            if ($effect === null || ! $this->policy->canRequestManualRetry($effect)) {
+                return null;
+            }
+
+            $effect->forceFill([
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'next_attempt_at' => now(),
+                'failed_at' => null,
+                'last_error_code' => null,
+                'last_error' => null,
+                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->policy->manualRetryMetadata()),
             ])->save();
 
             return $effect->fresh();
@@ -375,7 +305,7 @@ class TelegramOutboundEffectLedgerProtocol
             if ($candidate instanceof RequestException) {
                 $status = $candidate->response?->status();
 
-                if ($status === null || $status === 408 || $status === 429 || $status >= 500) {
+                if ($status === null || $status === 408 || $status >= 500) {
                     return true;
                 }
             }
@@ -392,108 +322,33 @@ class TelegramOutboundEffectLedgerProtocol
         return false;
     }
 
-    public function isTerminalFailure(TelegramOutboundEffect $effect): bool
+    public function retryAfterSeconds(Throwable $exception): ?int
     {
-        if ($this->stateValue($effect) !== TelegramOutboundEffectState::Failed->value) {
-            return false;
+        for ($candidate = $exception; $candidate !== null; $candidate = $candidate->getPrevious()) {
+            if (! $candidate instanceof RequestException || $candidate->response?->status() !== 429) {
+                continue;
+            }
+
+            $retryAfter = data_get($candidate->response->json(), 'parameters.retry_after')
+                ?? $candidate->response->header('Retry-After');
+            if (! is_numeric($retryAfter)) {
+                return 1;
+            }
+
+            return min(300, max(1, (int) $retryAfter));
         }
 
-        return in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)
-            || $this->effectAttemptsExhausted($effect);
+        return null;
+    }
+
+    public function isTerminalFailure(TelegramOutboundEffect $effect): bool
+    {
+        return $this->policy->isTerminalFailure($effect);
     }
 
     public function isDispatchable(TelegramOutboundEffect $effect): bool
     {
-        if (! in_array($this->stateValue($effect), [
-            TelegramOutboundEffectState::Pending->value,
-            TelegramOutboundEffectState::Failed->value,
-        ], true)) {
-            return false;
-        }
-
-        if (in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)) {
-            return false;
-        }
-
-        if ($effect->effect_type === TelegramOutboundEffectService::TYPE_SALES_PROOF
-            && (int) $effect->attempts >= TelegramOutboundEffectService::SALES_PROOF_MAX_ATTEMPTS) {
-            return false;
-        }
-
-        if ($effect->effect_type === TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST
-            && (int) $effect->attempts >= TelegramOutboundEffectService::ADMIN_BROADCAST_MAX_ATTEMPTS) {
-            return false;
-        }
-
-        if ($this->effectAttemptsExhausted($effect)) {
-            return false;
-        }
-
-        return $effect->next_attempt_at === null || $effect->next_attempt_at->lte(now());
-    }
-
-    private function isClaimable(TelegramOutboundEffect $effect, CarbonInterface $at): bool
-    {
-        if (! in_array($effect->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)
-            || in_array($effect->last_error_code, self::NON_RETRYABLE_FAILURE_CODES, true)) {
-            return false;
-        }
-
-        if ($effect->effect_type === TelegramOutboundEffectService::TYPE_SALES_PROOF
-            && (int) $effect->attempts >= TelegramOutboundEffectService::SALES_PROOF_MAX_ATTEMPTS
-            && (($effect->outcome_metadata['manual_retry_requested'] ?? false) !== true)) {
-            return false;
-        }
-
-        if ($effect->effect_type === TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST
-            && (int) $effect->attempts >= TelegramOutboundEffectService::ADMIN_BROADCAST_MAX_ATTEMPTS) {
-            return false;
-        }
-
-        if ($this->effectAttemptsExhausted($effect)) {
-            return false;
-        }
-
-        return $effect->next_attempt_at === null || $effect->next_attempt_at->lte($at);
-    }
-
-    private function receiptEffectIsOrderedReady(TelegramOutboundEffect $effect): bool
-    {
-        if ($effect->effect_type !== TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS
-            || $effect->effect_group_key === null
-            || (int) $effect->sequence <= 1) {
-            return true;
-        }
-
-        return ! TelegramOutboundEffect::query()
-            ->where('effect_group_key', $effect->effect_group_key)
-            ->where('sequence', '<', $effect->sequence)
-            ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
-            ->exists();
-    }
-
-    private function effectAttemptsExhausted(TelegramOutboundEffect $effect): bool
-    {
-        $maximum = match ($effect->effect_type) {
-            TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST => TelegramOutboundEffectService::ADMIN_BROADCAST_MAX_ATTEMPTS,
-            TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION => TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS,
-            TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION => TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS,
-            TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL => TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS,
-            default => null,
-        };
-
-        return $maximum !== null && (int) $effect->attempts >= $maximum;
-    }
-
-    private function attemptsExhaustedCode(TelegramOutboundEffect $effect): string
-    {
-        return match ($effect->effect_type) {
-            TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST => 'broadcast_recipient_attempts_exhausted',
-            TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION => 'stock_notification_attempts_exhausted',
-            TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION => 'price_change_recipient_attempts_exhausted',
-            TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL => 'price_change_store_channel_attempts_exhausted',
-            default => 'telegram_attempts_exhausted',
-        };
+        return $this->policy->isDispatchable($effect, now());
     }
 
     private function claimMatches(?TelegramOutboundEffect $effect, string $claimToken): bool
@@ -510,15 +365,6 @@ class TelegramOutboundEffectLedgerProtocol
         $existing = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
 
         return array_merge($existing, $updates);
-    }
-
-    private function retryDelaySeconds(int $attempts): int
-    {
-        return match (true) {
-            $attempts <= 1 => 5,
-            $attempts === 2 => 30,
-            default => 120,
-        };
     }
 
     private function failureCode(Throwable $exception): string

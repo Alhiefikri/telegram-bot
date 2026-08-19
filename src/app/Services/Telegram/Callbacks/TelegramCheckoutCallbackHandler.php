@@ -29,6 +29,7 @@ use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
@@ -48,6 +49,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramLocale $locale,
         private CheckoutMaintenance $maintenance,
         private TelegramOutboundEffectService $outboundEffects,
+        private TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -270,7 +272,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             : $this->outboundEffects->forOrder($order->id, $effectType);
 
         if ($effect !== null) {
-            $this->outboundEffects->dispatch($effect);
+            $this->dispatcher->dispatch($effect);
 
             return;
         }
@@ -287,7 +289,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function dispatchPendingAdminNotification(Order $order): void
     {
-        if ($this->outboundEffects->dispatchPendingAdminNotification($order)) {
+        $effect = $this->outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        if ($effect !== null) {
+            $this->dispatcher->dispatch($effect);
+
             return;
         }
 

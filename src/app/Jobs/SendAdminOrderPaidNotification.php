@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
@@ -39,6 +40,7 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
 
     public function handle(
         ?TelegramOutboundEffectService $outboundEffects = null,
+        ?AdminOrderNotificationDeliveryPipeline $pipeline = null,
     ): void {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -61,11 +63,11 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
                     ->firstOrFail();
 
             if ($effect !== null) {
-                $outboundEffects->processAdminOrderNotification($effect);
+                ($pipeline ??= app(AdminOrderNotificationDeliveryPipeline::class))->deliver($effect);
             } else {
                 $effect = $outboundEffects->recordAdminOrderPaidNotification(Order::findOrFail($this->orderId));
                 if ($effect !== null) {
-                    $outboundEffects->processAdminOrderNotification($effect);
+                    ($pipeline ??= app(AdminOrderNotificationDeliveryPipeline::class))->deliver($effect);
                 }
             }
         } finally {

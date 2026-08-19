@@ -24,6 +24,9 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
+use App\Services\Telegram\ManualPaymentProofDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
@@ -55,7 +58,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('admin', $effect->target_type);
         $this->assertSame('999', $effect->telegram_chat_id);
 
-        $this->assertTrue($outboundEffects->dispatchPendingAdminNotification($order));
+        app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
         Queue::assertPushedOn(
             'notifications',
             SendAdminOrderPendingNotification::class,
@@ -251,8 +254,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
 
-        $outboundEffects->processAdminOrderNotification($effect);
-        $outboundEffects->processAdminOrderNotification($effect->fresh());
+        $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        $pipeline->deliver($effect->fresh());
 
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         $this->assertSame(1, $sendCount);
@@ -271,7 +275,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
 
         try {
-            $outboundEffects->processAdminOrderNotification($effect);
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         } catch (\Throwable) {
             // Queue workers retry definite delivery failures through the job.
         }
@@ -299,7 +303,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('telegram_file_reference', $effect->outcome_metadata['attachment_type']);
         $this->assertTrue($effect->outcome_metadata['attachment_present']);
 
-        $outboundEffects->dispatch($effect);
+        app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
         Queue::assertPushedOn(
             'notifications',
             ForwardManualPaymentProof::class,
@@ -321,8 +325,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $effect = $outboundEffects->recordManualPaymentProof($order, $payment);
 
-        $outboundEffects->processManualPaymentProof($effect);
-        $outboundEffects->processManualPaymentProof($effect->fresh());
+        $pipeline = app(ManualPaymentProofDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        $pipeline->deliver($effect->fresh());
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertNotNull($payment->fresh()->payment_proof_forwarded_at);
@@ -348,8 +353,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $effect = $outboundEffects->recordManualPaymentProof($order, $payment);
 
-        $outboundEffects->processManualPaymentProof($effect);
-        $outboundEffects->processManualPaymentProof($effect->fresh());
+        $pipeline = app(ManualPaymentProofDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        $pipeline->deliver($effect->fresh());
 
         $freshEffect = $effect->fresh();
         $this->assertSame(TelegramOutboundEffectState::Unknown, $freshEffect->state);
@@ -373,7 +379,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $effect = $outboundEffects->recordManualPaymentProof($order, $payment);
 
         try {
-            $outboundEffects->processManualPaymentProof($effect);
+            app(ManualPaymentProofDeliveryPipeline::class)->deliver($effect);
         } catch (\Throwable) {
             // Queue workers retry definite delivery failures through the job.
         }

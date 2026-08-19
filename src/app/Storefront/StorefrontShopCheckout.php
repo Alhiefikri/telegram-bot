@@ -21,6 +21,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
@@ -42,6 +43,7 @@ class StorefrontShopCheckout
         private readonly StorefrontFunnelEvents $events,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
@@ -156,7 +158,10 @@ class StorefrontShopCheckout
 
     private function dispatchPendingAdminNotification(Order $order): void
     {
-        if ($this->outboundEffects->dispatchPendingAdminNotification($order)) {
+        $effect = $this->outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        if ($effect !== null) {
+            $this->dispatcher->dispatch($effect);
+
             return;
         }
 

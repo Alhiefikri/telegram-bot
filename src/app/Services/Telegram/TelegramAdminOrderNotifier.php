@@ -29,7 +29,7 @@ class TelegramAdminOrderNotifier
         $effect = $effects->recordAdminOrderPendingNotification($order);
 
         if ($effect !== null) {
-            $effects->processAdminOrderNotification($effect);
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         }
     }
 
@@ -51,7 +51,7 @@ class TelegramAdminOrderNotifier
         $effect = $effects->recordAdminOrderExpiredNotification($order);
 
         if ($effect !== null) {
-            $effects->processAdminOrderNotification($effect);
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         }
 
         $this->deletePending($order);
@@ -59,7 +59,7 @@ class TelegramAdminOrderNotifier
 
     /**
      * Send an admin notification for a claimed Telegram Outbound Effect.
-     * Claiming and finalization remain owned by TelegramOutboundEffectService.
+     * Claiming and finalization remain owned by TelegramOutboundEffectLedgerProtocol.
      *
      * @return array<string, mixed>
      */
@@ -330,5 +330,4 @@ class TelegramAdminOrderNotifier
             ? $chatId
             : null;
     }
-
 }

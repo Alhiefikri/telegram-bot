@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\ManualPaymentProofDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Bus\Queueable;
@@ -36,8 +37,10 @@ class ForwardManualPaymentProof implements ShouldBeUnique, ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(TelegramOutboundEffectService $outboundEffects): void
-    {
+    public function handle(
+        TelegramOutboundEffectService $outboundEffects,
+        ManualPaymentProofDeliveryPipeline $pipeline,
+    ): void {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
         DogfoodTiming::resetQueries();
@@ -58,7 +61,7 @@ class ForwardManualPaymentProof implements ShouldBeUnique, ShouldQueue
                     ->firstOrFail();
 
             if ($effect !== null) {
-                $outboundEffects->processManualPaymentProof($effect);
+                $pipeline->deliver($effect);
             }
         } finally {
             DogfoodTiming::log('dogfood.telegram.manual_payment_proof_job_finished', DogfoodTiming::queryStats() + [

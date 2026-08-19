@@ -4,12 +4,14 @@ namespace App\Services\Telegram;
 
 use App\Enums\InventoryMovementType;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\SendProductStockNotifications;
 use App\Models\InventoryMovement;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +19,7 @@ use Throwable;
 
 class StockNotificationDeliveryPipeline
 {
-    public const MAX_ATTEMPTS = 5;
+    public const MAX_ATTEMPTS = TelegramOutboundEffectPolicy::STOCK_NOTIFICATION_MAX_ATTEMPTS;
 
     public const QUEUE = 'telegram-broadcast';
 
@@ -27,6 +29,7 @@ class StockNotificationDeliveryPipeline
         private TelegramProductNotificationService $notifications,
         private TelegramBotClient $bot,
         private ?TelegramOutboundEffectService $outboundEffects = null,
+        private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
     ) {}
 
@@ -90,7 +93,7 @@ class StockNotificationDeliveryPipeline
         }
 
         $hasMore = $transientFailures > 0 || $this->hasPendingEffects($event->id);
-        $this->outboundEffects()->syncStockNotificationProjection($movementId);
+        $this->syncStockNotificationProjection($movementId);
 
         DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
             'sent' => $sent,
@@ -111,9 +114,9 @@ class StockNotificationDeliveryPipeline
 
     public function reconcile(int $chunk = 100): int
     {
-        $ledgerRecipientIds = $this->outboundEffects()->readyToDispatchQuery()
+        $ledgerRecipientIds = $this->ledger()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->orderBy('id')
             ->limit(max(1, $chunk))
             ->pluck('source_id');
@@ -125,13 +128,13 @@ class StockNotificationDeliveryPipeline
         $unmaterializedMovementIds = StockNotificationRecipient::query()
             ->whereNull('sent_at')
             ->whereNull('terminal_failed_at')
-            ->where('attempts', '<', TelegramOutboundEffectService::STOCK_NOTIFICATION_MAX_ATTEMPTS)
+            ->where('attempts', '<', self::MAX_ATTEMPTS)
             ->whereNotExists(function ($effects): void {
                 $effects
                     ->selectRaw('1')
                     ->from('telegram_outbound_effects')
                     ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
-                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
                     ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
             })
             ->with('event:id,inventory_movement_id')
@@ -150,6 +153,11 @@ class StockNotificationDeliveryPipeline
         }
 
         return $movementIds->count();
+    }
+
+    public function refreshAggregateProjection(int|string $movementId): void
+    {
+        $this->syncStockNotificationProjection($movementId);
     }
 
     private function snapshotEvent(int $movementId): ?StockNotificationEvent
@@ -200,9 +208,9 @@ class StockNotificationDeliveryPipeline
 
     private function dueEffects(int $eventId, int $batchSize)
     {
-        return $this->outboundEffects()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -213,9 +221,9 @@ class StockNotificationDeliveryPipeline
 
     private function hasPendingEffects(int $eventId): bool
     {
-        return $this->outboundEffects()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -280,7 +288,7 @@ class StockNotificationDeliveryPipeline
 
     private function deliverEffect(TelegramOutboundEffect $effect): string
     {
-        $claimed = $this->outboundEffects()->claim((string) $effect->getKey());
+        $claimed = $this->ledger()->claim((string) $effect->getKey());
         if ($claimed === null) {
             return 'skipped';
         }
@@ -297,50 +305,50 @@ class StockNotificationDeliveryPipeline
                 $recipient->reply_markup ?? [],
             );
             $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram stock notification');
-
-            return $this->outboundEffects()->finalizeSent(
+            $finalized = $this->ledger()->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 (string) $messageId,
-            ) ? 'sent' : 'skipped';
+            );
+            if ($finalized === null) {
+                return 'skipped';
+            }
+
+            $this->synchronizeSentProjection($finalized);
+
+            return 'sent';
         } catch (Throwable $exception) {
-            if ($this->isStockNotificationAmbiguous($exception)) {
-                $finalized = $this->outboundEffects()->finalizeUnknown(
+            if ($this->ledger()->isAmbiguous($exception)) {
+                $finalized = $this->ledger()->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                if ($finalized !== null) {
+                    $this->synchronizeUnknownProjection($finalized);
+                }
                 $this->logEffectFailure($claimed, $exception, 'unknown');
 
                 return $finalized ? 'unknown' : 'skipped';
             }
 
-            $finalized = $this->outboundEffects()->finalizeFailed(
+            $finalized = $this->ledger()->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
-                self::RETRY_DELAY_SECONDS,
             );
             if (! $finalized) {
                 return 'skipped';
             }
 
+            $this->synchronizeFailedProjection($finalized, $exception);
+
             $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
-            $terminal = $fresh !== null && $this->outboundEffects()->isTerminalFailure($fresh);
+            $terminal = $fresh !== null && $this->ledger()->isTerminalFailure($fresh);
             $this->logEffectFailure($claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
 
             return $terminal ? 'terminal_failure' : 'transient_failure';
         }
-    }
-
-    private function isStockNotificationAmbiguous(Throwable $exception): bool
-    {
-        if ($exception instanceof RequestException
-            && in_array($exception->response?->status(), [400, 403, 429], true)) {
-            return false;
-        }
-
-        return $this->outboundEffects()->isAmbiguous($exception);
     }
 
     private function logEffectFailure(TelegramOutboundEffect $effect, Throwable $exception, string $status): void
@@ -354,6 +362,56 @@ class StockNotificationDeliveryPipeline
             'http_status' => $exception instanceof RequestException ? $exception->response?->status() : null,
             'exception' => $exception::class,
         ]);
+    }
+
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
+    {
+        StockNotificationRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'sent_at' => $effect->sent_at ?? now(),
+                'failed_at' => null,
+                'terminal_failed_at' => null,
+                'last_error' => null,
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
+    {
+        StockNotificationRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function synchronizeFailedProjection(TelegramOutboundEffect $effect, Throwable $exception): void
+    {
+        $terminal = $this->ledger()->isTerminalFailure($effect);
+        StockNotificationRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'failed_at' => $effect->failed_at ?? now(),
+                'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
+                'last_error' => $this->projectionError($exception),
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function projectionError(Throwable $exception): string
+    {
+        return mb_substr(
+            TelegramBotApiRedactor::redactText($exception::class.': '.$exception->getMessage()),
+            0,
+            2000,
+        );
     }
 
     private function legacyFailureCode(?string $error, bool $terminal): string
@@ -372,6 +430,53 @@ class StockNotificationDeliveryPipeline
     private function outboundEffects(): TelegramOutboundEffectService
     {
         return $this->outboundEffects ??= app(TelegramOutboundEffectService::class);
+    }
+
+    private function ledger(): TelegramOutboundEffectLedgerProtocol
+    {
+        return $this->ledger ??= app(TelegramOutboundEffectLedgerProtocol::class);
+    }
+
+    private function syncStockNotificationProjection(int|string $movementId): void
+    {
+        $recipientIds = StockNotificationRecipient::query()
+            ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
+            ->selectRaw('CAST(id AS TEXT)');
+        $recipientCount = StockNotificationRecipient::query()
+            ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
+            ->count();
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_type', StockNotificationRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+            ->whereIn('source_id', $recipientIds);
+        $effectCount = (clone $effects)->count();
+        $resolvedCount = (clone $effects)
+            ->where(function (Builder $resolved): void {
+                $resolved
+                    ->where('state', TelegramOutboundEffectState::Sent->value)
+                    ->orWhere(function (Builder $terminal): void {
+                        $terminal
+                            ->where('state', TelegramOutboundEffectState::Failed->value)
+                            ->where(function (Builder $attempts): void {
+                                $attempts
+                                    ->whereIn('last_error_code', [
+                                        'telegram_http_400',
+                                        'telegram_http_403',
+                                        'stock_notification_attempts_exhausted',
+                                        'stock_notification_terminal_failure',
+                                    ])
+                                    ->orWhere('attempts', '>=', self::MAX_ATTEMPTS);
+                            });
+                    });
+            })
+            ->count();
+
+        if ($effectCount === $recipientCount && $resolvedCount === $recipientCount) {
+            InventoryMovement::query()
+                ->whereKey($movementId)
+                ->whereNull('stock_notification_sent_at')
+                ->update(['stock_notification_sent_at' => now()]);
+        }
     }
 
     private function responseValidator(): TelegramOutboundResponseValidator

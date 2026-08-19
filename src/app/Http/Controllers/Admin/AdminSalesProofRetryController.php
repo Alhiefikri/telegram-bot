@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\AuditLogger;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ class AdminSalesProofRetryController extends Controller
         AuditLogger $auditLogger,
         AdminDashboardRedirector $redirector,
         TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $dispatcher,
     ): RedirectResponse {
         $user = $request->attributes->get('adminUser');
 
@@ -37,7 +39,7 @@ class AdminSalesProofRetryController extends Controller
             return $redirector->salesProof($order, $request)->with('status', 'Sales Proof Post belum memiliki target Store Channel yang dapat dikirimi.');
         }
 
-        $outboundEffects->dispatch($effect, now()->toISOString(), force: true);
+        $dispatcher->dispatch($effect, now()->toISOString(), force: true);
 
         $auditLogger->log('sales_proof.retry_requested', $post, ['status' => $oldStatus, 'attempts' => $oldAttempts], ['order_id' => $order->id], $user, $request->ip());
 

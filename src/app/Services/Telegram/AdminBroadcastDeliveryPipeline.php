@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
@@ -26,11 +27,9 @@ final class AdminBroadcastDeliveryPipeline
 {
     public const RECIPIENT_RETRY_DELAY_SECONDS = 30;
 
-    private const MAX_PROVIDER_RETRY_AFTER_SECONDS = 300;
-
     public const BATCH_SIZE = 25;
 
-    public const MAX_ATTEMPTS = 5;
+    public const MAX_ATTEMPTS = TelegramOutboundEffectPolicy::ADMIN_BROADCAST_MAX_ATTEMPTS;
 
     public const QUEUE = 'telegram-broadcast';
 
@@ -39,6 +38,7 @@ final class AdminBroadcastDeliveryPipeline
         private readonly TelegramBroadcastRateLimiter $rateLimiter,
         private readonly TelegramLocale $locale,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
@@ -101,7 +101,7 @@ final class AdminBroadcastDeliveryPipeline
             }
         }
 
-        $hasMore = $this->outboundEffects->syncAdminBroadcastProjection($broadcast->id, $materialized);
+        $hasMore = $this->syncAdminBroadcastProjection($broadcast->id, $materialized);
         $projection = TelegramBroadcast::query()->find($broadcast->id);
         DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
             'operation' => 'admin_broadcast',
@@ -168,11 +168,25 @@ final class AdminBroadcastDeliveryPipeline
             });
     }
 
+    public function refreshProjection(int $broadcastId, bool $materialized = false): bool
+    {
+        return $this->syncAdminBroadcastProjection($broadcastId, $materialized);
+    }
+
+    public function synchronizeRecoveredUnknown(TelegramOutboundEffect $effect): void
+    {
+        $this->synchronizeUnknownProjection($effect);
+        $broadcastId = TelegramBroadcastRecipient::query()->whereKey($effect->source_id)->value('broadcast_id');
+        if ($broadcastId !== null) {
+            $this->syncAdminBroadcastProjection((int) $broadcastId);
+        }
+    }
+
     private function readyAdminBroadcastEffectsQuery(?CarbonInterface $at = null): Builder
     {
-        return $this->outboundEffects->readyToDispatchQuery($at)
+        return $this->ledger->readyToDispatchQuery($at)
             ->where('source_type', TelegramBroadcastRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_BROADCAST);
+            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value);
     }
 
     private function ensureAdminBroadcastRecipients(TelegramBroadcast $broadcast): void
@@ -294,7 +308,7 @@ final class AdminBroadcastDeliveryPipeline
      */
     private function sendAdminBroadcastRecipient(TelegramBroadcast $broadcast, TelegramOutboundEffect $effect): array
     {
-        $claimed = $this->outboundEffects->claim((string) $effect->getKey());
+        $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
             return ['status' => 'skipped'];
         }
@@ -325,22 +339,28 @@ final class AdminBroadcastDeliveryPipeline
                 );
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Admin Broadcast');
 
-            if (! $this->outboundEffects->finalizeSent(
+            $finalized = $this->ledger->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 (string) $messageId,
-            )) {
+            );
+            if ($finalized === null) {
                 return ['status' => 'skipped'];
             }
-        } catch (Throwable $exception) {
-            $retryAfterSeconds = $this->providerRetryAfterSeconds($exception);
 
-            if ($this->isBroadcastAmbiguous($exception)) {
-                $finalized = $this->outboundEffects->finalizeUnknown(
+            $this->synchronizeSentProjection($finalized);
+        } catch (Throwable $exception) {
+            $retryAfterSeconds = $this->ledger->retryAfterSeconds($exception);
+
+            if ($this->ledger->isAmbiguous($exception)) {
+                $finalized = $this->ledger->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                if ($finalized !== null) {
+                    $this->synchronizeUnknownProjection($finalized);
+                }
                 $recipientLog['status'] = 'unknown';
                 $recipientLog['exception'] = $exception::class;
                 $recipientLog['duration_ms'] = DogfoodTiming::elapsedMs($startedAt);
@@ -350,7 +370,7 @@ final class AdminBroadcastDeliveryPipeline
                 return $finalized ? ['status' => 'unknown'] : ['status' => 'skipped'];
             }
 
-            $finalized = $this->outboundEffects->finalizeFailed(
+            $finalized = $this->ledger->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
@@ -360,8 +380,10 @@ final class AdminBroadcastDeliveryPipeline
                 return ['status' => 'skipped'];
             }
 
+            $this->synchronizeFailedProjection($finalized, $exception);
+
             $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
-            $terminal = $fresh !== null && $this->outboundEffects->isTerminalFailure($fresh);
+            $terminal = $fresh !== null && $this->ledger->isTerminalFailure($fresh);
             $recipientLog['status'] = 'error';
             $recipientLog['exception'] = $exception::class;
             $recipientLog['terminal'] = $terminal;
@@ -383,18 +405,6 @@ final class AdminBroadcastDeliveryPipeline
         return ['status' => 'sent'];
     }
 
-    private function isBroadcastAmbiguous(Throwable $exception): bool
-    {
-        // Telegram's definite HTTP rejection, including flood control, is a
-        // retryable/terminal failure, not an accepted-then-disconnected send.
-        if ($exception instanceof RequestException
-            && in_array($exception->response?->status(), [400, 403, 429], true)) {
-            return false;
-        }
-
-        return $this->outboundEffects->isAmbiguous($exception);
-    }
-
     private function logBroadcastRecipientFailure(
         TelegramBroadcast $broadcast,
         TelegramOutboundEffect $effect,
@@ -412,6 +422,58 @@ final class AdminBroadcastDeliveryPipeline
             'status' => $exception instanceof RequestException ? $exception->response?->status() : null,
             'exception' => $exception::class,
         ]);
+    }
+
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
+    {
+        TelegramBroadcastRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'sent_at' => $effect->sent_at ?? now(),
+                'failed_at' => null,
+                'retry_at' => null,
+                'terminal_failed_at' => null,
+                'last_error' => null,
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
+    {
+        TelegramBroadcastRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function synchronizeFailedProjection(TelegramOutboundEffect $effect, Throwable $exception): void
+    {
+        $terminal = $this->ledger->isTerminalFailure($effect);
+        TelegramBroadcastRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'failed_at' => $effect->failed_at ?? now(),
+                'retry_at' => $terminal ? null : $effect->next_attempt_at,
+                'terminal_failed_at' => $terminal ? ($effect->failed_at ?? now()) : null,
+                'last_error' => $this->projectionError($exception),
+                'attempts' => $terminal ? self::MAX_ATTEMPTS : (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function projectionError(Throwable $exception): string
+    {
+        return mb_substr(
+            TelegramBotApiRedactor::redactText($exception::class.': '.$exception->getMessage()),
+            0,
+            2000,
+        );
     }
 
     /**
@@ -457,18 +519,69 @@ final class AdminBroadcastDeliveryPipeline
         ]);
     }
 
-    private function providerRetryAfterSeconds(Throwable $exception): ?int
+    private function syncAdminBroadcastProjection(int $broadcastId, bool $materialized = false): bool
     {
-        if (! $exception instanceof RequestException || $exception->response?->status() !== 429) {
-            return null;
+        $broadcast = TelegramBroadcast::query()->lockForUpdate()->find($broadcastId);
+        if ($broadcast === null) {
+            return false;
         }
 
-        $retryAfter = data_get($exception->response?->json(), 'parameters.retry_after')
-            ?? $exception->response?->header('Retry-After');
-        if (! is_numeric($retryAfter)) {
-            return 1;
+        $recipientIds = TelegramBroadcastRecipient::query()
+            ->where('broadcast_id', $broadcastId)
+            ->selectRaw('CAST(id AS TEXT)');
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_type', TelegramBroadcastRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+            ->whereIn('source_id', $recipientIds);
+        $recipientCount = TelegramBroadcastRecipient::query()->where('broadcast_id', $broadcastId)->count();
+        $sentCount = (clone $effects)->where('state', TelegramOutboundEffectState::Sent->value)->count();
+        $terminalFailedCount = (clone $effects)
+            ->where('state', TelegramOutboundEffectState::Failed->value)
+            ->where(function (Builder $terminal): void {
+                $terminal
+                    ->whereIn('last_error_code', [
+                        'telegram_http_400',
+                        'telegram_http_403',
+                        'broadcast_recipient_attempts_exhausted',
+                        'broadcast_recipient_terminal_failure',
+                    ])
+                    ->orWhere('attempts', '>=', self::MAX_ATTEMPTS);
+            })
+            ->count();
+        $retryableCount = $this->ledger->retryableQuery()
+            ->where('source_type', TelegramBroadcastRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+            ->whereIn('source_id', TelegramBroadcastRecipient::query()
+                ->where('broadcast_id', $broadcastId)
+                ->selectRaw('CAST(id AS TEXT)'))
+            ->count();
+        $pendingCount = max(0, $recipientCount - $sentCount - $terminalFailedCount);
+        $complete = $recipientCount > 0 && $pendingCount === 0;
+        $status = match (true) {
+            $recipientCount === 0 => TelegramBroadcast::STATUS_COMPLETED,
+            $complete && $sentCount === 0 => TelegramBroadcast::STATUS_FAILED,
+            $complete && $terminalFailedCount > 0 => TelegramBroadcast::STATUS_PARTIALLY_FAILED,
+            $complete => TelegramBroadcast::STATUS_COMPLETED,
+            $sentCount > 0 || $terminalFailedCount > 0 => TelegramBroadcast::STATUS_IN_PROGRESS,
+            default => TelegramBroadcast::STATUS_QUEUED,
+        };
+
+        $updates = [
+            'status' => $status,
+            'recipient_count' => $recipientCount,
+            'sent_count' => $sentCount,
+            'failed_count' => $terminalFailedCount,
+            'terminal_failed_count' => $terminalFailedCount,
+            'pending_count' => $pendingCount,
+            'completed_at' => $complete || $recipientCount === 0 ? now() : null,
+            'updated_at' => now(),
+        ];
+        if ($materialized) {
+            $updates['recipients_materialized_at'] = now();
         }
 
-        return min(self::MAX_PROVIDER_RETRY_AFTER_SECONDS, max(1, (int) $retryAfter));
+        TelegramBroadcast::query()->whereKey($broadcastId)->update($updates);
+
+        return $retryableCount > 0;
     }
 }

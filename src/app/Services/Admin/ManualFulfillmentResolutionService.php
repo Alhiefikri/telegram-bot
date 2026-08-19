@@ -14,6 +14,7 @@ use App\Services\AuditLogger;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
@@ -25,6 +26,7 @@ class ManualFulfillmentResolutionService
         private readonly OrderLifecycle $orders,
         private readonly ProductCredentialAllocator $credentials,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
@@ -63,7 +65,7 @@ class ManualFulfillmentResolutionService
         $this->audit->log('manual_fulfillment_review.fulfilled', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'order_status' => OrderStatus::Completed->value], $actor, $ip);
         $effect = $this->outboundEffects->recordReceipt($order);
         if ($effect !== null) {
-            $this->outboundEffects->dispatch($effect);
+            $this->dispatcher->dispatch($effect);
         }
 
         return $resolved;
