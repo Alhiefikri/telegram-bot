@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Services\Telegram\TelegramReceiptNotifier;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -21,7 +21,10 @@ class SendTelegramReceipt implements ShouldQueue
         public ?string $effectId = null,
     ) {}
 
-    public function handle(TelegramReceiptNotifier $notifier, TelegramOutboundEffectService $outboundEffects): void
+    public function handle(
+        TelegramOutboundEffectService $outboundEffects,
+        ReceiptDeliveryPipeline $pipeline,
+    ): void
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
@@ -46,7 +49,7 @@ class SendTelegramReceipt implements ShouldQueue
                     ->firstOrFail();
 
             if ($effect !== null) {
-                $outboundEffects->processReceipt($effect, $notifier);
+                $pipeline->deliver($effect);
             }
         } finally {
             DogfoodTiming::log('dogfood.telegram.receipt_job_finished', DogfoodTiming::queryStats() + [

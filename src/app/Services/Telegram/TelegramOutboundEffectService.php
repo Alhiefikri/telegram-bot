@@ -1019,7 +1019,7 @@ class TelegramOutboundEffectService
                 $next = $this->nextReceiptEffect($locked);
                 if ($next !== null) {
                     $this->dispatch($next);
-                } elseif ($this->isExplicitReceiptEffect($locked)) {
+                } elseif ($this->isExplicitReceiptEffect($locked) && $this->receiptGroupComplete($locked)) {
                     $this->dispatchReceiptCleanup($locked->source_id);
                 }
             }
@@ -1244,70 +1244,7 @@ class TelegramOutboundEffectService
         bool $dispatchNext = true,
         bool $throwOnAmbiguous = false,
     ): void {
-        if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS) {
-            throw new InvalidArgumentException('Unsupported Telegram receipt effect type.');
-        }
-
-        $claimed = $this->claim((string) $effect->getKey());
-        if ($claimed === null) {
-            return;
-        }
-
-        try {
-            $order = Order::query()
-                ->with(['customer', 'orderItems.stockItems', 'orderItems.product'])
-                ->findOrFail($claimed->source_id);
-
-            if (! $this->receiptEligible($order, $order->customer)
-                || (string) $order->customer->telegram_id !== (string) $claimed->telegram_chat_id) {
-                $this->finalizeNotDeliverable(
-                    (string) $claimed->getKey(),
-                    (string) $claimed->claim_token,
-                    'receipt_not_eligible',
-                    'Telegram receipt was no longer eligible for delivery.',
-                );
-
-                return;
-            }
-
-            $response = DogfoodTiming::time('dogfood.telegram.receipt_step', [
-                'step' => 'receipt_chunk',
-                'sequence' => (int) $claimed->sequence,
-                'chunk_group_correlation_id' => DogfoodTiming::correlation($claimed->effect_group_key),
-                'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
-                'order_correlation_id' => DogfoodTiming::correlation($order->id),
-            ], fn () => ($notifier ?? $this->receiptNotifier)->sendEffect($order, $claimed));
-            $messageId = data_get($response, 'result.message_id');
-
-            if (! is_numeric($messageId)) {
-                throw new TelegramTransportException('sendMessage');
-            }
-
-            if ($this->finalizeSent((string) $claimed->getKey(), (string) $claimed->claim_token, (string) $messageId)) {
-                if ($dispatchNext) {
-                    $next = $this->nextReceiptEffect($claimed->fresh());
-                    if ($next !== null) {
-                        $this->dispatch($next);
-                    }
-                }
-
-                if ($this->isExplicitReceiptEffect($claimed)) {
-                    $this->dispatchReceiptCleanup($order->id);
-                }
-            }
-        } catch (Throwable $exception) {
-            if ($this->isAmbiguous($exception)) {
-                $this->finalizeUnknown((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
-
-                if ($throwOnAmbiguous) {
-                    throw $exception;
-                }
-
-                return;
-            }
-
-            $this->finalizeFailed((string) $claimed->getKey(), (string) $claimed->claim_token, $exception);
-        }
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, $notifier, $dispatchNext, $throwOnAmbiguous);
     }
 
     public function processAdminOrderNotification(TelegramOutboundEffect $effect): void
@@ -1878,6 +1815,11 @@ class TelegramOutboundEffectService
             && $customer?->telegram_id !== null;
     }
 
+    public function receiptIsEligible(Order $order): bool
+    {
+        return $this->receiptEligible($order, $order->customer);
+    }
+
     private function receiptEffectIsOrderedReady(TelegramOutboundEffect $effect): bool
     {
         if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS
@@ -1898,7 +1840,7 @@ class TelegramOutboundEffectService
         return $groupKey.':unit:'.$sequence;
     }
 
-    private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool
+    private function receiptEffectIsExplicit(TelegramOutboundEffect $effect): bool
     {
         $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
 
@@ -1906,11 +1848,31 @@ class TelegramOutboundEffectService
             && ($metadata['delivery_context'] ?? null) === 'explicit_resend';
     }
 
-    private function dispatchReceiptCleanup(int|string $orderId): void
+    public function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool
+    {
+        return $this->receiptEffectIsExplicit($effect);
+    }
+
+    public function receiptGroupComplete(TelegramOutboundEffect $effect): bool
+    {
+        return $effect->effect_type === self::TYPE_RECEIPT_CREDENTIALS
+            && $effect->effect_group_key !== null
+            && ! TelegramOutboundEffect::query()
+                ->where('effect_group_key', $effect->effect_group_key)
+                ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
+                ->exists();
+    }
+
+    private function dispatchReceiptCleanupJob(int|string $orderId): void
     {
         DeleteBuyerCheckoutMessages::dispatch((string) $orderId, now()->toISOString())
             ->onQueue('notifications')
             ->afterCommit();
+    }
+
+    public function dispatchReceiptCleanup(int|string $orderId): void
+    {
+        $this->dispatchReceiptCleanupJob($orderId);
     }
 
     public function finalizeSent(string $effectId, string $claimToken, string $messageId): bool
