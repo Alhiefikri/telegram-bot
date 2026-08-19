@@ -14,6 +14,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
@@ -29,9 +30,10 @@ class RecoverTelegramOutboundEffects extends Command
         $cutoff = now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)));
         $dispatched = 0;
         $outboundEffects = app(TelegramOutboundEffectService::class);
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
         $staleLeases = $outboundEffects->recoverExpiredLeases(now());
 
-        $outboundEffects->readyToDispatchQuery(now())
+        $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
