@@ -101,26 +101,10 @@ class ProductPriceChangeNotificationService
 
     private function sendStoreChannelEffect(ProductPriceChangeEvent $event): string
     {
-        $effect = TelegramOutboundEffect::query()
+        $effect = $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $event->getKey())
             ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'price_change_store_channel_attempts_exhausted',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->first();
         if ($effect === null) {
             return 'skipped';
@@ -273,28 +257,12 @@ class ProductPriceChangeNotificationService
 
     private function dueRecipientEffects(int $eventId, int $batchSize)
     {
-        return TelegramOutboundEffect::query()
+        return $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'price_change_recipient_attempts_exhausted',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->orderByRaw('CAST(source_id AS BIGINT)')
             ->limit(max(1, $batchSize))
             ->get();
@@ -374,53 +342,21 @@ class ProductPriceChangeNotificationService
 
     private function hasPendingEffects(int $eventId): bool
     {
-        $recipientPending = TelegramOutboundEffect::query()
+        $recipientPending = $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'price_change_recipient_attempts_exhausted',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->exists();
         if ($recipientPending) {
             return true;
         }
 
-        return TelegramOutboundEffect::query()
+        return $this->outboundEffects()->readyToDispatchQuery()
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $eventId)
             ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL)
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->where('attempts', '<', TelegramOutboundEffectService::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS)
-            ->where(function ($error): void {
-                $error->whereNull('last_error_code')
-                    ->orWhereNotIn('last_error_code', [
-                        'telegram_http_400',
-                        'telegram_http_403',
-                        'price_change_store_channel_attempts_exhausted',
-                    ]);
-            })
-            ->where(function ($due): void {
-                $due->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now());
-            })
             ->exists();
     }
 
