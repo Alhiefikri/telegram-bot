@@ -5,11 +5,28 @@ namespace Tests\Feature\Telegram;
 use Tests\TestCase;
 
 /**
- * Deletion test for issue #298: removing the old facade surface must not make
- * callers recreate a second claim/finalization or projection switchboard.
+ * Deletion/contract test for issues #298 and #299: removing the old facade
+ * surface must not make callers recreate a second claim/finalization or
+ * projection switchboard.
  */
 final class TelegramOutboundEffectProtocolBoundaryTest extends TestCase
 {
+    /** @var list<string> */
+    private const REMOVED_SERVICE_SURFACE = [
+        'public function claim(',
+        'public function finalizeSent(',
+        'public function finalizeFailed(',
+        'public function finalizeUnknown(',
+        'public function finalizeNotDeliverable(',
+        'public function processAdminOrderNotification(',
+        'public function processManualPaymentProof(',
+        'public function processSalesProofPost(',
+        'public function processReceipt(',
+        'private function synchronizeDeliveryProjection(',
+        'public function syncAdminBroadcastProjection(',
+        'public function syncStockNotificationProjection(',
+    ];
+
     public function test_removed_delivery_state_surface_does_not_reappear_in_callers(): void
     {
         $protocol = file_get_contents(base_path('app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php'));
@@ -19,20 +36,7 @@ final class TelegramOutboundEffectProtocolBoundaryTest extends TestCase
         $this->assertIsString($service);
         $this->assertStringNotContainsString('TelegramOutboundEffectService', $protocol);
 
-        foreach ([
-            'public function claim(',
-            'public function finalizeSent(',
-            'public function finalizeFailed(',
-            'public function finalizeUnknown(',
-            'public function finalizeNotDeliverable(',
-            'public function processAdminOrderNotification(',
-            'public function processManualPaymentProof(',
-            'public function processSalesProofPost(',
-            'public function processReceipt(',
-            'private function synchronizeDeliveryProjection(',
-            'public function syncAdminBroadcastProjection(',
-            'public function syncStockNotificationProjection(',
-        ] as $removedSurface) {
+        foreach (self::REMOVED_SERVICE_SURFACE as $removedSurface) {
             $this->assertStringNotContainsString($removedSurface, $service, $removedSurface.' was reintroduced.');
         }
 

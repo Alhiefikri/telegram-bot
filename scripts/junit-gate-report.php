@@ -45,6 +45,7 @@ foreach (($xml->xpath('//testcase[failure or error]') ?: []) as $testCase) {
 }
 
 $passed = (int) $exitCode === 0
+    && $totals['tests'] > 0
     && $totals['skipped'] === 0
     && $totals['failures'] === 0
     && $totals['errors'] === 0;
@@ -64,6 +65,9 @@ echo '- Time: '.number_format($totals['time'], 3, '.', '')." seconds\n";
 echo "- Database: {$database}\n";
 echo "- JUnit: {$junitPath}\n";
 echo "- Log: {$logPath}\n";
+if ($totals['tests'] === 0) {
+    echo "- Gate warning: PHPUnit reported no executed tests.\n";
+}
 echo "\nFailures:\n";
 if ($problemCases === []) {
     echo "- None\n";

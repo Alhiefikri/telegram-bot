@@ -120,6 +120,7 @@ jobs:
           ./scripts/test-deploy-production-release.sh
           ./scripts/test-redact-release-diagnostics.sh
           ./scripts/test-check-migration-prefixes.sh
+          ./scripts/test-concurrency-deploy-gate.sh
 
   postgres-release-gate:
     name: PostgreSQL migration and concurrency release gate

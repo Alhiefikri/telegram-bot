@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/src"
@@ -13,7 +14,36 @@ LOG_PATH="$ARTIFACT_DIR/phpunit.log"
 JUNIT_PATH="$ARTIFACT_DIR/junit.xml"
 REPORT_PATH="$ARTIFACT_DIR/report.md"
 
-mkdir -p "$ARTIFACT_DIR"
+fail_preflight() {
+    echo "Concurrency gate preflight failed: $1" >&2
+    exit 1
+}
+
+if [[ -e "$ARTIFACT_DIR" && ! -d "$ARTIFACT_DIR" ]]; then
+    fail_preflight "artifact path exists but is not a directory: $ARTIFACT_DIR"
+fi
+
+if ! mkdir -p -- "$ARTIFACT_DIR"; then
+    fail_preflight "unable to create artifact directory: $ARTIFACT_DIR"
+fi
+
+if [[ ! -w "$ARTIFACT_DIR" ]]; then
+    fail_preflight "artifact directory is not writable: $ARTIFACT_DIR"
+fi
+
+WRITE_PROBE="$ARTIFACT_DIR/.concurrency-gate-write-probe-$$"
+if ! : > "$WRITE_PROBE"; then
+    fail_preflight "artifact directory cannot accept files: $ARTIFACT_DIR"
+fi
+rm -f -- "$WRITE_PROBE"
+
+if ! php -r 'if (! extension_loaded("pdo_pgsql")) { fwrite(STDERR, "pdo_pgsql is required.\n"); exit(1); } if (! function_exists("pcntl_fork")) { fwrite(STDERR, "pcntl_fork is required.\n"); exit(1); }'; then
+    fail_preflight "the PHP CLI is missing a required PostgreSQL/process-concurrency extension"
+fi
+
+if [[ ! -x "$APP_DIR/vendor/bin/phpunit" ]]; then
+    fail_preflight "PHPUnit is not installed at $APP_DIR/vendor/bin/phpunit"
+fi
 
 cleanup() {
     php "$ROOT_DIR/scripts/concurrency-gate-db.php" drop "$TEST_DATABASE" || true
