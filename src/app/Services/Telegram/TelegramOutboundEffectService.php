@@ -1372,7 +1372,7 @@ class TelegramOutboundEffectService
             };
             $messageId = data_get($response, 'result.message_id');
 
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
+            if (data_get($response, 'ok') !== true || ! is_numeric($messageId) || (int) $messageId <= 0) {
                 throw new TelegramTransportException('sendMessage');
             }
 
@@ -1466,7 +1466,7 @@ class TelegramOutboundEffectService
             );
             $messageId = data_get($response, 'result.message_id');
 
-            if (! is_numeric($messageId)) {
+            if (data_get($response, 'ok') !== true || ! is_numeric($messageId) || (int) $messageId <= 0) {
                 throw new TelegramTransportException('sendPhoto');
             }
 
