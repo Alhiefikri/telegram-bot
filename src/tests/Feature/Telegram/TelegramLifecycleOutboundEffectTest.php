@@ -179,6 +179,32 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertDatabaseCount('jobs', 0);
     }
 
+    public function test_failed_sales_proof_effect_projects_failure_when_post_never_entered_sending(): void
+    {
+        $order = Order::factory()->create();
+        $post = SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_PENDING,
+            'attempts' => 0,
+        ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'state' => TelegramOutboundEffectState::Failed,
+            'attempts' => 3,
+            'last_error' => 'Telegram delivery failed before completion.',
+            'last_error_code' => 'telegram_attempts_exhausted',
+        ]);
+
+        app(TelegramOutboundEffectService::class)->materializeSalesProofPostEffect($order);
+
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->fresh()->status);
+        $this->assertSame(3, $post->fresh()->attempts);
+    }
+
     public function test_expiry_records_one_idempotent_admin_effect_on_the_notifications_queue(): void
     {
         $this->configureAdminTarget();

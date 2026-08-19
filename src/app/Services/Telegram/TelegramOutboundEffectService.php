@@ -1783,8 +1783,9 @@ class TelegramOutboundEffectService
                 (string) $effect->telegram_message_id,
                 $effect->sent_at ?? now(),
             );
-        } elseif ($state === TelegramOutboundEffectState::Failed->value
-            && $post->status === SalesProofPost::STATUS_SENDING) {
+        } elseif ($state === TelegramOutboundEffectState::Failed->value) {
+            // The ledger is authoritative even when an older projection was
+            // never moved to `sending` before the worker failed.
             $this->synchronizeFailedProjection($effect);
         }
     }
