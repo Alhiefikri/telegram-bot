@@ -66,6 +66,26 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertSame('ok', $finalized->outcome_metadata['telegram_response']);
     }
 
+    public function test_operator_resolution_uses_the_protocol_for_review_states(): void
+    {
+        $effect = TelegramOutboundEffect::factory()->create([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+        ]);
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $resolved = $protocol->finalizeOperatorSent($effect->id, '100002', [
+            'resolution' => 'operator_marked_sent',
+        ]);
+
+        $this->assertNotNull($resolved);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $resolved->state);
+        $this->assertSame('100002', $resolved->telegram_message_id);
+        $this->assertSame('operator_marked_sent', $resolved->outcome_metadata['resolution']);
+        $this->assertNull($resolved->unknown_at);
+        $this->assertNull($resolved->next_attempt_at);
+    }
+
     public function test_definite_failure_records_retry_schedule_until_terminal(): void
     {
         $effect = TelegramOutboundEffect::factory()->create();

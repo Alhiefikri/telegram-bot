@@ -984,27 +984,19 @@ class TelegramOutboundEffectService
 
             $oldState = $this->stateValue($locked);
             $now = now();
-            $locked->forceFill([
-                'state' => TelegramOutboundEffectState::Sent->value,
-                'lease_until' => null,
-                'claim_token' => null,
-                'telegram_message_id' => $messageId,
-                'sent_at' => $now,
-                'manual_review_at' => $locked->manual_review_at ?? $now,
-                'failed_at' => null,
-                'next_attempt_at' => null,
-                'last_error' => null,
-                'outcome_metadata' => $this->mergeOutcomeMetadata($locked, [
-                    'resolution' => 'operator_marked_sent',
-                    'resolution_actor_id' => $actor?->getKey(),
-                    'resolution_at' => $now->toIso8601String(),
-                ]),
-            ])->save();
+            $resolved = $this->ledger->finalizeOperatorSent((string) $locked->getKey(), $messageId, [
+                'resolution' => 'operator_marked_sent',
+                'resolution_actor_id' => $actor?->getKey(),
+                'resolution_at' => $now->toIso8601String(),
+            ]);
+            if ($resolved === null) {
+                return false;
+            }
 
-            $this->synchronizeDeliveryProjection($locked, $messageId, $now);
+            $this->synchronizeDeliveryProjection($resolved, $messageId, $now);
             $this->auditLogger->logWithResolvedContext(
                 'telegram_outbound_effect.marked_sent',
-                $locked,
+                $resolved,
                 ['state' => $oldState],
                 [
                     'state' => TelegramOutboundEffectState::Sent->value,
@@ -1015,12 +1007,12 @@ class TelegramOutboundEffectService
                 $ip,
             );
 
-            if ($locked->effect_type === self::TYPE_RECEIPT_CREDENTIALS) {
-                $next = $this->nextReceiptEffect($locked);
+            if ($resolved->effect_type === self::TYPE_RECEIPT_CREDENTIALS) {
+                $next = $this->nextReceiptEffect($resolved);
                 if ($next !== null) {
                     $this->dispatch($next);
-                } elseif ($this->isExplicitReceiptEffect($locked) && $this->receiptGroupComplete($locked)) {
-                    $this->dispatchReceiptCleanup($locked->source_id);
+                } elseif ($this->isExplicitReceiptEffect($resolved) && $this->receiptGroupComplete($resolved)) {
+                    $this->dispatchReceiptCleanup($resolved->source_id);
                 }
             }
 

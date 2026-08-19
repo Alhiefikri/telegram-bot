@@ -187,6 +187,46 @@ class TelegramOutboundEffectLedgerProtocol
         });
     }
 
+    /**
+     * Resolve an ambiguous effect after an operator verified delivery outside
+     * Telegram's API. This uses the same durable transition boundary as a
+     * worker finalization, but does not require a claim token.
+     *
+     * @param array<string, mixed> $metadata
+     */
+    public function finalizeOperatorSent(
+        string $effectId,
+        string $messageId,
+        array $metadata = [],
+    ): ?TelegramOutboundEffect {
+        return DB::transaction(function () use ($effectId, $messageId, $metadata): ?TelegramOutboundEffect {
+            $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
+            if ($effect === null || ! in_array($this->stateValue($effect), [
+                TelegramOutboundEffectState::Unknown->value,
+                TelegramOutboundEffectState::ManualReview->value,
+            ], true)) {
+                return null;
+            }
+
+            $now = now();
+            $effect->forceFill([
+                'state' => TelegramOutboundEffectState::Sent->value,
+                'lease_until' => null,
+                'claim_token' => null,
+                'telegram_message_id' => $messageId,
+                'sent_at' => $now,
+                'manual_review_at' => $effect->manual_review_at ?? $now,
+                'failed_at' => null,
+                'unknown_at' => null,
+                'next_attempt_at' => null,
+                'last_error' => null,
+                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $metadata),
+            ])->save();
+
+            return $effect->fresh();
+        });
+    }
+
     public function finalizeFailed(
         string $effectId,
         string $claimToken,
