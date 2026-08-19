@@ -93,6 +93,18 @@ class TelegramBroadcastService
     }
 
     /**
+     * Redispatch a durable Admin Broadcast handoff found by recovery.
+     *
+     * Recovery must use the same queue boundary as the initial submission,
+     * while still allowing a broadcast whose first dispatch was recorded to
+     * be retried if its worker never materialized the audience.
+     */
+    public function dispatchAdminBroadcastForRecovery(TelegramBroadcast $broadcast): void
+    {
+        $this->dispatchAdminBroadcast($broadcast, force: true);
+    }
+
+    /**
      * @param  string|callable(Customer): string  $message
      * @param  string|callable(Customer): string|null  $title
      * @param  array|callable(Customer): array  $replyMarkup
@@ -184,12 +196,12 @@ class TelegramBroadcastService
         return $result;
     }
 
-    private function dispatchAdminBroadcast(TelegramBroadcast $broadcast): void
+    private function dispatchAdminBroadcast(TelegramBroadcast $broadcast, bool $force = false): void
     {
         Cache::lock('telegram:admin-broadcast-dispatch:'.$broadcast->id, 30)
-            ->block(5, function () use ($broadcast): void {
+            ->block(5, function () use ($broadcast, $force): void {
                 $current = TelegramBroadcast::query()->findOrFail($broadcast->id);
-                if ($current->queue_dispatched_at !== null) {
+                if (! $force && $current->queue_dispatched_at !== null) {
                     return;
                 }
 

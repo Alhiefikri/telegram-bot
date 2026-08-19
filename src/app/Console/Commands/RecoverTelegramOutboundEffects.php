@@ -6,7 +6,6 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendProductPriceChangeNotifications;
-use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
@@ -283,13 +282,13 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
-        app(TelegramBroadcastService::class)
+        $broadcastService = app(TelegramBroadcastService::class);
+        $broadcastService
             ->recoverableBroadcastsQuery(now())
             ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($broadcasts) use (&$dispatched): void {
+            ->chunkById((int) $this->option('chunk'), function ($broadcasts) use (&$dispatched, $broadcastService): void {
                 foreach ($broadcasts as $broadcast) {
-                    SendTelegramBroadcastBatch::dispatch($broadcast->id, now()->toISOString())
-                        ->onQueue('telegram-broadcast');
+                    $broadcastService->dispatchAdminBroadcastForRecovery($broadcast);
                     $dispatched++;
                 }
             });

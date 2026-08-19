@@ -493,6 +493,44 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         $this->assertSame(1, TelegramBroadcast::query()->count());
     }
 
+    public function test_recovery_rediscovers_a_committed_broadcast_when_process_dies_before_worker_pickup(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Queue::fake();
+        $realDispatcher = app(DispatcherContract::class);
+        $dispatcher = Mockery::mock(DispatcherContract::class);
+        $dispatcher->shouldReceive('dispatch')
+            ->once()
+            ->andThrow(new \RuntimeException('process stopped after the broadcast commit'));
+        $this->app->instance(DispatcherContract::class, $dispatcher);
+
+        try {
+            app(TelegramBroadcastService::class)->queueAdminBroadcast(
+                'Recover this committed broadcast',
+                [],
+                'process-death-before-worker-pickup',
+            );
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('process stopped after the broadcast commit', $exception->getMessage());
+        } finally {
+            $this->app->instance(DispatcherContract::class, $realDispatcher);
+        }
+
+        $broadcast = TelegramBroadcast::query()->sole();
+        $this->assertNull($broadcast->queue_dispatched_at);
+        $this->assertNull($broadcast->recipients_materialized_at);
+        $this->assertSame(0, TelegramBroadcastRecipient::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        $this->assertNotNull($broadcast->fresh()->queue_dispatched_at);
+        Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
+        Queue::assertPushed(SendTelegramBroadcastBatch::class, fn (SendTelegramBroadcastBatch $job): bool => $job->broadcastId === $broadcast->id);
+    }
+
     public function test_permanent_recipient_failure_becomes_terminal_without_blocking_other_recipients(): void
     {
         config()->set('services.telegram.token', 'bot-token');
