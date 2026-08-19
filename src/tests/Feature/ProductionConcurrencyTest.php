@@ -144,18 +144,7 @@ class ProductionConcurrencyTest extends TestCase
         $ip = '198.51.100.90';
         $login = 'concurrent@example.test';
         $attempts = 12;
-        $results = $this->runConcurrently(array_map(
-            fn (int $_attempt): callable => function () use ($login, $ip): array {
-                $decision = app(AdminLoginThrottle::class)->recordFailure($login, $ip);
-
-                return [
-                    'identity' => $decision->identityAttempts,
-                    'ip' => $decision->ipAttempts,
-                    'blocked' => $decision->blocked,
-                ];
-            },
-            range(1, $attempts),
-        ));
+        $results = $this->runIndependentAdminThrottleWorkers($login, $ip, $attempts);
 
         $this->assertSame($attempts, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
 
@@ -187,6 +176,112 @@ class ProductionConcurrencyTest extends TestCase
             $attempts,
             Cache::store('database')->get($throttle->ipKey($ip)),
         );
+    }
+
+    /**
+     * Run each throttle attempt in a fresh Laravel process. Unlike the legacy
+     * fork helper below, these workers never inherit the PHPUnit process or a
+     * PDO handle; every worker boots the application and opens its own pool
+     * connection after the barrier is released.
+     *
+     * @return list<array{ok: bool, value?: array{identity: int, ip: int, blocked: bool}, class?: string, message?: string, exit_code: int}>
+     */
+    private function runIndependentAdminThrottleWorkers(string $login, string $ip, int $attempts): array
+    {
+        $runId = bin2hex(random_bytes(8));
+        $directory = sys_get_temp_dir().'/telegram-bot-admin-throttle-'.$runId;
+        $worker = base_path('tests/Support/admin-login-throttle-worker.php');
+
+        if (! mkdir($directory, 0700) && ! is_dir($directory)) {
+            $this->fail('Unable to create admin throttle concurrency workspace.');
+        }
+
+        $releaseFile = $directory.'/release';
+        $processes = [];
+        $workerEnvironment = $this->independentWorkerEnvironment();
+
+        try {
+            for ($index = 0; $index < $attempts; $index++) {
+                $readyFile = $directory.'/ready-'.$index;
+                $resultFile = $directory.'/result-'.$index.'.json';
+                $stdoutFile = $directory.'/stdout-'.$index.'.log';
+                $stderrFile = $directory.'/stderr-'.$index.'.log';
+                $command = [PHP_BINARY, $worker, $login, $ip, $releaseFile, $readyFile, $resultFile];
+                $process = proc_open($command, [
+                    0 => ['file', '/dev/null', 'r'],
+                    1 => ['file', $stdoutFile, 'w'],
+                    2 => ['file', $stderrFile, 'w'],
+                ], $pipes, base_path(), $workerEnvironment);
+
+                if (! is_resource($process)) {
+                    $this->fail('Unable to start independent admin throttle worker.');
+                }
+
+                $processes[$index] = [
+                    'process' => $process,
+                    'result' => $resultFile,
+                    'stderr' => $stderrFile,
+                ];
+            }
+
+            $deadline = microtime(true) + 30;
+            foreach (array_keys($processes) as $index) {
+                while (! is_file($directory.'/ready-'.$index)) {
+                    if (microtime(true) > $deadline) {
+                        $this->fail('Timed out waiting for independent admin throttle workers to boot.');
+                    }
+
+                    usleep(10_000);
+                }
+            }
+
+            touch($releaseFile);
+            $results = [];
+            foreach ($processes as $index => $process) {
+                $exitCode = proc_close($process['process']);
+                $resultFile = $process['result'];
+                $results[] = is_file($resultFile)
+                    ? [...json_decode((string) file_get_contents($resultFile), true, flags: JSON_THROW_ON_ERROR), 'exit_code' => $exitCode]
+                    : [
+                        'ok' => false,
+                        'class' => 'RuntimeException',
+                        'message' => trim((string) file_get_contents($process['stderr'])),
+                        'exit_code' => $exitCode,
+                    ];
+            }
+
+            return $results;
+        } finally {
+            foreach ($processes as $process) {
+                if (is_resource($process['process'])) {
+                    proc_terminate($process['process']);
+                    proc_close($process['process']);
+                }
+            }
+
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
+    }
+
+    /** @return array<string, string> */
+    private function independentWorkerEnvironment(): array
+    {
+        $environment = array_map('strval', (array) getenv());
+        $connection = (array) config('database.connections.pgsql', []);
+        $environment['APP_ENV'] = 'testing';
+        $environment['CACHE_STORE'] = 'database';
+        $environment['DB_CONNECTION'] = 'pgsql';
+        $environment['DB_HOST'] = (string) ($connection['host'] ?? '127.0.0.1');
+        $environment['DB_PORT'] = (string) ($connection['port'] ?? '5432');
+        $environment['DB_DATABASE'] = (string) ($connection['database'] ?? '');
+        $environment['DB_USERNAME'] = (string) ($connection['username'] ?? '');
+        $environment['DB_PASSWORD'] = (string) ($connection['password'] ?? '');
+        $environment['DB_URL'] = '';
+
+        return $environment;
     }
 
     private function assertConcurrentAdminBroadcastWorkersShareOneDatabaseCacheWindow(bool $photo): void
@@ -489,12 +584,12 @@ class ProductionConcurrencyTest extends TestCase
     public function test_concurrent_duplicate_paid_callbacks_create_one_sale_and_one_receipt(): void
     {
         $this->requireConcurrencyLane();
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $order = $this->pakasirReadyOrder(stock: 2, quantity: 1, expiresAt: now()->addHour());
         $payment = $order->payments()->firstOrFail();
         $payload = $this->pakasirPayload($payment);
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
         $results = $this->runConcurrently([
             fn () => $this->processPakasirCallback($payload),
@@ -524,12 +619,12 @@ class ProductionConcurrencyTest extends TestCase
     public function test_paid_callback_racing_expiry_preserves_single_valid_inventory_outcome(): void
     {
         $this->requireConcurrencyLane();
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $order = $this->pakasirReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());
         $payment = $order->payments()->firstOrFail();
         $payload = $this->pakasirPayload($payment);
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
         $this->runConcurrently([
             fn () => $this->processPakasirCallback($payload),
@@ -690,7 +785,7 @@ class ProductionConcurrencyTest extends TestCase
     public function test_duplicate_durable_notification_recipient_claims_send_once(): void
     {
         $this->requireConcurrencyLane();
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $customer = Customer::factory()->create(['telegram_id' => '901233']);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
@@ -723,7 +818,7 @@ class ProductionConcurrencyTest extends TestCase
     public function test_admin_manual_completion_racing_expiry_preserves_single_valid_inventory_outcome(): void
     {
         $this->requireConcurrencyLane();
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $user = User::factory()->create();
         $order = $this->manualReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());

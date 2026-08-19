@@ -46,9 +46,6 @@ final class TelegramTranslationCatalog
 
     private const CATALOG_KEY_PATTERN = '/^(?:translation|router|language|welcome|menu|maintenance|support|account|status|community_gate|privacy|callback|catalog|search|cart|checkout|payment|date|order|receipt|notification)\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/';
 
-    /** @var list<string> */
-    private const NON_CATALOG_SOURCE_LITERALS = ['order.customer'];
-
     public function __construct(private Translator $translator) {}
 
     public function get(string $key, string $locale): string
@@ -258,17 +255,32 @@ final class TelegramTranslationCatalog
         $tokens = token_get_all($contents);
         $keys = [];
 
-        foreach ($tokens as $token) {
-            if (! is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING) {
+        foreach ($tokens as $index => $token) {
+            if (! is_array($token) || $token[0] !== T_STRING || ! in_array(strtolower($token[1]), ['translate', 'translatelocale'], true)) {
                 continue;
             }
 
-            $literal = stripcslashes(substr($token[1], 1, -1));
-            if (in_array($literal, self::NON_CATALOG_SOURCE_LITERALS, true)) {
+            $previousIndex = $this->previousSignificantTokenIndex($tokens, $index);
+            if ($previousIndex === null || ! $this->isObjectOperator($tokens[$previousIndex])) {
                 continue;
             }
-            if (preg_match(self::CATALOG_KEY_PATTERN, $literal) === 1) {
-                $keys[$literal] = true;
+
+            $openParenthesisIndex = $this->nextSignificantTokenIndex($tokens, $index);
+            if ($openParenthesisIndex === null || $tokens[$openParenthesisIndex] !== '(') {
+                continue;
+            }
+
+            foreach (array_slice($this->translationCallArguments($tokens, $openParenthesisIndex), 0, 2) as $argument) {
+                foreach ($argument as $argumentToken) {
+                    if (! is_array($argumentToken) || $argumentToken[0] !== T_CONSTANT_ENCAPSED_STRING) {
+                        continue;
+                    }
+
+                    $literal = stripcslashes(substr($argumentToken[1], 1, -1));
+                    if (preg_match(self::CATALOG_KEY_PATTERN, $literal) === 1) {
+                        $keys[$literal] = true;
+                    }
+                }
             }
         }
 
@@ -287,6 +299,96 @@ final class TelegramTranslationCatalog
         sort($keys);
 
         return $keys;
+    }
+
+    /**
+     * @param  list<array<int, mixed>|string>  $tokens
+     */
+    private function previousSignificantTokenIndex(array $tokens, int $index): ?int
+    {
+        for ($index--; $index >= 0; $index--) {
+            if (is_array($tokens[$index]) && $tokens[$index][0] === T_WHITESPACE) {
+                continue;
+            }
+
+            return $index;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<array<int, mixed>|string>  $tokens
+     */
+    private function nextSignificantTokenIndex(array $tokens, int $index): ?int
+    {
+        for ($index++; $index < count($tokens); $index++) {
+            if (is_array($tokens[$index]) && $tokens[$index][0] === T_WHITESPACE) {
+                continue;
+            }
+
+            return $index;
+        }
+
+        return null;
+    }
+
+    private function isObjectOperator(array|string $token): bool
+    {
+        return $token === '->'
+            || (defined('T_NULLSAFE_OBJECT_OPERATOR') && is_array($token) && $token[0] === T_NULLSAFE_OBJECT_OPERATOR);
+    }
+
+    /**
+     * Split a translation call into top-level arguments while preserving nested
+     * expressions such as match/ternary values in the key argument.
+     *
+     * @param  list<array<int, mixed>|string>  $tokens
+     * @return list<list<array<int, mixed>|string>>
+     */
+    private function translationCallArguments(array $tokens, int $openParenthesisIndex): array
+    {
+        $arguments = [];
+        $argument = [];
+        $stack = ['('];
+
+        for ($index = $openParenthesisIndex + 1; $index < count($tokens); $index++) {
+            $token = $tokens[$index];
+            $symbol = is_array($token) ? $token[1] : $token;
+
+            if (in_array($symbol, ['(', '[', '{'], true)) {
+                $stack[] = $symbol;
+                $argument[] = $token;
+
+                continue;
+            }
+
+            if (in_array($symbol, [')', ']', '}'], true)) {
+                array_pop($stack);
+                if ($stack === []) {
+                    if ($argument !== []) {
+                        $arguments[] = $argument;
+                    }
+
+                    break;
+                }
+
+                $argument[] = $token;
+
+                continue;
+            }
+
+            if ($symbol === ',' && count($stack) === 1) {
+                $arguments[] = $argument;
+                $argument = [];
+
+                continue;
+            }
+
+            $argument[] = $token;
+        }
+
+        return $arguments;
     }
 
     /**

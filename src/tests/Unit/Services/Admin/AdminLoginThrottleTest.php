@@ -90,8 +90,11 @@ class AdminLoginThrottleTest extends TestCase
     /** @param array<string, int> $values */
     private function throttle(array $values = []): AdminLoginThrottle
     {
+        $cache = new CacheRepository(new ArrayStore);
+
         return new AdminLoginThrottle(
-            new RateLimiter(new CacheRepository(new ArrayStore)),
+            new RateLimiter($cache),
+            $cache,
             new ConfigRepository(['auth' => ['admin_login_throttle' => $values]]),
         );
     }

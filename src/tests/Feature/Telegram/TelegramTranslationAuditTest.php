@@ -35,6 +35,26 @@ class TelegramTranslationAuditTest extends TestCase
         $this->assertContains('Missing ms translation for key required.key.', $errors);
     }
 
+    public function test_customer_translation_audit_ignores_eloquent_relation_literals(): void
+    {
+        $errors = app(TelegramTranslationCatalog::class)->audit();
+
+        $this->assertNotContains('Referenced translation key order.customer is missing from the English catalog.', $errors);
+        $this->assertNotContains('Referenced translation key order.orderItems is missing from the English catalog.', $errors);
+        $this->assertNotContains('Key order.orderItems is not defined in the English catalog.', $errors);
+    }
+
+    public function test_customer_translation_audit_rejects_placeholder_mismatches(): void
+    {
+        $errors = app(TelegramTranslationCatalog::class)->auditCatalogs([
+            'en' => ['checkout.example' => 'Pay :amount for :product'],
+            'id' => ['checkout.example' => 'Bayar :amount untuk :item'],
+            'ms' => ['checkout.example' => 'Bayar :amount untuk :product'],
+        ]);
+
+        $this->assertContains('Placeholder mismatch for key checkout.example in id.', $errors);
+    }
+
     public function test_catalog_uses_english_when_a_requested_locale_key_is_missing(): void
     {
         $translator = Mockery::mock(Translator::class);
