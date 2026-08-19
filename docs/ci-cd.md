@@ -33,9 +33,10 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
   - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
   - Reads the image digest recorded on the deployment commit by the successful CI run and pulls that exact GHCR digest on the VPS. Production never rebuilds the application image.
-  - Records the previous Git commit and immutable running image before changing the checkout, then runs `php artisan migrate --force` in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
-  - Aborts before cutover when migration fails, leaving the current containers available. If an internal gate or the public GitHub-runner smoke fails, restores the previous commit and immutable image automatically and verifies app and scheduler health.
-  - Writes `release-result.txt` with `deploy-succeeded`, `migration-failed-no-cutover`, or a reason-specific `*-rollback-succeeded` / `*-rollback-failed` result, so operators can distinguish a contained deploy failure from a failed recovery.
+  - Records the previous Git commit and immutable running image before changing the checkout, then runs only expand migrations (excluding the deferred Telegram outbound contract migration) in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
+  - Cuts over the compatible candidate, verifies its internal gates, and runs the public smoke check. The destructive deferred Telegram outbound contract is opt-in through the manual `apply_telegram_outbound_contract=true` input only; when selected, it records a preflight report, recovers eligible effects, requires `telegram:outbound-contract --strict`, applies the final migration, restarts long-lived workers, and rechecks health.
+  - Aborts before cutover when an expand migration or internal gate fails, leaving the current containers available. If the public GitHub-runner smoke fails before the contract phase, restores the previous commit and immutable image automatically and verifies app and scheduler health. Once the destructive contract phase begins, a failure leaves the compatible candidate running for manual investigation rather than attempting an unsafe code rollback.
+  - Writes `release-result.txt` with `deploy-succeeded-compatible-contract-pending`, `deploy-succeeded`, `migration-failed-no-cutover`, `contract-failed-candidate-remains`, or a reason-specific `*-rollback-succeeded` / `*-rollback-failed` result, so operators can distinguish a contained deploy failure from a failed recovery.
   - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
@@ -145,6 +146,11 @@ git checkout main
 git pull --ff-only origin main
 gh workflow run deploy-production.yml --ref main
 ```
+
+The normal command deploys the compatible application and leaves the
+destructive Telegram outbound contract pending. Apply that contract only after
+an encrypted production backup is verified and an operator explicitly dispatches
+with `-f apply_telegram_outbound_contract=true`.
 
 Watch the run with:
 

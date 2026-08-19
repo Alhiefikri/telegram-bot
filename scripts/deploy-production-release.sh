@@ -4,6 +4,7 @@ set -euo pipefail
 : "${PRODUCTION_PATH:?PRODUCTION_PATH is required}"
 : "${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}"
 RELEASE_OPERATION="${RELEASE_OPERATION:-deploy}"
+TELEGRAM_OUTBOUND_CONTRACT_MIGRATION="2026_08_18_000001_contract_telegram_outbound_effects.php"
 if [ "$RELEASE_OPERATION" = "deploy" ]; then
   : "${DEPLOY_BRANCH:?DEPLOY_BRANCH is required}"
   : "${DEPLOY_SHA:?DEPLOY_SHA is required}"
@@ -43,6 +44,83 @@ chmod 0700 "$REDACTOR_PATH"
 
 compose() {
   docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"
+}
+
+run_expand_migrations() {
+  local migration migration_name
+  local -a migration_args=()
+
+  shopt -s nullglob
+  for migration in src/database/migrations/*.php; do
+    migration_name="${migration##*/}"
+    if [ "$migration_name" = "$TELEGRAM_OUTBOUND_CONTRACT_MIGRATION" ]; then
+      continue
+    fi
+    migration_args+=(--path "database/migrations/$migration_name")
+  done
+  shopt -u nullglob
+
+  if [ "${#migration_args[@]}" -eq 0 ]; then
+    echo "No expand migrations found; refusing to run an unscoped migration." >&2
+    return 1
+  fi
+
+  echo "Running expand migrations; deferred contract migration is excluded: $TELEGRAM_OUTBOUND_CONTRACT_MIGRATION"
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+    -e APP_AUTO_MIGRATE=false \
+    -e APP_OPTIMIZE=false \
+    app php artisan migrate --force --isolated "${migration_args[@]}" </dev/null
+}
+
+run_deferred_telegram_contract() {
+  local attempt
+  local current_commit current_app_container running_image
+  local before_report="$RELEASE_ARTIFACT_DIR/telegram-outbound-contract-before.json"
+  local after_report="$RELEASE_ARTIFACT_DIR/telegram-outbound-contract-after.json"
+
+  current_commit="$(git rev-parse HEAD)"
+  if [ "$current_commit" != "$DEPLOY_SHA" ]; then
+    echo "Deferred Telegram outbound contract requires candidate checkout $DEPLOY_SHA; found $current_commit." >&2
+    return 1
+  fi
+
+  current_app_container="$(compose ps -q app)"
+  [ -n "$current_app_container" ] || {
+    echo "Deferred Telegram outbound contract cannot identify the running app container." >&2
+    return 1
+  }
+  running_image="$(docker inspect "$current_app_container" --format '{{.Config.Image}}')"
+  if [ "$running_image" != "$APP_IMAGE" ]; then
+    echo "Deferred Telegram outbound contract found app image $running_image instead of $APP_IMAGE." >&2
+    return 1
+  fi
+
+  echo "Recording Telegram outbound contract preflight before recovery."
+  compose exec -T app php artisan telegram:outbound-contract --json </dev/null > "$before_report"
+
+  echo "Recovering eligible Telegram outbound effects before contract migration."
+  compose exec -T app php artisan telegram:recover-outbound --chunk=100 --queue=telegram-outbound </dev/null
+
+  for attempt in $(seq 1 "${TELEGRAM_OUTBOUND_CONTRACT_ATTEMPTS:-36}"); do
+    if compose exec -T app php artisan telegram:outbound-contract --json --strict </dev/null > "$after_report"; then
+      break
+    fi
+    if [ "$attempt" -eq "${TELEGRAM_OUTBOUND_CONTRACT_ATTEMPTS:-36}" ]; then
+      echo "Telegram outbound contract did not become migration-safe after recovery." >&2
+      return 1
+    fi
+    sleep "${TELEGRAM_OUTBOUND_CONTRACT_INTERVAL:-5}"
+  done
+
+  echo "Applying deferred Telegram outbound contract migration."
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+    -e APP_AUTO_MIGRATE=false \
+    -e APP_OPTIMIZE=false \
+    app php artisan migrate --force --isolated </dev/null
+
+  compose exec -T app php artisan queue:restart </dev/null
+  wait_for_health
+  compose exec -T app php artisan telegram:outbound-contract --strict </dev/null
 }
 
 record_result() {
@@ -138,6 +216,21 @@ if ! flock -n 9; then
   exit 1
 fi
 
+if [ "$RELEASE_OPERATION" = "contract" ]; then
+  : "${DEPLOY_SHA:?DEPLOY_SHA is required for the deferred contract phase}"
+  : "${APP_IMAGE:?APP_IMAGE is required for the deferred contract phase}"
+
+  if run_deferred_telegram_contract; then
+    record_result "deploy-succeeded"
+    echo "Deferred Telegram outbound contract succeeded: commit=$DEPLOY_SHA image=$APP_IMAGE"
+    exit 0
+  fi
+
+  record_result "contract-failed-candidate-remains"
+  echo "DEPLOY FAILED: deferred Telegram outbound contract did not complete; candidate remains running for investigation." >&2
+  exit 1
+fi
+
 if [ "$RELEASE_OPERATION" = "rollback" ]; then
   PREVIOUS_COMMIT="$(cat "$RELEASE_ARTIFACT_DIR/previous-commit.txt")"
   PREVIOUS_IMAGE="$(cat "$RELEASE_ARTIFACT_DIR/previous-image.txt")"
@@ -197,8 +290,8 @@ docker pull "$APP_IMAGE"
 echo "Recording the pre-release failed-job ID watermark with the candidate image."
 APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE"
 
-echo "Running candidate database migration before application cutover."
-if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan migrate --force </dev/null; then
+echo "Running candidate expand migrations before application cutover."
+if ! run_expand_migrations; then
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   record_result "migration-failed-no-cutover"
@@ -231,5 +324,5 @@ if [ -n "$duplicate_projects" ]; then
   exit 21
 fi
 
-record_result "deploy-succeeded"
-echo "Production release succeeded: commit=$DEPLOY_SHA image=$APP_IMAGE"
+record_result "deploy-succeeded-compatible-contract-pending"
+echo "Production compatible release succeeded; deferred Telegram outbound contract remains pending: commit=$DEPLOY_SHA image=$APP_IMAGE"

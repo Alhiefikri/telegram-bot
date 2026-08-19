@@ -11,8 +11,20 @@ CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: failed-job snapshot can consume the streamed SSH script stdin\n' >&2; exit 1; }
-grep -Fq 'php artisan migrate --force </dev/null' "$RELEASE_SCRIPT" \
+grep -Fq 'php artisan migrate --force' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: candidate migration can consume the streamed SSH script stdin\n' >&2; exit 1; }
+grep -Fq '2026_08_18_000001_contract_telegram_outbound_effects.php' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: expand migration must name the deferred Telegram outbound contract migration\n' >&2; exit 1; }
+grep -Fq 'telegram:outbound-contract --strict' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: deferred Telegram outbound contract must have a strict preflight\n' >&2; exit 1; }
+grep -Fq 'telegram:recover-outbound --chunk=100 --queue=telegram-outbound' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: deferred Telegram outbound contract must recover effects before contracting\n' >&2; exit 1; }
+grep -Fq 'php artisan queue:restart' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: deferred Telegram outbound contract must restart long-lived workers\n' >&2; exit 1; }
+grep -Fq 'RELEASE_OPERATION=contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: production workflow must invoke the deferred contract phase explicitly\n' >&2; exit 1; }
+grep -Fq 'apply_telegram_outbound_contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: destructive contract migration must require an explicit workflow input\n' >&2; exit 1; }
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -30,7 +42,9 @@ run_scenario() {
   workspace=$(mktemp -d)
   bin="$workspace/bin"
   artifacts="$workspace/artifacts"
-  mkdir -p "$bin" "$artifacts" "$workspace/scripts"
+  mkdir -p "$bin" "$artifacts" "$workspace/scripts" "$workspace/src/database/migrations"
+  : > "$workspace/src/database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php"
+  : > "$workspace/src/database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php"
   printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
   printf '%s\n' "$previous_image" > "$workspace/current-image"
   printf '%s\n' "$scenario" > "$workspace/scenario"
@@ -145,6 +159,8 @@ SCRIPT
   case "$scenario" in
     success)
       grep -q 'compose .* run --rm --no-deps .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration"
+      grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
+      ! grep -q 'database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php' "$workspace/commands.log" || fail "success ran the deferred contract migration before cutover"
       ;;
     migration-failure)
       ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
@@ -166,8 +182,8 @@ SCRIPT
   printf 'PASS: %s\n' "$scenario"
 }
 
-run_scenario success 0 deploy-succeeded "$CANDIDATE_IMAGE"
-run_scenario legacy-image-success 0 deploy-succeeded "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
+run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
+run_scenario legacy-image-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"

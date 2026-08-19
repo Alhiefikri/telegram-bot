@@ -6,10 +6,12 @@ claim columns are not rollback storage.
 
 ## Deployment order
 
-1. Deploy the compatible application code. It must materialize, claim,
+1. Apply only the additive/expand migrations and deploy the compatible
+   application code. It must materialize, claim,
    finalize, recover, and project migrated Telegram effects through
    `telegram_outbound_effects` only.
-2. Drain or stop old workers, then run:
+2. After the candidate passes internal and public smoke gates, drain or stop
+   old workers, then run:
 
    ```sh
    php artisan telegram:outbound-contract --json
@@ -35,6 +37,15 @@ claim columns are not rollback storage.
    php artisan ops:health --db --queue-schema --queue-depth
    php artisan telegram:outbound-contract --strict
    ```
+
+The automatic release workflow applies the final contract only when the
+operator explicitly dispatches with `apply_telegram_outbound_contract=true`,
+after verifying an encrypted production backup, and only after the candidate is
+healthy and public smoke has passed. If the input remains false, the compatible
+candidate is released with the legacy columns intact. If recovery or the strict
+preflight remains blocked, the compatible candidate stays running with the
+legacy columns intact for investigation; do not roll application code back
+after the destructive contract migration starts.
 
 The restart is required because queue workers are long-lived processes and do
 not load the newly deployed application code until restarted.

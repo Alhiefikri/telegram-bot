@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      apply_telegram_outbound_contract:
+        description: Apply the destructive Telegram outbound contract migration after verified backup and strict preflight.
+        required: false
+        default: false
+        type: boolean
 
 
 env:
@@ -176,6 +181,25 @@ jobs:
             PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
             'bash -s' < scripts/deploy-production-release.sh
 
+      - name: Apply deferred Telegram outbound contract
+        id: telegram-outbound-contract
+        if: steps.external-smoke.outcome == 'success' && inputs.apply_telegram_outbound_contract == true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+          APP_IMAGE: ${{ env.APP_IMAGE }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
+          : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
+
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=contract APP_IMAGE="$APP_IMAGE" \
+            'bash -s' < scripts/deploy-production-release.sh
+
 
       - name: Fail release after external smoke rollback
         if: always() && steps.external-smoke.outcome == 'failure'
@@ -212,6 +236,12 @@ jobs:
             echo
             echo "- Result: \`$result\`"
             case "$result" in
+              deploy-succeeded-compatible-contract-pending)
+                echo "- Compatible candidate is running; the deferred Telegram outbound contract phase has not completed."
+                ;;
+              contract-failed-candidate-remains)
+                echo "- Deferred Telegram outbound contract failed; the compatible candidate remains running and needs manual investigation."
+                ;;
               deploy-failed-rollback-succeeded|external-smoke-failed-rollback-succeeded)
                 echo "- Deployment failed, but automatic rollback restored a healthy previous release."
                 ;;
