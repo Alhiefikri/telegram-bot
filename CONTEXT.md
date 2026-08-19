@@ -94,3 +94,15 @@ _Avoid_: Customer provider choice, automatic provider fallback
 **Checkout Maintenance**:
 The Owner/Admin-controlled store state that temporarily prevents new customer Orders while catalog access, cart management, and existing Order lifecycles remain available.
 _Avoid_: Store Maintenance, Store Closure
+
+**Telegram Outbound Effect**:
+A durable business delivery unit addressed to a Telegram customer, administrator, recipient, or Store Channel. It represents a customer-visible or operationally important message/media delivery, not every ephemeral Telegram API call.
+_Avoid_: Telegram API request, background message
+
+**Ambiguous Telegram Delivery**:
+An outbound effect whose Telegram outcome cannot be proven because the request or response ended in a timeout, connection failure, or worker interruption. It is not treated as a definite send failure.
+_Avoid_: ordinary send failure, retryable Telegram error
+
+**Manual Delivery Review**:
+The operator-controlled state for an Ambiguous Telegram Delivery that must be checked in Telegram or deliberately resent as a new effect before it is considered delivered.
+_Avoid_: Manual Fulfillment Review, automatic retry

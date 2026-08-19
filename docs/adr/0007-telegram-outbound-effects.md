@@ -10,6 +10,28 @@ Durable business deliveries to Telegram use one transactional Outbound Effect Le
 
 Telegram does not document an outbound idempotency key for `sendMessage` or `sendPhoto`, so a timeout, connection failure, or worker crash after the send may have an ambiguous outcome. Ambiguous effects are never blindly retried. They remain auditable for operator verification or an explicit new resend effect. Existing `orders.checkout_key` remains responsible for checkout mutation idempotency, while queue uniqueness and `afterCommit()` remain supporting optimisations rather than delivery guarantees.
 
+### Final protocol boundary
+
+`TelegramOutboundEffectLedgerProtocol` is the sole durable delivery-state
+seam. It owns row-locked claim ownership, leases, claim-token fencing, state
+transitions, ambiguity classification, retry scheduling, terminal-failure
+rules, receipt ordering, and operator-confirmed finalization. The family policy
+supplies attempt limits and ordering constraints without becoming a second
+state machine.
+
+Effect-family adapters own only eligibility, source loading, rendering,
+Telegram transport, and their read projection. The dispatcher maps effect
+types to queue jobs. Materialization and safe review summaries remain in the
+effect service, but no caller may reintroduce claim/finalization pass-throughs
+or a family-specific delivery-state switchboard. See the companion
+[architecture and recovery contract](../telegram-outbound-effect-architecture.md).
+
+An effect is `sent` only after a successful Telegram response with a valid
+positive integer message identifier. Transport ambiguity and expired leases
+become `unknown`; they are not returned to `pending` by recovery. Operator
+resolution uses the same protocol boundary, while an explicit resend creates a
+new auditable effect version and leaves the ambiguous record unchanged.
+
 ### Deferred Admin Broadcast materialization
 
 Admin Broadcast is an explicit deferred-materialization exception to the
@@ -42,3 +64,12 @@ recovery guarantee that closes that interval.
 - The system accepts conservative non-delivery and operator work in ambiguous cases to avoid duplicate credentials, payment instructions, and public Sales Proof Posts.
 - Existing provider boundaries remain intact. KlikQRIS recovery continues to use the same Payment and its existing single-flight service.
 - Legacy claim columns are removed only after an expand-contract migration proves that the ledger is authoritative for every effect family.
+- The scheduled `telegram:recover-outbound` command is a recovery publisher and
+  source-discovery safety net. It first fences expired leases as `unknown`,
+  then dispatches only due `pending` or policy-retryable `failed` effects
+  through the shared dispatcher. It does not automatically resend an
+  Ambiguous Telegram Delivery.
+- Admin Broadcast remains the documented deferred-materialization exception:
+  the committed broadcast row with a null `recipients_materialized_at` is the
+  durable handoff, and recovery redispatches that handoff through the same
+  locked queue boundary until recipient effects are materialized.
