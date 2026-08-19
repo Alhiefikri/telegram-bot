@@ -277,6 +277,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertNotNull($payment->fresh()->payment_proof_forwarded_at);
+        $this->assertSame('999', $payment->fresh()->payment_proof_admin_chat_id);
         $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999');
         $this->assertCount(1, $adminPhotos);
@@ -310,6 +311,30 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             'proof-file-secret',
             json_encode(app(TelegramOutboundEffectService::class)->reviewSummary($freshEffect), JSON_THROW_ON_ERROR),
         );
+    }
+
+    public function test_numeric_message_id_from_unsuccessful_telegram_response_is_not_marked_sent(): void
+    {
+        $this->configureAdminTarget();
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => false,
+                'result' => ['message_id' => 123],
+            ]),
+        ]);
+        [$order, $payment] = $this->manualProof();
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordManualPaymentProof($order, $payment);
+
+        try {
+            $outboundEffects->processManualPaymentProof($effect);
+        } catch (\Throwable) {
+            // Queue workers retry definite delivery failures through the job.
+        }
+
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->fresh()->state);
+        $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
     }
 
     private function configureAdminTarget(): void

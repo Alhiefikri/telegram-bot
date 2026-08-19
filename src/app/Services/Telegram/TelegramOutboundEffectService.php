@@ -1372,7 +1372,7 @@ class TelegramOutboundEffectService
             };
             $messageId = data_get($response, 'result.message_id');
 
-            if (! is_numeric($messageId)) {
+            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
                 throw new TelegramTransportException('sendMessage');
             }
 
@@ -1553,7 +1553,7 @@ class TelegramOutboundEffectService
                 ],
             );
             $messageId = data_get($response, 'result.message_id');
-            if (data_get($response, 'ok') !== true || ! is_numeric($messageId)) {
+            if (! is_numeric($messageId)) {
                 throw new RuntimeException('Telegram Sales Proof sendMessage did not return a successful message id.');
             }
 
