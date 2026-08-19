@@ -289,6 +289,36 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSoftDeleted('products', ['id' => $product->id]);
     }
 
+    public function test_editing_another_product_field_accepts_the_existing_usdt_price_precision(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'USDT Product',
+            'description' => 'Original description',
+            'price_amount' => 25000,
+            'usdt_price_amount' => 1_000_000,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'USDT Product',
+                'price_amount' => '25000',
+                'description' => 'Updated description',
+                'usdt_price_amount' => '1.000000',
+                'is_active' => '1',
+            ]);
+        $response->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $dashboard = $this->actingAs($admin)->get('/admin?tab=produk')->assertOk();
+        $this->assertStringNotContainsString('1.000000', $dashboard->getContent());
+
+        $product->refresh();
+        $this->assertSame('Updated description', $product->description);
+        $this->assertSame(1_000_000, $product->usdt_price_amount);
+    }
+
     public function test_product_modal_submission_validates_required_fields(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));

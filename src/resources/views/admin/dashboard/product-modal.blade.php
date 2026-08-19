@@ -68,7 +68,7 @@
 
                             <div>
                                 <x-admin-dashboard.field-label for="product-usdt-price">Harga USDT (opsional)</x-admin-dashboard.field-label>
-                                <x-admin-dashboard.input id="product-usdt-price" name="usdt_price_amount" min="0" step="0.000001" inputmode="decimal" placeholder="0.5" class="mt-1.5" x-model="productUsdtPrice" />
+                                <x-admin-dashboard.input type="number" id="product-usdt-price" name="usdt_price_amount" min="0" step="0.001" inputmode="decimal" placeholder="0.5" class="mt-1.5" x-model="productUsdtPrice" />
                                 @error('usdt_price_amount', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                                 @error('usdt_price_amount', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             </div>

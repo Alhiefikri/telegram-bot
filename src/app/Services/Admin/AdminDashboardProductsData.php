@@ -92,7 +92,7 @@ final class AdminDashboardProductsData
                     'usage_guide_url' => $product->usage_guide_url,
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
-                    'usdt_price_amount' => $product->usdt_price_amount === null ? null : number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''),
+                    'usdt_price_amount' => $this->formatUsdtPrice($product->usdt_price_amount),
                     'price' => Money::idr($product->price_amount),
                     'stock' => $product->stock,
                     'reserved_stock' => $product->reserved_stock,
@@ -124,7 +124,7 @@ final class AdminDashboardProductsData
                         'id' => $product->id,
                         'name' => $product->name,
                         'priceAmount' => $product->price_amount,
-                        'usdtPriceAmount' => $product->usdt_price_amount === null ? null : number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''),
+                        'usdtPriceAmount' => $this->formatUsdtPrice($product->usdt_price_amount),
                         'categoryId' => $product->category_id,
                         'description' => $product->description,
                         'deliveryNote' => $product->delivery_note,
@@ -270,6 +270,15 @@ final class AdminDashboardProductsData
                 'name' => $category->name,
             ])
             ->all();
+    }
+
+    private function formatUsdtPrice(?int $microAmount): ?string
+    {
+        if ($microAmount === null) {
+            return null;
+        }
+
+        return rtrim(rtrim(number_format($microAmount / 1_000_000, 6, '.', ''), '0'), '.') ?: '0';
     }
 
     /**

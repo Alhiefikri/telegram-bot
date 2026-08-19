@@ -18,6 +18,16 @@ abstract class AdminProductFormRequest extends FormRequest
         if ($value === '') {
             return;
         }
+
+        if (str_contains($value, '.')) {
+            [$whole, $fraction] = explode('.', $value, 2);
+
+            if ($fraction !== '') {
+                $fraction = rtrim($fraction, '0');
+                $value = $fraction === '' ? $whole : $whole.'.'.$fraction;
+            }
+        }
+
         if (preg_match('/^(\d+)(?:\.(\d{1,3}))?$/', $value, $m)) {
             $this->merge(['usdt_price_amount' => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
         }
