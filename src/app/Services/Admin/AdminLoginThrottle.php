@@ -10,8 +10,11 @@ use Illuminate\Support\Str;
 final class AdminLoginThrottle
 {
     private const IP_KEY_PREFIX = 'admin-login:ip:';
+
     private const LOCK_KEY_PREFIX = 'admin-login-throttle:lock:';
+
     private const LOCK_SECONDS = 30;
+
     private const LOCK_WAIT_SECONDS = 30;
 
     public function __construct(

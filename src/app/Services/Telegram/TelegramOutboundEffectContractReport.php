@@ -8,7 +8,6 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
-use App\Models\SalesProofPost;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramBroadcastRecipient;
 use Illuminate\Database\Query\Builder;
