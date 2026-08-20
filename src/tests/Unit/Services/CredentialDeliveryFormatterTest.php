@@ -63,7 +63,18 @@ class CredentialDeliveryFormatterTest extends TestCase
         ], (new CredentialDeliveryFormatter)->codeEntities($text));
     }
 
-    public function test_it_marks_structured_auth_tokens_as_copyable_code_entities(): void
+    public function test_it_does_not_infer_auth_token_entities_from_legacy_or_tutorial_text(): void
+    {
+        $text = "email : premium@example.test\npassword : Password-123\nMFA : ABCD EFGH\nAuth Token : tutorial text";
+
+        $this->assertSame([
+            ['type' => 'code', 'offset' => 8, 'length' => 20],
+            ['type' => 'code', 'offset' => 40, 'length' => 12],
+            ['type' => 'code', 'offset' => 59, 'length' => 9],
+        ], (new CredentialDeliveryFormatter)->codeEntities($text));
+    }
+
+    public function test_it_marks_explicit_structured_auth_token_fields_as_copyable_code_entities(): void
     {
         $text = "email : premium@example.test\npassword : Password-123\nAuth Token : token-value";
 
@@ -71,7 +82,11 @@ class CredentialDeliveryFormatterTest extends TestCase
             ['type' => 'code', 'offset' => 8, 'length' => 20],
             ['type' => 'code', 'offset' => 40, 'length' => 12],
             ['type' => 'code', 'offset' => 66, 'length' => 11],
-        ], (new CredentialDeliveryFormatter)->codeEntities($text));
+        ], (new CredentialDeliveryFormatter)->codeEntitiesForFields($text, [
+            ['label' => 'email', 'value' => 'premium@example.test'],
+            ['label' => 'password', 'value' => 'Password-123'],
+            ['label' => 'Auth Token', 'value' => 'token-value'],
+        ]));
     }
 
     public function test_it_marks_explicit_unicode_fields_using_utf16_offsets(): void
