@@ -2,6 +2,10 @@ const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = "Tidak ada file yang dipilih";
 const RETURN_TARGET_HIGHLIGHT_MS = 1800;
 const MAX_ACCOUNT_CARDS = 20;
+const ACCOUNT_INPUT_SWITCH_CONFIRMATION =
+  "Beralih ke Input Cepat? Draf akun yang belum disimpan tetap berada di halaman sampai modal ditutup.";
+const ACCOUNT_INPUT_CLOSE_CONFIRMATION =
+  "Tutup Input Akun? Draf akun yang belum disimpan akan hilang.";
 const MODAL_FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -404,7 +408,20 @@ export default function adminDashboard(initialState = {}) {
 
     setStockInputMode(mode) {
       if (mode !== "quick" && mode !== "account") {
-        return;
+        return false;
+      }
+
+      if (mode === this.stockInputMode) {
+        return true;
+      }
+
+      if (
+        this.stockInputMode === "account" &&
+        mode === "quick" &&
+        this.accountInputDirty() &&
+        !window.confirm(ACCOUNT_INPUT_SWITCH_CONFIRMATION)
+      ) {
+        return false;
       }
 
       this.stockInputMode = mode;
@@ -421,6 +438,8 @@ export default function adminDashboard(initialState = {}) {
           this.$refs.stockItems?.focus();
         }
       });
+
+      return true;
     },
 
     accountInputChanged() {
@@ -444,6 +463,13 @@ export default function adminDashboard(initialState = {}) {
             ].some((value) => String(value ?? "") !== "") ||
             card.accessMethod !== "none"
         )
+      );
+    },
+
+    confirmAccountInputClose() {
+      return (
+        !this.accountInputDirty() ||
+        window.confirm(ACCOUNT_INPUT_CLOSE_CONFIRMATION)
       );
     },
 
@@ -1036,18 +1062,8 @@ export default function adminDashboard(initialState = {}) {
     },
 
     closeStockModal(force = false) {
-      if (
-        !force &&
-        this.stockInputMode === "account" &&
-        this.accountInputDirty()
-      ) {
-        if (
-          !window.confirm(
-            "Tutup Input Akun? Draf akun yang belum disimpan akan hilang."
-          )
-        ) {
-          return;
-        }
+      if (!force && !this.confirmAccountInputClose()) {
+        return;
       }
 
       const opener = this.stockModalOpener;
@@ -1064,6 +1080,11 @@ export default function adminDashboard(initialState = {}) {
 
     submitStockForm(event) {
       if (!event.target.checkValidity()) {
+        return;
+      }
+
+      if (!this.confirmAccountInputClose()) {
+        event.preventDefault();
         return;
       }
 

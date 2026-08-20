@@ -1520,7 +1520,8 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
   const productCard = page
     .locator("article:visible")
     .filter({ hasText: "Browser QA Produk A" });
-  await productCard.getByRole("button", { name: /Stok/i }).click();
+  const opener = productCard.getByRole("button", { name: /Stok/i });
+  await opener.click();
 
   const dialog = page.getByRole("dialog", { name: "Tambah Stok" });
   await expect(dialog).toBeVisible();
@@ -1579,6 +1580,28 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
   await dialog.locator("#account-email-0").fill("changed@example.test");
   await expect(dialog.getByText("Review wajib sebelum commit")).toBeHidden();
 
+  let switchDialog;
+  page.once("dialog", async (browserDialog) => {
+    switchDialog = browserDialog;
+    await browserDialog.dismiss();
+  });
+  await dialog.getByRole("tab", { name: "Input Cepat" }).click();
+  expect(switchDialog?.type()).toBe("confirm");
+  await expect(dialog.locator("#account-email-0")).toBeVisible();
+  await expect(dialog.locator("#account-email-0")).toHaveValue(
+    "changed@example.test"
+  );
+
+  let acceptedSwitchDialog;
+  page.once("dialog", async (browserDialog) => {
+    acceptedSwitchDialog = browserDialog;
+    await browserDialog.accept();
+  });
+  await dialog.getByRole("tab", { name: "Input Cepat" }).click();
+  expect(acceptedSwitchDialog?.type()).toBe("confirm");
+  await expect(dialog.locator("#stock-items")).toBeVisible();
+  await expect(dialog.locator("#account-email-0")).toBeHidden();
+
   let closeDialog;
   page.once("dialog", async (browserDialog) => {
     closeDialog = browserDialog;
@@ -1587,6 +1610,21 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
   await dialog.getByRole("button", { name: "Tutup modal" }).click();
   expect(closeDialog?.type()).toBe("confirm");
   await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("tab", { name: "Input Akun" }).click();
+  await expect(dialog.locator("#account-email-0")).toHaveValue(
+    "changed@example.test"
+  );
+
+  let acceptedCloseDialog;
+  page.once("dialog", async (browserDialog) => {
+    acceptedCloseDialog = browserDialog;
+    await browserDialog.accept();
+  });
+  await dialog.getByRole("button", { name: "Tutup modal" }).click();
+  expect(acceptedCloseDialog?.type()).toBe("confirm");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
 test("focuses the relevant product field when server validation reopens the modal", async ({
