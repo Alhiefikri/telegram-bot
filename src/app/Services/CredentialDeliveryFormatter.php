@@ -20,7 +20,7 @@ class CredentialDeliveryFormatter
      */
     public function codeEntities(string $text): array
     {
-        preg_match_all('/(?:email|password|MFA) : ([^\r\n]+)/', $text, $matches, PREG_OFFSET_CAPTURE);
+        preg_match_all('/(?:email|password|MFA|Auth Token) : ([^\r\n]+)/', $text, $matches, PREG_OFFSET_CAPTURE);
 
         return array_map(function (array $match) use ($text): array {
             [$value, $offset] = $match;

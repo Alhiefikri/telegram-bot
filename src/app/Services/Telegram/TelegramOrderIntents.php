@@ -8,6 +8,8 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\CredentialDeliveryFormatter;
+use App\Services\Credentials\CredentialDelivery;
+use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
@@ -32,6 +34,7 @@ class TelegramOrderIntents
         private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
+        private CredentialDeliveryPresentation $credentialPresentation,
         private TelegramMessageChunker $messageChunker,
     ) {}
 
@@ -164,7 +167,8 @@ class TelegramOrderIntents
             $lines[] = '';
             $lines[] = $refreshNotice;
         }
-        $accountLines = $this->accountSecretLines($customer, $order, $paymentStatus);
+        $delivery = $this->credentialPresentation->forCustomer($customer, $order, $payment);
+        $accountLines = $this->accountSecretLines($customer, $delivery);
         if ($accountLines !== []) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
@@ -344,26 +348,24 @@ class TelegramOrderIntents
         return $this->locale->translate($customer, 'order.refresh.not_paid');
     }
 
-    private function accountSecretLines(Customer $customer, Order $order, PaymentStatus $paymentStatus): array
+    private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array
     {
-        if ($paymentStatus !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
-            return [];
-        }
-
         $lines = [];
-        foreach ($order->orderItems as $item) {
-            if ($item->stockItems->isEmpty()) {
-                continue;
-            }
+        foreach ($delivery->groups() as $group) {
+            $lines[] = $group->productName();
+            foreach ($group->accounts() as $account) {
+                $lines[] = $account->number().'. '.$account->text();
 
-            $lines[] = $item->product_name;
-            foreach ($item->stockItems->values() as $index => $stockItem) {
-                $lines[] = ($index + 1).'. '.$this->credentialFormatter->format((string) $stockItem->secret);
+                if ($account->isStructured()
+                    && $account->tutorial() !== null
+                    && $account->tutorial() !== $group->defaultTutorial()) {
+                    $lines[] = $this->locale->translate($customer, 'order.detail.delivery_note');
+                    $lines[] = $account->tutorial();
+                }
             }
-            $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
-            if ($deliveryNote !== '') {
+            if ($group->defaultTutorial() !== null) {
                 $lines[] = $this->locale->translate($customer, 'order.detail.delivery_note');
-                $lines[] = $deliveryNote;
+                $lines[] = $group->defaultTutorial();
             }
         }
 

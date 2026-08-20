@@ -62,4 +62,15 @@ class CredentialDeliveryFormatterTest extends TestCase
             ['type' => 'code', 'offset' => 62, 'length' => 9],
         ], (new CredentialDeliveryFormatter)->codeEntities($text));
     }
+
+    public function test_it_marks_structured_auth_tokens_as_copyable_code_entities(): void
+    {
+        $text = "email : premium@example.test\npassword : Password-123\nAuth Token : token-value";
+
+        $this->assertSame([
+            ['type' => 'code', 'offset' => 8, 'length' => 20],
+            ['type' => 'code', 'offset' => 40, 'length' => 12],
+            ['type' => 'code', 'offset' => 66, 'length' => 11],
+        ], (new CredentialDeliveryFormatter)->codeEntities($text));
+    }
 }

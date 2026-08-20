@@ -8,14 +8,14 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationStatus;
-use App\Services\CredentialDeliveryFormatter;
+use App\Services\Credentials\CredentialDelivery;
+use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
-use App\Services\ProductUsageGuide;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 
 class StorefrontShopSignedInvoice
@@ -23,8 +23,7 @@ class StorefrontShopSignedInvoice
     public function __construct(
         private readonly TelegramQrCodeRenderer $qrCodes,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
-        private readonly CredentialDeliveryFormatter $credentialFormatter,
-        private readonly ProductUsageGuide $usageGuides,
+        private readonly CredentialDeliveryPresentation $credentialPresentation,
         private readonly OrderLifecycle $orders,
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
@@ -43,7 +42,8 @@ class StorefrontShopSignedInvoice
         $redirectUrl = $this->redirectUrl($order);
         $klikQrisResult = $this->isKlikQrisPayment($payment) ? $this->klikQris->classify($payment) : null;
         $qrisReadiness = $this->qrisReadiness($projection, $payment, $klikQrisResult);
-        $accountGroups = $this->accountGroups($order, $state);
+        $delivery = $this->credentialPresentation->forOrder($order, $payment);
+        $accountGroups = $this->accountGroups($delivery);
         $payable = $projection->isPendingPayment ? $klikQrisResult?->payable() : null;
 
         return new StorefrontShopSignedInvoiceReadResult(
@@ -68,9 +68,7 @@ class StorefrontShopSignedInvoice
             qrisEffectiveExpiresAt: $payable?->effectiveExpiresAt(),
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
             accountGroups: $accountGroups,
-            usageGuides: $state === StorefrontShopSignedInvoiceState::Paid
-                ? $this->usageGuides->forOrder($order)
-                : [],
+            usageGuides: $state === StorefrontShopSignedInvoiceState::Paid ? $delivery->usageGuides() : [],
             accountCopyText: $this->accountCopyText($accountGroups),
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
             manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
@@ -307,43 +305,40 @@ class StorefrontShopSignedInvoice
     /**
      * @return list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>
      */
-    private function accountGroups(Order $order, StorefrontShopSignedInvoiceState $state): array
+    private function accountGroups(CredentialDelivery $delivery): array
     {
-        if ($state !== StorefrontShopSignedInvoiceState::Paid) {
-            return [];
-        }
-
-        return $order->orderItems
-            ->map(function (OrderItem $item): array {
-                $secrets = $item->stockItems
-                    ->map(function ($stockItem): array {
-                        $rawSecret = (string) $stockItem->secret;
-
-                        return [
-                            'text' => $this->credentialFormatter->format($rawSecret),
-                            'parts' => $this->credentialFormatter->parts($rawSecret),
-                        ];
-                    })
-                    ->filter(fn (array $secret): bool => trim($secret['text']) !== '')
-                    ->values()
-                    ->map(fn (array $secret, int $index): array => array_merge($secret, [
-                        'label' => 'Data akun '.($index + 1),
-                    ]))
-                    ->all();
-
-                return [
-                    'product_name' => (string) $item->product_name,
-                    'delivery_note' => $item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note,
-                    'usage_guide' => $this->usageGuides->forItem($item),
-                    'secrets' => $secrets,
-                    'copy_text' => collect($secrets)
-                        ->map(fn (array $secret, int $index): string => ($index + 1).".\n".$secret['text'])
-                        ->implode("\n\n"),
+        return array_map(function ($group): array {
+            $secrets = array_map(function ($account): array {
+                $secret = [
+                    'text' => $account->text(),
+                    'parts' => $account->legacyParts(),
+                    'label' => $account->label(),
                 ];
-            })
-            ->filter(fn (array $group): bool => $group['secrets'] !== [])
-            ->values()
-            ->all();
+
+                if ($account->isStructured()) {
+                    $secret += [
+                        'structured' => true,
+                        'email' => $account->email(),
+                        'password' => $account->password(),
+                        'access_method' => $account->accessMethod()?->value,
+                        'access_value' => $account->accessValue(),
+                        'tutorial' => $account->tutorial(),
+                    ];
+                }
+
+                return $secret;
+            }, $group->accounts());
+
+            return [
+                'product_name' => $group->productName(),
+                'delivery_note' => $group->defaultTutorial(),
+                'usage_guide' => $group->usageGuide(),
+                'secrets' => $secrets,
+                'copy_text' => collect($secrets)
+                    ->map(fn (array $secret, int $index): string => ($index + 1).".\n".$secret['text'])
+                    ->implode("\n\n"),
+            ];
+        }, $delivery->groups());
     }
 
     /**

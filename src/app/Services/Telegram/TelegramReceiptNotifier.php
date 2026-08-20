@@ -7,7 +7,8 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Services\CredentialDeliveryFormatter;
-use App\Services\ProductUsageGuide;
+use App\Services\Credentials\CredentialDelivery;
+use App\Services\Credentials\CredentialDeliveryPresentation;
 
 class TelegramReceiptNotifier
 {
@@ -15,7 +16,7 @@ class TelegramReceiptNotifier
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
-        private ProductUsageGuide $usageGuides,
+        private CredentialDeliveryPresentation $credentialPresentation,
         private TelegramMessageChunker $messageChunker,
         private TelegramSupportContact $supportContact,
     ) {}
@@ -63,7 +64,8 @@ class TelegramReceiptNotifier
             return ['chunks' => [''], 'guides' => []];
         }
 
-        $guides = $this->usageGuides->forOrder($order);
+        $delivery = $this->credentialPresentation->forCustomer($customer, $order);
+        $guides = $delivery->usageGuides();
         $lines = [
             $this->locale->translate($customer, 'receipt.title'),
             '━━━━━━━━━━━━━━',
@@ -75,7 +77,7 @@ class TelegramReceiptNotifier
             $lines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
 
-        $accountLines = $this->accountSecretLines($order);
+        $accountLines = $this->accountSecretLines($customer, $delivery);
         if ($accountLines !== []) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'receipt.account_details');
@@ -141,23 +143,25 @@ class TelegramReceiptNotifier
         );
     }
 
-    private function accountSecretLines(Order $order): array
+    private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array
     {
         $lines = [];
-        foreach ($order->orderItems as $item) {
-            if ($item->stockItems->isEmpty()) {
-                continue;
-            }
+        foreach ($delivery->groups() as $group) {
+            $lines[] = $group->productName();
+            foreach ($group->accounts() as $account) {
+                $lines[] = $account->number().'. '.$account->text();
 
-            $lines[] = $item->product_name;
-            foreach ($item->stockItems->values() as $index => $stockItem) {
-                $lines[] = ($index + 1).'. '.$this->credentialFormatter->format((string) $stockItem->secret);
+                if ($account->isStructured()
+                    && $account->tutorial() !== null
+                    && $account->tutorial() !== $group->defaultTutorial()) {
+                    $lines[] = $this->locale->translate($customer, 'receipt.delivery_note');
+                    $lines[] = $account->tutorial();
+                }
             }
-            $deliveryNote = trim((string) ($item->delivery_note_snapshotted ? $item->delivery_note : $item->product?->delivery_note));
-            if ($deliveryNote !== '') {
+            if ($group->defaultTutorial() !== null) {
                 $lines[] = '';
-                $lines[] = $this->locale->translate($order->customer, 'receipt.delivery_note');
-                $lines[] = $deliveryNote;
+                $lines[] = $this->locale->translate($customer, 'receipt.delivery_note');
+                $lines[] = $group->defaultTutorial();
             }
             $lines[] = '';
         }
