@@ -203,6 +203,85 @@ final class ProductStockIntake
     }
 
     /**
+     * Perform the non-mutating Account Input review used by the admin UI.
+     *
+     * This intentionally does not reserve identities or create an operation
+     * row. It reports the current registry view, while submit() repeats the
+     * same checks and unique claims authoritatively inside its transaction.
+     *
+     * @throws ValidationException when the submission is structurally invalid.
+     */
+    public function review(
+        Product $product,
+        ProductStockIntakeSubmission|array $submission,
+        ?User $actor = null,
+    ): ProductStockIntakeReview {
+        $submission = is_array($submission)
+            ? ProductStockIntakeSubmission::fromArray($submission)
+            : $submission;
+
+        $this->assertActorMayAdjustStock($actor);
+
+        if (! $submission->isStructuredAccount()) {
+            throw ValidationException::withMessages([
+                'accounts' => ['Input review hanya tersedia untuk akun terstruktur.'],
+            ]);
+        }
+
+        $this->assertStructuredInputEnabled();
+        $normalized = $this->normalizeAndValidate($submission, rejectSubmissionDuplicates: false);
+        $registeredDuplicates = $this->registeredIdentityKinds($normalized['items']);
+        $accounts = [];
+        $duplicateCount = 0;
+
+        foreach ($normalized['items'] as $position => $item) {
+            /** @var StructuredCredentialPayload $payload */
+            $payload = $item['payload'];
+            $index = $item['index'];
+            $submissionKinds = array_keys($normalized['submission_duplicates'][$index] ?? []);
+            $registryKinds = array_keys($registeredDuplicates[$index] ?? []);
+            $duplicateKinds = array_values(array_unique([...$submissionKinds, ...$registryKinds]));
+            $duplicateFields = array_values(array_unique(array_map(
+                fn (string $kind): string => $this->identityField($kind),
+                $duplicateKinds,
+            )));
+            $duplicateSources = [];
+            if ($submissionKinds !== []) {
+                $duplicateSources[] = 'submission';
+            }
+            if ($registryKinds !== []) {
+                $duplicateSources[] = 'registry';
+            }
+            $hasDuplicate = $duplicateKinds !== [];
+            if ($hasDuplicate) {
+                $duplicateCount++;
+            }
+
+            $accounts[] = [
+                'index' => $index,
+                'account_number' => $position + 1,
+                'email' => $payload->email,
+                'access_method' => $payload->accessMethod->value,
+                'otp_domain' => $payload->otpMailDomain(),
+                'tutorial_source' => $payload->tutorialOverride !== null
+                    ? 'override'
+                    : 'product_default',
+                'duplicate_status' => $hasDuplicate ? 'duplicate' : 'clear',
+                'duplicate_fields' => $duplicateFields,
+                'duplicate_sources' => $duplicateSources,
+            ];
+        }
+
+        return new ProductStockIntakeReview(
+            operationKey: $submission->operationKey,
+            status: $duplicateCount > 0 ? 'duplicate' : 'ready',
+            accountCount: count($accounts),
+            duplicateCount: $duplicateCount,
+            accounts: $accounts,
+        );
+    }
+
+    /**
      * @param  array<string, mixed>  $input
      */
     public function submitStructured(
@@ -240,21 +319,29 @@ final class ProductStockIntake
     }
 
     /**
-     * @return array{items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>, canonical_items:list<array<string,mixed>>}
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
      */
-    private function normalizeAndValidate(ProductStockIntakeSubmission $submission): array
+    private function normalizeAndValidate(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
     {
         if ($submission->isLegacy()) {
-            return $this->normalizeLegacy($submission);
+            return $this->normalizeLegacy($submission, $rejectSubmissionDuplicates);
         }
 
-        return $this->normalizeStructured($submission);
+        return $this->normalizeStructured($submission, $rejectSubmissionDuplicates);
     }
 
     /**
-     * @return array{items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>, canonical_items:list<array<string,mixed>>}
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
      */
-    private function normalizeLegacy(ProductStockIntakeSubmission $submission): array
+    private function normalizeLegacy(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
     {
         $errors = [];
         $items = [];
@@ -291,16 +378,27 @@ final class ProductStockIntake
             $errors['stock_items'][] = 'Isi minimal satu baris stok.';
         }
 
-        $this->appendSubmissionDuplicateErrors($errors, $items, structured: false);
+        $submissionDuplicates = $this->submissionDuplicateKinds($items);
+        if ($rejectSubmissionDuplicates) {
+            $this->appendSubmissionDuplicateErrors($errors, $submissionDuplicates, structured: false);
+        }
         $this->throwIfInvalid($errors);
 
-        return ['items' => $items, 'canonical_items' => $canonicalItems];
+        return [
+            'items' => $items,
+            'canonical_items' => $canonicalItems,
+            'submission_duplicates' => $submissionDuplicates,
+        ];
     }
 
     /**
-     * @return array{items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>, canonical_items:list<array<string,mixed>>}
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
      */
-    private function normalizeStructured(ProductStockIntakeSubmission $submission): array
+    private function normalizeStructured(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
     {
         $errors = [];
         $items = [];
@@ -388,10 +486,17 @@ final class ProductStockIntake
             $canonicalItems[] = $payload->toArray();
         }
 
-        $this->appendSubmissionDuplicateErrors($errors, $items, structured: true);
+        $submissionDuplicates = $this->submissionDuplicateKinds($items);
+        if ($rejectSubmissionDuplicates) {
+            $this->appendSubmissionDuplicateErrors($errors, $submissionDuplicates, structured: true);
+        }
         $this->throwIfInvalid($errors);
 
-        return ['items' => $items, 'canonical_items' => $canonicalItems];
+        return [
+            'items' => $items,
+            'canonical_items' => $canonicalItems,
+            'submission_duplicates' => $submissionDuplicates,
+        ];
     }
 
     /**
@@ -447,12 +552,25 @@ final class ProductStockIntake
 
     /**
      * @param  array<string, list<string>>  $errors
-     * @param  list<array{index:int, identities:list<array{kind:string,value:string}>}>  $items
+     * @param  array<int,array<string,bool>>  $duplicates
      */
-    private function appendSubmissionDuplicateErrors(array &$errors, array $items, bool $structured): void
+    private function appendSubmissionDuplicateErrors(array &$errors, array $duplicates, bool $structured): void
+    {
+        foreach ($duplicates as $index => $kinds) {
+            foreach (array_keys($kinds) as $kind) {
+                $this->addDuplicateError($errors, (int) $index, $kind, $structured);
+            }
+        }
+    }
+
+    /** @return array<int,array<string,bool>> */
+    private function submissionDuplicateKinds(array $items): array
     {
         /** @var array<string, array{index:int, kind:string}> $seen */
         $seen = [];
+        /** @var array<int,array<string,bool>> $duplicates */
+        $duplicates = [];
+
         foreach ($items as $item) {
             foreach ($item['identities'] as $identity) {
                 $claimKey = $identity['kind'].':'.$identity['value'];
@@ -463,10 +581,12 @@ final class ProductStockIntake
                 }
 
                 $previous = $seen[$claimKey];
-                $this->addDuplicateError($errors, $previous['index'], $previous['kind'], $structured);
-                $this->addDuplicateError($errors, $item['index'], $identity['kind'], $structured);
+                $duplicates[$previous['index']][$previous['kind']] = true;
+                $duplicates[$item['index']][$identity['kind']] = true;
             }
         }
+
+        return $duplicates;
     }
 
     /**
@@ -567,10 +687,27 @@ final class ProductStockIntake
      */
     private function findRegisteredIdentityConflict(array $items): ?ProductStockIntakeIdentityConflict
     {
-        if (! $this->fingerprints->isReady()) {
-            return null;
+        foreach ($this->registeredIdentityKinds($items) as $itemIndex => $kinds) {
+            if ($kinds !== []) {
+                return new ProductStockIntakeIdentityConflict((int) $itemIndex, (string) array_key_first($kinds));
+            }
         }
 
+        return null;
+    }
+
+    /**
+     * @param  list<array{index:int, identities:list<array{kind:string,value:string}>}>  $items
+     * @return array<int,array<string,bool>>
+     */
+    private function registeredIdentityKinds(array $items): array
+    {
+        if (! $this->fingerprints->isReady()) {
+            return [];
+        }
+
+        /** @var array<int,array<string,bool>> $duplicates */
+        $duplicates = [];
         foreach ($items as $item) {
             foreach ($item['identities'] as $identity) {
                 $fingerprint = $this->fingerprints->forIdentity($identity['kind'], $identity['value']);
@@ -578,12 +715,17 @@ final class ProductStockIntake
                     ->where('identity_kind', $identity['kind'])
                     ->where('fingerprint', $fingerprint)
                     ->exists()) {
-                    return new ProductStockIntakeIdentityConflict($item['index'], $identity['kind']);
+                    $duplicates[$item['index']][$identity['kind']] = true;
                 }
             }
         }
 
-        return null;
+        return $duplicates;
+    }
+
+    private function identityField(string $kind): string
+    {
+        return $kind === CredentialIdentityKind::AuthToken ? 'access_value' : 'email';
     }
 
     /** @return list<array{kind:string,value:string}> */

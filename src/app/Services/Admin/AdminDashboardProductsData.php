@@ -84,6 +84,7 @@ final class AdminDashboardProductsData
                     : ['available' => 0, 'reserved' => 0, 'paid' => 0];
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
                 $stockAccountsUrl = route('admin.products.stock.accounts.store', ['product' => $product]);
+                $stockAccountsReviewUrl = route('admin.products.stock.accounts.review', ['product' => $product]);
                 $stockReturnUrl = route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id;
                 $updateUrl = route('admin.products.update', ['product' => $product]);
 
@@ -117,6 +118,7 @@ final class AdminDashboardProductsData
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
                     'stock_url' => $stockUrl,
                     'stock_accounts_url' => $stockAccountsUrl,
+                    'stock_accounts_review_url' => $stockAccountsReviewUrl,
                     'visibility_url' => route('admin.products.visibility.update', ['product' => $product]),
                     'share_url' => route('storefront.home').'#product-'.$product->id,
                     'created_at' => $product->created_at?->toDateTimeString(),
@@ -126,6 +128,7 @@ final class AdminDashboardProductsData
                         'stock' => $product->stock,
                         'stockUrl' => $stockUrl,
                         'stockAccountsUrl' => $stockAccountsUrl,
+                        'stockAccountsReviewUrl' => $stockAccountsReviewUrl,
                         'stockReturnUrl' => $stockReturnUrl,
                         'deliveryNote' => $product->delivery_note,
                     ],
@@ -144,6 +147,7 @@ final class AdminDashboardProductsData
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,
                         'stockAccountsUrl' => $stockAccountsUrl,
+                        'stockAccountsReviewUrl' => $stockAccountsReviewUrl,
                         'stockReturnUrl' => $stockReturnUrl,
                         'stock' => $product->stock,
                         'availableStockItemCount' => $availableStockItemCount,
@@ -317,9 +321,11 @@ final class AdminDashboardProductsData
             return null;
         }
 
-        $host = parse_url((string) ($structuredPayload['access_value'] ?? ''), PHP_URL_HOST);
-
-        return is_string($host) && $host !== '' ? strtolower($host) : null;
+        try {
+            return StructuredCredentialPayload::fromArray($structuredPayload)->otpMailDomain();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function productStatusBadge(bool $isActive): array

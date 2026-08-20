@@ -145,6 +145,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::delete('{product}', AdminProductDeleteController::class)->name('destroy');
                 Route::patch('{product}/visibility', AdminProductVisibilityController::class)->name('visibility.update');
                 Route::post('{product}/stock', AdminProductStockController::class)->name('stock.store');
+                Route::post('{product}/stock/accounts/review', [AdminProductAccountStockController::class, 'review'])->name('stock.accounts.review');
                 Route::post('{product}/stock/accounts', AdminProductAccountStockController::class)->name('stock.accounts.store');
                 Route::patch('{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('stock-items.update');
                 Route::delete('{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('stock-items.destroy');

@@ -172,7 +172,7 @@
                                                     x-bind:class="accountInputErrorClass(index, 'access_value')"
                                                     class="mt-1.5 min-h-12 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
                                                 >
-                                                <p x-show="account.accessMethod === 'otp_mail_link' && accountAccessDomain(account)" class="mt-1 text-[10px] font-black text-neo-ink/70">Domain tujuan: <span x-text="accountAccessDomain(account)"></span></p>
+                                                <p x-show="account.accessMethod === 'otp_mail_link' && accountAccessDomain(account)" class="mt-1 text-[10px] font-black text-neo-ink/70">Domain tujuan: <span x-text="accountAccessDomain(account)"></span>. Server akan mengonfirmasi domain final saat Review.</p>
                                                 <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_value')" x-text="accountInputError(index, 'access_value')"></x-admin-dashboard.field-error>
                                             </div>
 
@@ -201,8 +201,8 @@
                                         <x-admin-dashboard.button type="button" variant="neutral" x-on:click="addAccountCard()" x-bind:disabled="accountCards.length >= 20" class="w-full">
                                             ➕ Tambah akun
                                         </x-admin-dashboard.button>
-                                        <x-admin-dashboard.button type="button" variant="pink" x-on:click="reviewAccountInput()" x-bind:disabled="accountInputSubmitting" class="w-full">
-                                            <span x-text="`Review ${accountCards.length} akun`">Review 1 akun</span>
+                                        <x-admin-dashboard.button type="button" variant="pink" x-on:click="reviewAccountInput()" x-bind:disabled="accountInputSubmitting || accountInputReviewing" class="w-full">
+                                            <span x-text="accountInputReviewing ? 'Memeriksa server...' : `Review ${accountCards.length} akun`">Review 1 akun</span>
                                         </x-admin-dashboard.button>
                                     </div>
                                 </div>
@@ -215,16 +215,22 @@
 
                                     <div class="grid gap-2 sm:grid-cols-3">
                                         <x-admin-dashboard.mini-stat label="Jumlah akun" value="" tone="cyan"><span x-text="accountCards.length">1</span></x-admin-dashboard.mini-stat>
-                                        <x-admin-dashboard.mini-stat label="Status" value="Lulus" tone="emerald" />
+                                        <x-admin-dashboard.mini-stat label="Status" value="" tone="emerald">
+                                            <span x-text="accountInputReview?.status === 'ready' ? 'Server lulus' : 'Ada duplikat'">Server lulus</span>
+                                        </x-admin-dashboard.mini-stat>
                                         <x-admin-dashboard.mini-stat label="Tutorial" value="Per akun" tone="amber" />
                                     </div>
 
+                                    <x-admin-dashboard.notice tone="warning" x-show="accountInputReview?.status === 'duplicate'">
+                                        Review server menemukan konflik identitas. Edit akun yang ditandai sebelum commit.
+                                    </x-admin-dashboard.notice>
+
                                     <div class="space-y-2" aria-label="Preview pengiriman pelanggan">
-                                        <template x-for="(account, index) in accountCards" :key="`review-${account.id}`">
+                                        <template x-for="account in accountInputReviewAccounts()" :key="`review-${account.index}`">
                                             <article class="rounded-[0.5rem] border-2 border-neo-ink bg-white p-3">
                                                 <div class="flex flex-wrap items-center justify-between gap-2">
-                                                    <p class="font-display text-xs font-black uppercase" x-text="`Account #${index + 1}`">Account #1</p>
-                                                    <span class="rounded-full border-2 border-neo-ink bg-[#fff8d6] px-2 py-0.5 text-[9px] font-black uppercase" x-text="accountTutorialSource(account)">Tutorial default Product</span>
+                                                    <p class="font-display text-xs font-black uppercase" x-text="`Account #${account.account_number}`">Account #1</p>
+                                                    <span class="rounded-full border-2 border-neo-ink bg-[#fff8d6] px-2 py-0.5 text-[9px] font-black uppercase" x-text="accountInputReviewTutorialSource(account)">Tutorial default Product</span>
                                                 </div>
                                                 <dl class="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                                                     <div>
@@ -238,9 +244,15 @@
                                                     <div class="sm:col-span-2">
                                                         <dt class="font-black uppercase text-neo-ink/60">Akses</dt>
                                                         <dd class="font-bold">
-                                                            <span x-text="accountAccessLabel(account.accessMethod)">Tidak ada</span>
-                                                            <span x-show="account.accessMethod === 'otp_mail_link' && accountAccessDomain(account)"> · domain <span x-text="accountAccessDomain(account)"></span></span>
-                                                            <span x-show="account.accessMethod === 'auth_token'"> · token siap dikirim sebagai teks</span>
+                                                            <span x-text="accountAccessLabel(account.access_method)">Tidak ada</span>
+                                                            <span x-show="account.access_method === 'otp_mail_link' && account.otp_domain"> · domain <span x-text="account.otp_domain"></span></span>
+                                                            <span x-show="account.access_method === 'auth_token'"> · token siap dikirim sebagai teks</span>
+                                                        </dd>
+                                                    </div>
+                                                    <div class="sm:col-span-2">
+                                                        <dt class="font-black uppercase text-neo-ink/60">Status identitas</dt>
+                                                        <dd class="font-bold" x-bind:class="account.duplicate_status === 'duplicate' ? 'text-[#b91c1c]' : 'text-[#166534]'">
+                                                            <span x-text="account.duplicate_status === 'duplicate' ? accountInputReviewDuplicateSummary(account) : 'Tidak ada konflik identitas'">Tidak ada konflik identitas</span>
                                                         </dd>
                                                     </div>
                                                 </dl>
@@ -252,7 +264,7 @@
                                         <x-admin-dashboard.button type="button" variant="neutral" x-on:click="editAccountInput()" x-bind:disabled="accountInputSubmitting">
                                             ← Kembali edit
                                         </x-admin-dashboard.button>
-                                        <x-admin-dashboard.button type="submit" variant="pink" x-bind:disabled="accountInputSubmitting || !accountInputReviewed" x-bind:class="{ 'cursor-wait opacity-70': accountInputSubmitting }">
+                                        <x-admin-dashboard.button type="submit" variant="pink" x-bind:disabled="accountInputSubmitting || accountInputReviewing || !accountInputCanCommit()" x-bind:class="{ 'cursor-wait opacity-70': accountInputSubmitting || accountInputReviewing }">
                                             <span x-text="accountInputSubmitting ? 'Menyimpan...' : `Tambah ${accountCards.length} stok`">Tambah 1 stok</span>
                                         </x-admin-dashboard.button>
                                     </div>

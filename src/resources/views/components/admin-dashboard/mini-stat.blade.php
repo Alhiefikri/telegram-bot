@@ -25,5 +25,11 @@
         'text-[#92400e]' => $tone === 'amber',
         'text-[#166534]' => $tone === 'emerald',
     ])>{{ $label }}</p>
-    <p class="mt-0.5 break-words font-display text-sm font-bold text-neo-ink">{{ $value }}</p>
+    <p class="mt-0.5 break-words font-display text-sm font-bold text-neo-ink">
+        @if ($slot->isNotEmpty())
+            {{ $slot }}
+        @else
+            {{ $value }}
+        @endif
+    </p>
 </div>

@@ -144,6 +144,23 @@ final readonly class StructuredCredentialPayload
         return $identities;
     }
 
+    /**
+     * Return the safe, server-derived host shown for an OTP Mail Link.
+     *
+     * The payload has already passed the HTTPS/hostname checks above, so this
+     * method never returns the URL, query string, fragment, or access value.
+     */
+    public function otpMailDomain(): ?string
+    {
+        if ($this->accessMethod !== CredentialAccessMethod::OtpMailLink || $this->accessValue === null) {
+            return null;
+        }
+
+        $host = parse_url($this->accessValue, PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? strtolower($host) : null;
+    }
+
     private static function assertNoAccessValue(?string $accessValue): void
     {
         if ($accessValue !== null) {

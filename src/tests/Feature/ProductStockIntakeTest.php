@@ -82,6 +82,125 @@ class ProductStockIntakeTest extends TestCase
         Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
     }
 
+    public function test_account_review_returns_server_normalized_safe_metadata_without_writing_stock(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $otpUrl = 'HTTPS://Mail.Example.TEST/otp?opaque=review-otp-canary';
+        $password = 'review-password-canary';
+
+        $review = app(ProductStockIntake::class)->review(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => '  Review.Account@Example.TEST ',
+                'password' => $password,
+                'access_method' => 'otp_mail_link',
+                'access_value' => $otpUrl,
+                'tutorial_override' => 'Use the review tutorial.',
+            ]]),
+            $admin,
+        );
+
+        $payload = $review->toArray();
+        $account = $payload['accounts'][0];
+        $encoded = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+        $this->assertSame('ready', $payload['status']);
+        $this->assertSame(1, $payload['account_count']);
+        $this->assertSame('review.account@example.test', $account['email']);
+        $this->assertSame('mail.example.test', $account['otp_domain']);
+        $this->assertSame('override', $account['tutorial_source']);
+        $this->assertSame('clear', $account['duplicate_status']);
+        $this->assertSame([], $account['duplicate_sources']);
+        $this->assertStringNotContainsString($password, $encoded);
+        $this->assertStringNotContainsString($otpUrl, $encoded);
+        $this->assertSame(0, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+        $this->assertSame(0, AuditLog::query()->count());
+    }
+
+    public function test_account_review_reports_submission_and_registry_duplicates_without_echoing_identity_values(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => 'registered-review@example.test',
+                'password' => 'registered-review-password',
+                'access_method' => 'none',
+            ]]),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $review = app(ProductStockIntake::class)->review(
+            $product,
+            ProductStockIntakeSubmission::structured([
+                [
+                    'email' => 'REGISTERED-REVIEW@example.test',
+                    'password' => 'new-review-password-a',
+                    'access_method' => 'auth_token',
+                    'access_value' => 'shared-review-token',
+                ],
+                [
+                    'email' => 'new-review@example.test',
+                    'password' => 'new-review-password-b',
+                    'access_method' => 'auth_token',
+                    'access_value' => 'shared-review-token',
+                ],
+            ]),
+            $admin,
+        );
+
+        $payload = $review->toArray();
+        $first = $payload['accounts'][0];
+        $second = $payload['accounts'][1];
+        $encoded = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+        $this->assertSame('duplicate', $payload['status']);
+        $this->assertSame(2, $payload['duplicate_count']);
+        $this->assertSame('duplicate', $first['duplicate_status']);
+        $this->assertContains('email', $first['duplicate_fields']);
+        $this->assertContains('access_value', $first['duplicate_fields']);
+        $this->assertSame(['submission', 'registry'], $first['duplicate_sources']);
+        $this->assertSame(['submission'], $second['duplicate_sources']);
+        $this->assertStringNotContainsString('new-review-password-a', $encoded);
+        $this->assertStringNotContainsString('shared-review-token', $encoded);
+        $this->assertSame(1, ProductStockItem::query()->count());
+        $this->assertSame(1, CredentialIdentity::query()->count());
+        $this->assertSame(1, InventoryMovement::query()->count());
+        $this->assertSame(1, AuditLog::query()->count());
+    }
+
+    public function test_account_review_route_returns_safe_server_projection(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $response = $this->actingAs($admin)
+            ->postJson(route('admin.products.stock.accounts.review', $product), [
+                'operation_key' => (string) Str::uuid(),
+                'accounts' => [[
+                    'email' => 'route-review@example.test',
+                    'password' => 'route-review-password',
+                    'access_method' => 'otp_mail_link',
+                    'access_value' => 'https://MAIL.Example.TEST/otp?opaque=route-review-canary',
+                ]],
+            ])
+            ->assertOk()
+            ->assertJsonPath('review.status', 'ready')
+            ->assertJsonPath('review.accounts.0.email', 'route-review@example.test')
+            ->assertJsonPath('review.accounts.0.otp_domain', 'mail.example.test');
+
+        $this->assertStringNotContainsString('route-review-password', $response->getContent());
+        $this->assertStringNotContainsString('route-review-canary', $response->getContent());
+        $this->assertSame(0, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+    }
+
     public function test_structured_twenty_item_intake_creates_one_movement_and_one_audit(): void
     {
         $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 1]);

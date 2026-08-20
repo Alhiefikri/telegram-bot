@@ -102,6 +102,7 @@ class AdminProductDashboardState
             'stockForm' => [
                 'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
                 'stockAccountsFormAction' => $stockModalProduct['stock_accounts_url'] ?? '',
+                'stockAccountsReviewAction' => $stockModalProduct['stock_accounts_review_url'] ?? '',
                 'stockReturnUrl' => isset($stockModalProduct['id'])
                     ? route('admin.dashboard', ['tab' => self::PRODUCT_TAB]).'#product-'.$stockModalProduct['id']
                     : '',

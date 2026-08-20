@@ -141,6 +141,8 @@ const emptyAccountInputState = () => ({
   accountCards: [emptyAccountCard()],
   accountInputStage: "edit",
   accountInputReviewed: false,
+  accountInputReview: null,
+  accountInputReviewing: false,
   accountInputErrors: {},
   accountInputSubmitting: false,
   accountInputOperationKey: "",
@@ -187,6 +189,8 @@ export default function adminDashboard(initialState = {}) {
     stockFormAction: initialState.stockForm?.stockFormAction ?? "",
     stockAccountsFormAction:
       initialState.stockForm?.stockAccountsFormAction ?? "",
+    stockAccountsReviewAction:
+      initialState.stockForm?.stockAccountsReviewAction ?? "",
     stockReturnUrl: initialState.stockForm?.stockReturnUrl ?? "",
     stockProductId: initialState.stockForm?.stockProductId ?? null,
     stockProductName: initialState.stockForm?.stockProductName ?? "",
@@ -445,6 +449,7 @@ export default function adminDashboard(initialState = {}) {
     accountInputChanged() {
       this.accountInputStage = "edit";
       this.accountInputReviewed = false;
+      this.accountInputReview = null;
       this.accountInputErrors = {};
       this.accountInputMessage = "";
     },
@@ -595,6 +600,49 @@ export default function adminDashboard(initialState = {}) {
         : "Override akun";
     },
 
+    accountInputReviewAccounts() {
+      return Array.isArray(this.accountInputReview?.accounts)
+        ? this.accountInputReview.accounts
+        : [];
+    },
+
+    accountInputReviewTutorialSource(account) {
+      return account?.tutorial_source === "override"
+        ? "Override akun"
+        : "Tutorial default Product";
+    },
+
+    accountInputReviewDuplicateSummary(account) {
+      const fields = {
+        email: "email",
+        access_value: "Auth Token",
+      };
+      const sources = {
+        submission: "pengajuan ini",
+        registry: "Credential Identity registry",
+      };
+      const duplicateFields = (account?.duplicate_fields ?? []).map(
+        (field) => fields[field] ?? field
+      );
+      const duplicateSources = (account?.duplicate_sources ?? []).map(
+        (source) => sources[source] ?? source
+      );
+
+      if (duplicateSources.length === 0) {
+        return "Tidak ada konflik identitas";
+      }
+
+      return `Duplikat ${duplicateFields.join(" + ")} · ${duplicateSources.join(" + ")}`;
+    },
+
+    accountInputCanCommit() {
+      return (
+        this.accountInputReviewed &&
+        this.accountInputStage === "review" &&
+        this.accountInputReview?.status === "ready"
+      );
+    },
+
     accountInputValidationErrors() {
       const errors = {};
       const add = (index, field, message) => {
@@ -611,9 +659,6 @@ export default function adminDashboard(initialState = {}) {
           `Input Akun harus berisi 1 sampai ${MAX_ACCOUNT_CARDS} akun.`,
         ];
       }
-
-      const emailOwners = new Map();
-      const tokenOwners = new Map();
 
       this.accountCards.forEach((card, index) => {
         const email = String(card.email ?? "");
@@ -684,40 +729,16 @@ export default function adminDashboard(initialState = {}) {
             "Tutorial tambahan maksimal 2000 karakter."
           );
         }
-
-        const normalizedEmail = email.trim().toLowerCase();
-        if (normalizedEmail && !emailOwners.has(normalizedEmail)) {
-          emailOwners.set(normalizedEmail, index);
-        } else if (normalizedEmail) {
-          add(
-            emailOwners.get(normalizedEmail),
-            "email",
-            "Identitas email duplikat dalam pengajuan."
-          );
-          add(index, "email", "Identitas email duplikat dalam pengajuan.");
-        }
-
-        if (method === "auth_token" && accessValue !== "") {
-          if (!tokenOwners.has(accessValue)) {
-            tokenOwners.set(accessValue, index);
-          } else {
-            add(
-              tokenOwners.get(accessValue),
-              "access_value",
-              "Auth Token duplikat dalam pengajuan."
-            );
-            add(index, "access_value", "Auth Token duplikat dalam pengajuan.");
-          }
-        }
       });
 
       return errors;
     },
 
-    reviewAccountInput() {
+    async reviewAccountInput() {
       const errors = this.accountInputValidationErrors();
       this.accountInputErrors = errors;
       this.accountInputMessage = "";
+      this.accountInputReview = null;
 
       if (Object.keys(errors).length > 0) {
         this.accountInputStage = "edit";
@@ -726,14 +747,67 @@ export default function adminDashboard(initialState = {}) {
         return false;
       }
 
-      this.accountInputStage = "review";
-      this.accountInputReviewed = true;
-      return true;
+      this.accountInputReviewing = true;
+      const payload = this.accountInputPayload();
+      this.accountInputOperationKey = payload.operation_key;
+      const csrf = document.querySelector('input[name="_token"]')?.value ?? "";
+
+      try {
+        const response = await fetch(
+          this.stockAccountsReviewAction ||
+            `${this.stockAccountsFormAction}/review`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "X-CSRF-TOKEN": csrf,
+            },
+            body: JSON.stringify(payload),
+          }
+        );
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          this.accountInputErrors = body.errors ?? {};
+          this.accountInputMessage =
+            body.message ?? "Review Input Akun tidak dapat dilakukan.";
+          this.accountInputStage = "edit";
+          this.accountInputReviewed = false;
+          this.focusAccountInputError();
+          return false;
+        }
+
+        const review = body.review ?? body;
+        if (!review || !Array.isArray(review.accounts)) {
+          this.accountInputMessage =
+            "Review server tidak mengembalikan hasil yang valid.";
+          this.accountInputStage = "edit";
+          this.accountInputReviewed = false;
+          return false;
+        }
+
+        this.accountInputReview = review;
+        this.accountInputStage = "review";
+        this.accountInputReviewed = true;
+        this.accountInputMessage = body.message ?? "Review server selesai.";
+        return review.status === "ready";
+      } catch (error) {
+        this.accountInputMessage =
+          "Koneksi gagal. Draf akun tetap tersimpan di halaman ini.";
+        this.accountInputStage = "edit";
+        this.accountInputReviewed = false;
+        return false;
+      } finally {
+        this.accountInputReviewing = false;
+      }
     },
 
     editAccountInput() {
       this.accountInputStage = "edit";
       this.accountInputReviewed = false;
+      this.accountInputReview = null;
       this.accountInputMessage = "";
       this.$nextTick(() => document.getElementById("account-email-0")?.focus());
     },
@@ -757,8 +831,8 @@ export default function adminDashboard(initialState = {}) {
     async submitAccountInput(event) {
       event.preventDefault();
 
-      if (!this.accountInputReviewed || this.accountInputStage !== "review") {
-        this.reviewAccountInput();
+      if (!this.accountInputCanCommit()) {
+        await this.reviewAccountInput();
         return;
       }
 
@@ -1046,6 +1120,7 @@ export default function adminDashboard(initialState = {}) {
         activeTab: "produk",
         stockFormAction: product.stockUrl,
         stockAccountsFormAction: product.stockAccountsUrl ?? "",
+        stockAccountsReviewAction: product.stockAccountsReviewUrl ?? "",
         stockReturnUrl: product.stockReturnUrl ?? "",
         stockProductId: product.id,
         stockProductName: product.name,
