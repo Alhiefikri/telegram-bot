@@ -1287,6 +1287,9 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
     page.getByRole("heading", { name: "Tambah Stok" })
   ).toBeVisible();
   await expect(modal.getByText("0 item")).toBeVisible();
+  await expect(modal.locator('input[name="operation_key"]')).toHaveValue(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  );
 
   await modal
     .getByPlaceholder("email@example.com|password\nKEY-XXXX-1234")

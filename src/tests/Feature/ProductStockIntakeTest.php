@@ -286,6 +286,52 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(1, AuditLog::query()->count());
     }
 
+    public function test_quick_input_replays_same_browser_operation_key_without_duplicate_side_effects(): void
+    {
+        Queue::fake([SendProductStockNotifications::class]);
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $operationKey = (string) Str::uuid();
+        $payload = [
+            'operation_key' => $operationKey,
+            'stock_items' => "quick@example.test|password|demo-mfa\nsecond@example.test|password-2",
+        ];
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), $payload)
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), $payload)
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(2, ProductStockItem::query()->count());
+        $this->assertSame(1, InventoryMovement::query()->count());
+        $this->assertSame(1, AuditLog::query()->count());
+        $this->assertDatabaseHas('product_stock_intake_operations', [
+            'operation_key' => $operationKey,
+            'mode' => ProductStockIntakeSubmission::MODE_LEGACY,
+            'item_count' => 2,
+        ]);
+        Queue::assertPushedTimes(SendProductStockNotifications::class, 1);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.stock.store', $product), [
+                ...$payload,
+                'stock_items' => 'different@example.test|different-password',
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['stock_items'], null, 'stockAdjustment');
+
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(2, ProductStockItem::query()->count());
+        $this->assertSame(1, InventoryMovement::query()->count());
+        $this->assertSame(1, AuditLog::query()->count());
+        Queue::assertPushedTimes(SendProductStockNotifications::class, 1);
+    }
+
     public function test_account_route_allows_owner_and_admin_but_forbids_finance_and_support(): void
     {
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);

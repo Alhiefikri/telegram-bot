@@ -190,6 +190,7 @@ export default function adminDashboard(initialState = {}) {
     stockProductDeliveryNote:
       initialState.stockForm?.stockProductDeliveryNote ?? "",
     stockItems: initialState.stockForm?.stockItems ?? "",
+    stockOperationKey: initialState.stockForm?.stockOperationKey ?? "",
     stockFormSubmitting: false,
     stockInputMode: "quick",
     ...emptyAccountInputState(),
@@ -224,6 +225,10 @@ export default function adminDashboard(initialState = {}) {
         }
 
         if (this.stockModalOpen) {
+          if (!this.stockOperationKey) {
+            this.stockOperationKey = newOperationKey();
+          }
+
           if (this.stockInputMode === "account") {
             this.$nextTick(() =>
               document.getElementById("account-email-0")?.focus()
@@ -1021,6 +1026,7 @@ export default function adminDashboard(initialState = {}) {
         stockProductStock: product.stock,
         stockProductDeliveryNote: product.deliveryNote ?? "",
         stockItems: "",
+        stockOperationKey: newOperationKey(),
         stockFormSubmitting: false,
         stockInputMode: "quick",
         ...emptyAccountInputState(),
@@ -1049,6 +1055,7 @@ export default function adminDashboard(initialState = {}) {
       this.accountInputSubmitting = false;
       this.stockModalOpen = false;
       this.stockItems = "";
+      this.stockOperationKey = "";
       this.stockInputMode = "quick";
       Object.assign(this, emptyAccountInputState());
       this.stockModalOpener = null;
@@ -1058,6 +1065,10 @@ export default function adminDashboard(initialState = {}) {
     submitStockForm(event) {
       if (!event.target.checkValidity()) {
         return;
+      }
+
+      if (!this.stockOperationKey) {
+        this.stockOperationKey = newOperationKey();
       }
 
       this.stockFormSubmitting = true;

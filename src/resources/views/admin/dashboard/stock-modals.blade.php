@@ -39,6 +39,7 @@
                             <form method="POST" x-bind:action="stockFormAction" x-on:submit="submitStockForm($event)" class="space-y-3">
                                 @csrf
                                 <input type="hidden" name="stock_product_id" x-bind:value="stockProductId">
+                                <input type="hidden" name="operation_key" x-bind:value="stockOperationKey">
 
                                 <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold uppercase text-neo-ink">
                                     <span class="max-w-[13rem] truncate" x-text="stockProductName">Produk</span>

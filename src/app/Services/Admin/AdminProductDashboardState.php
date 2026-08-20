@@ -110,6 +110,7 @@ class AdminProductDashboardState
                 'stockProductStock' => $stockModalProduct['stock'] ?? 0,
                 'stockProductDeliveryNote' => $stockModalProduct['delivery_note'] ?? null,
                 'stockItems' => old('stock_items', ''),
+                'stockOperationKey' => old('operation_key', ''),
             ],
         ];
     }
