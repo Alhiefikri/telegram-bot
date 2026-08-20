@@ -16,6 +16,7 @@ class StockAdjustmentService
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
+        private readonly ProductStockIntake $stockIntake,
     ) {}
 
     /**
@@ -37,6 +38,29 @@ class StockAdjustmentService
         }
         if ($stockItems !== [] && ($delta < 1 || count($stockItems) !== $delta)) {
             throw new InvalidArgumentException('Stock item count must match positive stock adjustment.');
+        }
+
+        // Keep this compatibility service available to lifecycle/concurrency
+        // callers while sending every positive item submission through the
+        // same deep intake boundary as the admin controllers. Direct callers
+        // historically materialize notification state but do not execute the
+        // Telegram job inline, so this path opts out of dispatch.
+        if ($delta > 0 && $stockItems !== []) {
+            $result = $this->stockIntake->submit(
+                $product,
+                ProductStockIntakeSubmission::legacy($stockItems),
+                $user,
+                $ip,
+                dispatchNotifications: false,
+            );
+            $adjusted = $product->fresh();
+
+            return [
+                'product' => $adjusted,
+                'available_before' => $result->availableBefore,
+                'available_after' => $result->availableAfter,
+                'movement_id' => $result->movementId,
+            ];
         }
 
         return DB::transaction(function () use ($product, $delta, $notes, $user, $ip, $stockItems) {

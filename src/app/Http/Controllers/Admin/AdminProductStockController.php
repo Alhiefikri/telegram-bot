@@ -4,18 +4,19 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductStockRequest;
-use App\Jobs\SendProductStockNotifications;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
-use App\Services\StockAdjustmentService;
-use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use App\Services\ProductStockIntake;
+use App\Services\ProductStockIntakeIdempotencyConflict;
+use App\Services\ProductStockIntakeSubmission;
 use App\Support\AdminTelegramDogfoodTiming;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Validation\ValidationException;
 
 class AdminProductStockController extends Controller
 {
-    public function __invoke(StoreProductStockRequest $request, Product $product, StockAdjustmentService $stockAdjustment, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(StoreProductStockRequest $request, Product $product, ProductStockIntake $stockIntake, AdminProductDashboardFormProtocol $forms): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
@@ -23,12 +24,23 @@ class AdminProductStockController extends Controller
         $stockItems = $request->stockItems();
 
         $itemCount = count($stockItems);
-        $notes = "Tambah stok manual dashboard ({$itemCount} item).";
+        try {
+            $stockIntake->submit(
+                $product,
+                ProductStockIntakeSubmission::legacy($stockItems, $request->operationKey()),
+                $user,
+                $request->ip(),
+            );
+        } catch (ValidationException $exception) {
+            $errors = $exception->errors();
+            $errors['stock_items'] ??= ['Isi stok tidak valid.'];
 
-        $adjustment = $stockAdjustment->adjustWithAvailability($product, $itemCount, $notes, $user, $request->ip(), $stockItems);
-        SendProductStockNotifications::dispatch(
-            $adjustment['movement_id'],
-        )->onQueue(StockNotificationDeliveryPipeline::QUEUE)->afterCommit();
+            return $forms->stockValidationErrors($request, $product, $errors);
+        } catch (ProductStockIntakeIdempotencyConflict) {
+            return $forms->stockValidationErrors($request, $product, [
+                'stock_items' => ['Kunci operasi sudah digunakan untuk pengajuan stok lain.'],
+            ]);
+        }
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, ['queued' => true]);
 
         return $forms->stockAdded($product->fresh(), $itemCount);

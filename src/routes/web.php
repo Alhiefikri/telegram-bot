@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\AdminOrderDetailController;
 use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
 use App\Http\Controllers\Admin\AdminOrderManualRejectController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
+use App\Http\Controllers\Admin\AdminProductAccountStockController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockController;
@@ -144,6 +145,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::delete('{product}', AdminProductDeleteController::class)->name('destroy');
                 Route::patch('{product}/visibility', AdminProductVisibilityController::class)->name('visibility.update');
                 Route::post('{product}/stock', AdminProductStockController::class)->name('stock.store');
+                Route::post('{product}/stock/accounts', AdminProductAccountStockController::class)->name('stock.accounts.store');
                 Route::patch('{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('stock-items.update');
                 Route::delete('{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('stock-items.destroy');
             });

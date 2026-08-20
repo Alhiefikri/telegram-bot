@@ -26,6 +26,7 @@ class StoreProductStockRequest extends FormRequest
     {
         return [
             'stock_items' => ['required', 'string', 'max:5000'],
+            'operation_key' => ['nullable', 'uuid'],
         ];
     }
 
@@ -64,6 +65,13 @@ class StoreProductStockRequest extends FormRequest
             ->filter()
             ->values()
             ->all();
+    }
+
+    public function operationKey(): ?string
+    {
+        $value = $this->input('operation_key');
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
