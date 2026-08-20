@@ -353,7 +353,7 @@ class AdminStoreChannelTest extends TestCase
 
             $this->assertSame(
                 1,
-                preg_match('/Auto berikutnya<\/p>\s*<p[^>]*>2026-07-06 (10|11|12|13):58<\/p>/', $content),
+                preg_match('/Auto berikutnya<\/p>\s*<p[^>]*>\s*2026-07-06 (10|11|12|13):58\s*<\/p>/', $content),
                 'Expected the automatic fake sales proof availability label to keep the 08:58 local wall-clock minutes and add the recorded 2/3/4/5 hour cooldown.'
             );
             foreach (['2026-07-06 02:58', '2026-07-06 03:58', '2026-07-06 04:58', '2026-07-06 05:58'] as $utcLabel) {

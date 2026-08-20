@@ -1,4 +1,7 @@
 # CI/CD
+## Deployment platform
+
+This repository does not use Railway. The release path is GitHub Actions from `main`, followed by the SSH-based VPS deployment in `.github/workflows/deploy-production.yml`. Keep production configuration on the VPS and do not add Railway commands, services, or configuration.
 
 ## Branch strategy
 

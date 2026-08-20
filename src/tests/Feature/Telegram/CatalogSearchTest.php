@@ -275,17 +275,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Games')
             && str_contains($r['text'], 'Daftar Produk')
-            && ! str_contains($r['text'], '1. ✅ Diamond')
-            && ! str_contains($r['text'], '2. ❌ Diamond Habis')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond · Rp 15.000 · 1.25 USDT'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '❌ 🛍️ Diamond Habis · Rp 10.000'
+            && str_contains($r['text'], '1. ✅ Diamond')
+            && str_contains($r['text'], '2. ❌ Diamond Habis')
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Pilih #1'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '🛍️ Pilih #2'
+            && str_contains($r['text'], '💎 Binance Pay: 1.25 USDT')
             && ! str_contains($r['text'], 'Stok 3')
             && ! str_contains($r['text'], 'Stok 0')
             && ! str_contains($r['text'], 'Voucher MLBB instant.')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'akun-diamond@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '✨ 🛍️ Diamond · Rp 15.000 · 1.25 USDT'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Pilih #1'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories'));
@@ -313,7 +314,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], '━━━━━━━━━━━━━━'));
     }
 
-    public function test_search_product_button_shows_usdt_and_respects_telegram_label_limit(): void
+    public function test_search_product_button_uses_short_mobile_safe_label_and_keeps_usdt_in_message(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
@@ -336,8 +337,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Hasil pencarian: premium'));
         $buttonText = $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? '';
 
-        $this->assertSame('✨ 🛍️ Premium Account Premium Account P... · Rp 35.000 · 1.5 USDT', $buttonText);
-        $this->assertLessThanOrEqual(64, mb_strlen($buttonText));
+        $this->assertSame('🛍️ Pilih #1', $buttonText);
+        $this->assertLessThanOrEqual(20, mb_strlen($buttonText));
+        $this->assertStringContainsString($product->name, (string) $request['text']);
+        $this->assertStringContainsString('1.5 USDT', (string) $request['text']);
         $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
     }
 
@@ -396,7 +399,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'netflix@example.test')
-            && str_contains(($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? ''), 'Netflix Habis')
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Pilih #1'
             && str_contains(json_encode($r->data()), 'product:'.$matching->id)
             && str_contains(json_encode($r->data()), 'product:'.$empty->id));
     }

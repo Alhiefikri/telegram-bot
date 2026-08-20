@@ -10,7 +10,6 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
-use Illuminate\Support\Str;
 
 class TelegramCatalogIntents
 {
@@ -208,6 +207,9 @@ class TelegramCatalogIntents
             $lines[] = '';
             $lines[] = $category->description;
         }
+        foreach ($products as $index => $product) {
+            $this->appendProductSummary($lines, $customer, $product, $index + 1);
+        }
         if ($maintenance->active) {
             $lines[] = '';
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
@@ -215,7 +217,7 @@ class TelegramCatalogIntents
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
-        $keyboard = $products->values()->map(fn ($product) => [$this->productButton($product)])->all();
+        $keyboard = $products->values()->map(fn ($product, $index) => [$this->productButton($customer, $product, $index + 1)])->all();
         if ($this->hasMultipleCategoryOptions()) {
             $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.category.back'), 'callback_data' => 'back:categories']];
         }
@@ -266,7 +268,12 @@ class TelegramCatalogIntents
         }
         foreach ($products as $i => $product) {
             $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-            $lines[] = '   💰 Rp'.number_format($product->price_amount, 0, ',', '.');
+            $lines[] = '   '.$this->productPrice($customer, $product);
+            if ($this->hasBinancePrice($product)) {
+                $lines[] = '   '.$this->locale->translate($customer, 'catalog.payment.binance_total', [
+                    'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
+                ]);
+            }
             $lines[] = '   📝 '.$this->descriptionExcerpt($customer, $product);
         }
         if ($hasMore) {
@@ -274,7 +281,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'search.more');
         }
 
-        $keyboard = $products->map(fn ($product) => [$this->productButton($product)])->all();
+        $keyboard = $products->map(fn ($product, $index) => [$this->productButton($customer, $product, $index + 1)])->all();
         $keyboard[] = [['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -303,6 +310,32 @@ class TelegramCatalogIntents
         return $description !== '' ? $description : $this->locale->translate($customer, 'catalog.description_missing');
     }
 
+    /**
+     * @param  list<string>  $lines
+     */
+    private function appendProductSummary(array &$lines, Customer $customer, Product $product, int $number): void
+    {
+        $lines[] = $number.'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
+        $lines[] = '   '.$this->productPrice($customer, $product);
+        if ($this->hasBinancePrice($product)) {
+            $lines[] = '   '.$this->locale->translate($customer, 'catalog.payment.binance_total', [
+                'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
+            ]);
+        }
+    }
+
+    private function productPrice(Customer $customer, Product $product): string
+    {
+        return $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.');
+    }
+
+    private function hasBinancePrice(Product $product): bool
+    {
+        return $product->isAvailable()
+            && $product->usdt_price_amount !== null
+            && $this->checkout->binancePayEnabled();
+    }
+
     private function soldQuantity(Product $product): int
     {
         return (int) OrderItem::query()
@@ -323,26 +356,15 @@ class TelegramCatalogIntents
     /**
      * @return array{text: string, callback_data: string, style?: string, icon_custom_emoji_id?: string}
      */
-    private function productButton(Product $product): array
+    private function productButton(Customer $customer, Product $product, int $number): array
     {
         $availableStock = max(0, $product->availableStock());
         $icon = $this->icons->resolve($product->name);
         $customEmojiId = $icon['custom_emoji_id'];
         $fallbackIcon = $customEmojiId ? '' : $icon['fallback'].' ';
-        $status = $availableStock > 0 ? '✨' : '❌';
-        $priceParts = ['Rp '.number_format($product->price_amount, 0, ',', '.')];
-
-        if ($availableStock > 0
-            && $product->usdt_price_amount !== null
-            && $this->checkout->binancePayEnabled()) {
-            $priceParts[] = $this->checkout->formatUsdt($product->usdt_price_amount).' USDT';
-        }
-
-        $suffix = ' · '.implode(' · ', $priceParts);
-        $prefix = $status.' '.$fallbackIcon;
 
         $button = [
-            'text' => $this->productButtonLabel($prefix, $product->name, $suffix),
+            'text' => $fallbackIcon.$this->locale->translate($customer, 'catalog.product_button', ['number' => $number]),
             'callback_data' => 'product:'.$product->id,
             'style' => $availableStock > 0 ? 'success' : 'danger',
         ];
@@ -352,25 +374,5 @@ class TelegramCatalogIntents
         }
 
         return $button;
-    }
-
-    private function productButtonLabel(string $prefix, string $name, string $suffix): string
-    {
-        $maxLength = 64;
-        $nameLimit = $maxLength - Str::length($prefix.$suffix);
-
-        if ($nameLimit <= 0) {
-            return Str::substr($prefix.$suffix, 0, $maxLength);
-        }
-
-        if (Str::length($name) <= $nameLimit) {
-            return $prefix.$name.$suffix;
-        }
-
-        $nameLabel = $nameLimit > 3
-            ? Str::substr($name, 0, $nameLimit - 3).'...'
-            : Str::substr($name, 0, $nameLimit);
-
-        return $prefix.$nameLabel.$suffix;
     }
 }
