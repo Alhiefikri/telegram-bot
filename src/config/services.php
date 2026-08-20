@@ -1,6 +1,12 @@
 <?php
 
 return [
+    'credentials' => [
+        // Separate from APP_KEY so its lifecycle is explicit; keep it stable
+        // after registry rows are created without rotating encrypted payloads.
+        'identity_fingerprint_key' => env('CREDENTIAL_IDENTITY_FINGERPRINT_KEY'),
+    ],
+
     'binance' => [
         'pay_id' => env('BINANCE_PAY_ID'),
         'pay_uid' => env('BINANCE_PAY_UID'),
