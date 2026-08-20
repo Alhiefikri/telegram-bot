@@ -2,13 +2,16 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Support\Money;
 use Illuminate\Support\Collection;
+use Throwable;
 
 final class AdminDashboardProductsData
 {
@@ -80,6 +83,8 @@ final class AdminDashboardProductsData
                     ? ['available' => (int) ($summary?->available ?? 0), 'reserved' => (int) ($summary?->reserved ?? 0), 'paid' => (int) ($summary?->paid ?? 0)]
                     : ['available' => 0, 'reserved' => 0, 'paid' => 0];
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
+                $stockAccountsUrl = route('admin.products.stock.accounts.store', ['product' => $product]);
+                $stockReturnUrl = route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id;
                 $updateUrl = route('admin.products.update', ['product' => $product]);
 
                 return [
@@ -111,6 +116,7 @@ final class AdminDashboardProductsData
                     'update_url' => $updateUrl,
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
                     'stock_url' => $stockUrl,
+                    'stock_accounts_url' => $stockAccountsUrl,
                     'visibility_url' => route('admin.products.visibility.update', ['product' => $product]),
                     'share_url' => route('storefront.home').'#product-'.$product->id,
                     'created_at' => $product->created_at?->toDateTimeString(),
@@ -119,6 +125,9 @@ final class AdminDashboardProductsData
                         'name' => $product->name,
                         'stock' => $product->stock,
                         'stockUrl' => $stockUrl,
+                        'stockAccountsUrl' => $stockAccountsUrl,
+                        'stockReturnUrl' => $stockReturnUrl,
+                        'deliveryNote' => $product->delivery_note,
                     ],
                     'edit_payload' => [
                         'id' => $product->id,
@@ -134,6 +143,8 @@ final class AdminDashboardProductsData
                         'imageUrl' => $this->images->publicUrl($product->image_path),
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,
+                        'stockAccountsUrl' => $stockAccountsUrl,
+                        'stockReturnUrl' => $stockReturnUrl,
                         'stock' => $product->stock,
                         'availableStockItemCount' => $availableStockItemCount,
                         'stockSummary' => $stockSummary,
@@ -198,28 +209,47 @@ final class AdminDashboardProductsData
     {
         $order = $stockItem->orderItem?->order;
         $payment = $order?->payments?->sortByDesc('paid_at')->first();
-        $status = $this->stockItemStatus($order, $payment);
-        $available = $stockItem->order_item_id === null;
+        $format = $stockItem->credential_format ?? CredentialFormat::Legacy;
+        $structuredPayload = $format === CredentialFormat::StructuredAccount
+            ? $this->structuredPayload($stockItem)
+            : null;
+        $status = $this->stockItemStatus($stockItem, $order, $payment, $structuredPayload);
+        $available = $stockItem->order_item_id === null && $stockItem->retired_at === null;
+        $editable = $available && ($format === CredentialFormat::Legacy || $structuredPayload !== null);
 
         return [
             'id' => $stockItem->id,
-            'secret' => $stockItem->secret,
+            'credential_format' => $format->value,
+            'credential_payload' => $structuredPayload,
+            'access_domain' => $this->accessDomain($structuredPayload),
+            'secret' => $format === CredentialFormat::Legacy ? $stockItem->secret : null,
             'status' => $status,
             'invoice' => $order?->invoice_number,
             'reserved_at' => $order?->created_at?->toDateTimeString(),
             'expires_at' => $order?->expires_at?->toDateTimeString(),
             'paid_at' => $payment?->paid_at?->toDateTimeString(),
             'metadata' => $this->stockItemMetadata($order, $payment, $status),
-            'repair_needed' => $stockItem->order_item_id !== null && in_array($status, ['EXPIRED', 'CANCELLED'], true),
-            'editable' => $available,
-            'update_url' => $available ? route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]) : null,
-            'delete_url' => $available ? route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]) : null,
+            'repair_needed' => ($stockItem->order_item_id !== null && in_array($status, ['EXPIRED', 'CANCELLED'], true)) || $status === 'REPAIR',
+            'editable' => $editable,
+            'update_url' => $editable ? route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]) : null,
+            'delete_url' => $editable ? route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]) : null,
             'cancel_release_url' => $status === 'DIPESAN' && $order ? route('admin.orders.cancel-release', $order) : null,
         ];
     }
 
-    private function stockItemStatus($order, $payment): string
+    /**
+     * @param  array<string, mixed>|null  $structuredPayload
+     */
+    private function stockItemStatus(ProductStockItem $stockItem, $order, $payment, ?array $structuredPayload): string
     {
+        if ($stockItem->retired_at !== null) {
+            return 'RETIRED';
+        }
+
+        if ($stockItem->credential_format === CredentialFormat::StructuredAccount && $structuredPayload === null) {
+            return 'REPAIR';
+        }
+
         if (! $order) {
             return 'TERSEDIA';
         }
@@ -238,6 +268,13 @@ final class AdminDashboardProductsData
 
     private function stockItemMetadata($order, $payment, string $status): ?string
     {
+        if ($status === 'RETIRED') {
+            return 'retired · read-only';
+        }
+        if ($status === 'REPAIR') {
+            return 'payload rusak · read-only';
+        }
+
         if (! $order) {
             return null;
         }
@@ -248,6 +285,41 @@ final class AdminDashboardProductsData
             'EXPIRED', 'CANCELLED' => $order->invoice_number.' · perlu repair',
             default => $order->invoice_number,
         };
+    }
+
+    /**
+     * The dashboard is an authenticated operator surface, so Available
+     * structured rows may be edited there. Keep this shape explicit and do
+     * not leak persistence/cast internals into the Alpine contract.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function structuredPayload(ProductStockItem $stockItem): ?array
+    {
+        try {
+            $payload = $stockItem->credential_payload;
+            if (! is_array($payload)) {
+                return null;
+            }
+
+            return StructuredCredentialPayload::fromArray($payload)->toArray();
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $structuredPayload
+     */
+    private function accessDomain(?array $structuredPayload): ?string
+    {
+        if (($structuredPayload['access_method'] ?? null) !== 'otp_mail_link') {
+            return null;
+        }
+
+        $host = parse_url((string) ($structuredPayload['access_value'] ?? ''), PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? strtolower($host) : null;
     }
 
     private function productStatusBadge(bool $isActive): array

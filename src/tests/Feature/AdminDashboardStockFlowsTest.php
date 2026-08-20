@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -9,6 +11,7 @@ use App\Enums\UserRole;
 use App\Jobs\SendProductStockNotifications;
 use App\Models\AuditLog;
 use App\Models\Category;
+use App\Models\CredentialIdentity;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
@@ -17,6 +20,8 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
+use App\Services\ProductStockIntake;
+use App\Services\ProductStockIntakeSubmission;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -26,6 +31,191 @@ use Tests\TestCase;
 class AdminDashboardStockFlowsTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_account_input_and_manage_stock_expose_a_safe_structured_editor_contract(): void
+    {
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Structured Account Product',
+            'delivery_note' => 'Use the product tutorial.',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => 'structured@example.test',
+                'password' => "multi\nline-password",
+                'access_method' => CredentialAccessMethod::AuthToken->value,
+                'access_value' => 'fake-auth-token-for-admin-test',
+                'tutorial_override' => "Open the mailbox first.\nThen sign in.",
+            ]]),
+            $admin,
+            '203.0.113.20',
+            dispatchNotifications: false,
+        );
+
+        $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
+        $item = $payload['stockItems'][0];
+
+        $this->assertSame(CredentialFormat::StructuredAccount->value, $item['credential_format']);
+        $this->assertSame('structured@example.test', $item['credential_payload']['email']);
+        $this->assertSame('fake-auth-token-for-admin-test', $item['credential_payload']['access_value']);
+        $this->assertSame('Use the product tutorial.', $payload['deliveryNote']);
+        $this->assertSame(route('admin.products.stock.accounts.store', $product), $payload['stockAccountsUrl']);
+        $this->assertTrue($item['editable']);
+
+        $response = $this->actingAs($admin)->get('/admin?tab=produk');
+
+        $response
+            ->assertOk()
+            ->assertSee('Input Cepat')
+            ->assertSee('Input Akun')
+            ->assertSee('Review 1 akun')
+            ->assertSee('credential_format', false);
+    }
+
+    public function test_available_structured_stock_item_can_be_updated_without_changing_stock_and_old_identity_is_retained(): void
+    {
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => 'before@example.test',
+                'password' => 'before-password',
+                'access_method' => 'otp_mail_link',
+                'access_value' => 'https://mail.example.test/otp?fake=before',
+            ]]),
+            $admin,
+            dispatchNotifications: false,
+        );
+        $stockItem = ProductStockItem::query()->sole();
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.stock-items.update', [$product, $stockItem]), [
+                'credential_format' => CredentialFormat::StructuredAccount->value,
+                'email' => 'after@example.test',
+                'password' => "after\npassword",
+                'access_method' => CredentialAccessMethod::AuthToken->value,
+                'access_value' => 'fake-auth-token-after',
+                'tutorial_override' => 'Use the updated tutorial.',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $updated = $stockItem->fresh();
+        $this->assertSame('after@example.test', $updated->credential_payload['email']);
+        $this->assertSame('fake-auth-token-after', $updated->credential_payload['access_value']);
+        $this->assertSame(CredentialAccessMethod::AuthToken, CredentialAccessMethod::from($updated->credential_payload['access_method']));
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(2, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertDatabaseCount('inventory_movements', 1);
+
+        $audit = AuditLog::query()->where('action', 'product_stock_item.updated')->sole();
+        $this->assertStringNotContainsString('before@example.test', (string) json_encode($audit->new_values));
+        $this->assertStringNotContainsString('fake-auth-token-after', (string) json_encode($audit->new_values));
+    }
+
+    public function test_reserved_paid_and_retired_structured_rows_are_read_only(): void
+    {
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 1]);
+        $reservedOrder = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $reservedItem = OrderItem::factory()->create(['order_id' => $reservedOrder->id, 'product_id' => $product->id]);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $paidOrder->payments()->create([
+            'provider' => 'manual',
+            'merchant_ref' => 'MR-STRUCTURED-PAID',
+            'method' => 'manual',
+            'amount' => 10000,
+            'currency' => 'IDR',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        $paidItem = OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $product->id]);
+
+        foreach ([
+            ['email' => 'reserved-structured@example.test', 'order_item_id' => $reservedItem->id],
+            ['email' => 'paid-structured@example.test', 'order_item_id' => $paidItem->id],
+            ['email' => 'retired-structured@example.test', 'order_item_id' => null, 'retired_at' => now()],
+        ] as $index => $attributes) {
+            $payload = [
+                'version' => 1,
+                'email' => $attributes['email'],
+                'password' => 'fake-password-'.$index,
+                'access_method' => 'none',
+                'access_value' => null,
+                'tutorial_override' => null,
+            ];
+            ProductStockItem::create([
+                'product_id' => $product->id,
+                'order_item_id' => $attributes['order_item_id'],
+                'retired_at' => $attributes['retired_at'] ?? null,
+                'credential_format' => CredentialFormat::StructuredAccount,
+                'credential_payload' => $payload,
+                'secret' => null,
+            ]);
+        }
+
+        $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
+
+        $this->assertSame(['RETIRED', 'DIPESAN', 'PAID'], array_column($payload['stockItems'], 'status'));
+        $this->assertSame([false, false, false], array_column($payload['stockItems'], 'editable'));
+        $this->assertSame([null, null, null], array_column($payload['stockItems'], 'update_url'));
+        $this->assertSame([null, null, null], array_column($payload['stockItems'], 'delete_url'));
+    }
+
+    public function test_structured_edit_rejects_a_registered_email_without_writing_the_new_payload(): void
+    {
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        foreach (['first@example.test', 'second@example.test'] as $email) {
+            app(ProductStockIntake::class)->submit(
+                $product,
+                ProductStockIntakeSubmission::structured([[
+                    'email' => $email,
+                    'password' => 'fake-password-'.$email,
+                    'access_method' => 'none',
+                ]]),
+                $admin,
+                dispatchNotifications: false,
+            );
+        }
+
+        $first = ProductStockItem::query()->orderBy('id')->firstOrFail();
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.stock-items.update', [$product, $first]), [
+                'credential_format' => CredentialFormat::StructuredAccount->value,
+                'email' => 'second@example.test',
+                'password' => 'replacement-password',
+                'access_method' => 'none',
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['email'], null, 'stockItemUpdate');
+
+        $this->assertSame('first@example.test', $first->fresh()->credential_payload['email']);
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(2, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(2, InventoryMovement::query()->count());
+        $this->assertSame(2, AuditLog::query()->where('action', 'product.stock_adjusted')->count());
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'product_stock_item.updated']);
+    }
 
     public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void
     {

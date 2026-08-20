@@ -89,7 +89,7 @@ class AdminProductDashboardFormProtocol
             ->withInput(['stock_product_id' => $product->id]);
     }
 
-    public function stockItemUpdateValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
+    public function stockItemUpdateValidationErrors(Request $request, Validator|array $validator, Product $product): RedirectResponse
     {
         return $this->productTabRedirect()
             ->withErrors($validator, self::STOCK_ITEM_UPDATE_BAG)

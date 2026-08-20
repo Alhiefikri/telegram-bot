@@ -40,6 +40,10 @@ class AdminProductAccountStockController extends Controller
             ], 422);
         }
 
-        return response()->json($result->toArray(), $result->idempotentReplay ? 200 : 201);
+        return response()->json([
+            ...$result->toArray(),
+            'redirect_url' => route('admin.dashboard', ['tab' => 'produk', 'stock_added' => $result->itemCount, 'stock_product' => $product->id]).'#product-'.$product->id,
+            'message' => "Stok bertambah {$result->itemCount} akun.",
+        ], $result->idempotentReplay ? 200 : 201);
     }
 }

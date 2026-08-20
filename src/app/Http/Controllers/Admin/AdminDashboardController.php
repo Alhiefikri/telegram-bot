@@ -40,6 +40,11 @@ class AdminDashboardController extends Controller
             $request->query('category_id') !== null ? (int) $request->query('category_id') : null,
         );
 
+        $stockAdded = filter_var($request->query('stock_added'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $viewData['accountStockStatus'] = $stockAdded !== false && $stockAdded !== null
+            ? "Stok bertambah {$stockAdded} akun."
+            : null;
+
         if ($viewData['navigation']['activeTab'] === 'produk' && $request->query('product_form') === 'create') {
             $viewData['dashboardState']['productModalOpen'] = true;
         }

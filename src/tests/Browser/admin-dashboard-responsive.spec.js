@@ -1507,6 +1507,85 @@ test("traps keyboard focus in the stock modal and restores its opener", async ({
   await expect(opener).toBeFocused();
 });
 
+test("keeps structured Account Input reviewed, bounded, and private in page memory", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+
+  const productCard = page
+    .locator("article:visible")
+    .filter({ hasText: "Browser QA Produk A" });
+  await productCard.getByRole("button", { name: /Stok/i }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Tambah Stok" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator('button[role="tab"]').nth(1).click();
+  await expect(dialog.locator("#account-email-0")).toBeFocused();
+  await expect(dialog.getByText("1 / 20 akun")).toBeVisible();
+
+  await dialog.locator("#account-email-0").fill("account-one@example.test");
+  await dialog.locator("#account-password-0").fill("multi\nline-fake-password");
+  await dialog.getByRole("radio", { name: "OTP Mail Link" }).check();
+  await dialog
+    .locator("#account-access-value-0")
+    .fill("https://mail.example.test/otp?fake=browser");
+  await expect(
+    dialog.getByText("Domain tujuan: mail.example.test")
+  ).toBeVisible();
+
+  await dialog.getByRole("radio", { name: "Tidak ada" }).check();
+  await expect(dialog.locator("#account-access-value-0")).toBeHidden();
+
+  for (let index = 0; index < 19; index += 1) {
+    await dialog.getByRole("button", { name: /Tambah akun/ }).click();
+  }
+  await expect(dialog.getByText("20 / 20 akun")).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: /Tambah akun/ })
+  ).toBeDisabled();
+
+  await dialog.getByRole("button", { name: "Hapus akun #20" }).click();
+  await expect(dialog.getByText("19 / 20 akun")).toBeVisible();
+  for (let index = 19; index > 1; index -= 1) {
+    await dialog.getByRole("button", { name: `Hapus akun #${index}` }).click();
+  }
+  await expect(dialog.getByText("1 / 20 akun")).toBeVisible();
+
+  await dialog.getByRole("button", { name: /Review 1 akun/ }).click();
+  await expect(dialog.getByText("Review wajib sebelum commit")).toBeVisible();
+  await expect(dialog.getByText("Account #1")).toBeVisible();
+  await expect(
+    dialog.getByText("Tutorial default Product").first()
+  ).toBeVisible();
+
+  const secret = "multi\nline-fake-password";
+  const leakedAttribute = await dialog.evaluate(
+    (root, value) =>
+      [...root.querySelectorAll("*")].some((element) =>
+        [...element.attributes].some((attribute) =>
+          attribute.value.includes(value)
+        )
+      ),
+    secret
+  );
+  expect(leakedAttribute).toBe(false);
+
+  await dialog.getByRole("button", { name: /Kembali edit/ }).click();
+  await dialog.locator("#account-email-0").fill("changed@example.test");
+  await expect(dialog.getByText("Review wajib sebelum commit")).toBeHidden();
+
+  let closeDialog;
+  page.once("dialog", async (browserDialog) => {
+    closeDialog = browserDialog;
+    await browserDialog.dismiss();
+  });
+  await dialog.getByRole("button", { name: "Tutup modal" }).click();
+  expect(closeDialog?.type()).toBe("confirm");
+  await expect(dialog).toBeVisible();
+});
+
 test("focuses the relevant product field when server validation reopens the modal", async ({
   page,
 }) => {

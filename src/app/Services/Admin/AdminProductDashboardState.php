@@ -97,9 +97,14 @@ class AdminProductDashboardState
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
             'stockForm' => [
                 'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
+                'stockAccountsFormAction' => $stockModalProduct['stock_accounts_url'] ?? '',
+                'stockReturnUrl' => isset($stockModalProduct['id'])
+                    ? route('admin.dashboard', ['tab' => self::PRODUCT_TAB]).'#product-'.$stockModalProduct['id']
+                    : '',
                 'stockProductId' => $stockModalProduct['id'] ?? null,
                 'stockProductName' => $stockModalProduct['name'] ?? '',
                 'stockProductStock' => $stockModalProduct['stock'] ?? 0,
+                'stockProductDeliveryNote' => $stockModalProduct['delivery_note'] ?? null,
                 'stockItems' => old('stock_items', ''),
             ],
         ];
