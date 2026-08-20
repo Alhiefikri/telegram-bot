@@ -1526,9 +1526,43 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
 
   const dialog = page.getByRole("dialog", { name: "Tambah Stok" });
   await expect(dialog).toBeVisible();
-  await dialog.locator('button[role="tab"]').nth(1).click();
+  const quickTab = dialog.getByRole("tab", { name: "Input Cepat" });
+  const accountTab = dialog.getByRole("tab", { name: "Input Akun" });
+  await expect(quickTab).toHaveAttribute(
+    "aria-controls",
+    "stock-input-quick-panel"
+  );
+  await expect(accountTab).toHaveAttribute(
+    "aria-controls",
+    "stock-input-account-panel"
+  );
+  await expect(dialog.getByRole("tabpanel")).toHaveCount(2);
+  await accountTab.click();
   await expect(dialog.locator("#account-email-0")).toBeFocused();
   await expect(dialog.getByText("1 / 20 akun")).toBeVisible();
+
+  await accountTab.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(quickTab).toBeFocused();
+  await expect(dialog.locator("#stock-input-quick-panel")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(accountTab).toBeFocused();
+  await expect(dialog.locator("#stock-input-account-panel")).toBeVisible();
+  await dialog.locator("#account-email-0").focus();
+
+  await dialog.getByRole("button", { name: /Review 1 akun/ }).click();
+  await expect(dialog.locator("#account-email-0")).toHaveAttribute(
+    "aria-invalid",
+    "true"
+  );
+  await expect(dialog.locator("#account-email-0")).toHaveAttribute(
+    "aria-describedby",
+    "account-email-error-0"
+  );
+  await expect(dialog.locator("#account-email-error-0")).toHaveAttribute(
+    "role",
+    "alert"
+  );
 
   await dialog.locator("#account-email-0").fill("account-one@example.test");
   await dialog.locator("#account-password-0").fill("multi\nline-fake-password");

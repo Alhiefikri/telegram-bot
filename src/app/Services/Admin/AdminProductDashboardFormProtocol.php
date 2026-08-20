@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -91,9 +92,14 @@ class AdminProductDashboardFormProtocol
 
     public function stockItemUpdateValidationErrors(Request $request, Validator|array $validator, Product $product): RedirectResponse
     {
+        $stockItem = $request->route('stockItem');
+
         return $this->productTabRedirect()
             ->withErrors($validator, self::STOCK_ITEM_UPDATE_BAG)
-            ->withInput(['stock_item_product_id' => $product->id]);
+            ->withInput([
+                'stock_item_product_id' => $product->id,
+                'stock_item_id' => $stockItem instanceof ProductStockItem ? $stockItem->id : null,
+            ]);
     }
 
     public function productCreated(Product $product): RedirectResponse

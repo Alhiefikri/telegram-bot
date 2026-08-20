@@ -82,6 +82,12 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('Input Cepat')
             ->assertSee('Input Akun')
             ->assertSee('Review 1 akun')
+            ->assertSee('id="stock-input-quick-tab"', false)
+            ->assertSee('aria-controls="stock-input-quick-panel"', false)
+            ->assertSee('role="tabpanel"', false)
+            ->assertSee('id="stock-input-account-panel"', false)
+            ->assertSee('x-bind:aria-invalid', false)
+            ->assertSee('x-bind:aria-describedby', false)
             ->assertSee('credential_format', false);
     }
 
@@ -223,6 +229,47 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame(2, InventoryMovement::query()->count());
         $this->assertSame(2, AuditLog::query()->where('action', 'product.stock_adjusted')->count());
         $this->assertDatabaseMissing('audit_logs', ['action' => 'product_stock_item.updated']);
+    }
+
+    public function test_structured_edit_validation_reopens_manage_stock_with_a_safe_error(): void
+    {
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        foreach (['first@example.test', 'second@example.test'] as $email) {
+            app(ProductStockIntake::class)->submit(
+                $product,
+                ProductStockIntakeSubmission::structured([[
+                    'email' => $email,
+                    'password' => 'fake-password-'.$email,
+                    'access_method' => 'none',
+                ]]),
+                $admin,
+                dispatchNotifications: false,
+            );
+        }
+
+        $first = ProductStockItem::query()->orderBy('id')->firstOrFail();
+
+        $followUp = $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->followingRedirects()
+            ->patch(route('admin.products.stock-items.update', [$product, $first]), [
+                'credential_format' => CredentialFormat::StructuredAccount->value,
+                'email' => 'second@example.test',
+                'password' => 'replacement-password',
+                'access_method' => 'none',
+            ])
+            ->assertOk();
+        $state = $followUp->viewData('dashboardState');
+
+        $followUp
+            ->assertSee('Data stok belum disimpan.', false)
+            ->assertSee('Identitas kredensial sudah terdaftar dan tidak dapat digunakan ulang.', false);
+        $this->assertTrue($state['manageStockModalOpen']);
+        $this->assertSame($product->id, $state['manageStockPayload']['id']);
+        $this->assertSame($first->id, $state['manageStockEditingItemId']);
     }
 
     public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void

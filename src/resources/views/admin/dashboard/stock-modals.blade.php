@@ -10,32 +10,51 @@
                         description="Input Cepat tetap untuk stok legacy. Input Akun membuat satu akun = satu stok."
                         class="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto bg-[#7BD10A] p-3 sm:p-5"
                     >
-                        <div class="mb-4 {{ $structuredStockInputEnabled ? 'grid grid-cols-2' : 'grid grid-cols-1' }} gap-2" role="tablist" aria-label="Mode input stok">
-                            @if ($structuredStockInputEnabled)
+                        @if ($structuredStockInputEnabled)
+                        <div class="mb-4 grid grid-cols-2 gap-2" role="tablist" aria-label="Mode input stok">
                             <button
+                                id="stock-input-quick-tab"
                                 type="button"
                                 role="tab"
                                 x-bind:aria-selected="stockInputMode === 'quick'"
+                                aria-controls="stock-input-quick-panel"
+                                x-bind:tabindex="stockInputMode === 'quick' ? '0' : '-1'"
                                 x-bind:class="stockInputMode === 'quick' ? 'bg-[#f2da3d]' : 'bg-white'"
+                                data-stock-input-mode="quick"
                                 x-on:click="setStockInputMode('quick')"
+                                x-on:keydown="handleStockInputTabKeydown($event)"
                                 class="min-h-11 rounded-[0.45rem] border-[3px] border-neo-ink px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[3px_3px_0_0_#050505]"
                             >
                                 Input Cepat
                             </button>
                             <button
+                                id="stock-input-account-tab"
                                 type="button"
                                 role="tab"
                                 x-bind:aria-selected="stockInputMode === 'account'"
+                                aria-controls="stock-input-account-panel"
+                                x-bind:tabindex="stockInputMode === 'account' ? '0' : '-1'"
                                 x-bind:class="stockInputMode === 'account' ? 'bg-[#f2da3d]' : 'bg-white'"
+                                data-stock-input-mode="account"
                                 x-on:click="setStockInputMode('account')"
+                                x-on:keydown="handleStockInputTabKeydown($event)"
                                 class="min-h-11 rounded-[0.45rem] border-[3px] border-neo-ink px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[3px_3px_0_0_#050505]"
                             >
                                 Input Akun
                             </button>
-                            @endif
                         </div>
+                        @endif
 
-                        <div x-show="stockInputMode === 'quick'" x-cloak>
+                        <div
+                            @if ($structuredStockInputEnabled)
+                                id="stock-input-quick-panel"
+                                role="tabpanel"
+                                aria-labelledby="stock-input-quick-tab"
+                                tabindex="0"
+                            @endif
+                            x-show="stockInputMode === 'quick'"
+                            x-cloak
+                        >
                             <form method="POST" x-bind:action="stockFormAction" x-on:submit="submitStockForm($event)" class="space-y-3">
                                 @csrf
                                 <input type="hidden" name="stock_product_id" x-bind:value="stockProductId">
@@ -74,7 +93,7 @@
                         </div>
 
                         @if ($structuredStockInputEnabled)
-                        <div x-show="stockInputMode === 'account'" x-cloak>
+                        <div id="stock-input-account-panel" role="tabpanel" aria-labelledby="stock-input-account-tab" tabindex="0" x-show="stockInputMode === 'account'" x-cloak>
                             <form method="POST" x-bind:action="stockAccountsFormAction" x-on:submit="submitAccountInput($event)" class="space-y-4">
                                 @csrf
                                 <div class="flex flex-wrap items-start justify-between gap-3">
@@ -118,9 +137,11 @@
                                                         x-model="account.email"
                                                         x-on:input="accountInputChanged()"
                                                         x-bind:class="accountInputErrorClass(index, 'email')"
+                                                        x-bind:aria-invalid="accountInputError(index, 'email') ? 'true' : 'false'"
+                                                        x-bind:aria-describedby="accountInputError(index, 'email') ? 'account-email-error-' + index : null"
                                                         class="mt-1.5 min-h-12 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
                                                     >
-                                                    <x-admin-dashboard.field-error x-show="accountInputError(index, 'email')" x-text="accountInputError(index, 'email')"></x-admin-dashboard.field-error>
+                                                    <x-admin-dashboard.field-error x-show="accountInputError(index, 'email')" x-bind:id="'account-email-error-' + index" x-text="accountInputError(index, 'email')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                                 </div>
                                                 <div>
                                                     <label x-bind:for="`account-password-${index}`" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Password</label>
@@ -133,13 +154,15 @@
                                                         x-model="account.password"
                                                         x-on:input="accountInputChanged()"
                                                         x-bind:class="accountInputErrorClass(index, 'password')"
+                                                        x-bind:aria-invalid="accountInputError(index, 'password') ? 'true' : 'false'"
+                                                        x-bind:aria-describedby="accountInputError(index, 'password') ? 'account-password-error-' + index : null"
                                                         class="mt-1.5 min-h-20 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-3 font-mono text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
                                                     ></textarea>
-                                                    <x-admin-dashboard.field-error x-show="accountInputError(index, 'password')" x-text="accountInputError(index, 'password')"></x-admin-dashboard.field-error>
+                                                    <x-admin-dashboard.field-error x-show="accountInputError(index, 'password')" x-bind:id="'account-password-error-' + index" x-text="accountInputError(index, 'password')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                                 </div>
                                             </div>
 
-                                            <fieldset class="mt-3">
+                                            <fieldset class="mt-3" x-bind:aria-invalid="accountInputError(index, 'access_method') ? 'true' : 'false'" x-bind:aria-describedby="accountInputError(index, 'access_method') ? 'account-access-method-error-' + index : null">
                                                 <legend class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Metode akses</legend>
                                                 <div class="mt-1.5 grid gap-2 sm:grid-cols-3">
                                                     <template x-for="method in ['none', 'otp_mail_link', 'auth_token']" :key="method">
@@ -156,7 +179,7 @@
                                                         </label>
                                                     </template>
                                                 </div>
-                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_method')" x-text="accountInputError(index, 'access_method')"></x-admin-dashboard.field-error>
+                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_method')" x-bind:id="'account-access-method-error-' + index" x-text="accountInputError(index, 'access_method')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                             </fieldset>
 
                                             <div x-show="account.accessMethod !== 'none'" class="mt-3">
@@ -170,10 +193,12 @@
                                                     x-model="account.accessValue"
                                                     x-on:input="accountInputChanged()"
                                                     x-bind:class="accountInputErrorClass(index, 'access_value')"
+                                                    x-bind:aria-invalid="accountInputError(index, 'access_value') ? 'true' : 'false'"
+                                                    x-bind:aria-describedby="accountInputError(index, 'access_value') ? 'account-access-value-error-' + index : null"
                                                     class="mt-1.5 min-h-12 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
                                                 >
                                                 <p x-show="account.accessMethod === 'otp_mail_link' && accountAccessDomain(account)" class="mt-1 text-[10px] font-black text-neo-ink/70">Domain tujuan: <span x-text="accountAccessDomain(account)"></span>. Server akan mengonfirmasi domain final saat Review.</p>
-                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_value')" x-text="accountInputError(index, 'access_value')"></x-admin-dashboard.field-error>
+                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_value')" x-bind:id="'account-access-value-error-' + index" x-text="accountInputError(index, 'access_value')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                             </div>
 
                                             <div class="mt-3">
@@ -190,9 +215,11 @@
                                                     x-model="account.tutorialOverride"
                                                     x-on:input="accountInputChanged()"
                                                     x-bind:class="accountInputErrorClass(index, 'tutorial_override')"
+                                                    x-bind:aria-invalid="accountInputError(index, 'tutorial_override') ? 'true' : 'false'"
+                                                    x-bind:aria-describedby="accountInputError(index, 'tutorial_override') ? 'account-tutorial-error-' + index : null"
                                                     class="mt-1.5 min-h-20 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-3 text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
                                                 ></textarea>
-                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'tutorial_override')" x-text="accountInputError(index, 'tutorial_override')"></x-admin-dashboard.field-error>
+                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'tutorial_override')" x-bind:id="'account-tutorial-error-' + index" x-text="accountInputError(index, 'tutorial_override')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                             </div>
                                         </article>
                                     </template>
@@ -296,6 +323,15 @@
                             Ringkasan menghitung semua akun. Hanya 25 akun terbaru per status yang ditampilkan di riwayat.
                         </x-admin-dashboard.notice>
 
+                        <x-admin-dashboard.notice tone="danger" x-show="manageStockErrorMessages().length > 0" role="alert" aria-live="assertive" class="mb-3">
+                            <p class="font-black uppercase">Data stok belum disimpan.</p>
+                            <ul class="mt-1 list-disc space-y-1 pl-4 text-xs font-bold">
+                                <template x-for="message in manageStockErrorMessages()" :key="message">
+                                    <li x-text="message"></li>
+                                </template>
+                            </ul>
+                        </x-admin-dashboard.notice>
+
                         <div class="space-y-3">
                             <template x-for="group in manageStockGroups()" :key="group.key">
                                 <section class="rounded-[0.55rem] border-2 border-neo-ink bg-white/80 p-2 shadow-[3px_3px_0_0_#050505]">
@@ -342,35 +378,40 @@
                                                 </div>
 
                                                 <template x-if="item.editable && item.credential_format === 'structured_account'">
-                                                    <form method="POST" x-bind:action="item.update_url" class="mt-3 grid gap-3 rounded-[0.45rem] border-2 border-neo-ink bg-[#fffdf0] p-2" x-show="item.editing" x-transition>
+                                                    <form method="POST" x-bind:id="'stock-item-editor-' + item.id" x-bind:action="item.update_url" class="mt-3 grid gap-3 rounded-[0.45rem] border-2 border-neo-ink bg-[#fffdf0] p-2" x-show="item.editing" x-transition>
                                                         @csrf
                                                         <input type="hidden" name="_method" value="PATCH">
                                                         <input type="hidden" name="credential_format" value="structured_account">
                                                         <div class="grid gap-2 sm:grid-cols-2">
                                                             <div>
-                                                                <x-admin-dashboard.field-label>Email</x-admin-dashboard.field-label>
-                                                                <input name="email" type="email" maxlength="254" autocomplete="off" x-model="item.credential_payload.email" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
+                                                                <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-email'">Email</x-admin-dashboard.field-label>
+                                                                <input x-bind:id="'stock-item-' + item.id + '-email'" name="email" type="email" maxlength="254" autocomplete="off" x-model="item.credential_payload.email" x-bind:aria-invalid="manageStockError('email') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('email') ? 'stock-item-' + item.id + '-email-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
+                                                                <p x-show="manageStockError('email')" x-bind:id="'stock-item-' + item.id + '-email-error'" x-text="manageStockError('email')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                             </div>
                                                             <div>
-                                                                <x-admin-dashboard.field-label>Password</x-admin-dashboard.field-label>
-                                                                <textarea name="password" rows="2" maxlength="1024" autocomplete="new-password" x-model="item.credential_payload.password" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 font-mono text-xs font-bold"></textarea>
+                                                                <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-password'">Password</x-admin-dashboard.field-label>
+                                                                <textarea x-bind:id="'stock-item-' + item.id + '-password'" name="password" rows="2" maxlength="1024" autocomplete="new-password" x-model="item.credential_payload.password" x-bind:aria-invalid="manageStockError('password') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('password') ? 'stock-item-' + item.id + '-password-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 font-mono text-xs font-bold"></textarea>
+                                                                <p x-show="manageStockError('password')" x-bind:id="'stock-item-' + item.id + '-password-error'" x-text="manageStockError('password')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                             </div>
                                                         </div>
                                                         <div>
-                                                            <x-admin-dashboard.field-label>Metode akses</x-admin-dashboard.field-label>
-                                                            <select name="access_method" x-model="item.credential_payload.access_method" x-on:change="item.credential_payload.access_value = ''" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
+                                                            <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-access-method'">Metode akses</x-admin-dashboard.field-label>
+                                                            <select x-bind:id="'stock-item-' + item.id + '-access-method'" name="access_method" x-model="item.credential_payload.access_method" x-on:change="item.credential_payload.access_value = ''" x-bind:aria-invalid="manageStockError('access_method') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('access_method') ? 'stock-item-' + item.id + '-access-method-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
                                                                 <option value="none">Tidak ada</option>
                                                                 <option value="otp_mail_link">OTP Mail Link</option>
                                                                 <option value="auth_token">Auth Token</option>
                                                             </select>
+                                                            <p x-show="manageStockError('access_method')" x-bind:id="'stock-item-' + item.id + '-access-method-error'" x-text="manageStockError('access_method')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                         </div>
                                                         <div x-show="item.credential_payload.access_method !== 'none'">
-                                                            <x-admin-dashboard.field-label>Nilai metode akses</x-admin-dashboard.field-label>
-                                                            <input name="access_value" x-bind:type="item.credential_payload.access_method === 'otp_mail_link' ? 'url' : 'text'" x-bind:maxlength="item.credential_payload.access_method === 'otp_mail_link' ? 2048 : 3500" x-model="item.credential_payload.access_value" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
+                                                            <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-access-value'">Nilai metode akses</x-admin-dashboard.field-label>
+                                                            <input x-bind:id="'stock-item-' + item.id + '-access-value'" name="access_value" x-bind:type="item.credential_payload.access_method === 'otp_mail_link' ? 'url' : 'text'" x-bind:maxlength="item.credential_payload.access_method === 'otp_mail_link' ? 2048 : 3500" x-model="item.credential_payload.access_value" x-bind:aria-invalid="manageStockError('access_value') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('access_value') ? 'stock-item-' + item.id + '-access-value-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
+                                                            <p x-show="manageStockError('access_value')" x-bind:id="'stock-item-' + item.id + '-access-value-error'" x-text="manageStockError('access_value')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                         </div>
                                                         <div>
-                                                            <x-admin-dashboard.field-label>Tutorial override</x-admin-dashboard.field-label>
-                                                            <textarea name="tutorial_override" rows="2" maxlength="2000" x-model="item.credential_payload.tutorial_override" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold"></textarea>
+                                                            <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-tutorial-override'">Tutorial override</x-admin-dashboard.field-label>
+                                                            <textarea x-bind:id="'stock-item-' + item.id + '-tutorial-override'" name="tutorial_override" rows="2" maxlength="2000" x-model="item.credential_payload.tutorial_override" x-bind:aria-invalid="manageStockError('tutorial_override') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('tutorial_override') ? 'stock-item-' + item.id + '-tutorial-override-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold"></textarea>
+                                                            <p x-show="manageStockError('tutorial_override')" x-bind:id="'stock-item-' + item.id + '-tutorial-override-error'" x-text="manageStockError('tutorial_override')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-2 sm:justify-end">
                                                             <x-admin-dashboard.button type="submit" variant="secondary" size="sm">Simpan</x-admin-dashboard.button>

@@ -202,7 +202,7 @@ export default function adminDashboard(initialState = {}) {
     stockFormSubmitting: false,
     stockInputMode: "quick",
     ...emptyAccountInputState(),
-    manageStockModalOpen: false,
+    manageStockModalOpen: Boolean(initialState.manageStockModalOpen),
     manageStockProductName: "",
     manageStockProductStock: 0,
     manageStockItems: [],
@@ -210,6 +210,10 @@ export default function adminDashboard(initialState = {}) {
     manageStockSummary: { available: 0, reserved: 0, paid: 0 },
     manageStockTruncated: false,
     manageStockAddPayload: null,
+    manageStockInitialPayload: initialState.manageStockPayload ?? null,
+    manageStockInitialEditingItemId:
+      initialState.manageStockEditingItemId ?? null,
+    manageStockErrors: initialState.manageStockErrors ?? {},
     productModalOpener: null,
     stockModalOpener: null,
     manageStockModalOpener: null,
@@ -244,6 +248,15 @@ export default function adminDashboard(initialState = {}) {
           } else {
             this.$refs.stockItems?.focus();
           }
+          return;
+        }
+
+        if (this.manageStockModalOpen && this.manageStockInitialPayload) {
+          this.applyManageStockPayload(
+            this.manageStockInitialPayload,
+            this.manageStockInitialEditingItemId
+          );
+          this.$nextTick(() => this.focusManageStockError());
           return;
         }
 
@@ -444,6 +457,35 @@ export default function adminDashboard(initialState = {}) {
       });
 
       return true;
+    },
+
+    handleStockInputTabKeydown(event) {
+      const key = event.key;
+      if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(key)) {
+        return;
+      }
+
+      const tabs = Array.from(
+        document.querySelectorAll('#stock-modal [role="tab"]')
+      );
+      const currentIndex = tabs.indexOf(event.currentTarget);
+      if (currentIndex < 0 || tabs.length === 0) {
+        return;
+      }
+
+      const nextIndex =
+        key === "Home"
+          ? 0
+          : key === "End"
+            ? tabs.length - 1
+            : (currentIndex + (key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      const nextTab = tabs[nextIndex];
+
+      event.preventDefault();
+      if (this.setStockInputMode(nextTab.dataset.stockInputMode)) {
+        this.$nextTick(() => nextTab.focus());
+      }
     },
 
     accountInputChanged() {
@@ -895,6 +937,36 @@ export default function adminDashboard(initialState = {}) {
       })).filter((group) => group.items.length > 0);
     },
 
+    manageStockError(field) {
+      const value = this.manageStockErrors?.[field];
+
+      if (Array.isArray(value)) {
+        return value[0] ?? "";
+      }
+
+      return typeof value === "string" ? value : "";
+    },
+
+    manageStockErrorMessages() {
+      return Object.values(this.manageStockErrors ?? {})
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter((value) => typeof value === "string" && value !== "");
+    },
+
+    focusManageStockError() {
+      const itemId = this.manageStockInitialEditingItemId;
+      if (itemId === null || itemId === undefined) {
+        return;
+      }
+
+      this.$nextTick(() => {
+        document
+          .getElementById("stock-item-editor-" + itemId)
+          ?.querySelector('input:not([type="hidden"]), select, textarea')
+          ?.focus();
+      });
+    },
+
     modalFocusableElements(dialog) {
       return Array.from(
         dialog?.querySelectorAll(MODAL_FOCUSABLE_SELECTOR) ?? []
@@ -1058,13 +1130,18 @@ export default function adminDashboard(initialState = {}) {
       this.productModalOpen = false;
     },
 
-    openManageStockModal(product) {
-      this.manageStockModalOpener = document.activeElement;
+    applyManageStockPayload(product, editingItemId = null) {
+      const editingId = editingItemId === null ? null : String(editingItemId);
+
       Object.assign(this, {
-        activeTab: "produk",
         manageStockProductName: product.name,
         manageStockProductStock: product.stock,
-        manageStockItems: editableStockItems(product.stockItems),
+        manageStockItems: editableStockItems(product.stockItems).map(
+          (item) => ({
+            ...item,
+            editing: editingId !== null && String(item.id) === editingId,
+          })
+        ),
         manageStockAvailableCount: product.availableStockItemCount || 0,
         manageStockSummary: product.stockSummary || {
           available: product.availableStockItemCount || 0,
@@ -1081,8 +1158,19 @@ export default function adminDashboard(initialState = {}) {
           stockReturnUrl: product.stockReturnUrl,
           deliveryNote: product.deliveryNote,
         },
+      });
+    },
+
+    openManageStockModal(product) {
+      this.manageStockModalOpener = document.activeElement;
+      this.manageStockInitialPayload = null;
+      this.manageStockInitialEditingItemId = null;
+      this.manageStockErrors = {};
+      Object.assign(this, {
+        activeTab: "produk",
         manageStockModalOpen: true,
       });
+      this.applyManageStockPayload(product);
       this.$nextTick(() =>
         this.modalFocusableElements(
           document.getElementById("manage-stock-modal")
@@ -1096,6 +1184,9 @@ export default function adminDashboard(initialState = {}) {
       this.manageStockItems = [];
       this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
       this.manageStockAddPayload = null;
+      this.manageStockInitialPayload = null;
+      this.manageStockInitialEditingItemId = null;
+      this.manageStockErrors = {};
       this.manageStockModalOpener = null;
 
       if (restoreFocus) {

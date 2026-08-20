@@ -37,6 +37,7 @@ class AdminProductDashboardState
         $categoryManagement = $productsTab['categoryManagement'] ?? ['createUrl' => '', 'categories' => []];
         $categories = collect($categoryManagement['categories']);
         $stockModalProduct = $products->firstWhere('id', (int) old('stock_product_id'));
+        $stockItemUpdateProduct = $products->firstWhere('id', (int) old('stock_item_product_id'));
         $editingProduct = $products->firstWhere('id', (int) old('product_id'));
         $editingCategory = $categories->firstWhere('id', $categoryId ?? (int) old('category_id'));
         $productStoreUrl = $productsTab['productStoreUrl'];
@@ -99,6 +100,10 @@ class AdminProductDashboardState
             ],
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
             'structuredStockInputEnabled' => $this->stockIntake->structuredInputEnabled(),
+            'manageStockModalOpen' => $stockItemUpdateErrors->count() > 0 && $stockItemUpdateProduct !== null,
+            'manageStockPayload' => $stockItemUpdateProduct['edit_payload'] ?? null,
+            'manageStockEditingItemId' => old('stock_item_id') !== null ? (int) old('stock_item_id') : null,
+            'manageStockErrors' => $stockItemUpdateErrors->toArray(),
             'stockForm' => [
                 'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
                 'stockAccountsFormAction' => $stockModalProduct['stock_accounts_url'] ?? '',
