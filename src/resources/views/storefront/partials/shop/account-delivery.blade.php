@@ -45,35 +45,108 @@
                     </div>
                     <div class="mt-3 space-y-3">
                         @foreach ($group['secrets'] as $secret)
-                            <article class="rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-ink)] p-3 text-white shadow-[3px_3px_0_var(--sf-shadow)]" data-copy-group>
-                                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                    <p class="font-display text-sm font-black">{{ $secret['label'] }}</p>
-                                    <button type="button"
-                                            class="inline-flex min-h-9 w-full items-center justify-center rounded-md border-2 border-white bg-white px-3 text-xs font-black text-[var(--sf-ink)] sm:w-auto"
-                                            data-copy-text="{{ $secret['text'] }}"
-                                            data-copy-success="{{ $secret['label'] }} tersalin.">
-                                        Salin data
-                                    </button>
-                                </div>
-                                <pre class="mt-3 overflow-x-auto whitespace-pre-wrap font-mono text-sm font-bold leading-6">{{ $secret['text'] }}</pre>
-                                @if ($secret['parts'] !== null)
-                                    <dl class="mt-4 grid gap-2 sm:grid-cols-3">
-                                        @foreach (['email' => 'Email', 'password' => 'Password', 'mfa' => 'MFA Secret'] as $key => $label)
-                                            <div class="rounded-md border-2 border-white/30 p-2">
-                                                <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">{{ $label }}</dt>
-                                                <dd class="mt-1 min-w-0 break-all font-mono text-xs font-bold">{{ $secret['parts'][$key] }}</dd>
+                            @if (($secret['structured'] ?? false) === true)
+                                <article class="rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-ink)] p-3 text-white shadow-[3px_3px_0_var(--sf-shadow)]" aria-label="{{ $secret['label'] }}">
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            <p class="font-display text-sm font-black">{{ $secret['label'] }}</p>
+                                            <p class="mt-1 text-[11px] font-bold text-white/70">Akun terstruktur · salin setiap nilai sesuai kebutuhan.</p>
+                                        </div>
+                                        <div class="shrink-0" data-copy-group>
+                                            <button type="button"
+                                                    class="inline-flex min-h-9 w-full items-center justify-center rounded-md border-2 border-white bg-white px-3 text-xs font-black text-[var(--sf-ink)] sm:w-auto"
+                                                    data-copy-text="{{ $secret['text'] }}"
+                                                    data-copy-success="{{ $secret['label'] }} tersalin.">
+                                                <span data-copy-feedback>Salin akun</span>
+                                            </button>
+                                            <p class="mt-1 min-h-5 text-right text-xs font-black text-[var(--sf-green)]" aria-live="polite" data-copy-status></p>
+                                        </div>
+                                    </div>
+
+                                    <dl class="mt-4 grid gap-3 sm:grid-cols-2">
+                                        @foreach ([['key' => 'email', 'label' => 'Email'], ['key' => 'password', 'label' => 'Password']] as $field)
+                                            <div class="rounded-md border-2 border-white/30 p-2" data-copy-group>
+                                                <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">{{ $field['label'] }}</dt>
                                                 <button type="button"
-                                                        class="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-white px-2 text-[11px] font-black text-[var(--sf-ink)]"
-                                                        data-copy-text="{{ $secret['parts'][$key] }}"
-                                                        data-copy-success="{{ $label }} tersalin.">
-                                                    Salin
+                                                        class="mt-1 block min-h-14 w-full rounded-md border-2 border-white/30 bg-white/10 px-2 py-2 text-left transition hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white"
+                                                        data-copy-text="{{ $secret[$field['key']] }}"
+                                                        data-copy-success="{{ $field['label'] }} tersalin."
+                                                        aria-label="Salin {{ $field['label'] }}">
+                                                    <span class="block min-w-0 break-all font-mono text-xs font-bold">{{ $secret[$field['key']] }}</span>
+                                                    <span class="mt-2 block text-[10px] font-black uppercase tracking-[0.14em] text-white/70" data-copy-feedback>Salin</span>
                                                 </button>
+                                                <p class="mt-1 min-h-5 text-xs font-black text-[var(--sf-green)]" aria-live="polite" data-copy-status></p>
                                             </div>
                                         @endforeach
+
+                                        @if (($secret['access_method'] ?? null) === 'auth_token' && filled($secret['access_value'] ?? null))
+                                            <div class="rounded-md border-2 border-white/30 p-2 sm:col-span-2" data-copy-group>
+                                                <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Auth Token Outlook/Hotmail</dt>
+                                                <button type="button"
+                                                        class="mt-1 block min-h-14 w-full rounded-md border-2 border-white/30 bg-white/10 px-2 py-2 text-left transition hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white"
+                                                        data-copy-text="{{ $secret['access_value'] }}"
+                                                        data-copy-success="Auth Token tersalin."
+                                                        aria-label="Salin Auth Token Outlook/Hotmail">
+                                                    <span class="block min-w-0 break-all font-mono text-xs font-bold">{{ $secret['access_value'] }}</span>
+                                                    <span class="mt-2 block text-[10px] font-black uppercase tracking-[0.14em] text-white/70" data-copy-feedback>Salin</span>
+                                                </button>
+                                                <p class="mt-1 min-h-5 text-xs font-black text-[var(--sf-green)]" aria-live="polite" data-copy-status></p>
+                                            </div>
+                                        @endif
+
+                                        @if (($secret['access_method'] ?? null) === 'otp_mail_link' && filled($secret['access_value'] ?? null) && filled($secret['access_domain'] ?? null))
+                                            <div class="rounded-md border-2 border-white/30 p-2 sm:col-span-2">
+                                                <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">OTP Mail</dt>
+                                                <dd class="mt-1 break-all font-mono text-xs font-bold">Domain tujuan: {{ $secret['access_domain'] }}</dd>
+                                                <a href="{{ $secret['access_value'] }}"
+                                                   target="_blank"
+                                                   rel="noreferrer noopener"
+                                                   referrerpolicy="no-referrer"
+                                                   class="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-md border-2 border-white bg-white px-3 text-xs font-black text-[var(--sf-ink)] transition hover:bg-[var(--sf-yellow)] focus:outline-none focus:ring-2 focus:ring-white sm:w-auto">
+                                                    Buka OTP Mail
+                                                </a>
+                                            </div>
+                                        @endif
                                     </dl>
-                                @endif
-                                <p class="mt-2 min-h-5 text-xs font-black text-[var(--sf-green)]" aria-live="polite" data-copy-status></p>
-                            </article>
+
+                                    @if (filled($secret['tutorial'] ?? null) && ($secret['tutorial'] ?? null) !== $group['delivery_note'])
+                                        <div class="mt-4 rounded-md border-[3px] border-white/30 bg-white/10 p-3 text-sm font-bold leading-6">
+                                            <p class="font-display text-xs font-black uppercase tracking-[0.14em]">Instruksi akun</p>
+                                            <p class="mt-2 whitespace-pre-line">{{ $secret['tutorial'] }}</p>
+                                        </div>
+                                    @endif
+                                </article>
+                            @else
+                                <article class="rounded-md border-[3px] border-[var(--sf-border)] bg-[var(--sf-ink)] p-3 text-white shadow-[3px_3px_0_var(--sf-shadow)]" data-copy-group>
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                        <p class="font-display text-sm font-black">{{ $secret['label'] }}</p>
+                                        <button type="button"
+                                                class="inline-flex min-h-9 w-full items-center justify-center rounded-md border-2 border-white bg-white px-3 text-xs font-black text-[var(--sf-ink)] sm:w-auto"
+                                                data-copy-text="{{ $secret['text'] }}"
+                                                data-copy-success="{{ $secret['label'] }} tersalin.">
+                                            Salin data
+                                        </button>
+                                    </div>
+                                    <pre class="mt-3 overflow-x-auto whitespace-pre-wrap font-mono text-sm font-bold leading-6">{{ $secret['text'] }}</pre>
+                                    @if ($secret['parts'] !== null)
+                                        <dl class="mt-4 grid gap-2 sm:grid-cols-3">
+                                            @foreach (['email' => 'Email', 'password' => 'Password', 'mfa' => 'MFA Secret'] as $key => $label)
+                                                <div class="rounded-md border-2 border-white/30 p-2">
+                                                    <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">{{ $label }}</dt>
+                                                    <dd class="mt-1 min-w-0 break-all font-mono text-xs font-bold">{{ $secret['parts'][$key] }}</dd>
+                                                    <button type="button"
+                                                            class="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-white px-2 text-[11px] font-black text-[var(--sf-ink)]"
+                                                            data-copy-text="{{ $secret['parts'][$key] }}"
+                                                            data-copy-success="{{ $label }} tersalin.">
+                                                        Salin
+                                                    </button>
+                                                </div>
+                                            @endforeach
+                                        </dl>
+                                    @endif
+                                    <p class="mt-2 min-h-5 text-xs font-black text-[var(--sf-green)]" aria-live="polite" data-copy-status></p>
+                                </article>
+                            @endif
                         @endforeach
                     </div>
                     @if (filled($group['delivery_note']))

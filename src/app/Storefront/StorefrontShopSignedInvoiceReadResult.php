@@ -10,7 +10,7 @@ use Carbon\CarbonImmutable;
 class StorefrontShopSignedInvoiceReadResult
 {
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array<string, mixed>>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
      * @param  list<array{title: string, url: string}>  $usageGuides
      */
     public function __construct(

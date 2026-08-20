@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
@@ -9,6 +11,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontOrderAccess;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -61,6 +64,49 @@ class StorefrontOrderAccessTest extends TestCase
             ->assertOk()
             ->assertSee($secret, false)
             ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+    }
+
+    public function test_recovery_access_renders_the_same_structured_account_fields_and_otp_action(): void
+    {
+        [$order, $key] = $this->paidOrderWithAccessKey();
+        $item = $order->orderItems()->with('product')->firstOrFail();
+        $item->stockItems()->delete();
+        $item->product->update(['delivery_note' => 'Recovery product tutorial.']);
+        $otpUrl = 'https://mail.recovery.example.test/otp?opaque=recovery-otp-value';
+
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'recovery@example.test',
+                'Recovery-password',
+                CredentialAccessMethod::OtpMailLink,
+                $otpUrl,
+            )->toArray(),
+        ]);
+
+        $this->post(route('storefront.order-access.store'), [
+            'invoice_number' => $order->invoice_number,
+            'access_key' => $key,
+        ])->assertRedirect(route('storefront.order-access.show', $order));
+
+        $this->get(route('storefront.order-access.show', $order))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Data akun 1',
+                'recovery@example.test',
+                'Recovery-password',
+                'Domain tujuan: mail.recovery.example.test',
+                'Buka OTP Mail',
+                'Recovery product tutorial.',
+            ], false)
+            ->assertSee('data-copy-text="recovery@example.test"', false)
+            ->assertSee($otpUrl, false)
+            ->assertSee('rel="noreferrer noopener"', false)
+            ->assertDontSee('data-copy-text="'.$otpUrl.'"', false)
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }

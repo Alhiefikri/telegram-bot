@@ -595,6 +595,8 @@ async function writeClipboard(text) {
 
 function markCopied(button) {
   const originalText = button.textContent;
+  const feedback = button.querySelector("[data-copy-feedback]");
+  const originalFeedback = feedback?.textContent;
   const status = button
     .closest("[data-copy-group]")
     ?.querySelector("[data-copy-status]");
@@ -604,9 +606,19 @@ function markCopied(button) {
     status.textContent = statusText;
   }
 
-  button.textContent = "Tersalin";
+  if (feedback) {
+    feedback.textContent = "Tersalin";
+  } else {
+    button.textContent = "Tersalin";
+  }
+
   window.setTimeout(() => {
-    button.textContent = originalText;
+    if (feedback) {
+      feedback.textContent = originalFeedback;
+    } else {
+      button.textContent = originalText;
+    }
+
     if (status) {
       status.textContent = "";
     }

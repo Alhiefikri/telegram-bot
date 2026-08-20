@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
@@ -12,6 +14,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Notifications\CustomerLoginLinkNotification;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopPaymentStatusRefresh;
@@ -370,6 +373,64 @@ class CustomerAccountTest extends TestCase
             ->assertSee('Data akun siap digunakan')
             ->assertSee($secret, false)
             ->assertSee('data-copy-text="'.$secret.'"', false);
+    }
+
+    public function test_paid_customer_order_detail_renders_structured_account_fields_and_safe_otp_action(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'structured-owner@example.test', 'email_verified_at' => now()]);
+        $product = Product::factory()->create([
+            'name' => 'Structured Customer Product',
+            'delivery_note' => 'Customer product tutorial.',
+        ]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-STRUCTURED-CUSTOMER',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $item = OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'pakasir',
+            'merchant_ref' => 'MR-STRUCTURED-CUSTOMER',
+            'method' => 'hosted',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        $otpUrl = 'https://mail.customer.example.test/otp?opaque=customer-otp-value';
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'customer-structured@example.test',
+                'Customer-structured-password',
+                CredentialAccessMethod::OtpMailLink,
+                $otpUrl,
+            )->toArray(),
+        ]);
+
+        $this->actingAs($customer, 'customer')->get(route('customer.orders.show', $order))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Data akun siap digunakan',
+                'Data akun 1',
+                'customer-structured@example.test',
+                'Customer-structured-password',
+                'Domain tujuan: mail.customer.example.test',
+                'Buka OTP Mail',
+                'Customer product tutorial.',
+            ], false)
+            ->assertSee('data-copy-text="customer-structured@example.test"', false)
+            ->assertSee($otpUrl, false)
+            ->assertSee('rel="noreferrer noopener"', false)
+            ->assertDontSee('data-copy-text="'.$otpUrl.'"', false)
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
     }
 
     public function test_paid_guest_order_can_be_claimed_and_repeat_claim_is_idempotent(): void

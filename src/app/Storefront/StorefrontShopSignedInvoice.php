@@ -303,7 +303,11 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @return list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>
+     * Keep the legacy secret shape stable while adding structured-account
+     * fields only to structured entries. The view consumes this as a safe
+     * channel projection; it never reads ProductStockItem payloads directly.
+     *
+     * @return list<array{product_name: string, secrets: list<array<string, mixed>>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>
      */
     private function accountGroups(CredentialDelivery $delivery): array
     {
@@ -316,12 +320,19 @@ class StorefrontShopSignedInvoice
                 ];
 
                 if ($account->isStructured()) {
+                    $accessMethod = $account->accessMethod()?->value;
+                    $accessValue = $account->accessValue();
+
                     $secret += [
                         'structured' => true,
+                        'number' => $account->number(),
                         'email' => $account->email(),
                         'password' => $account->password(),
-                        'access_method' => $account->accessMethod()?->value,
-                        'access_value' => $account->accessValue(),
+                        'access_method' => $accessMethod,
+                        'access_value' => $accessValue,
+                        'access_domain' => $accessMethod === 'otp_mail_link'
+                            ? $this->otpDomain($accessValue)
+                            : null,
                         'tutorial' => $account->tutorial(),
                     ];
                 }
@@ -342,7 +353,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array<string, mixed>>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
      */
     private function accountCopyText(array $accountGroups): string
     {
@@ -352,7 +363,7 @@ class StorefrontShopSignedInvoice
     }
 
     /**
-     * @param  list<array{product_name: string, secrets: list<array{label: string, text: string, parts: ?array{email: string, password: string, mfa: string}}>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
+     * @param  list<array{product_name: string, secrets: list<array<string, mixed>>, copy_text: string, delivery_note: ?string, usage_guide: null|array{title: string, url: string}}>  $accountGroups
      */
     private function paidDeliveryType(Order $order, StorefrontShopSignedInvoiceState $state, array $accountGroups): string
     {
@@ -384,5 +395,27 @@ class StorefrontShopSignedInvoice
     private function redirectUrl(Order $order): string
     {
         return $this->invoiceUrls->show($order);
+    }
+
+    private function otpDomain(?string $url): ?string
+    {
+        if ($url === null || filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return null;
+        }
+
+        $parts = parse_url($url);
+        $host = is_array($parts) ? ($parts['host'] ?? null) : null;
+        $scheme = is_array($parts) ? strtolower((string) ($parts['scheme'] ?? '')) : '';
+
+        if ($scheme !== 'https'
+            || ! is_string($host)
+            || $host === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            return null;
+        }
+
+        return strtolower($host);
     }
 }

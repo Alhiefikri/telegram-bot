@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -12,6 +14,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopPaymentRefreshCoordinator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -649,6 +652,111 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertSee(url('/alpha/cara-pakai'), false)
             ->assertDontSee('Bingung cara masuk');
+    }
+
+    public function test_paid_structured_invoice_renders_account_fields_otp_action_and_separate_tutorials(): void
+    {
+        $this->pakasirConfigIsReady();
+        [$paidOrder] = $this->paidOrderWithAccountSecretGroups([
+            [
+                'product_name' => 'Structured Account Product',
+                'unit_price' => 45000,
+                'delivery_note' => 'Product default tutorial.',
+                'usage_guide_title' => 'Product usage guide',
+                'usage_guide_url' => '/structured/guide',
+                'secrets' => ['structured-placeholder'],
+            ],
+        ]);
+
+        $item = $paidOrder->orderItems->firstOrFail();
+        $item->stockItems()->delete();
+        $otpUrl = 'https://mail.example.test/otp?opaque=web-otp-value';
+        $authToken = 'web-auth-token-value';
+
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'structured-web@example.test',
+                'Structured-web-password',
+                CredentialAccessMethod::OtpMailLink,
+                $otpUrl,
+                'Account-specific tutorial.',
+            )->toArray(),
+        ]);
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'auth-web@example.test',
+                'Auth-web-password',
+                CredentialAccessMethod::AuthToken,
+                $authToken,
+            )->toArray(),
+        ]);
+
+        $response = $this->get(URL::signedRoute('storefront.shop.orders.show', $paidOrder, null, false));
+
+        $response
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Data akun 1',
+                'structured-web@example.test',
+                'Buka OTP Mail',
+                'Account-specific tutorial.',
+                'Data akun 2',
+                'auth-web@example.test',
+                'Auth Token Outlook/Hotmail',
+                'Product default tutorial.',
+                'Product usage guide',
+            ], false)
+            ->assertSee('data-copy-text="structured-web@example.test"', false)
+            ->assertSee('data-copy-text="Structured-web-password"', false)
+            ->assertSee('data-copy-text="'.$authToken.'"', false)
+            ->assertSee('Domain tujuan: mail.example.test', false)
+            ->assertSee($otpUrl, false)
+            ->assertSee('rel="noreferrer noopener"', false)
+            ->assertSee('data-copy-feedback', false)
+            ->assertDontSee('data-copy-text="'.$otpUrl.'"', false)
+            ->assertDontSee('href="'.$authToken.'"', false)
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+    }
+
+    public function test_pending_structured_invoice_never_reveals_account_fields_or_otp_url(): void
+    {
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        [$pendingOrder] = $this->pendingNativeQrisOrder(
+            totalAmount: 45000,
+            providerFee: 300,
+            providerTotalPayment: 45300,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.STRUCTUREDPENDING99',
+        );
+        $item = $pendingOrder->orderItems->firstOrFail();
+        $otpUrl = 'https://mail.pending.example.test/otp?opaque=pending-otp-value';
+
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'pending-structured@example.test',
+                'Pending-structured-password',
+                CredentialAccessMethod::OtpMailLink,
+                $otpUrl,
+            )->toArray(),
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $pendingOrder, null, false))
+            ->assertOk()
+            ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
+            ->assertDontSee('pending-structured@example.test', false)
+            ->assertDontSee('Pending-structured-password', false)
+            ->assertDontSee($otpUrl, false)
+            ->assertDontSee('mail.pending.example.test', false);
     }
 
     public function test_paid_invoice_without_allocated_stock_items_renders_admin_follow_up_copy(): void
