@@ -1019,7 +1019,7 @@ class TelegramOutboundEffectService
         ?TelegramOutboundEffect $supersedes = null,
     ): TelegramOutboundEffect {
         $rendered = $this->receiptNotifier->render($order);
-        $chunkCount = max(1, count($rendered['chunks']));
+        $chunkCount = max(1, count($rendered['units'] ?? $rendered['chunks']));
         $baseGroupKey = self::receiptEffectGroupKey((string) $order->getKey());
         $groupKey = $baseGroupKey;
 

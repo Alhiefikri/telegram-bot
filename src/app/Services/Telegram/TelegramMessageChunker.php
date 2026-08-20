@@ -2,6 +2,8 @@
 
 namespace App\Services\Telegram;
 
+use InvalidArgumentException;
+
 final class TelegramMessageChunker
 {
     /**
@@ -32,6 +34,32 @@ final class TelegramMessageChunker
         }
 
         return $chunks === [] ? [''] : $chunks;
+    }
+
+    /**
+     * Preserve credential/button units as indivisible sends. The caller must
+     * split non-secret tutorial material or a long token into another unit;
+     * this boundary never silently truncates or splits a credential entity.
+     *
+     * @param  list<TelegramMessageUnit>  $units
+     * @return list<TelegramMessageUnit>
+     */
+    public function fromAtomicUnits(array $units, int $limit = 3900): array
+    {
+        if ($limit < 1) {
+            throw new InvalidArgumentException('Telegram message limit must be positive.');
+        }
+
+        foreach ($units as $unit) {
+            if (! $unit instanceof TelegramMessageUnit) {
+                throw new InvalidArgumentException('Telegram atomic units must be message units.');
+            }
+            if ($unit->characterLength() > $limit) {
+                throw new InvalidArgumentException('Telegram atomic message unit exceeds the configured limit.');
+            }
+        }
+
+        return array_values($units);
     }
 
     /** @return list<string> */

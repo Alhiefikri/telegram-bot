@@ -73,4 +73,17 @@ class CredentialDeliveryFormatterTest extends TestCase
             ['type' => 'code', 'offset' => 66, 'length' => 11],
         ], (new CredentialDeliveryFormatter)->codeEntities($text));
     }
+
+    public function test_it_marks_explicit_unicode_fields_using_utf16_offsets(): void
+    {
+        $text = "🔐 Data akun #1\nemail : user@example.test\npassword : Päss😀word";
+
+        $this->assertSame([
+            ['type' => 'code', 'offset' => 24, 'length' => 17],
+            ['type' => 'code', 'offset' => 53, 'length' => 10],
+        ], (new CredentialDeliveryFormatter)->codeEntitiesForFields($text, [
+            ['label' => 'email', 'value' => 'user@example.test'],
+            ['label' => 'password', 'value' => 'Päss😀word'],
+        ]));
+    }
 }

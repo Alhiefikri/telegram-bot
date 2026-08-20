@@ -17,6 +17,7 @@ class TelegramReceiptNotifier
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
         private CredentialDeliveryPresentation $credentialPresentation,
+        private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
         private TelegramSupportContact $supportContact,
     ) {}
@@ -53,7 +54,7 @@ class TelegramReceiptNotifier
      * Render a receipt in memory. The returned credential-bearing strings are
      * deliberately never persisted in the outbound effect ledger.
      *
-     * @return array{chunks: list<string>, guides: list<array{title: string, url: string}>}
+     * @return array{chunks: list<string>, units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
      */
     public function render(Order $order): array
     {
@@ -61,11 +62,17 @@ class TelegramReceiptNotifier
 
         $customer = $order->customer;
         if (! $customer instanceof Customer) {
-            return ['chunks' => [''], 'guides' => []];
+            $unit = new TelegramMessageUnit('');
+
+            return ['chunks' => [''], 'units' => [$unit], 'guides' => []];
         }
 
         $delivery = $this->credentialPresentation->forCustomer($customer, $order);
         $guides = $delivery->usageGuides();
+        if ($this->hasStructuredAccount($delivery)) {
+            return $this->renderStructuredReceipt($customer, $order, $delivery, $guides);
+        }
+
         $lines = [
             $this->locale->translate($customer, 'receipt.title'),
             '━━━━━━━━━━━━━━',
@@ -101,10 +108,9 @@ class TelegramReceiptNotifier
             $lines[] = $this->locale->translate($customer, 'receipt.thanks');
         }
 
-        return [
-            'chunks' => $this->messageChunker->fromLines($lines),
-            'guides' => $guides,
-        ];
+        $units = $this->unitsFromLines($lines, $customer, $guides, withReplyMarkup: true);
+
+        return $this->rendered($units, $guides);
     }
 
     /**
@@ -128,19 +134,122 @@ class TelegramReceiptNotifier
 
         $rendered = $this->render($order);
         $index = max(0, (int) $effect->sequence - 1);
-        $chunk = $rendered['chunks'][$index] ?? null;
-        if (! is_string($chunk)) {
+        $unit = $rendered['units'][$index] ?? null;
+        if (! $unit instanceof TelegramMessageUnit) {
             throw new TelegramOutboundPreSendException('Telegram receipt delivery unit is no longer renderable.');
         }
 
-        $isFinal = $index === array_key_last($rendered['chunks']);
-
         return $this->bot->sendMessage(
             $customer->telegram_id,
-            $chunk,
-            $isFinal ? $this->receiptReplyMarkup($customer, $rendered['guides']) : [],
-            $this->credentialOptions($chunk),
+            $unit->text(),
+            $unit->replyMarkup(),
+            $unit->options(),
         );
+    }
+
+    /**
+     * @param  list<array{title: string, url: string}>  $guides
+     * @return array{chunks: list<string>, units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
+     */
+    private function renderStructuredReceipt(
+        Customer $customer,
+        Order $order,
+        CredentialDelivery $delivery,
+        array $guides,
+    ): array {
+        $headerLines = [
+            $this->locale->translate($customer, 'receipt.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            '',
+            $this->locale->translate($customer, 'receipt.products'),
+        ];
+        foreach ($order->orderItems as $item) {
+            $headerLines[] = '- '.$item->product_name.' x '.$item->quantity;
+        }
+        $headerLines[] = '';
+        $headerLines[] = $this->locale->translate($customer, 'receipt.account_details');
+        $headerLines[] = '━━━━━━━━━━━━━━';
+
+        $footerLines = [
+            $this->locale->translate($customer, 'receipt.save_details'),
+        ];
+        foreach ($guides as $guide) {
+            $footerLines[] = '';
+            $footerLines[] = '📘 '.$guide['title'];
+            $footerLines[] = $guide['url'];
+        }
+        $footerLines[] = '';
+        $footerLines[] = $this->locale->translate($customer, 'receipt.login_help');
+        $footerLines[] = $this->locale->translate($customer, 'receipt.thanks');
+
+        $units = [
+            ...$this->unitsFromLines($headerLines),
+            ...$this->credentialRenderer->accountUnits(
+                $customer,
+                $delivery,
+                'receipt.otp_button',
+                'receipt.delivery_note',
+            ),
+            ...$this->unitsFromLines($footerLines, $customer, $guides, withReplyMarkup: true),
+        ];
+
+        return $this->rendered($units, $guides);
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @param  list<array{title: string, url: string}>  $guides
+     * @return list<TelegramMessageUnit>
+     */
+    private function unitsFromLines(
+        array $lines,
+        ?Customer $customer = null,
+        array $guides = [],
+        bool $withReplyMarkup = false,
+    ): array {
+        $chunks = $this->messageChunker->fromLines($lines);
+        $units = [];
+        foreach ($chunks as $index => $chunk) {
+            $isFinal = $index === array_key_last($chunks);
+            $replyMarkup = $withReplyMarkup && $isFinal && $customer instanceof Customer
+                ? $this->receiptReplyMarkup($customer, $guides)
+                : [];
+            $units[] = new TelegramMessageUnit(
+                text: $chunk,
+                entities: $this->credentialFormatter->codeEntities($chunk),
+                replyMarkup: $replyMarkup,
+            );
+        }
+
+        return $units;
+    }
+
+    /**
+     * @param  list<TelegramMessageUnit>  $units
+     * @param  list<array{title: string, url: string}>  $guides
+     * @return array{chunks: list<string>, units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
+     */
+    private function rendered(array $units, array $guides): array
+    {
+        return [
+            'chunks' => array_map(static fn (TelegramMessageUnit $unit): string => $unit->text(), $units),
+            'units' => $units,
+            'guides' => $guides,
+        ];
+    }
+
+    private function hasStructuredAccount(CredentialDelivery $delivery): bool
+    {
+        foreach ($delivery->groups() as $group) {
+            foreach ($group->accounts() as $account) {
+                if ($account->isStructured()) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array
@@ -194,12 +303,5 @@ class TelegramReceiptNotifier
         return [
             'inline_keyboard' => $rows,
         ];
-    }
-
-    private function credentialOptions(string $text): array
-    {
-        $entities = $this->credentialFormatter->codeEntities($text);
-
-        return $entities === [] ? [] : ['entities' => $entities];
     }
 }

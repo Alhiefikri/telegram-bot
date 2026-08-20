@@ -35,6 +35,7 @@ class TelegramOrderIntents
         private TelegramLocale $locale,
         private CredentialDeliveryFormatter $credentialFormatter,
         private CredentialDeliveryPresentation $credentialPresentation,
+        private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
     ) {}
 
@@ -168,23 +169,38 @@ class TelegramOrderIntents
             $lines[] = $refreshNotice;
         }
         $delivery = $this->credentialPresentation->forCustomer($customer, $order, $payment);
-        $accountLines = $this->accountSecretLines($customer, $delivery);
-        if ($accountLines !== []) {
+        if ($this->hasStructuredAccount($delivery)) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
-            array_push($lines, ...$accountLines);
+            $units = [
+                ...$this->unitsFromLines($lines),
+                ...$this->credentialRenderer->accountUnits(
+                    $customer,
+                    $delivery,
+                    'order.detail.otp_button',
+                    'order.detail.delivery_note',
+                ),
+                new TelegramMessageUnit($this->orderInstruction($customer, $order, $payment)),
+            ];
+        } else {
+            $accountLines = $this->accountSecretLines($customer, $delivery);
+            if ($accountLines !== []) {
+                $lines[] = '';
+                $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
+                array_push($lines, ...$accountLines);
+            }
+            $lines[] = '';
+            $lines[] = $this->orderInstruction($customer, $order, $payment);
+            $units = $this->unitsFromLines($lines, withCredentialEntities: true);
         }
-        $lines[] = '';
-        $lines[] = $this->orderInstruction($customer, $order, $payment);
 
-        $chunks = $this->messageChunker->fromLines($lines);
         $lastResponse = null;
-        foreach ($chunks as $index => $chunk) {
+        foreach ($units as $unit) {
             $lastResponse = $this->bot->sendMessage(
                 $chatId,
-                $chunk,
-                [],
-                $this->credentialOptions($chunk),
+                $unit->text(),
+                $unit->replyMarkup(),
+                $unit->options(),
             );
         }
 
@@ -372,10 +388,28 @@ class TelegramOrderIntents
         return $lines;
     }
 
-    private function credentialOptions(string $text): array
+    /** @return list<TelegramMessageUnit> */
+    private function unitsFromLines(array $lines, bool $withCredentialEntities = false): array
     {
-        $entities = $this->credentialFormatter->codeEntities($text);
+        return array_map(
+            fn (string $chunk): TelegramMessageUnit => new TelegramMessageUnit(
+                text: $chunk,
+                entities: $withCredentialEntities ? $this->credentialFormatter->codeEntities($chunk) : [],
+            ),
+            $this->messageChunker->fromLines($lines),
+        );
+    }
 
-        return $entities === [] ? [] : ['entities' => $entities];
+    private function hasStructuredAccount(CredentialDelivery $delivery): bool
+    {
+        foreach ($delivery->groups() as $group) {
+            foreach ($group->accounts() as $account) {
+                if ($account->isStructured()) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }
