@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\ProductStockIntakeOperation;
 use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Services\Credentials\CredentialIdentityBackfillReadinessService;
 use App\Services\Credentials\CredentialIdentityFingerprint;
 use App\Services\Credentials\CredentialIdentityKind;
 use App\Services\Credentials\LegacyCredentialIdentityParser;
@@ -33,6 +34,7 @@ final class ProductStockIntake
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
         private readonly CredentialIdentityFingerprint $fingerprints,
+        private readonly CredentialIdentityBackfillReadinessService $identityBackfillReadiness,
         private readonly LegacyCredentialIdentityParser $legacyIdentityParser,
     ) {}
 
@@ -222,7 +224,8 @@ final class ProductStockIntake
 
     public function structuredInputEnabled(): bool
     {
-        return (bool) config('services.credentials.structured_stock_input_enabled', false);
+        return (bool) config('services.credentials.structured_stock_input_enabled', false)
+            && $this->identityBackfillReadiness->isReady();
     }
 
     /**

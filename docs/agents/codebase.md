@@ -63,7 +63,7 @@ Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability(
 
 `ProductStockIntake` adalah pemilik canonical untuk penambahan positif melalui **Input Cepat** dan **Input Akun**. Ia menormalkan seluruh batch sebelum transaksi, mengunci Product, mengklaim idempotency key dan `CredentialIdentity`, membuat `ProductStockItem`, menaikkan numeric stock, membuat satu adjustment movement/audit, lalu menyerahkan restock notification setelah commit. Controller `AdminProductStockController` dan `AdminProductAccountStockController` hanya adapter; mereka tidak boleh mengubah stock atau membuat identity secara langsung.
 
-`CredentialIdentity` menyimpan fingerprint HMAC keyed untuk email dan Auth Token, bukan plaintext. `BackfillCredentialIdentityRegistry` memproses retained Product Stock Items secara bounded dan hanya melaporkan row IDs/counts. `STRUCTURED_STOCK_INPUT_ENABLED` adalah rollback switch: default production `false`, sehingga Input Cepat dan delivery structured yang sudah tersimpan tetap hidup saat Account Input dinonaktifkan.
+`CredentialIdentity` menyimpan fingerprint HMAC keyed untuk email dan Auth Token, bukan plaintext. `BackfillCredentialIdentityRegistry` memproses retained Product Stock Items secara bounded dan hanya melaporkan row IDs/counts, lalu menyimpan readiness singleton yang dikunci ke digest fingerprint key hanya setelah full commit tanpa unresolved row. `CredentialIdentityBackfillReadinessService` adalah runtime gate; `credentials:check-identity-readiness` adalah deployment check. `STRUCTURED_STOCK_INPUT_ENABLED` adalah rollback switch: default production `false`, sehingga Input Cepat dan delivery structured yang sudah tersimpan tetap hidup saat Account Input dinonaktifkan.
 
 ### Cart
 
@@ -406,7 +406,7 @@ npm run build
 
 `composer test:concurrency-gate` memerlukan PostgreSQL disposable dan dipakai ketika perubahan menyentuh lock/stock/checkout/payment. `npm run build` diperlukan bila perubahan menyentuh Blade asset, Vite entry, CSS, atau JavaScript.
 
-Structured stock rollout uses [`runbook-structured-account-stock-intake-rollout.md`](../../docs/runbook-structured-account-stock-intake-rollout.md). Never enable `STRUCTURED_STOCK_INPUT_ENABLED` before the bounded backfill, conflict resolution, and non-production end-to-end proof are recorded.
+Structured stock rollout uses [`runbook-structured-account-stock-intake-rollout.md`](../../docs/runbook-structured-account-stock-intake-rollout.md). Never enable `STRUCTURED_STOCK_INPUT_ENABLED` before the bounded backfill, persisted readiness check, conflict resolution, and non-production end-to-end proof are recorded.
 
 ## 11. Checklist perubahan untuk AI
 

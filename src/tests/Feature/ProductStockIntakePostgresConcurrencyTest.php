@@ -342,6 +342,7 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
             '--drop-types' => true,
         ]);
         $this->assertSame(0, $exitCode);
+        $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
     }
 
     private function assertSafeConcurrencyDatabase(): void

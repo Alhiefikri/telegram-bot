@@ -6,6 +6,7 @@ This runbook enables **Input Akun** additively while preserving Input Cepat, exi
 
 - Keep `STRUCTURED_STOCK_INPUT_ENABLED=false` during schema/code rollout and backfill.
 - Keep `CREDENTIAL_IDENTITY_FINGERPRINT_KEY` stable after the registry has rows. It is a keyed fingerprint secret, not a value to print or copy into evidence.
+- The backfill command persists a singleton readiness record keyed to a digest of the configured fingerprint key. Account Input requires that record to be `ready`; the environment flag alone is insufficient.
 - Never select decrypted `secret` or `credential_payload` values into command output, logs, screenshots, issue comments, or CI artifacts.
 - Do not delete `credential_identities` during rollback. Its retained fingerprints are the no-reuse history.
 
@@ -30,7 +31,7 @@ cd src
 php artisan credentials:backfill-identity-registry --chunk=100 --dry-run
 ```
 
-The dry-run must exit `0` with `unresolved=0` before commit mode. A non-zero result is a hard stop: inspect only the reported row IDs through the authenticated admin repair workflow, resolve retained duplicate identities, and rerun the dry-run. Do not paste credential values into the incident record.
+The dry-run must exit `0` with `unresolved=0` before commit mode. A dry-run never changes the persisted readiness state. A non-zero result is a hard stop: inspect only the reported row IDs through the authenticated admin repair workflow, resolve retained duplicate identities, and rerun the dry-run. Do not paste credential values into the incident record.
 
 Commit the registry in the same bounded shape:
 
@@ -40,6 +41,15 @@ php artisan credentials:backfill-identity-registry --chunk=100
 ```
 
 The commit run must exit `0` with `ready=true`. Re-running from the beginning is safe and idempotent; `--after-id=<last_id>` may be used for an interrupted bounded run. Enablement is blocked while any retained duplicate or malformed structured row remains unresolved.
+
+Verify the durable deployment gate, which reports only safe counts and IDs:
+
+```bash
+cd src
+php artisan credentials:check-identity-readiness --json
+```
+
+This command must exit `0` immediately before enabling the flag. It also fails closed if the fingerprint key is missing or differs from the key used for the successful backfill.
 
 Safe evidence consists of the command, exit code, `scanned/registered/already_registered/skipped_unrecognized/conflicts/unresolved/last_id`, and the reported row IDs. It must not contain credential content.
 
@@ -67,7 +77,7 @@ Also run the supported responsive browser suites and the two-axis Standards + Sp
 
 ## 4. Enable Account Input
 
-After the proof and backfill are green, set the runtime environment variable:
+After the proof, the commit run, and `credentials:check-identity-readiness` are green, set the runtime environment variable:
 
 ```text
 STRUCTURED_STOCK_INPUT_ENABLED=true
@@ -77,7 +87,7 @@ Refresh cached configuration and restart PHP-FPM, queue workers, and the schedul
 
 ## Rollback
 
-Set `STRUCTURED_STOCK_INPUT_ENABLED=false`, refresh cached configuration, and restart the application processes. This hides/rejects new Account Input submissions while preserving:
+Set `STRUCTURED_STOCK_INPUT_ENABLED=false`, refresh cached configuration, and restart the application processes. The persisted readiness record is intentionally retained so a later enablement can reuse the same successful backfill while the fingerprint key remains stable. This hides/rejects new Account Input submissions while preserving:
 
 - Input Cepat;
 - existing structured Product Stock Items and their identity history;

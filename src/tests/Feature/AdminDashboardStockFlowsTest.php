@@ -32,6 +32,14 @@ class AdminDashboardStockFlowsTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
+        $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
+    }
+
     public function test_account_input_and_manage_stock_expose_a_safe_structured_editor_contract(): void
     {
         config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');

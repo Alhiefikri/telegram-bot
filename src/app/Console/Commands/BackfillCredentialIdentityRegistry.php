@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Enums\CredentialFormat;
 use App\Models\CredentialIdentity;
+use App\Models\CredentialIdentityBackfillReadiness;
 use App\Models\ProductStockItem;
+use App\Services\Credentials\CredentialIdentityBackfillReadinessService;
 use App\Services\Credentials\CredentialIdentityConflict;
 use App\Services\Credentials\CredentialIdentityFingerprint;
 use App\Services\Credentials\LegacyCredentialIdentityParser;
@@ -28,6 +30,7 @@ final class BackfillCredentialIdentityRegistry extends Command
     private array $dryRunClaims = [];
 
     public function handle(
+        CredentialIdentityBackfillReadinessService $readiness,
         CredentialIdentityFingerprint $fingerprints,
         LegacyCredentialIdentityParser $legacyParser,
     ): int {
@@ -63,78 +66,160 @@ final class BackfillCredentialIdentityRegistry extends Command
         $lastId = $afterId;
         $unresolvedIds = [];
         $conflictIds = [];
+        $scanUpperBoundId = (int) (ProductStockItem::query()->max('id') ?? 0);
+        $trackedRun = false;
+        $baseCounts = [
+            'scanned' => 0,
+            'registered' => 0,
+            'already_registered' => 0,
+            'skipped_unrecognized' => 0,
+            'conflicts' => 0,
+            'unresolved' => 0,
+        ];
 
-        ProductStockItem::query()
-            ->where('id', '>', $afterId)
-            ->orderBy('id')
-            ->chunkById(
-                $chunk,
-                function (Collection $items) use (
-                    &$scanned,
-                    &$registered,
-                    &$alreadyRegistered,
-                    &$skippedUnrecognized,
-                    &$unresolved,
-                    &$conflicts,
-                    &$lastId,
-                    &$unresolvedIds,
-                    &$conflictIds,
-                    $dryRun,
-                    $fingerprints,
-                    $legacyParser,
-                ): void {
-                    foreach ($items as $stockItem) {
-                        /** @var ProductStockItem $stockItem */
-                        $scanned++;
-                        $lastId = max($lastId, (int) $stockItem->getKey());
+        if (! $dryRun) {
+            try {
+                $state = $readiness->begin($afterId, $scanUpperBoundId);
+                $scanUpperBoundId = (int) ($state->scan_upper_bound_id ?? $scanUpperBoundId);
+                $trackedRun = $state->status === CredentialIdentityBackfillReadiness::STATUS_PENDING
+                    && $state->fingerprint_key_digest === $fingerprints->keyDigest();
 
-                        try {
-                            $identities = $this->identitiesFor($stockItem, $legacyParser);
-                        } catch (Throwable) {
-                            $unresolved++;
-                            $unresolvedIds[] = (int) $stockItem->getKey();
+                if ($trackedRun && $afterId > 0) {
+                    $baseCounts = [
+                        'scanned' => (int) $state->scanned_count,
+                        'registered' => (int) $state->registered_count,
+                        'already_registered' => (int) $state->already_registered_count,
+                        'skipped_unrecognized' => (int) $state->skipped_unrecognized_count,
+                        'conflicts' => (int) $state->conflict_count,
+                        'unresolved' => (int) $state->unresolved_count,
+                    ];
+                }
+            } catch (Throwable) {
+                $this->error('Credential identity backfill failed: readiness state could not be started safely.');
 
-                            continue;
-                        }
+                return self::FAILURE;
+            }
+        }
 
-                        if ($identities === []) {
-                            $skippedUnrecognized++;
+        try {
+            ProductStockItem::query()
+                ->where('id', '>', $afterId)
+                ->where('id', '<=', $scanUpperBoundId)
+                ->orderBy('id')
+                ->chunkById(
+                    $chunk,
+                    function (Collection $items) use (
+                        &$scanned,
+                        &$registered,
+                        &$alreadyRegistered,
+                        &$skippedUnrecognized,
+                        &$unresolved,
+                        &$conflicts,
+                        &$lastId,
+                        &$unresolvedIds,
+                        &$conflictIds,
+                        $dryRun,
+                        $trackedRun,
+                        $baseCounts,
+                        $readiness,
+                        $fingerprints,
+                        $legacyParser,
+                    ): void {
+                        foreach ($items as $stockItem) {
+                            /** @var ProductStockItem $stockItem */
+                            $scanned++;
+                            $lastId = max($lastId, (int) $stockItem->getKey());
 
-                            continue;
-                        }
+                            try {
+                                $identities = $this->identitiesFor($stockItem, $legacyParser);
+                            } catch (Throwable) {
+                                $unresolved++;
+                                $unresolvedIds[] = (int) $stockItem->getKey();
 
-                        $result = $this->registerIdentities($stockItem, $identities, $dryRun, $fingerprints);
-                        if ($result['status'] === 'conflict') {
-                            $conflicts++;
-                            $unresolved++;
-                            $unresolvedIds[] = (int) $stockItem->getKey();
-                            $conflictIds[] = (int) $stockItem->getKey();
-                            if ($result['existing_stock_item_id'] !== null) {
-                                $conflictIds[] = $result['existing_stock_item_id'];
+                                continue;
                             }
 
-                            continue;
-                        }
-                        if ($result['status'] === 'unresolved') {
-                            $unresolved++;
-                            $unresolvedIds[] = (int) $stockItem->getKey();
+                            if ($identities === []) {
+                                $skippedUnrecognized++;
 
-                            continue;
+                                continue;
+                            }
+
+                            $result = $this->registerIdentities($stockItem, $identities, $dryRun, $fingerprints);
+                            if ($result['status'] === 'conflict') {
+                                $conflicts++;
+                                $unresolved++;
+                                $unresolvedIds[] = (int) $stockItem->getKey();
+                                $conflictIds[] = (int) $stockItem->getKey();
+                                if ($result['existing_stock_item_id'] !== null) {
+                                    $conflictIds[] = $result['existing_stock_item_id'];
+                                }
+
+                                continue;
+                            }
+                            if ($result['status'] === 'unresolved') {
+                                $unresolved++;
+                                $unresolvedIds[] = (int) $stockItem->getKey();
+
+                                continue;
+                            }
+
+                            $registered += $result['registered'];
+                            $alreadyRegistered += $result['already_registered'];
                         }
 
-                        $registered += $result['registered'];
-                        $alreadyRegistered += $result['already_registered'];
-                    }
-                },
-                'id',
-                'id',
-            );
+                        if (! $dryRun && $trackedRun) {
+                            $readiness->recordProgress($lastId, [
+                                'scanned' => $baseCounts['scanned'] + $scanned,
+                                'registered' => $baseCounts['registered'] + $registered,
+                                'already_registered' => $baseCounts['already_registered'] + $alreadyRegistered,
+                                'skipped_unrecognized' => $baseCounts['skipped_unrecognized'] + $skippedUnrecognized,
+                                'conflicts' => $baseCounts['conflicts'] + $conflicts,
+                                'unresolved' => $baseCounts['unresolved'] + $unresolved,
+                            ]);
+                        }
+                    },
+                    'id',
+                    'id',
+                );
+        } catch (Throwable) {
+            $this->error('Credential identity backfill failed while processing retained rows; readiness remains disabled.');
+
+            return self::FAILURE;
+        }
 
         $unresolvedIds = array_values(array_unique($unresolvedIds));
         sort($unresolvedIds);
         $conflictIds = array_values(array_unique($conflictIds));
         sort($conflictIds);
-        $ready = ! $dryRun && $unresolved === 0;
+        $totals = [
+            'scanned' => $baseCounts['scanned'] + $scanned,
+            'registered' => $baseCounts['registered'] + $registered,
+            'already_registered' => $baseCounts['already_registered'] + $alreadyRegistered,
+            'skipped_unrecognized' => $baseCounts['skipped_unrecognized'] + $skippedUnrecognized,
+            'conflicts' => $baseCounts['conflicts'] + $conflicts,
+            'unresolved' => $baseCounts['unresolved'] + $unresolved,
+        ];
+        $ready = false;
+
+        if (! $dryRun) {
+            try {
+                if ($trackedRun) {
+                    $ready = $readiness->finish(
+                        eligibleForReady: true,
+                        lastProcessedId: $lastId,
+                        scanUpperBoundId: $scanUpperBoundId,
+                        counts: $totals,
+                    );
+                } else {
+                    $ready = $readiness->isReady();
+                }
+            } catch (Throwable) {
+                $this->error('Credential identity backfill failed: readiness state could not be finalized safely.');
+
+                return self::FAILURE;
+            }
+        }
 
         $this->line(sprintf(
             'SUMMARY mode=%s scanned=%d registered=%d already_registered=%d skipped_unrecognized=%d conflicts=%d unresolved=%d last_id=%d ready=%s',
@@ -153,6 +238,12 @@ final class BackfillCredentialIdentityRegistry extends Command
 
         if ($unresolved > 0) {
             $this->error('Credential identity backfill found unresolved retained rows; resolve the reported row IDs before enabling structured intake.');
+
+            return self::FAILURE;
+        }
+
+        if (! $dryRun && ! $ready) {
+            $this->error('Credential identity backfill did not establish complete readiness; run a full commit after resolving the reported rows.');
 
             return self::FAILURE;
         }

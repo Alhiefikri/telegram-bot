@@ -13,6 +13,20 @@ final class CredentialIdentityFingerprint
         return trim($this->configuredKey()) !== '';
     }
 
+    /**
+     * Return a non-secret identifier for the configured fingerprint key.
+     *
+     * The registry readiness record uses this digest to prevent a successful
+     * backfill performed with one key from authorizing intake under another.
+     * The key itself is never returned or persisted.
+     */
+    public function keyDigest(): ?string
+    {
+        $key = $this->configuredKey();
+
+        return trim($key) === '' ? null : hash('sha256', $key);
+    }
+
     public function assertReady(): void
     {
         if (! $this->isReady()) {

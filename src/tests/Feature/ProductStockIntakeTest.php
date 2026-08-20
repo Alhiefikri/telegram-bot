@@ -33,6 +33,7 @@ class ProductStockIntakeTest extends TestCase
         parent::setUp();
 
         config()->set('services.credentials.identity_fingerprint_key', 'stock-intake-test-fingerprint-key');
+        $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
     }
 
     public function test_structured_one_item_intake_is_atomic_and_materializes_one_safe_restock_transition(): void

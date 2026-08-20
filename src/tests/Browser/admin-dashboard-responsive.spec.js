@@ -27,6 +27,7 @@ test.beforeAll(async () => {
 
   runArtisan(["optimize:clear"]);
   runArtisan(["migrate:fresh", "--force"]);
+  runArtisan(["credentials:backfill-identity-registry"]);
   invoiceFixtures = JSON.parse(
     runArtisan(["tinker", "--execute", responsiveSeedScript])
   );
