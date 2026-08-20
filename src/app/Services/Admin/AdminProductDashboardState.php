@@ -2,10 +2,13 @@
 
 namespace App\Services\Admin;
 
+use App\Services\ProductStockIntake;
 use Illuminate\Support\ViewErrorBag;
 
 class AdminProductDashboardState
 {
+    public function __construct(private readonly ProductStockIntake $stockIntake) {}
+
     private const PRODUCT_TAB = 'produk';
 
     private const PRODUCT_CREATE_BAG = 'productCreate';
@@ -95,6 +98,7 @@ class AdminProductDashboardState
                     || trim((string) old('delivery_note', $editingProduct['delivery_note'] ?? '')) !== '',
             ],
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
+            'structuredStockInputEnabled' => $this->stockIntake->structuredInputEnabled(),
             'stockForm' => [
                 'stockFormAction' => $stockModalProduct['stock_url'] ?? '',
                 'stockAccountsFormAction' => $stockModalProduct['stock_accounts_url'] ?? '',

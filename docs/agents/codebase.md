@@ -61,6 +61,10 @@ Customer
 
 Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability()`, dan `availableStock()` daripada mengulang query visibility/stock di caller. Perubahan stok direkam lewat `InventoryLedger`/`EloquentInventoryLedger` dan menghasilkan `InventoryMovement` bertipe `reservation`, `sale`, `release`, atau `adjustment`.
 
+`ProductStockIntake` adalah pemilik canonical untuk penambahan positif melalui **Input Cepat** dan **Input Akun**. Ia menormalkan seluruh batch sebelum transaksi, mengunci Product, mengklaim idempotency key dan `CredentialIdentity`, membuat `ProductStockItem`, menaikkan numeric stock, membuat satu adjustment movement/audit, lalu menyerahkan restock notification setelah commit. Controller `AdminProductStockController` dan `AdminProductAccountStockController` hanya adapter; mereka tidak boleh mengubah stock atau membuat identity secara langsung.
+
+`CredentialIdentity` menyimpan fingerprint HMAC keyed untuk email dan Auth Token, bukan plaintext. `BackfillCredentialIdentityRegistry` memproses retained Product Stock Items secara bounded dan hanya melaporkan row IDs/counts. `STRUCTURED_STOCK_INPUT_ENABLED` adalah rollback switch: default production `false`, sehingga Input Cepat dan delivery structured yang sudah tersimpan tetap hidup saat Account Input dinonaktifkan.
+
 ### Cart
 
 `Cart` punya status `active`, `checked_out`, `abandoned`, atau `expired`. `CartService` memiliki aturan satu cart aktif/customer dan perubahan quantity. Checkout mengunci cart dan cart items; jangan membuat Order langsung dari UI/controller.
@@ -90,6 +94,7 @@ Status payment canonical: `pending`, `paid`, `failed`, `expired`, `refunded`.
 | Aturan                                   | Pemilik canonical                                                                                                                                                                  | Adapter/caller yang tidak boleh mengambil alih         |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | membuat Order/Payment dan reservasi stok | [`OrderCheckoutService`](../../src/app/Services/OrderCheckoutService.php)                                                                                                          | controller, Telegram router, storefront view           |
+| positive stock intake + identity claim  | [`ProductStockIntake`](../../src/app/Services/ProductStockIntake.php), [`CredentialIdentity`](../../src/app/Models/CredentialIdentity.php)                                    | admin controller, model caller, browser adapter         |
 | transisi paid/cancel/expiry/refund       | [`OrderLifecycle`](../../src/app/Services/OrderLifecycle.php) dan [`OrderStateMachine`](../../src/app/Services/OrderStateMachine.php)                                              | callback controller, provider client                   |
 | provider baru untuk checkout             | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php) | channel-specific provider selection                    |
 | reservation/sale/release stock           | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                    | model/controller langsung mengubah stock               |
@@ -97,6 +102,7 @@ Status payment canonical: `pending`, `paid`, `failed`, `expired`, `refunded`.
 | provider status verification             | callback processor + provider adapter masing-masing                                                                                                                                | callback payload langsung menandai paid                |
 | customer order access                    | [`StorefrontOrderAccess`](../../src/app/Storefront/StorefrontOrderAccess.php)                                                                                                      | controller menyimpan plaintext Recovery Key            |
 | customer-facing copy                     | Telegram/Storefront presentation adapter                                                                                                                                           | domain service mengirim pesan channel                  |
+| paid credential projection              | [`CredentialDeliveryPresentation`](../../src/app/Services/Credentials/CredentialDeliveryPresentation.php)                                                                         | Telegram/Web adapter parsing encrypted payloads         |
 
 Aturan praktis: service domain mengembalikan outcome/DTO; adapter menerjemahkan outcome menjadi Telegram message, HTTP response, view, atau admin alert.
 
@@ -157,6 +163,10 @@ Admin request melewati `AuthorizeAdminAccess`, yang menempelkan `adminUser` ke r
 - Owner/Admin/Finance/Support: melihat order/payment dan resend receipt sesuai policy.
 
 `AdminPaymentModeController` hanya mengorkestrasi request. Validasi readiness dan optimistic version conflict berada di `UpdatePaymentModeRequest`/`PaymentProviderSwitcher`; switch dan audit log ditulis atomik dalam transaksi. Switch provider lama tidak mengubah Payment yang sudah ada.
+
+Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1–20 kartu) dan mengembalikan hanya metadata aman. `AdminProductStockController` mempertahankan redirect/flash contract Input Cepat. `ProductStockItemManager` hanya mengedit atau menghapus Available rows; Reserved, Paid, retired, dan repair-required rows tetap read-only. Invalid `credential_format` atau encrypted structured payload diproyeksikan sebagai `REPAIR` tanpa secret.
+
+`CredentialDeliveryPresentation` adalah seam bersama Store Bot dan Web Storefront. Ia memeriksa ulang paid eligibility, customer ownership, ordering, format legacy/structured, dan effective tutorial; DTO-nya hanya hidup di memory dan sengaja menolak serialization/debug secret output. Telegram menggunakan [`TelegramReceiptNotifier`](../../src/app/Services/Telegram/TelegramReceiptNotifier.php) + receipt ledger; Web menggunakan [`StorefrontShopSignedInvoice`](../../src/app/Storefront/StorefrontShopSignedInvoice.php) + Recovery Key/access policy. OTP Mail Link tidak pernah di-fetch oleh server.
 
 `CheckoutMaintenance` adalah owner canonical untuk state **Checkout Maintenance** melalui [`CheckoutMaintenance::current()`](../../src/app/Services/CheckoutMaintenance/CheckoutMaintenance.php), `change()`, dan `guardNewOrder()`. `AdminCheckoutMaintenanceController` hanya mengorkestrasi request; role predicate `UserRole::canManageStoreOperations()` membatasi mutasi ke Owner/Admin, sedangkan `AdminDashboardStatsData` menyajikan status untuk semua role admin. `change()` mengunci row singleton `checkout_maintenance_settings`, memeriksa optimistic `version`, menormalkan note, mendeteksi no-op, lalu menulis setting dan `AuditLogger` dalam transaksi yang sama. Perubahan nyata menaikkan version dan menyimpan activation timestamp; deactivation selalu menghapus public note, sementara nilai lama tetap berada di audit.
 
@@ -330,6 +340,7 @@ Lock dan dedupe yang harus dipertahankan:
 - KlikQRIS: cache lock `klikqris:callback-status:<payment-id>` untuk create, recovery, callback, reconciliation, dan alert.
 - Telegram webhook: unique `update_id`, processing claim, retry/quarantine.
 - Provider callbacks: `PaymentEvent` idempotency/coalescing dan `processed_at`.
+- Structured stock intake: Product row lock + unique `(identity_kind, fingerprint)` + unique operation key; edit/delete use the same Product-before-Stock-Item lock order as checkout allocation.
 
 Jangan mengurangi lock menjadi `exists()` check biasa pada jalur yang membuat payment, menjual/mencadangkan stok, atau mengirim paid effect. Jangan menggunakan `provider_create_state` di luar KlikQRIS service untuk menentukan UI.
 
@@ -370,6 +381,11 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/*Payment*Test.php`, `KlikQris*Test.php`, `Pakasir*Test.php`, `Binance*Test.php` — provider contract/lifecycle/reconciliation.
 - `tests/Feature/OrderCartDomainTest.php` — cart/order/inventory transition.
 - `tests/Feature/Admin*Test.php` — role, dashboard, provider switch, audit, manual completion.
+- `tests/Feature/CredentialIdentityFoundationTest.php` — additive encrypted persistence, normalization, registry backfill, and safe command output.
+- `tests/Feature/ProductStockIntakeTest.php` — atomic Input Cepat/Input Akun, idempotency, duplicate identity, authorization, audit/movement/notification behavior.
+- `tests/Feature/ProductStockIntakePostgresConcurrencyTest.php` — process races for same key, duplicate identity, intake/checkout, edit/checkout, and delete/checkout; runs only through the PostgreSQL gate.
+- `tests/Feature/StructuredStockSecurityAndRolloutTest.php` — rollout switch, fingerprint readiness, URL safety, malformed-row repair, and canary persistence scan.
+- `tests/Feature/CredentialDeliveryPresentationTest.php` and `tests/Feature/Telegram/StructuredCredentialDeliveryTest.php` — shared paid projection, no serialization, ordered OTP/Auth Token delivery, and Manual Delivery Review ambiguity.
 - `tests/Feature/Telegram/TelegramOutboundEffect*Test.php`, `AdminTelegram*OutboundEffectTest.php`, dan `AdminTelegramBroadcastQueueTest.php` — ledger protocol, Manual Delivery Review, Admin Broadcast recovery, contract, deletion-boundary, dan family behavior.
 - `tests/Feature/KlikQrisReportingTest.php` — provider reporting contract, pagination, retries, schema validation, redaction, and cache identity.
 - `tests/Feature/AdminDashboardReportingTest.php` — active-tab isolation, role policy, local matching, filters, safe errors, pagination, and proof URL safety.
@@ -389,6 +405,8 @@ npm run build
 ```
 
 `composer test:concurrency-gate` memerlukan PostgreSQL disposable dan dipakai ketika perubahan menyentuh lock/stock/checkout/payment. `npm run build` diperlukan bila perubahan menyentuh Blade asset, Vite entry, CSS, atau JavaScript.
+
+Structured stock rollout uses [`runbook-structured-account-stock-intake-rollout.md`](../../docs/runbook-structured-account-stock-intake-rollout.md). Never enable `STRUCTURED_STOCK_INPUT_ENABLED` before the bounded backfill, conflict resolution, and non-production end-to-end proof are recorded.
 
 ## 11. Checklist perubahan untuk AI
 

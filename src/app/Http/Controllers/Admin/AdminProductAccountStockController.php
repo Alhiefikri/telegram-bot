@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\StructuredStockInputDisabled;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductAccountStockRequest;
 use App\Models\Product;
@@ -15,6 +16,13 @@ class AdminProductAccountStockController extends Controller
 {
     public function __invoke(StoreProductAccountStockRequest $request, Product $product, ProductStockIntake $stockIntake): JsonResponse
     {
+        if (! $stockIntake->structuredInputEnabled()) {
+            return response()->json([
+                'message' => 'Input Akun sedang tidak tersedia. Silakan hubungi administrator.',
+                'code' => 'structured_stock_input_disabled',
+            ], 503);
+        }
+
         try {
             $result = $stockIntake->submit(
                 $product,
@@ -25,6 +33,11 @@ class AdminProductAccountStockController extends Controller
                 $request->attributes->get('adminUser'),
                 $request->ip(),
             );
+        } catch (StructuredStockInputDisabled) {
+            return response()->json([
+                'message' => 'Input Akun sedang tidak tersedia. Silakan hubungi administrator.',
+                'code' => 'structured_stock_input_disabled',
+            ], 503);
         } catch (ProductStockIntakeIdempotencyConflict) {
             return response()->json([
                 'message' => 'Kunci operasi sudah digunakan untuk pengajuan stok lain.',

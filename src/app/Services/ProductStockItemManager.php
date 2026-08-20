@@ -88,7 +88,7 @@ class ProductStockItemManager
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                if ($lockedItem->credential_format !== CredentialFormat::StructuredAccount) {
+                if ($lockedItem->safeCredentialFormat() !== CredentialFormat::StructuredAccount) {
                     throw ValidationException::withMessages([
                         'credential_format' => 'Format stok tidak cocok dengan editor akun.',
                     ]);

@@ -35,6 +35,26 @@ _Avoid_: ordinary Paid Order, late checkout
 A digital-account credential that has been delivered or otherwise exposed and must never be returned to the Available Product pool, including after a refund.
 _Avoid_: reusable refunded credential, restocked account
 
+**Product Stock Item**:
+One sellable credential unit for a Product that is either available, reserved to an Order, permanently allocated, or retired. A Product Stock Item is distinct from the Product's numeric stock projection.
+_Avoid_: stock row, quantity line
+
+**Stock Intake**:
+An Owner/Admin-confirmed operation that adds one or more Product Stock Items and their matching inventory adjustment as one indivisible change.
+_Avoid_: line count, direct stock edit
+
+**Structured Account Credential**:
+A Product Stock Item with a required email and password, at most one optional access method, and an optional item-specific tutorial. It is an alternative to a legacy free-form credential, not a replacement for it.
+_Avoid_: free-form stock line, customer account
+
+**OTP Mail Link**:
+An encrypted HTTPS destination delivered with one Structured Account Credential so its customer can open the associated OTP mailbox. It is an access action, not a copyable authentication secret or Product usage guide.
+_Avoid_: Auth Token, tutorial link
+
+**Auth Token**:
+An encrypted copyable Outlook/Hotmail authentication secret delivered as text with one Structured Account Credential. It is an alternative to an OTP Mail Link.
+_Avoid_: OTP Mail Link, usage guide
+
 **Provider Cancellation Attempt**:
 An idempotent post-commit request to cancel an unpaid provider transaction after the local Order has been released. It does not reverse a provider-confirmed payment; such a payment becomes a Late Payment.
 _Avoid_: local cancellation, guaranteed provider refund

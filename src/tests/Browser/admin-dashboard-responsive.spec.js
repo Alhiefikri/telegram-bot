@@ -2089,6 +2089,8 @@ function appEnv() {
     APP_URL: baseUrl ?? "http://127.0.0.1",
     DB_CONNECTION: "sqlite",
     DB_DATABASE: dbPath,
+    STRUCTURED_STOCK_INPUT_ENABLED: "true",
+    CREDENTIAL_IDENTITY_FINGERPRINT_KEY: "browser-only-fingerprint-key",
     SESSION_DRIVER: "file",
     CACHE_STORE: "array",
     QUEUE_CONNECTION: "database",

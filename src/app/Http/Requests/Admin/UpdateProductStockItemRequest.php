@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests\Admin;
 
-use App\Enums\CredentialFormat;
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -22,7 +21,7 @@ class UpdateProductStockItemRequest extends FormRequest
 
         if ($stockItem instanceof ProductStockItem && ! $this->has('credential_format')) {
             $this->merge([
-                'credential_format' => ($stockItem->credential_format ?? CredentialFormat::Legacy)->value,
+                'credential_format' => $stockItem->safeCredentialFormat()?->value ?? 'repair_required',
             ]);
         }
     }

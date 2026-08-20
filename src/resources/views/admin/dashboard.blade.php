@@ -32,6 +32,7 @@
             $historyTab = $historyTab ?? [];
             $withdrawTab = $withdrawTab ?? [];
             $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
+            $structuredStockInputEnabled = (bool) ($dashboardState['structuredStockInputEnabled'] ?? false);
         @endphp
 
         <main

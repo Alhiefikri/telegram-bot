@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Enums\CredentialFormat;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductStockItemRequest;
 use App\Models\Product;
@@ -19,7 +18,7 @@ class AdminProductStockItemUpdateController extends Controller
         $user = $request->attributes->get('adminUser');
 
         try {
-            if (($stockItem->credential_format ?? CredentialFormat::Legacy) === CredentialFormat::StructuredAccount) {
+            if ($stockItem->safeCredentialFormat()?->value === 'structured_account') {
                 $stockItemManager->updateAvailableStructured(
                     $product,
                     $stockItem,

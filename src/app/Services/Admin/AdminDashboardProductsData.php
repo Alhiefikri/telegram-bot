@@ -209,17 +209,17 @@ final class AdminDashboardProductsData
     {
         $order = $stockItem->orderItem?->order;
         $payment = $order?->payments?->sortByDesc('paid_at')->first();
-        $format = $stockItem->credential_format ?? CredentialFormat::Legacy;
+        $format = $stockItem->safeCredentialFormat();
         $structuredPayload = $format === CredentialFormat::StructuredAccount
             ? $this->structuredPayload($stockItem)
             : null;
-        $status = $this->stockItemStatus($stockItem, $order, $payment, $structuredPayload);
+        $status = $this->stockItemStatus($stockItem, $order, $payment, $format, $structuredPayload);
         $available = $stockItem->order_item_id === null && $stockItem->retired_at === null;
         $editable = $available && ($format === CredentialFormat::Legacy || $structuredPayload !== null);
 
         return [
             'id' => $stockItem->id,
-            'credential_format' => $format->value,
+            'credential_format' => $format?->value ?? 'repair_required',
             'credential_payload' => $structuredPayload,
             'access_domain' => $this->accessDomain($structuredPayload),
             'secret' => $format === CredentialFormat::Legacy ? $stockItem->secret : null,
@@ -240,13 +240,13 @@ final class AdminDashboardProductsData
     /**
      * @param  array<string, mixed>|null  $structuredPayload
      */
-    private function stockItemStatus(ProductStockItem $stockItem, $order, $payment, ?array $structuredPayload): string
+    private function stockItemStatus(ProductStockItem $stockItem, $order, $payment, ?CredentialFormat $format, ?array $structuredPayload): string
     {
         if ($stockItem->retired_at !== null) {
             return 'RETIRED';
         }
 
-        if ($stockItem->credential_format === CredentialFormat::StructuredAccount && $structuredPayload === null) {
+        if ($format === null || ($format === CredentialFormat::StructuredAccount && $structuredPayload === null)) {
             return 'REPAIR';
         }
 

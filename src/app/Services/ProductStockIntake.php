@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CredentialAccessMethod;
 use App\Enums\CredentialFormat;
 use App\Enums\InventoryMovementType;
+use App\Exceptions\StructuredStockInputDisabled;
 use App\Jobs\SendProductStockNotifications;
 use App\Models\CredentialIdentity;
 use App\Models\InventoryMovement;
@@ -53,6 +54,10 @@ final class ProductStockIntake
             ? ProductStockIntakeSubmission::fromArray($submission)
             : $submission;
         $this->assertActorMayAdjustStock($actor);
+
+        if ($submission->isStructuredAccount()) {
+            $this->assertStructuredInputEnabled();
+        }
 
         $normalized = $this->normalizeAndValidate($submission);
         $payloadHash = $this->payloadHash($submission, $normalized['canonical_items']);
@@ -213,6 +218,22 @@ final class ProductStockIntake
             $actor,
             $ip,
         );
+    }
+
+    public function structuredInputEnabled(): bool
+    {
+        return (bool) config('services.credentials.structured_stock_input_enabled', false);
+    }
+
+    /**
+     * The rollout switch is checked before credential-bearing normalization so
+     * a disabled request does not needlessly hold plaintext in the service.
+     */
+    public function assertStructuredInputEnabled(): void
+    {
+        if (! $this->structuredInputEnabled()) {
+            throw new StructuredStockInputDisabled;
+        }
     }
 
     /**

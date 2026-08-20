@@ -7,6 +7,7 @@ use App\Services\Credentials\StructuredCredentialPayload;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
+use Throwable;
 
 #[Fillable(['product_id', 'order_item_id', 'retired_at', 'retired_reason', 'secret', 'credential_format', 'credential_payload'])]
 class ProductStockItem extends Model
@@ -63,6 +64,21 @@ class ProductStockItem extends Model
             'credential_payload' => 'encrypted:array',
             'secret' => 'encrypted',
         ];
+    }
+
+    public function safeCredentialFormat(): ?CredentialFormat
+    {
+        try {
+            $format = $this->getAttribute('credential_format');
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($format === null) {
+            return CredentialFormat::Legacy;
+        }
+
+        return $format instanceof CredentialFormat ? $format : null;
     }
 
     public function product()

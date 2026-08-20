@@ -10,7 +10,8 @@
                         description="Input Cepat tetap untuk stok legacy. Input Akun membuat satu akun = satu stok."
                         class="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto bg-[#7BD10A] p-3 sm:p-5"
                     >
-                        <div class="mb-4 grid grid-cols-2 gap-2" role="tablist" aria-label="Mode input stok">
+                        <div class="mb-4 {{ $structuredStockInputEnabled ? 'grid grid-cols-2' : 'grid grid-cols-1' }} gap-2" role="tablist" aria-label="Mode input stok">
+                            @if ($structuredStockInputEnabled)
                             <button
                                 type="button"
                                 role="tab"
@@ -31,6 +32,7 @@
                             >
                                 Input Akun
                             </button>
+                            @endif
                         </div>
 
                         <div x-show="stockInputMode === 'quick'" x-cloak>
@@ -70,6 +72,7 @@
                             </form>
                         </div>
 
+                        @if ($structuredStockInputEnabled)
                         <div x-show="stockInputMode === 'account'" x-cloak>
                             <form method="POST" x-bind:action="stockAccountsFormAction" x-on:submit="submitAccountInput($event)" class="space-y-4">
                                 @csrf
@@ -255,6 +258,11 @@
                                 </div>
                             </form>
                         </div>
+                        @else
+                            <x-admin-dashboard.notice tone="neutral" class="mb-0 text-xs">
+                                Input Akun sementara dinonaktifkan sampai backfill identitas dan proof rollout selesai. Input Cepat tetap tersedia.
+                            </x-admin-dashboard.notice>
+                        @endif
                     </x-admin-dashboard.modal-shell>
                 </x-admin-dashboard.modal-backdrop>
 
