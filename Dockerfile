@@ -16,6 +16,9 @@ RUN npm run build
 FROM php:8.4-fpm AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-dejavu-core \
+    fonts-noto-cjk \
+    fonts-noto-core \
     libfreetype6-dev \
     libjpeg62-turbo-dev \
     libicu-dev \
