@@ -209,7 +209,7 @@ final class TelegramCredentialDeliveryRenderer
                 $label.' — Auth Token Outlook/Hotmail',
                 ...$tokenLines,
             ];
-            $tokenText = implode("\n", $tokenLines);
+            $tokenText = implode("\n", $tokenUnitLines);
             if (mb_strlen($tokenText, 'UTF-8') > self::MESSAGE_LIMIT) {
                 throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
             }

@@ -15,6 +15,7 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramMessageUnit;
 use App\Services\Telegram\TelegramOrderIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
@@ -107,6 +108,68 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
         $this->assertLessThanOrEqual(3900, mb_strlen((string) $message['text'], 'UTF-8'));
         $this->assertCount(3, $message['entities'] ?? []);
         $this->assertSame(3400, $message['entities'][2]['length']);
+    }
+
+    public function test_grouped_long_auth_token_keeps_product_and_account_context(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 778800, 'locale' => 'id']);
+        [$order, $item] = $this->paidOrder($customer, 'Grouped Long Token Bundle');
+        $token = str_repeat('T', 3400);
+        $tutorial = str_repeat('Tutorial ', 100);
+
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'long-grouped@example.test',
+                'Password',
+                CredentialAccessMethod::AuthToken,
+                $token,
+                $tutorial,
+            )->toArray(),
+        ]);
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'other-grouped@example.test',
+                'Other-password',
+                CredentialAccessMethod::OtpMailLink,
+                'https://mail.other-grouped.example.test/otp',
+            )->toArray(),
+        ]);
+
+        $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order->fresh());
+        $tokenUnits = array_values(array_filter(
+            $detail['units'],
+            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), $token),
+        ));
+
+        $this->assertCount(1, $tokenUnits);
+        $tokenUnit = $tokenUnits[0];
+        $this->assertStringContainsString('Grouped Long Token Bundle', $tokenUnit->text());
+        $this->assertStringContainsString('Data akun #1', $tokenUnit->text());
+
+        $allText = implode("\n", array_map(
+            fn (TelegramMessageUnit $unit): string => $unit->text(),
+            $detail['units'],
+        ));
+        $this->assertSame(1, substr_count($allText, $token));
+
+        $entities = $tokenUnit->entities();
+        $this->assertCount(1, $entities);
+        $tokenOffset = strpos($tokenUnit->text(), $token);
+        $this->assertNotFalse($tokenOffset);
+        $this->assertSame(
+            intdiv(
+                strlen(mb_convert_encoding(substr($tokenUnit->text(), 0, $tokenOffset), 'UTF-16LE', 'UTF-8')),
+                2,
+            ),
+            $entities[0]['offset'],
+        );
+        $this->assertSame(3400, $entities[0]['length']);
     }
 
     public function test_ambiguous_structured_receipt_enters_manual_review_without_blind_resend(): void
