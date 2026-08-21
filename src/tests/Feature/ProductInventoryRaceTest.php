@@ -27,6 +27,7 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -39,62 +40,64 @@ use Tests\Support\TelegramBotTestSupport;
 class ProductInventoryRaceTest extends TelegramBotTestSupport
 {
     #[Group('postgres-release')]
-    public function test_two_buyers_competing_for_last_stock_can_cart_but_only_one_checkout_reserves_stock(): void
+    public function test_two_buyers_competing_for_last_stock_can_open_detail_but_only_one_direct_purchase_reserves_stock(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 390001, 'locale' => 'id']);
-        Customer::factory()->create(['telegram_id' => 390002, 'locale' => 'id']);
+        $buyerA = Customer::factory()->create(['telegram_id' => 390001, 'locale' => 'id']);
+        $buyerB = Customer::factory()->create(['telegram_id' => 390002, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 1, secrets: ['last-secret']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(39001, 'buyer-a-qty', 'qty:'.$product->id.':1', ['id' => 390001, 'username' => 'buyer_a'], 390001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39002, 'buyer-b-qty', 'qty:'.$product->id.':1', ['id' => 390002, 'username' => 'buyer_b'], 390002))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39003, 'buyer-a-checkout', 'checkout', ['id' => 390001, 'username' => 'buyer_a'], 390001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39004, 'buyer-b-checkout', 'checkout', ['id' => 390002, 'username' => 'buyer_b'], 390002))->assertOk();
+        $tokenA = $this->openProductDetail($buyerA, $product, 39001, 88001);
+        $tokenB = $this->openProductDetail($buyerB, $product, 39002, 88002);
+        $this->payProductDetail($buyerA, $product, $tokenA, 39003, 88001);
+        $this->payProductDetail($buyerB, $product, $tokenB, 39004, 88002);
 
-        $this->assertSame(2, CartItem::sum('quantity'));
+        $this->assertSame(1, CartItem::sum('quantity'));
         $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
-        $this->assertSame(1, Cart::where('status', CartStatus::Active)->count());
+        $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
         $this->assertSame(1, Order::count());
         $this->assertSame(1, $product->fresh()->reserved_stock);
         $this->assertSame(1, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
         $this->assertStockUnavailableMessageCount(0);
-        $this->assertCheckoutStockChangedMessageCount(1);
+        $this->assertCheckoutStockChangedMessageCount(0);
         $this->assertInventoryInvariants($product);
     }
 
-    public function test_duplicate_quantity_callback_sets_quantity_once_and_does_not_repeat_payment_choices(): void
+    public function test_duplicate_direct_payment_callback_creates_one_order_and_one_cart_item(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 390003, 'locale' => 'id']);
+        $customer = Customer::factory()->create(['telegram_id' => 390003, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 2, secrets: ['secret-a', 'secret-b']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(39003, 'same-buyer-qty-a', 'qty:'.$product->id.':1', ['id' => 390003, 'username' => 'buyer_dup'], 390003))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39004, 'same-buyer-qty-b', 'qty:'.$product->id.':1', ['id' => 390003, 'username' => 'buyer_dup'], 390003))->assertOk();
+        $token = $this->openProductDetail($customer, $product, 39003, 88003);
+        $this->payProductDetail($customer, $product, $token, 39004, 88003);
+        $this->payProductDetail($customer, $product, $token, 39005, 88003);
 
         $this->assertSame(1, CartItem::count());
         $this->assertSame(1, CartItem::firstOrFail()->quantity);
-        $this->assertPaymentChoiceMessageCount(1);
+        $this->assertSame(1, Order::count());
         $this->assertInventoryInvariants($product);
     }
 
-    public function test_competing_quantity_callbacks_may_exceed_stock_but_checkout_does_not_oversell(): void
+    public function test_competing_direct_purchases_may_exceed_stock_but_checkout_does_not_oversell(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 391001, 'locale' => 'id']);
-        Customer::factory()->create(['telegram_id' => 391002, 'locale' => 'id']);
+        $buyerA = Customer::factory()->create(['telegram_id' => 391001, 'locale' => 'id']);
+        $buyerB = Customer::factory()->create(['telegram_id' => 391002, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 2, secrets: ['secret-1', 'secret-2']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(39101, 'buyer-a-qty-two', 'qty:'.$product->id.':2', ['id' => 391001, 'username' => 'buyer_a'], 391001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39102, 'buyer-b-qty-one', 'qty:'.$product->id.':1', ['id' => 391002, 'username' => 'buyer_b'], 391002))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39103, 'buyer-a-checkout', 'checkout', ['id' => 391001, 'username' => 'buyer_a'], 391001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39104, 'buyer-b-checkout', 'checkout', ['id' => 391002, 'username' => 'buyer_b'], 391002))->assertOk();
+        $tokenA = $this->openProductDetail($buyerA, $product, 39101, 88010);
+        $tokenA = $this->increaseProductDetail($buyerA, $product, $tokenA, 39102, 88010);
+        $tokenB = $this->openProductDetail($buyerB, $product, 39103, 88011);
+        $this->payProductDetail($buyerA, $product, $tokenA, 39104, 88010);
+        $this->payProductDetail($buyerB, $product, $tokenB, 39105, 88011);
 
-        $this->assertSame(3, CartItem::sum('quantity'));
+        $this->assertSame(2, CartItem::sum('quantity'));
         $this->assertSame(1, Order::count());
         $this->assertSame(2, $product->fresh()->reserved_stock);
         $this->assertSame(2, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
         $this->assertStockUnavailableMessageCount(0);
-        $this->assertCheckoutStockChangedMessageCount(1);
+        $this->assertCheckoutStockChangedMessageCount(0);
         $this->assertInventoryInvariants($product);
     }
 
@@ -112,14 +115,15 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertInventoryInvariants($product);
     }
 
-    public function test_duplicate_checkout_callback_keeps_single_order_and_single_credential_claim(): void
+    public function test_duplicate_direct_payment_keeps_single_order_and_single_credential_claim(): void
     {
         $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 393001, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 1, secrets: ['checkout-secret']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(39301, 'qty-valid', 'qty:'.$product->id.':1', ['id' => 393001], 393001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39302, 'checkout-first', 'checkout', ['id' => 393001], 393001))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(39303, 'checkout-duplicate', 'checkout', ['id' => 393001], 393001))->assertOk();
+        $token = $this->openProductDetail($customer, $product, 39301, 88030);
+        $this->payProductDetail($customer, $product, $token, 39302, 88030);
+        $this->payProductDetail($customer, $product, $token, 39303, 88030);
 
         $this->assertSame(1, Order::count());
         $this->assertSame(1, OrderItem::count());
@@ -677,6 +681,55 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertSame(2, ProductStockItem::where('product_id', $product->id)->whereNull('order_item_id')->count());
         $this->assertSame(0, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
         $this->assertInventoryInvariants($product);
+    }
+
+    private function openProductDetail(Customer $customer, Product $product, int $updateId, int $messageId): string
+    {
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId,
+            'product-'.$updateId,
+            'product:'.$product->id,
+            ['id' => $customer->telegram_id],
+            $customer->telegram_id,
+            'private',
+            $messageId,
+        ))->assertOk();
+
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertNotNull($selection);
+
+        return (string) $selection['interactionToken'];
+    }
+
+    private function increaseProductDetail(Customer $customer, Product $product, string $token, int $updateId, int $messageId): string
+    {
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId,
+            'increase-'.$updateId,
+            'detail:qty:+:'.$product->id.':'.$token,
+            ['id' => $customer->telegram_id],
+            $customer->telegram_id,
+            'private',
+            $messageId,
+        ))->assertOk();
+
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertNotNull($selection);
+
+        return (string) $selection['interactionToken'];
+    }
+
+    private function payProductDetail(Customer $customer, Product $product, string $token, int $updateId, int $messageId): void
+    {
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId,
+            'pay-'.$updateId,
+            'detail:pay:qris:'.$product->id.':'.$token,
+            ['id' => $customer->telegram_id],
+            $customer->telegram_id,
+            'private',
+            $messageId,
+        ))->assertOk();
     }
 
     /** @param list<string> $secrets */

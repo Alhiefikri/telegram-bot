@@ -8,6 +8,7 @@ use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramChatPrivacyGuard;
 use App\Services\Telegram\TelegramCommunityGate;
+use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
 
@@ -18,6 +19,7 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramMenuIntents $menu,
+        private TelegramIntentSession $session,
         private TelegramLocale $locale,
     ) {}
 
@@ -44,6 +46,7 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
         }
 
         $this->communityGate->clearPrompt($context->customer);
+        $this->session->forget($context->customer);
         $context->customer->update(['locale' => $locale]);
         $context->customer->refresh();
         $this->bot->answerCallbackQuery($context->callbackQueryId);

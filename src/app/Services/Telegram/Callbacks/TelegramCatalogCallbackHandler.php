@@ -73,7 +73,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forget($context->customer);
-            $this->catalog->sendStockChoices($context->customer, $context->chatId, $product, $availableStock);
+            $this->catalog->sendProductDetail($context->customer, $context->chatId, $product);
 
             return true;
         }

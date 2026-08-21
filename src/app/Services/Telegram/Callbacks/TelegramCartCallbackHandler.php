@@ -5,15 +5,11 @@ namespace App\Services\Telegram\Callbacks;
 use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Models\Product;
-use App\Services\CheckoutMaintenance\CheckoutMaintenance;
-use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
-use App\Services\Telegram\TelegramCartIntents;
 use App\Services\Telegram\TelegramCatalogIntents;
-use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 
@@ -21,12 +17,9 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 {
     public function __construct(
         private TelegramBotClient $bot,
-        private TelegramCartIntents $cart,
         private TelegramCatalogIntents $catalog,
-        private TelegramCheckoutIntents $checkoutIntents,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
-        private CheckoutMaintenance $maintenance,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -42,9 +35,8 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === 'batal'
-            || preg_match('/^qty:([1-9][0-9]*):([1-9][0-9]*)$/', $context->data) === 1
-            || preg_match('/^buy:(qris|binance):([1-9][0-9]*)$/', $context->data) === 1
-            || preg_match('/^buy:([1-9][0-9]*)$/', $context->data) === 1;
+            || preg_match('/^detail:qty:(-|\+|current|manual|cancel):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1
+            || preg_match('/^detail:back:([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
@@ -58,81 +50,14 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if (preg_match('/^buy:(qris|binance):([1-9][0-9]*)$/', $context->data, $matches)) {
-            $paymentMethod = $matches[1];
-            $product = Product::publicVisible()->whereKey((int) $matches[2])->first();
-            $availableStock = $product ? $product->availableStock() : 0;
-            $maintenance = $this->maintenance->current();
-            if ($maintenance->active) {
-                if (! $product || $availableStock < 1) {
-                    $this->sendMaintenanceNotice($context, $maintenance);
-
-                    return true;
-                }
-
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
-                $this->session->put($context->customer, $product->id);
-                $this->catalog->sendQuantityChoices($context->customer, $context->chatId, $product, $availableStock, $paymentMethod);
-
-                return true;
-            }
-            if (! $product || $availableStock < 1) {
-                $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_unavailable'));
-
-                return true;
-            }
-            if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
-                $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
-
-                return true;
-            }
-
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->put($context->customer, $product->id);
-            $this->catalog->sendQuantityChoices($context->customer, $context->chatId, $product, $availableStock, $paymentMethod);
+        if (preg_match('/^detail:qty:(-|\+|current|manual|cancel):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
+            $this->handleQuantityAction($context, $matches[1], (int) $matches[2], $matches[3]);
 
             return true;
         }
 
-        if (preg_match('/^buy:([1-9][0-9]*)$/', $context->data, $matches)) {
-            $product = Product::publicVisible()->whereKey((int) $matches[1])->first();
-            $availableStock = $product ? $product->availableStock() : 0;
-            $maintenance = $this->maintenance->current();
-            if ($maintenance->active) {
-                if (! $product || $availableStock < 1) {
-                    $this->sendMaintenanceNotice($context, $maintenance);
-
-                    return true;
-                }
-
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
-                $this->session->put($context->customer, $product->id);
-                $this->catalog->sendQuantityChoices($context->customer, $context->chatId, $product, $availableStock);
-
-                return true;
-            }
-            if (! $product || $availableStock < 1) {
-                $this->session->forget($context->customer);
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_unavailable'));
-
-                return true;
-            }
-
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->put($context->customer, $product->id);
-            $this->catalog->sendQuantityChoices($context->customer, $context->chatId, $product, $availableStock);
-
-            return true;
-        }
-
-        if (preg_match('/^qty:([1-9][0-9]*):([1-9][0-9]*)$/', $context->data, $matches)) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $productId = (int) $matches[1];
-            $selectedProductId = $this->session->getSelectedProductId($context->customer);
-            $this->session->forget($context->customer);
-            $this->cart->addProductToCart($context->customer, $context->chatId, $productId, (int) $matches[2], (int) $selectedProductId === $productId);
+        if (preg_match('/^detail:back:([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
+            $this->handleBack($context, (int) $matches[1], $matches[2]);
 
             return true;
         }
@@ -140,28 +65,153 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
         return false;
     }
 
-    private function sendMaintenanceNotice(TelegramCallbackContext $context, CheckoutMaintenanceState $state): void
+    private function handleQuantityAction(TelegramCallbackContext $context, string $action, int $productId, string $token): void
     {
-        $this->bot->answerCallbackQuery($context->callbackQueryId);
-        $this->bot->sendMessage(
-            $context->chatId,
-            $this->maintenanceMessage($context->customer, $state),
-            $this->maintenanceKeyboard($context->customer),
-        );
+        $this->session->withLock($context->customer, function () use ($context, $action, $productId, $token): void {
+            $selection = $this->currentSelection($context->customer, $productId, $token);
+            if ($selection === null) {
+                $this->sendStale($context);
+
+                return;
+            }
+
+            $product = Product::publicVisible()->whereKey($productId)->first();
+            $availableStock = $product ? max(0, $product->availableStock()) : 0;
+            if ($action === 'current') {
+                if (! $product || $availableStock < (int) $selection['quantity']) {
+                    $this->session->forget($context->customer);
+                    $this->sendUnavailable($context);
+
+                    return;
+                }
+
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+                return;
+            }
+
+            if (! $product || $availableStock < 1) {
+                $this->session->forget($context->customer);
+                $this->sendUnavailable($context);
+
+                return;
+            }
+
+            if ($action === 'manual') {
+                if ($selection['mode'] !== 'browsing') {
+                    $this->sendStale($context);
+
+                    return;
+                }
+
+                $next = $this->session->awaitCustomQuantity(
+                    $context->customer,
+                    $selection,
+                    $this->locale->code($context->customer),
+                );
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->catalog->sendCustomQuantityPrompt($context->customer, $context->chatId, $product, $next);
+
+                return;
+            }
+
+            if ($action === 'cancel') {
+                if ($selection['mode'] !== 'awaiting_custom_quantity') {
+                    $this->sendStale($context);
+
+                    return;
+                }
+
+                $next = $this->session->browsing(
+                    $context->customer,
+                    $selection,
+                    (int) $selection['previousQuantity'],
+                    $this->locale->code($context->customer),
+                );
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+
+                return;
+            }
+
+            if ($selection['mode'] !== 'browsing') {
+                $this->sendStale($context);
+
+                return;
+            }
+
+            $quantity = (int) $selection['quantity'] + ($action === '+' ? 1 : -1);
+            if ($quantity < 1) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.minimum'));
+
+                return;
+            }
+            if ($quantity > $availableStock) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.maximum', ['stock' => $availableStock]));
+
+                return;
+            }
+
+            $next = $this->session->browsing(
+                $context->customer,
+                $selection,
+                $quantity,
+                $this->locale->code($context->customer),
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+        });
     }
 
-    private function maintenanceMessage(Customer $customer, CheckoutMaintenanceState $state): string
+    private function handleBack(TelegramCallbackContext $context, int $productId, string $token): void
     {
-        return $this->locale->translate($customer, 'checkout.maintenance')
-            .$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
+        $this->session->withLock($context->customer, function () use ($context, $productId, $token): void {
+            $selection = $this->currentSelection($context->customer, $productId, $token, ['browsing']);
+            if ($selection === null) {
+                $this->sendStale($context);
+
+                return;
+            }
+
+            $product = Product::whereKey($productId)->first();
+            $this->session->forget($context->customer);
+            if (! $product) {
+                $this->sendUnavailable($context);
+
+                return;
+            }
+
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->catalog->sendCategoryProducts(
+                $context->customer,
+                $context->chatId,
+                $product->category_id ? (string) $product->category_id : 'uncategorized',
+            );
+        });
     }
 
-    /** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
-    private function maintenanceKeyboard(Customer $customer): array
+    /** @param  list<string>  $modes */
+    private function currentSelection(Customer $customer, int $productId, string $token, array $modes = ['browsing', 'awaiting_custom_quantity']): ?array
     {
-        return ['inline_keyboard' => [[[
-            'text' => $this->locale->translate($customer, 'checkout.status_button'),
-            'callback_data' => 'checkout-maintenance:status',
-        ]]]];
+        $selection = $this->session->get($customer);
+        if ($selection === null
+            || (int) $selection['productId'] !== $productId
+            || ! hash_equals((string) $selection['interactionToken'], $token)
+            || ! in_array($selection['mode'], $modes, true)
+        ) {
+            return null;
+        }
+
+        return $selection;
+    }
+
+    private function sendStale(TelegramCallbackContext $context): void
+    {
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+    }
+
+    private function sendUnavailable(TelegramCallbackContext $context): void
+    {
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.unavailable'));
     }
 }

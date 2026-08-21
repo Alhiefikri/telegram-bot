@@ -17,6 +17,7 @@ class TelegramCatalogIntents
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
         private TelegramCheckoutIntents $checkout,
+        private TelegramIntentSession $session,
         private CheckoutMaintenance $maintenance,
     ) {}
 
@@ -50,44 +51,96 @@ class TelegramCatalogIntents
         $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
     }
 
-    public function sendStockChoices(Customer $customer, string $chatId, Product $product, int $availableStock): void
+    public function sendProductDetail(Customer $customer, string $chatId, Product $product): void
     {
-        $soldQuantity = $this->soldQuantity($product);
+        $availableStock = max(0, $product->availableStock());
+        if ($availableStock < 1) {
+            $this->session->forget($customer);
+            $this->renderProductDetail($customer, $chatId, $product, null, $availableStock);
+
+            return;
+        }
+
+        $selection = $this->session->start(
+            $customer,
+            (int) $product->getKey(),
+            1,
+            $this->locale->code($customer),
+        );
+        $this->renderProductDetail($customer, $chatId, $product, $selection, $availableStock);
+    }
+
+    /**
+     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string}  $selection
+     */
+    public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null): void
+    {
+        $availableStock ??= max(0, $product->availableStock());
         $maintenance = $this->maintenance->current();
-        $checkoutMaintenanceActive = $maintenance->active;
-        $binanceAvailable = ! $checkoutMaintenanceActive
+        $binanceAvailable = ! $maintenance->active
             && $availableStock > 0
             && $product->usdt_price_amount !== null
             && $this->checkout->binancePayEnabled();
         $keyboard = [];
-        if ($checkoutMaintenanceActive) {
+        $quantity = $selection['quantity'] ?? null;
+
+        if ($selection !== null && $availableStock > 0 && $selection['mode'] === 'browsing') {
+            $productId = (int) $product->getKey();
+            $token = $selection['interactionToken'];
             $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'catalog.check_status'),
-                'callback_data' => 'checkout-maintenance:status',
+                'text' => $this->locale->translate($customer, 'catalog.detail.decrease'),
+                'callback_data' => 'detail:qty:-:'.$productId.':'.$token,
+            ], [
+                'text' => (string) $quantity,
+                'callback_data' => 'detail:qty:current:'.$productId.':'.$token,
+            ], [
+                'text' => $this->locale->translate($customer, 'catalog.detail.increase'),
+                'callback_data' => 'detail:qty:+:'.$productId.':'.$token,
             ]];
-        } elseif ($availableStock > 0) {
-            $qrisButton = [[
-                'text' => $this->locale->translate($customer, 'catalog.payment.qris_button', [
-                    'amount' => number_format($product->price_amount, 0, ',', '.'),
-                ]),
-                'callback_data' => 'buy:qris:'.$product->id,
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'catalog.detail.custom_quantity'),
+                'callback_data' => 'detail:qty:manual:'.$productId.':'.$token,
             ]];
-            if ($binanceAvailable) {
-                $binanceButton = [[
-                    'text' => $this->locale->translate($customer, 'catalog.payment.binance_button', [
-                        'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
-                    ]),
-                    'callback_data' => 'buy:binance:'.$product->id,
+
+            if ($maintenance->active) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.check_status'),
+                    'callback_data' => 'checkout-maintenance:status',
                 ]];
-                $keyboard = [$qrisButton, $binanceButton];
             } else {
-                $keyboard[] = $qrisButton;
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.detail.pay_qris', [
+                        'amount' => number_format($product->price_amount * (int) $quantity, 0, ',', '.'),
+                    ]),
+                    'callback_data' => 'detail:pay:qris:'.$productId.':'.$token,
+                    'style' => 'success',
+                ]];
+                if ($binanceAvailable) {
+                    $keyboard[] = [[
+                        'text' => $this->locale->translate($customer, 'catalog.detail.pay_binance', [
+                            'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * (int) $quantity),
+                        ]),
+                        'callback_data' => 'detail:pay:binance:'.$productId.':'.$token,
+                    ]];
+                }
             }
+
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'catalog.detail.back_products'),
+                'callback_data' => 'detail:back:'.$productId.':'.$token,
+            ]];
+        } else {
+            if ($maintenance->active) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.check_status'),
+                    'callback_data' => 'checkout-maintenance:status',
+                ]];
+            }
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'catalog.back_categories'),
+                'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
+            ]];
         }
-        $keyboard[] = [[
-            'text' => $this->locale->translate($customer, 'catalog.back_categories'),
-            'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
-        ]];
 
         $lines = [
             '🛍️ '.$product->name,
@@ -95,8 +148,8 @@ class TelegramCatalogIntents
             $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
         ];
         if ($binanceAvailable) {
-            $lines[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
-                'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
+            $lines[] = $this->locale->translate($customer, 'catalog.detail.binance_price', [
+                'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount),
             ]);
         }
         $lines[] = $availableStock > 0
@@ -105,80 +158,108 @@ class TelegramCatalogIntents
         if ($availableStock > 0) {
             $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
         }
-        $lines[] = $this->locale->translate($customer, 'catalog.sold').$soldQuantity;
+        $lines[] = $this->locale->translate($customer, 'catalog.sold').$this->soldQuantity($product);
+        if ($quantity !== null) {
+            $lines[] = $this->locale->translate($customer, 'catalog.detail.quantity', ['quantity' => $quantity]);
+            $lines[] = $this->locale->translate($customer, 'catalog.detail.subtotal', [
+                'amount' => number_format($product->price_amount * (int) $quantity, 0, ',', '.'),
+            ]);
+        }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
         $lines[] = $this->descriptionText($customer, $product);
         $lines[] = '';
-        $lines[] = $checkoutMaintenanceActive
-            ? $this->maintenanceNotice($customer, $maintenance)
-            : ($availableStock > 0
-                ? $this->locale->translate($customer, 'catalog.payment_method')
-                    ."\n\n"
-                    .$this->locale->qrisCrossBorderSupport($customer)
-                    ."\n\n"
-                    .$this->locale->translate($customer, 'catalog.after_quantity')
-                : $this->locale->translate($customer, 'catalog.sold_out_guidance'));
+        if ($maintenance->active) {
+            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+            if ($availableStock < 1) {
+                $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
+            }
+        } else {
+            $lines[] = $availableStock > 0
+                ? $this->locale->qrisCrossBorderSupport($customer)
+                : $this->locale->translate($customer, 'catalog.sold_out_guidance');
+        }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
     }
 
-    public function sendQuantityChoices(Customer $customer, string $chatId, Product $product, int $availableStock, ?string $paymentMethod = null): void
+    /**
+     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string}  $selection
+     */
+    public function sendCustomQuantityPrompt(Customer $customer, string $chatId, Product $product, array $selection, ?string $feedback = null): void
     {
-        $quantityLimit = min($availableStock, 5);
-        $maintenance = $this->maintenance->current();
-        $checkoutMaintenanceActive = $maintenance->active;
-        $directCheckout = in_array($paymentMethod, ['qris', 'binance'], true);
-        $keyboard = [];
-        if ($checkoutMaintenanceActive) {
-            $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'catalog.check_status'),
-                'callback_data' => 'checkout-maintenance:status',
-            ]];
-        } else {
-            for ($quantity = 1; $quantity <= $quantityLimit; $quantity++) {
-                if ($paymentMethod === 'binance') {
-                    $total = $this->locale->translate($customer, 'catalog.quantity.binance_total', [
-                        'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity),
-                    ]);
-                } elseif ($paymentMethod === 'qris') {
-                    $total = $this->locale->translate($customer, 'catalog.quantity.qris_total', [
-                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
-                    ]);
-                } else {
-                    $total = null;
-                }
-                $keyboard[] = [[
-                    'text' => $total === null ? (string) $quantity : $quantity.' · '.$total,
-                    'callback_data' => $directCheckout ? 'qty:'.$paymentMethod.':'.$product->id.':'.$quantity : 'qty:'.$product->id.':'.$quantity,
-                ]];
-            }
+        $availableStock = max(0, $product->availableStock());
+        $lines = [];
+        if ($feedback !== null) {
+            $lines[] = $feedback;
+            $lines[] = '';
         }
-        $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.quantity.back_details'), 'callback_data' => 'product:'.$product->id]];
-
-        $lines = [
-            $this->locale->translate($customer, 'catalog.quantity.title'),
-            '━━━━━━━━━━━━━━',
-            $this->locale->translate($customer, 'catalog.quantity.product').$product->name,
-            $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock,
-        ];
-        if ($paymentMethod === 'binance') {
-            $lines[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
-                'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount),
-            ]).$this->locale->translate($customer, 'catalog.quantity.per_item');
-        } elseif ($paymentMethod === 'qris') {
-            $lines[] = $this->locale->translate($customer, 'catalog.payment.qris_total', [
-                'amount' => number_format($product->price_amount, 0, ',', '.'),
-            ]).$this->locale->translate($customer, 'catalog.quantity.per_item');
-        }
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_title');
+        $lines[] = '━━━━━━━━━━━━━━';
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$product->name;
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.current', ['quantity' => $selection['quantity']]);
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock;
         $lines[] = '';
-        $lines[] = $checkoutMaintenanceActive
-            ? $this->maintenanceNotice($customer, $maintenance)
-            : ($directCheckout
-                ? $this->locale->translate($customer, 'catalog.quantity.direct_prompt')
-                : $this->locale->translate($customer, 'catalog.quantity.prompt'));
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_instruction', ['example' => 5]);
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $productId = (int) $product->getKey();
+        $this->bot->sendMessage($chatId, implode("\n", $lines), [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->translate($customer, 'catalog.quantity.cancel'),
+                'callback_data' => 'detail:qty:cancel:'.$productId.':'.$selection['interactionToken'],
+            ]]],
+        ]);
+    }
+
+    public function handleCustomQuantityInput(Customer $customer, string $chatId, string $text): void
+    {
+        $this->session->withLock($customer, function () use ($customer, $chatId, $text): void {
+            $selection = $this->session->get($customer);
+            if ($selection === null || $selection['mode'] !== 'awaiting_custom_quantity') {
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.selection.stale'));
+
+                return;
+            }
+
+            $product = Product::publicVisible()->whereKey($selection['productId'])->first();
+            $availableStock = $product ? max(0, $product->availableStock()) : 0;
+            if (! $product || $availableStock < 1) {
+                $this->session->forget($customer);
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.selection.unavailable'));
+
+                return;
+            }
+
+            $candidate = trim($text);
+            $quantity = preg_match('/^[0-9]+$/D', $candidate) === 1
+                ? filter_var($candidate, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+                : false;
+            if ($quantity === false) {
+                $this->sendCustomQuantityPrompt(
+                    $customer,
+                    $chatId,
+                    $product,
+                    $selection,
+                    $this->locale->translate($customer, 'catalog.quantity.retry'),
+                );
+
+                return;
+            }
+            if ($quantity > $availableStock) {
+                $this->sendCustomQuantityPrompt(
+                    $customer,
+                    $chatId,
+                    $product,
+                    $selection,
+                    $this->locale->translate($customer, 'catalog.quantity.over_stock', ['stock' => $availableStock]),
+                );
+
+                return;
+            }
+
+            $next = $this->session->browsing($customer, $selection, (int) $quantity, $this->locale->code($customer));
+            $this->renderProductDetail($customer, $chatId, $product, $next, $availableStock);
+        });
     }
 
     public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId): void

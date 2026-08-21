@@ -4,26 +4,114 @@ namespace App\Services\Telegram;
 
 use App\Models\Customer;
 use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 
 class TelegramIntentSession
 {
+    private const TTL_MINUTES = 15;
+
     public function key(Customer $customer): string
     {
-        return 'telegram:selected-product:'.$customer->telegram_id;
+        return 'telegram:product-selection:'.$customer->telegram_id;
     }
 
-    public function getSelectedProductId(Customer $customer): mixed
+    public function lockKey(Customer $customer): string
     {
-        return Cache::get($this->key($customer));
+        return 'telegram:product-selection-lock:'.$customer->telegram_id;
     }
 
-    public function put(Customer $customer, int $productId): void
+    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'|'awaiting_custom_quantity', previousQuantity?: int}|null */
+    public function get(Customer $customer): ?array
     {
-        Cache::put($this->key($customer), $productId, now()->addMinutes(15));
+        $state = Cache::get($this->key($customer));
+        if (! is_array($state)
+            || ! isset($state['productId'], $state['quantity'], $state['interactionToken'], $state['locale'], $state['mode'])
+            || ! is_int($state['productId'])
+            || ! is_int($state['quantity'])
+            || $state['quantity'] < 1
+            || ! is_string($state['interactionToken'])
+            || $state['interactionToken'] === ''
+            || ! is_string($state['locale'])
+            || ! in_array($state['mode'], ['browsing', 'awaiting_custom_quantity'], true)
+            || ($state['mode'] === 'awaiting_custom_quantity'
+                && (! isset($state['previousQuantity'])
+                    || ! is_int($state['previousQuantity'])
+                    || $state['previousQuantity'] < 1))
+        ) {
+            if ($state !== null) {
+                $this->forget($customer);
+            }
+
+            return null;
+        }
+
+        if ($state['mode'] === 'browsing') {
+            unset($state['previousQuantity']);
+        }
+
+        return $state;
+    }
+
+    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'} */
+    public function start(Customer $customer, int $productId, int $quantity, string $locale): array
+    {
+        if ($quantity < 1) {
+            throw new RuntimeException('Telegram product selection quantity must be positive.');
+        }
+
+        $state = [
+            'productId' => $productId,
+            'quantity' => $quantity,
+            'interactionToken' => $this->newInteractionToken(),
+            'locale' => $locale,
+            'mode' => 'browsing',
+        ];
+        $this->put($customer, $state);
+
+        return $state;
+    }
+
+    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int} */
+    public function awaitCustomQuantity(Customer $customer, array $state, string $locale): array
+    {
+        $awaiting = [
+            'productId' => (int) $state['productId'],
+            'quantity' => (int) $state['quantity'],
+            'interactionToken' => $this->newInteractionToken(),
+            'locale' => $locale,
+            'mode' => 'awaiting_custom_quantity',
+            'previousQuantity' => (int) $state['quantity'],
+        ];
+        $this->put($customer, $awaiting);
+
+        return $awaiting;
+    }
+
+    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'} */
+    public function browsing(Customer $customer, array $state, int $quantity, string $locale): array
+    {
+        return $this->start($customer, (int) $state['productId'], $quantity, $locale);
+    }
+
+    public function put(Customer $customer, array $state): void
+    {
+        Cache::put($this->key($customer), $state, now()->addMinutes(self::TTL_MINUTES));
+    }
+
+    public function withLock(Customer $customer, callable $callback): mixed
+    {
+        return Cache::lock($this->lockKey($customer), 15)->block(5, $callback);
     }
 
     public function forget(Customer $customer): void
     {
         Cache::forget($this->key($customer));
+        // Remove scalar state written before the tokenized flow cutover.
+        Cache::forget('telegram:selected-product:'.$customer->telegram_id);
+    }
+
+    private function newInteractionToken(): string
+    {
+        return bin2hex(random_bytes(8));
     }
 }

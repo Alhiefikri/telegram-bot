@@ -176,7 +176,7 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(1, '/katalog'))->assertOk();
         $firstPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
-        $this->postTelegramWebhook($this->callbackUpdate(2, 'cb-buy', 'buy:'.$product->id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(2, 'cb-product', 'product:'.$product->id))->assertOk();
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, CartItem::count());

@@ -22,7 +22,6 @@ class TelegramMessageRouter
         private TelegramIntentSession $session,
         private TelegramMenuIntents $menu,
         private TelegramCatalogIntents $catalog,
-        private TelegramCartIntents $cart,
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramAdminAccess $adminAccess,
@@ -58,7 +57,7 @@ class TelegramMessageRouter
             if (($productId = $this->startProductId($text)) !== null) {
                 $product = Product::publicVisible()->whereKey($productId)->first();
                 if ($product) {
-                    $this->catalog->sendStockChoices($customer, $chatId, $product, $product->availableStock());
+                    $this->catalog->sendProductDetail($customer, $chatId, $product);
 
                     return;
                 }
@@ -229,29 +228,26 @@ class TelegramMessageRouter
             return;
         }
 
-        $productId = $this->session->getSelectedProductId($customer);
-        if ($productId !== null && ! $isPrivateChat) {
+        $selection = $this->session->get($customer);
+        if ($selection !== null && ! $isPrivateChat) {
+            $this->session->forget($customer);
             $this->chatPrivacy->denyMessage($customer, $chatId);
 
             return;
         }
 
-        if ($productId !== null) {
-            if (ctype_digit($text) && $this->cart->addProductToCart($customer, $chatId, (int) $productId, (int) $text, true)) {
-                $this->session->forget($customer);
-
-                return;
-            }
-
-            if (! ctype_digit($text)) {
-                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.quantity_invalid'));
-            }
+        if ($selection !== null && $selection['mode'] === 'awaiting_custom_quantity') {
+            $this->catalog->handleCustomQuantityInput($customer, $chatId, $text);
 
             return;
         }
 
-        $this->session->forget($customer);
+        if ($selection !== null) {
+            $this->session->forget($customer);
+        }
+
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.unknown_command'));
+
     }
 
     private function isPrivateOnlyCommand(string $text): bool

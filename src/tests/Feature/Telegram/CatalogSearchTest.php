@@ -69,7 +69,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Produk Deep Link')
             && str_contains((string) $request['text'], 'Detail produk')
-            && str_contains(json_encode($request->data()), 'buy:qris:'.$product->id));
+            && str_contains(json_encode($request->data()), 'detail:pay:qris:'.$product->id.':'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'selamat datang di LHIE STORE'));
     }
@@ -133,7 +133,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(112, '/products'))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(113, 'cb-english-product', 'product:'.$product->id))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(114, 'cb-english-qris', 'buy:qris:'.$product->id))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Product List')
@@ -149,12 +148,12 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains((string) $request['text'], 'Status: Tersedia')
             && ! str_contains((string) $request['text'], 'Detail produk'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], '🔢 Choose quantity')
-            && str_contains((string) $request['text'], '✅ Available stock: 2')
-            && str_contains((string) $request['text'], '💳 QRIS: Rp25.000 / item')
-            && ! str_contains((string) $request['text'], ' per item')
-            && ! str_contains((string) $request['text'], 'Pilih jumlah')
-            && ! str_contains((string) $request['text'], 'Stok tersedia'));
+            && str_contains((string) $request['text'], 'Netflix Premium')
+            && str_contains((string) $request['text'], 'Quantity: 1')
+            && str_contains((string) $request['text'], 'Subtotal: Rp25.000')
+            && str_contains(json_encode($request->data()), 'Enter custom quantity')
+            && str_contains(json_encode($request->data()), 'detail:pay:qris:'.$product->id.':')
+            && ! str_contains((string) $request['text'], 'Choose quantity'));
     }
 
     public function test_katalog_lists_active_categories_uncategorized_and_empty_state(): void
@@ -547,7 +546,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(125, '/cari canva'))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(126, 'cb-search-product', 'product:'.$product->id))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(132, 'cb-search-qris', 'buy:qris:'.$product->id))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
@@ -558,16 +556,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], '📝 Detail produk')
             && str_contains($r['text'], '🛒 Terjual: 2')
             && str_contains($r['text'], 'Desain premium siap pakai.')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '💳 QRIS · Rp25.000'
-            && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'buy:qris:'.$product->id);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], '🔢 Pilih jumlah')
-            && str_contains($r['text'], '✅ Stok tersedia: 5')
-            && str_contains($r['text'], '💳 QRIS: Rp25.000 per item')
-            && ! str_contains($r['text'], ' / item')
-            && ! str_contains(strtolower($r['text']), 'ready')
-            && ! str_contains($r['text'], 'Choose quantity')
-            && ! str_contains($r['text'], 'Available stock'));
+            && str_contains($r['text'], 'Jumlah: 1')
+            && str_contains($r['text'], 'Subtotal: Rp25.000')
+            && str_contains(json_encode($r->data()), 'detail:pay:qris:'.$product->id.':')
+            && ! str_contains($r['text'], 'Pilih jumlah'));
     }
 
     public function test_cari_without_matching_keyword_sends_fallback_to_catalog(): void
@@ -863,9 +855,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         ]);
 
         $locales = [
-            'id' => ['chat_id' => 45101, 'catalog' => 'Lihat Produk', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Pilih jumlah', 'search' => 'Hasil pencarian'],
-            'en' => ['chat_id' => 45102, 'catalog' => 'Browse Products', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Choose quantity', 'search' => 'Search results'],
-            'ms' => ['chat_id' => 45103, 'catalog' => 'Lihat Produk', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Pilih kuantiti', 'search' => 'Hasil carian'],
+            'id' => ['chat_id' => 45101, 'catalog' => 'Lihat Produk', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian'],
+            'en' => ['chat_id' => 45102, 'catalog' => 'Browse Products', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results'],
+            'ms' => ['chat_id' => 45103, 'catalog' => 'Lihat Produk', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian'],
         ];
 
         foreach ($locales as $index => $locale) {
@@ -875,7 +867,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $this->postTelegramWebhook($this->messageUpdate(45110 + $locale['chat_id'], '/products', $from, $locale['chat_id']))->assertOk();
             $this->postTelegramWebhook($this->callbackUpdate(45120 + $locale['chat_id'], 'category-'.$index, 'category:'.$category->id, $from, $locale['chat_id']))->assertOk();
             $this->postTelegramWebhook($this->callbackUpdate(45130 + $locale['chat_id'], 'product-'.$index, 'product:'.$product->id, $from, $locale['chat_id']))->assertOk();
-            $this->postTelegramWebhook($this->callbackUpdate(45140 + $locale['chat_id'], 'buy-'.$index, 'buy:'.$product->id, $from, $locale['chat_id']))->assertOk();
             $this->postTelegramWebhook($this->messageUpdate(45150 + $locale['chat_id'], '/search netflix', $from, $locale['chat_id']))->assertOk();
 
             $payloads = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')

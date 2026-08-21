@@ -367,7 +367,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
     }
 
-    public function test_payment_options_prioritize_qris_and_explain_cross_border_support(): void
+    public function test_product_detail_payment_options_prioritize_qris_and_explain_cross_border_support_in_customer_locale(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
@@ -395,18 +395,32 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $idPayload = $this->customerPayload('/sendMessage', 41071);
         $enPayload = $this->customerPayload('/sendMessage', 41072);
         $msPayload = $this->customerPayload('/sendMessage', 41073);
-        $idButtons = collect($idPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-        $enButtons = collect($enPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-        $msButtons = collect($msPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-        $this->assertSame('💳 QRIS · Rp50.000', $msPayload['reply_markup']['inline_keyboard'][0][0]['text']);
-        $this->assertSame('💎 Binance Pay · 3 USDT', $msPayload['reply_markup']['inline_keyboard'][1][0]['text']);
+        $idPaymentButtons = collect($idPayload['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->filter(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:'))
+            ->values()
+            ->all();
+        $enPaymentButtons = collect($enPayload['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->filter(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:'))
+            ->values()
+            ->all();
+        $msPaymentButtons = collect($msPayload['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->filter(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:'))
+            ->values()
+            ->all();
 
-        $this->assertSame('buy:qris:'.$product->id, $idButtons[0]);
-        $this->assertSame('buy:binance:'.$product->id, $idButtons[1]);
-        $this->assertSame('buy:qris:'.$product->id, $enButtons[0]);
-        $this->assertSame('buy:binance:'.$product->id, $enButtons[1]);
-        $this->assertSame('buy:qris:'.$product->id, $msButtons[0]);
-        $this->assertSame('buy:binance:'.$product->id, $msButtons[1]);
+        $this->assertCount(2, $idPaymentButtons);
+        $this->assertCount(2, $enPaymentButtons);
+        $this->assertCount(2, $msPaymentButtons);
+        $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $idPaymentButtons[0]['text']);
+        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $idPaymentButtons[1]['text']);
+        $this->assertSame('💳 Pay with QRIS · Rp50.000', $enPaymentButtons[0]['text']);
+        $this->assertSame('💎 Pay with Binance · 3 USDT', $enPaymentButtons[1]['text']);
+        $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $msPaymentButtons[0]['text']);
+        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $msPaymentButtons[1]['text']);
+        $this->assertStringNotContainsString('checkout.payment_method', json_encode($idPayload, JSON_THROW_ON_ERROR));
         $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara saat ini mendukung koneksi dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
         $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border currently supports connections with:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability still depends on the payment app/provider'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
         $this->assertLocalizedCopy($msPayload, ['QRIS Rentas Sempadan kini menyokong sambungan dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'QRIS Cross-Border currently supports connections with:']);

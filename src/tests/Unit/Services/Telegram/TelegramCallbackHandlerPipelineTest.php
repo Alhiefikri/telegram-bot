@@ -107,7 +107,7 @@ class TelegramCallbackHandlerPipelineTest extends TestCase
             'admin stats' => [TelegramAdminStatsCallbackHandler::class, 'statistik_harian', TelegramCallbackStage::BeforeCommunityGate, false],
             'catalog' => [TelegramCatalogCallbackHandler::class, 'product:1', TelegramCallbackStage::AfterCommunityGate, true],
             'order' => [TelegramOrderCallbackHandler::class, 'order:INV-123', TelegramCallbackStage::AfterCommunityGate, false],
-            'cart' => [TelegramCartCallbackHandler::class, 'buy:1', TelegramCallbackStage::AfterCommunityGate, false],
+            'cart' => [TelegramCartCallbackHandler::class, 'detail:qty:+:1:token', TelegramCallbackStage::AfterCommunityGate, false],
             'checkout' => [TelegramCheckoutCallbackHandler::class, 'checkout', TelegramCallbackStage::AfterCommunityGate, false],
             'checkout maintenance status' => [TelegramCheckoutMaintenanceCallbackHandler::class, 'checkout-maintenance:status', TelegramCallbackStage::AfterCommunityGate, false],
             'payment proof' => [TelegramPaymentProofCallbackHandler::class, 'payment-proof:INV-123', TelegramCallbackStage::AfterCommunityGate, false],

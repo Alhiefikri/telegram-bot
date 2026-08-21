@@ -10,12 +10,13 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
 class CheckoutMaintenanceTest extends TelegramBotTestSupport
 {
-    public function test_active_catalog_and_quantity_controls_replace_purchase_actions_without_blocking_cart_management(): void
+    public function test_active_catalog_and_detail_controls_replace_purchase_actions_without_blocking_cart_management(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
@@ -28,10 +29,8 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Telegram Maintenance Product', 'stock' => 5, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->callbackUpdate(10, 'detail', 'product:'.$product->id))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(11, 'buy', 'buy:'.$product->id))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(12, 'quantity', 'qty:'.$product->id.':2'))->assertOk();
 
-        $this->assertSame(1, CartItem::query()->count());
+        $this->assertSame(0, CartItem::query()->count());
         $this->assertSame(0, Order::query()->count());
 
         $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
@@ -39,8 +38,8 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $encodedMessages = json_encode($messagePayloads, JSON_THROW_ON_ERROR);
         $this->assertStringContainsString('Telegram Maintenance Product', $encodedMessages);
         $this->assertStringContainsString('checkout-maintenance:status', $encodedMessages);
-        $this->assertStringNotContainsString('buy:qris:'.$product->id, $encodedMessages);
-        $this->assertStringContainsString('Pilih jumlah', $encodedMessages);
+        $this->assertStringNotContainsString('detail:pay:', $encodedMessages);
+        $this->assertStringContainsString('Jumlah: 1', $encodedMessages);
         $this->assertStringContainsString('Cek Status Checkout', $encodedMessages);
         $this->assertStringContainsString('Coba lagi setelah update selesai.', $encodedMessages);
     }
@@ -118,25 +117,14 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(
             60,
-            'cart-during-maintenance',
-            'qty:'.$product->id.':1',
+            'detail-during-maintenance',
+            'product:'.$product->id,
             ['id' => 12347, 'username' => 'reopened-buyer'],
             12347,
             'private',
             99060,
         ))->assertOk();
-        $cart = CartItem::query()->firstOrFail()->cart;
-        $this->assertEqualsWithDelta(86_400, abs($cart->expires_at->diffInSeconds(now())), 5);
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->postTelegramWebhook($this->callbackUpdate(
-            61,
-            'blocked-checkout',
-            'checkout',
-            ['id' => 12347, 'username' => 'reopened-buyer'],
-            12347,
-            'private',
-            99061,
-        ))->assertOk();
+        $this->assertSame(0, CartItem::query()->count());
         $this->assertSame(0, Order::query()->count());
 
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
@@ -146,9 +134,20 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'activated_at' => null,
         ]);
         $this->postTelegramWebhook($this->callbackUpdate(
+            61,
+            'reopened-detail',
+            'product:'.$product->id,
+            ['id' => 12347, 'username' => 'reopened-buyer'],
+            12347,
+            'private',
+            99061,
+        ))->assertOk();
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertNotNull($selection);
+        $this->postTelegramWebhook($this->callbackUpdate(
             62,
-            'reopened-checkout',
-            'checkout',
+            'reopened-payment',
+            'detail:pay:qris:'.$product->id.':'.$selection['interactionToken'],
             ['id' => 12347, 'username' => 'reopened-buyer'],
             12347,
             'private',
@@ -188,11 +187,16 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Admin sedang sinkronisasi payment provider.', (string) $message['text']);
     }
 
-    public function test_stale_direct_quantity_callback_returns_maintenance_notice_before_availability_validation(): void
+    public function test_stale_direct_payment_callback_returns_maintenance_notice_before_availability_validation(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $product = Product::factory()->create(['name' => 'Sold Out Stale Product', 'stock' => 0, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $product = Product::factory()->create(['name' => 'Sold Out Stale Product', 'stock' => 1, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41, 'detail-before-maintenance', 'product:'.$product->id))->assertOk();
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertNotNull($selection);
+        $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'public_note' => 'Admin sedang sinkronisasi payment provider.',
@@ -200,7 +204,15 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'activated_at' => now(),
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41, 'stale-quantity', 'qty:qris:'.$product->id.':1'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            42,
+            'stale-payment',
+            'detail:pay:qris:'.$product->id.':'.$selection['interactionToken'],
+            ['id' => 12345],
+            12345,
+            'private',
+            99042,
+        ))->assertOk();
 
         $this->assertSame(0, CartItem::query()->count());
         $message = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -239,17 +251,11 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $this->assertCount(0, $maintenanceAnswers);
     }
 
-    public function test_stale_purchase_callbacks_return_maintenance_notice_before_stock_validation(): void
+    public function test_obsolete_purchase_callbacks_do_not_mutate_cart_or_order(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $product = Product::factory()->create(['name' => 'Sold Out Purchase', 'stock' => 0, 'reserved_stock' => 0]);
-        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
-            'is_active' => true,
-            'public_note' => 'Admin sedang sinkronisasi payment provider.',
-            'version' => 1,
-            'activated_at' => now(),
-        ]);
+        $product = Product::factory()->create(['name' => 'Obsolete Purchase', 'stock' => 0, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->callbackUpdate(50, 'stale-qris-buy', 'buy:qris:'.$product->id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(51, 'stale-buy', 'buy:'.$product->id))->assertOk();
@@ -258,10 +264,8 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $this->assertSame(0, Order::query()->count());
         $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
         $payload = json_encode($messages->map(fn (array $record): mixed => $record[0]->data())->all(), JSON_THROW_ON_ERROR);
-        $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload);
-        $this->assertStringContainsString('Admin sedang sinkronisasi payment provider.', $payload);
-        $this->assertStringContainsString('checkout-maintenance:status', $payload);
-        $this->assertStringNotContainsString('Produk ini belum bisa dibeli sekarang', $payload);
+        $this->assertStringNotContainsString('buy:qris:', $payload);
+        $this->assertStringNotContainsString('detail:pay:', $payload);
     }
 
     public function test_stale_checkout_choice_returns_maintenance_notice_without_an_active_cart(): void

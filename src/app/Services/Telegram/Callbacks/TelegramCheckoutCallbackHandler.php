@@ -66,7 +66,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     {
         return $context->data === 'checkout'
             || in_array($context->data, ['checkout:current', 'checkout:binance'], true)
-            || preg_match('/^qty:(qris|binance):([1-9][0-9]*):([1-9][0-9]*)$/', $context->data) === 1;
+            || preg_match('/^detail:pay:(qris|binance):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
@@ -85,54 +85,94 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if (preg_match('/^qty:(qris|binance):([1-9][0-9]*):([1-9][0-9]*)$/', $context->data, $matches)) {
-            $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
-            $this->withCheckoutIntentLock($context, $checkoutKey, function () use ($context, $matches, $checkoutKey): void {
-                if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
-                    $this->bot->answerCallbackQuery($context->callbackQueryId);
-
-                    return;
-                }
-                $maintenance = $this->maintenance->current();
-                if ($maintenance->active) {
-                    $this->bot->answerCallbackQuery($context->callbackQueryId);
-                    $this->bot->sendMessage(
-                        $context->chatId,
-                        $this->maintenanceMessage($context->customer, $maintenance),
-                        $this->maintenanceKeyboard($context->customer),
-                    );
-
-                    return;
-                }
-
-                $paymentMethod = $matches[1];
-                $productId = (int) $matches[2];
-                $quantity = (int) $matches[3];
-                $product = Product::publicVisible()->whereKey($productId)->first();
-                if (! $product || $product->availableStock() < $quantity) {
-                    $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.product_or_quantity_unavailable'));
-
-                    return;
-                }
-                if ($paymentMethod === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
-                    $this->session->forget($context->customer);
-                    $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
-
-                    return;
-                }
-
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
-                $this->session->forget($context->customer);
-                if ($this->cart->addProductToCart($context->customer, $context->chatId, $productId, $quantity, true, false)) {
-                    $this->checkout($context, $paymentMethod === 'binance', false, $checkoutKey);
-                }
-            });
+        if (preg_match('/^detail:pay:(qris|binance):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
+            $paymentMethod = $matches[1];
+            $productId = (int) $matches[2];
+            $token = $matches[3];
+            $checkoutKey = $this->detailCheckoutIntentKey($context->customer, $context->chatId, $context->messageId, $productId, $token);
+            $this->withCheckoutIntentLock(
+                $context,
+                $checkoutKey,
+                fn () => $this->checkoutProductDetail($context, $paymentMethod === 'binance', $productId, $token, $checkoutKey),
+            );
 
             return true;
         }
 
         return false;
+    }
+
+    private function checkoutProductDetail(TelegramCallbackContext $context, bool $binance, int $productId, string $token, string $checkoutKey): void
+    {
+        if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+
+        $this->session->withLock($context->customer, function () use ($context, $binance, $productId, $token, $checkoutKey): void {
+            if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+                return;
+            }
+
+            $selection = $this->session->get($context->customer);
+            if ($selection === null
+                || $selection['mode'] !== 'browsing'
+                || (int) $selection['productId'] !== $productId
+                || ! hash_equals((string) $selection['interactionToken'], $token)
+            ) {
+                $this->sendSelectionStale($context);
+
+                return;
+            }
+
+            $maintenance = $this->maintenance->current();
+            if ($maintenance->active) {
+                $this->session->forget($context->customer);
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->bot->sendMessage(
+                    $context->chatId,
+                    $this->maintenanceMessage($context->customer, $maintenance),
+                    $this->maintenanceKeyboard($context->customer),
+                );
+
+                return;
+            }
+
+            $product = Product::publicVisible()->whereKey($productId)->first();
+            $availableStock = $product ? max(0, $product->availableStock()) : 0;
+            if (! $product || $availableStock < (int) $selection['quantity']) {
+                $this->session->forget($context->customer);
+                $this->sendSelectionUnavailable($context);
+
+                return;
+            }
+
+            if ($binance && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
+
+                return;
+            }
+
+            // Resolve the rail before mutating the active Cart. The checkout
+            // service remains the authoritative second check inside its transaction.
+            $this->paymentIntentSelector->select($binance);
+
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            if ($this->cart->addProductToCart(
+                $context->customer,
+                $context->chatId,
+                $productId,
+                (int) $selection['quantity'],
+                true,
+                false,
+            )) {
+                $this->session->forget($context->customer);
+                $this->checkout($context, $binance, false, $checkoutKey);
+            }
+        });
     }
 
     private function choosePaymentMethod(TelegramCallbackContext $context, ?string $checkoutKey = null): void
@@ -314,6 +354,16 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         };
     }
 
+    private function sendSelectionStale(TelegramCallbackContext $context): void
+    {
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+    }
+
+    private function sendSelectionUnavailable(TelegramCallbackContext $context): void
+    {
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.unavailable'));
+    }
+
     private function maintenanceMessage(Customer $customer, CheckoutMaintenanceState $state): string
     {
         return $this->locale->translate($customer, 'checkout.maintenance')
@@ -327,6 +377,21 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             'text' => $this->locale->translate($customer, 'checkout.status_button'),
             'callback_data' => 'checkout-maintenance:status',
         ]]]];
+    }
+
+    private function detailCheckoutIntentKey(Customer $customer, string $chatId, ?int $messageId, int $productId, string $token): string
+    {
+        $payload = implode('|', [
+            'telegram-detail-checkout',
+            $customer->getKey(),
+            $customer->telegram_id,
+            $chatId,
+            $messageId ?? 'no-message',
+            $productId,
+            $token,
+        ]);
+
+        return hash_hmac('sha256', $payload, (string) config('app.key'));
     }
 
     private function checkoutIntentKey(Customer $customer, string $chatId, ?int $messageId, string $data): ?string
@@ -349,9 +414,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function checkoutIntentPayload(string $data): string
     {
-        if (preg_match('/^qty:(qris|binance):([1-9][0-9]*):[1-9][0-9]*$/', $data, $matches)) {
-            return 'qty:'.$matches[1].':'.$matches[2];
-        }
 
         if (in_array($data, ['checkout:current', 'checkout:binance'], true)) {
             return 'checkout:choice';
