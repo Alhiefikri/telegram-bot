@@ -106,7 +106,11 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_MANUAL_PAYMENT_PROOF = 'manual-payment-proof-v1';
 
-    public const TEMPLATE_SALES_PROOF = 'sales-proof-post-v1';
+    /** Text-only Sales Proof effects materialized before the photo cutover. */
+    public const TEMPLATE_SALES_PROOF_LEGACY = 'sales-proof-post-v1';
+
+    /** Photo-capable Sales Proof effects materialized after the invoice cutover. */
+    public const TEMPLATE_SALES_PROOF = 'sales-proof-post-v2';
 
     public const TEMPLATE_STOCK_NOTIFICATION = 'stock-notification-v1';
 
@@ -581,7 +585,7 @@ class TelegramOutboundEffectService
                 'target_type' => 'store_channel',
                 'telegram_chat_id' => $chatId,
                 'queue' => self::SALES_PROOF_QUEUE,
-                'telegram_method' => 'sendMessage',
+                'telegram_method' => 'sendPhoto',
                 'locale' => 'en',
                 'template_version' => self::TEMPLATE_SALES_PROOF,
                 'state' => $projectionState,
@@ -606,6 +610,7 @@ class TelegramOutboundEffectService
                 },
                 'outcome_metadata' => [
                     'delivery_context' => 'sales_proof',
+                    'unit_role' => 'invoice',
                     'reason' => in_array($projectionState, self::REVIEW_STATES, true)
                         ? 'legacy_sending_ambiguous'
                         : 'sales_proof',

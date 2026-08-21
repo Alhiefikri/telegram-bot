@@ -321,7 +321,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
             'role' => UserRole::Owner,
         ]));
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 919]])]);
+        Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 919]])]);
 
         $customer = Customer::factory()->create(['username' => 'RetryAdmin']);
         $order = Order::factory()->create([
@@ -332,7 +332,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         ]);
         $product = Product::factory()->create(['name' => 'Retry Product']);
         OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Retry Product', 'quantity' => 1, 'unit_price' => 12000, 'subtotal' => 12000]);
-        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid, 'paid_at' => now()]);
         InventoryMovement::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale, 'quantity' => -1]);
         SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_FAILED, 'attempts' => 3, 'last_error' => 'temporary failure']);
 

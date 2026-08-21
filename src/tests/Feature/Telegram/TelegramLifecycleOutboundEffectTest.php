@@ -143,6 +143,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
         $this->assertSame('store_channel', $effect->target_type);
         $this->assertSame('notifications', $effect->queue);
+        $this->assertSame('sendPhoto', $effect->telegram_method);
+        $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF, $effect->template_version);
+        $this->assertSame('invoice', $effect->outcome_metadata['unit_role'] ?? null);
         $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
         Queue::assertPushed(
             PublishSalesProofPost::class,

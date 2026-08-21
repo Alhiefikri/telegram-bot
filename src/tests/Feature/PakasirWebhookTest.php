@@ -214,7 +214,7 @@ class PakasirWebhookTest extends TestCase
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         Http::fake([
             'https://app.pakasir.com/api/transactiondetail*' => Http::response(['transaction' => ['status' => 'completed', 'amount' => 50000, 'order_id' => '*']]),
-            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]),
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]),
         ]);
         config()->set('services.telegram.token', 'bot-token');
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir());
@@ -226,18 +226,22 @@ class PakasirWebhookTest extends TestCase
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
         $this->postJson('/api/webhook/pakasir', $this->payload($payment->merchant_ref, $payment->amount))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) $request['chat_id'] === '-100123'
-            && str_contains((string) ($request['text'] ?? ''), 'Successful orders'));
+        $channelPhoto = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && ((collect($request->data())->firstWhere('name', 'chat_id')['contents'] ?? null) === '-100123'))
+            ->first()[0];
+        $channelFields = collect($channelPhoto->data())->keyBy('name');
+        $this->assertSame('-100123', $channelFields['chat_id']['contents'] ?? null);
+        $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $channelFields['caption']['contents'] ?? '');
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') !== '-100123'
             && str_contains((string) ($request['text'] ?? ''), 'Produk terjual'));
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
         $this->assertSame('77', SalesProofPost::firstOrFail()->telegram_message_id);
         $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
-        $this->assertStringContainsString('Ad***', $copy);
-        $this->assertStringNotContainsString($order->invoice_number, $copy);
-        $this->assertStringNotContainsString((string) $order->total_amount, $copy);
+        $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $copy);
+        $this->assertStringContainsString('Order ID: '.$order->invoice_number, $copy);
+        $this->assertStringContainsString('Thank you for choosing Lhie Store.', $copy);
+        $this->assertStringNotContainsString('AdamBuyer', $copy);
     }
 
     public function test_wrong_amount_wrong_project_unknown_order_api_mismatch_and_api_failure_fail_closed(): void

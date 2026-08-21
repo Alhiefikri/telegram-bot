@@ -10,6 +10,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Services\InventoryLedger;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Storefront\StorefrontUrl;
 use InvalidArgumentException;
 use Throwable;
@@ -28,6 +29,7 @@ final class SalesProofDeliveryPipeline
         private readonly SalesProofPostNumbering $numbering,
         private readonly InventoryLedger $inventory,
         private readonly StorefrontUrl $urls,
+        private readonly PaidInvoiceRenderer $invoiceRenderer,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect): void
@@ -68,16 +70,32 @@ final class SalesProofDeliveryPipeline
             }
 
             $postNumber = $this->numbering->reserveNextNumber();
-            $response = $this->bot->sendMessage(
-                (string) $claimed->telegram_chat_id,
-                $this->formatter->format($order, $postNumber),
-                [
-                    'inline_keyboard' => [[[
-                        'text' => '🛒 Shop Now',
-                        'url' => $this->salesProofShoppingButtonUrl($order),
-                    ]]],
-                ],
-            );
+            if ($this->isPhotoEffect($claimed)) {
+                $invoice = $this->invoiceRenderer->render($order);
+                $response = $this->bot->sendPhoto(
+                    (string) $claimed->telegram_chat_id,
+                    $invoice->bytes,
+                    $invoice->filename,
+                    $this->formatter->format($order, $postNumber, $invoice->metadata),
+                    [
+                        'inline_keyboard' => [[[
+                            'text' => '🛒 Shop Now',
+                            'url' => $this->salesProofShoppingButtonUrl($order),
+                        ]]],
+                    ],
+                );
+            } else {
+                $response = $this->bot->sendMessage(
+                    (string) $claimed->telegram_chat_id,
+                    $this->formatter->formatLegacy($order, $postNumber),
+                    [
+                        'inline_keyboard' => [[[
+                            'text' => '🛒 Shop Now',
+                            'url' => $this->salesProofShoppingButtonUrl($order),
+                        ]]],
+                    ],
+                );
+            }
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Sales Proof');
             $finalized = $this->ledger->finalizeSent(
                 (string) $claimed->getKey(),
@@ -141,6 +159,12 @@ final class SalesProofDeliveryPipeline
         return $productId
             ? $this->urls->telegramProductStartUrlForId((int) $productId)
             : (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+    }
+
+    private function isPhotoEffect(TelegramOutboundEffect $effect): bool
+    {
+        return $effect->telegram_method === 'sendPhoto'
+            && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_SALES_PROOF;
     }
 
     private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
