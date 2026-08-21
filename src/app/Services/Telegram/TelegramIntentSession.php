@@ -27,16 +27,19 @@ class TelegramIntentSession
         if (! is_array($state)
             || ! isset($state['productId'], $state['quantity'], $state['interactionToken'], $state['locale'], $state['mode'])
             || ! is_int($state['productId'])
+            || $state['productId'] < 1
             || ! is_int($state['quantity'])
             || $state['quantity'] < 1
             || ! is_string($state['interactionToken'])
-            || $state['interactionToken'] === ''
+            || preg_match('/\A[a-f0-9]{16}\z/D', $state['interactionToken']) !== 1
             || ! is_string($state['locale'])
+            || ! in_array($state['locale'], TelegramTranslationCatalog::SUPPORTED_LOCALES, true)
             || ! in_array($state['mode'], ['browsing', 'awaiting_custom_quantity'], true)
             || ($state['mode'] === 'awaiting_custom_quantity'
                 && (! isset($state['previousQuantity'])
                     || ! is_int($state['previousQuantity'])
-                    || $state['previousQuantity'] < 1))
+                    || $state['previousQuantity'] < 1
+                    || $state['previousQuantity'] !== $state['quantity']))
         ) {
             if ($state !== null) {
                 $this->forget($customer);
@@ -55,6 +58,10 @@ class TelegramIntentSession
     /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'} */
     public function start(Customer $customer, int $productId, int $quantity, string $locale): array
     {
+        if ($productId < 1) {
+            throw new RuntimeException('Telegram product selection product must be positive.');
+        }
+
         if ($quantity < 1) {
             throw new RuntimeException('Telegram product selection quantity must be positive.');
         }
@@ -63,7 +70,9 @@ class TelegramIntentSession
             'productId' => $productId,
             'quantity' => $quantity,
             'interactionToken' => $this->newInteractionToken(),
-            'locale' => $locale,
+            'locale' => in_array($locale, TelegramTranslationCatalog::SUPPORTED_LOCALES, true)
+                ? $locale
+                : TelegramLocale::DEFAULT_LOCALE,
             'mode' => 'browsing',
         ];
         $this->put($customer, $state);
@@ -101,6 +110,11 @@ class TelegramIntentSession
     public function withLock(Customer $customer, callable $callback): mixed
     {
         return Cache::lock($this->lockKey($customer), 15)->block(5, $callback);
+    }
+
+    public function forgetWithLock(Customer $customer): void
+    {
+        $this->withLock($customer, fn (): null => $this->forget($customer));
     }
 
     public function forget(Customer $customer): void

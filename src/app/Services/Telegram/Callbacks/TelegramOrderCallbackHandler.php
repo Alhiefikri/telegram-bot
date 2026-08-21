@@ -68,7 +68,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
 
     private function cancelPendingOrder(TelegramCallbackContext $context, string $orderId): void
     {
-        $this->session->forget($context->customer);
+        $this->session->forgetWithLock($context->customer);
 
         $order = $context->customer->orders()
             ->whereKey($orderId)

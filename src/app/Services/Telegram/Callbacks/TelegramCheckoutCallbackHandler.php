@@ -151,6 +151,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             }
 
             if ($binance && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
+                $this->session->forget($context->customer);
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
 
                 return;
@@ -161,17 +162,22 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $this->paymentIntentSelector->select($binance);
 
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            if ($this->cart->addProductToCart(
+            $added = $this->cart->addProductToCart(
                 $context->customer,
                 $context->chatId,
                 $productId,
                 (int) $selection['quantity'],
                 true,
                 false,
-            )) {
+            );
+            if (! $added) {
                 $this->session->forget($context->customer);
-                $this->checkout($context, $binance, false, $checkoutKey);
+
+                return;
             }
+
+            $this->session->forget($context->customer);
+            $this->checkout($context, $binance, false, $checkoutKey);
         });
     }
 

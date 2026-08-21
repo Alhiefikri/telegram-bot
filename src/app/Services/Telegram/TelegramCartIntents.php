@@ -29,11 +29,9 @@ class TelegramCartIntents
         $cart = null;
 
         try {
-            $product = Product::query()
+            $product = Product::publicVisible()
                 ->whereKey($productId)
-                ->where('is_active', true)
                 ->firstOrFail();
-
             if ($product->availableStock() < $quantity) {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.stock_conflict'));
 

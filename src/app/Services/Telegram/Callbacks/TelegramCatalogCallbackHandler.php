@@ -41,7 +41,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
     {
         if ($context->data === 'katalog' || $context->data === 'back:categories') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->forget($context->customer);
+            $this->session->forgetWithLock($context->customer);
             $this->catalog->sendCategoryCatalog($context->customer, $context->chatId);
 
             return true;
@@ -49,7 +49,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
         if (preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $context->data, $matches)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->forget($context->customer);
+            $this->session->forgetWithLock($context->customer);
             $this->catalog->sendCategoryProducts($context->customer, $context->chatId, $matches[1]);
 
             return true;
@@ -65,14 +65,14 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             $product = Product::publicVisible()->whereKey((int) $matches[1])->first();
             $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
-                $this->session->forget($context->customer);
+                $this->session->forgetWithLock($context->customer);
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_unavailable'));
 
                 return true;
             }
 
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->forget($context->customer);
+            $this->session->forgetWithLock($context->customer);
             $this->catalog->sendProductDetail($context->customer, $context->chatId, $product);
 
             return true;

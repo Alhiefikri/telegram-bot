@@ -46,7 +46,7 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
         }
 
         $this->communityGate->clearPrompt($context->customer);
-        $this->session->forget($context->customer);
+        $this->session->forgetWithLock($context->customer);
         $context->customer->update(['locale' => $locale]);
         $context->customer->refresh();
         $this->bot->answerCallbackQuery($context->callbackQueryId);

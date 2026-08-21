@@ -5,6 +5,7 @@ namespace App\Services\Telegram\Callbacks;
 use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -20,6 +21,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
         private TelegramCatalogIntents $catalog,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
+        private CheckoutMaintenance $maintenance,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -43,7 +45,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
     {
         if ($context->data === 'batal') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->forget($context->customer);
+            $this->session->forgetWithLock($context->customer);
             $context->customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'cart.cancelled'));
 
@@ -71,6 +73,23 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             $selection = $this->currentSelection($context->customer, $productId, $token);
             if ($selection === null) {
                 $this->sendStale($context);
+
+                return;
+            }
+
+            $maintenance = $this->maintenance->current();
+            if ($maintenance->active) {
+                $this->session->forget($context->customer);
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->bot->sendMessage(
+                    $context->chatId,
+                    $this->locale->translate($context->customer, 'checkout.maintenance')
+                        .$this->locale->checkoutMaintenanceNote($context->customer, $maintenance->publicNote),
+                    ['inline_keyboard' => [[[
+                        'text' => $this->locale->translate($context->customer, 'checkout.status_button'),
+                        'callback_data' => 'checkout-maintenance:status',
+                    ]]]],
+                );
 
                 return;
             }

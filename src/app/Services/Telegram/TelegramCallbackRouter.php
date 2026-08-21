@@ -34,7 +34,7 @@ class TelegramCallbackRouter
         }
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->bot->answerCallbackQuery($id, $this->locale->translate($customer, 'callback.community_gate_required'));
 
             return;

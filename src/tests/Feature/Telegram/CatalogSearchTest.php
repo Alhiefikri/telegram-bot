@@ -15,6 +15,7 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class CatalogSearchTest extends TelegramBotTestSupport
@@ -921,5 +922,69 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 $this->assertStringNotContainsString('Search results', $copy);
             }
         }
+    }
+
+    #[DataProvider('productGridCounts')]
+    public function test_product_selector_keeps_numeric_rows_and_navigation_isolated(int $count): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 319000 + $count, 'locale' => 'en']);
+        $category = Category::factory()->create(['name' => 'Grid Category '.$count, 'is_active' => true]);
+        $otherCategory = Category::factory()->create(['name' => 'Other Category '.$count, 'is_active' => true]);
+
+        for ($index = 1; $index <= $count; $index++) {
+            Product::factory()->create([
+                'name' => 'Grid Product '.$count.'-'.$index,
+                'category_id' => $category->id,
+                'price_amount' => 10000 + $index,
+                'stock' => 2,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+        }
+        Product::factory()->create([
+            'name' => 'Other Product '.$count,
+            'category_id' => $otherCategory->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(319100 + $count, '/products', [], $customer->telegram_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            319200 + $count,
+            'grid-category-'.$count,
+            'category:'.$category->id,
+            [],
+            $customer->telegram_id,
+            'private',
+            99000 + $count,
+        ))->assertOk();
+
+        $message = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Grid Category '.$count))->last();
+        $this->assertNotNull($message);
+        $keyboard = $message[0]->data()['reply_markup']['inline_keyboard'] ?? [];
+        $productRows = array_chunk(range(1, $count), 3);
+        $this->assertCount(count($productRows) + 1, $keyboard);
+        foreach ($productRows as $rowIndex => $expectedNumbers) {
+            $row = $keyboard[$rowIndex];
+            $this->assertCount(count($expectedNumbers), $row);
+            foreach ($row as $buttonIndex => $button) {
+                $this->assertSame((string) $expectedNumbers[$buttonIndex], $button['text']);
+                $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $button['callback_data']);
+            }
+        }
+        $this->assertCount(1, $keyboard[count($productRows)]);
+        $this->assertSame('back:categories', $keyboard[count($productRows)][0]['callback_data']);
+    }
+
+    public static function productGridCounts(): iterable
+    {
+        yield 'one product' => [1];
+        yield 'two products' => [2];
+        yield 'three products' => [3];
+        yield 'six products' => [6];
+        yield 'twelve products' => [12];
     }
 }

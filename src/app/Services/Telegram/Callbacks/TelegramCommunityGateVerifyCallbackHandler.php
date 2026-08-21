@@ -38,7 +38,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
 
     public function handle(TelegramCallbackContext $context): bool
     {
-        $this->session->forget($context->customer);
+        $this->session->forgetWithLock($context->customer);
         if ($this->communityGate->verify($context->customer, $context->chatId, $this->chatPrivacy->isPrivate($context->chatType))) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
         } else {

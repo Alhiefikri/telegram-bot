@@ -221,6 +221,21 @@ class TelegramCatalogIntents
                 return;
             }
 
+            $maintenance = $this->maintenance->current();
+            if ($maintenance->active) {
+                $this->session->forget($customer);
+                $this->bot->sendMessage(
+                    $chatId,
+                    $this->maintenanceNotice($customer, $maintenance),
+                    ['inline_keyboard' => [[[
+                        'text' => $this->locale->translate($customer, 'checkout.status_button'),
+                        'callback_data' => 'checkout-maintenance:status',
+                    ]]]],
+                );
+
+                return;
+            }
+
             $product = Product::publicVisible()->whereKey($selection['productId'])->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             if (! $product || $availableStock < 1) {
@@ -235,22 +250,32 @@ class TelegramCatalogIntents
                 ? filter_var($candidate, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
                 : false;
             if ($quantity === false) {
+                $retry = $this->session->awaitCustomQuantity(
+                    $customer,
+                    $selection,
+                    $this->locale->code($customer),
+                );
                 $this->sendCustomQuantityPrompt(
                     $customer,
                     $chatId,
                     $product,
-                    $selection,
+                    $retry,
                     $this->locale->translate($customer, 'catalog.quantity.retry'),
                 );
 
                 return;
             }
             if ($quantity > $availableStock) {
+                $retry = $this->session->awaitCustomQuantity(
+                    $customer,
+                    $selection,
+                    $this->locale->code($customer),
+                );
                 $this->sendCustomQuantityPrompt(
                     $customer,
                     $chatId,
                     $product,
-                    $selection,
+                    $retry,
                     $this->locale->translate($customer, 'catalog.quantity.over_stock', ['stock' => $availableStock]),
                 );
 

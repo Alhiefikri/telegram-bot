@@ -3,12 +3,15 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\CartStatus;
+use App\Enums\TelegramOutboundEffectType;
 use App\Models\Cart;
+use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -123,6 +126,21 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(318013, '1.5', [], 318011))->assertOk();
         $this->assertSame('awaiting_custom_quantity', $this->selection($customer)['mode']);
         $this->assertStringContainsString('positive whole number', (string) $this->lastMessageText('Custom Product'));
+        $retry = $this->selection($customer);
+        $this->assertSame('awaiting_custom_quantity', $retry['mode']);
+        $this->assertNotSame($awaiting['interactionToken'], $retry['interactionToken']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180131,
+            'stale-cancel-after-retry',
+            'detail:qty:cancel:'.$product->id.':'.$awaiting['interactionToken'],
+            [],
+            318011,
+            'private',
+            88002,
+        ))->assertOk();
+        $this->assertSame('awaiting_custom_quantity', $this->selection($customer)['mode']);
+        $this->assertSame($retry['interactionToken'], $this->selection($customer)['interactionToken']);
 
         $this->postTelegramWebhook($this->messageUpdate(318014, '5', [], 318011))->assertOk();
         $this->assertSame('awaiting_custom_quantity', $this->selection($customer)['mode']);
@@ -408,6 +426,388 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Payment::count());
+    }
+
+    public function test_navigation_and_cancellation_clear_selection_before_late_text(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Navigation Product',
+            'price_amount' => 10000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $startCustomer = Customer::factory()->create(['telegram_id' => 318051, 'locale' => 'en']);
+        $this->openDetail($startCustomer, $product);
+        $startState = $this->selection($startCustomer);
+        $this->postTelegramWebhook($this->messageUpdate(3180511, '/start', [], 318051))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180512, '2', [], 318051))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($startCustomer));
+
+        $catalogCustomer = Customer::factory()->create(['telegram_id' => 318052, 'locale' => 'en']);
+        $this->openDetail($catalogCustomer, $product);
+        $catalogState = $this->selection($catalogCustomer);
+        $this->postTelegramWebhook($this->messageUpdate(3180521, '/products', [], 318052))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180522, '2', [], 318052))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($catalogCustomer));
+
+        $cancelCustomer = Customer::factory()->create(['telegram_id' => 318053, 'locale' => 'en']);
+        $this->openDetail($cancelCustomer, $product);
+        $cancelState = $this->selection($cancelCustomer);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180531,
+            'manual-before-cancel',
+            'detail:qty:manual:'.$product->id.':'.$cancelState['interactionToken'],
+            [],
+            318053,
+            'private',
+            88053,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180532, '/batal', [], 318053))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180533, '2', [], 318053))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($cancelCustomer));
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            318054,
+            'old-start-payment',
+            'detail:pay:qris:'.$product->id.':'.$startState['interactionToken'],
+            [],
+            318051,
+            'private',
+            88051,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            318055,
+            'old-catalog-payment',
+            'detail:pay:qris:'.$product->id.':'.$catalogState['interactionToken'],
+            [],
+            318052,
+            'private',
+            88052,
+        ))->assertOk();
+
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_maintenance_activation_invalidates_old_quantity_and_manual_controls(): void
+    {
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Maintenance Selection Product',
+            'price_amount' => 10000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $setting = CheckoutMaintenanceSetting::query()->firstOrFail();
+
+        $quantityCustomer = Customer::factory()->create(['telegram_id' => 318056, 'locale' => 'en']);
+        $this->openDetail($quantityCustomer, $product);
+        $quantityState = $this->selection($quantityCustomer);
+        $setting->update([
+            'is_active' => true,
+            'public_note' => 'Admin maintenance note.',
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180561,
+            'quantity-during-maintenance',
+            'detail:qty:+:'.$product->id.':'.$quantityState['interactionToken'],
+            [],
+            318056,
+            'private',
+            88056,
+        ))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($quantityCustomer));
+
+        $setting->update([
+            'is_active' => false,
+            'public_note' => null,
+            'version' => 2,
+            'activated_at' => null,
+        ]);
+        $manualCustomer = Customer::factory()->create(['telegram_id' => 318057, 'locale' => 'en']);
+        $this->openDetail($manualCustomer, $product);
+        $manualState = $this->selection($manualCustomer);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180571,
+            'manual-before-maintenance',
+            'detail:qty:manual:'.$product->id.':'.$manualState['interactionToken'],
+            [],
+            318057,
+            'private',
+            88057,
+        ))->assertOk();
+        $awaiting = $this->selection($manualCustomer);
+        $paymentCustomer = Customer::factory()->create(['telegram_id' => 318058, 'locale' => 'en']);
+        $this->openDetail($paymentCustomer, $product);
+        $paymentState = $this->selection($paymentCustomer);
+        $setting->update([
+            'is_active' => true,
+            'public_note' => 'Admin maintenance note.',
+            'version' => 3,
+            'activated_at' => now(),
+        ]);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180581,
+            'payment-during-maintenance',
+            'detail:pay:qris:'.$product->id.':'.$paymentState['interactionToken'],
+            [],
+            318058,
+            'private',
+            88058,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180572, '2', [], 318057))->assertOk();
+
+        $this->assertNull(app(TelegramIntentSession::class)->get($manualCustomer));
+        $this->assertNull(app(TelegramIntentSession::class)->get($paymentCustomer));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Admin maintenance note.')
+            && str_contains((string) json_encode($request->data()), 'checkout-maintenance:status'));
+        $this->assertNotSame('', (string) $awaiting['interactionToken']);
+    }
+
+    public function test_payment_revalidates_visibility_prices_and_binance_configuration(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318061, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Live Detail Pricing',
+            'price_amount' => 10000,
+            'usdt_price_amount' => 2_000_000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $product->forceFill(['price_amount' => 15000, 'usdt_price_amount' => 3_000_000])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180611,
+            'qris-after-price-change',
+            'detail:pay:qris:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318061,
+            'private',
+            88061,
+        ))->assertOk();
+        $this->assertSame(15000, Order::query()->sole()->total_amount);
+        $this->assertSame(15000, Payment::query()->sole()->amount);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180612,
+            'reopen-for-usdt-change',
+            'product:'.$product->id,
+            [],
+            318061,
+            'private',
+            88062,
+        ))->assertOk();
+        $state = $this->selection($customer);
+        $product->forceFill(['usdt_price_amount' => null])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180613,
+            'binance-after-usdt-removal',
+            'detail:pay:binance:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318061,
+            'private',
+            88062,
+        ))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+
+        $product->forceFill(['usdt_price_amount' => 3_000_000])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180614,
+            'reopen-for-binance-disable',
+            'product:'.$product->id,
+            [],
+            318061,
+            'private',
+            88064,
+        ))->assertOk();
+        $state = $this->selection($customer);
+        $setting->forceFill(['binance_pay_enabled' => false])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180615,
+            'binance-after-disable',
+            'detail:pay:binance:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318061,
+            'private',
+            88064,
+        ))->assertOk();
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+        $this->assertSame(1, Order::count());
+
+        $visibilityCustomer = Customer::factory()->create(['telegram_id' => 318062, 'locale' => 'en']);
+        $this->openDetail($visibilityCustomer, $product);
+        $visibilityState = $this->selection($visibilityCustomer);
+        $product->forceFill(['is_active' => false])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180621,
+            'payment-after-visibility-change',
+            'detail:pay:qris:'.$product->id.':'.$visibilityState['interactionToken'],
+            [],
+            318062,
+            'private',
+            88065,
+        ))->assertOk();
+
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertNull(app(TelegramIntentSession::class)->get($visibilityCustomer));
+    }
+
+    public function test_binance_checkout_uses_live_usdt_price_after_detail_render(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'binance_verification_mode' => 'order_id',
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318066, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Live Binance Pricing',
+            'price_amount' => 10000,
+            'usdt_price_amount' => 2_000_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $product->forceFill(['usdt_price_amount' => 3_000_000])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180661,
+            'binance-after-usdt-change',
+            'detail:pay:binance:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318066,
+            'private',
+            88066,
+        ))->assertOk();
+
+        $payment = Payment::query()->sole();
+        $this->assertSame('BINANCE_PAY_ID', $payment->method);
+        $this->assertSame(3_000_000, $payment->amount);
+        $this->assertSame('USDT', $payment->currency);
+    }
+
+    public function test_malformed_callbacks_and_corrupt_session_state_have_no_side_effects(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318071, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Malformed Callback Product',
+            'price_amount' => 10000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+
+        foreach ([
+            'detail:qty:unknown:'.$product->id.':'.$state['interactionToken'],
+            'detail:pay:paypal:'.$product->id.':'.$state['interactionToken'],
+            'detail:pay:qris:0:'.$state['interactionToken'],
+            'detail:pay:qris:'.$product->id.':'.$state['interactionToken'].':extra',
+            'detail:qty:+:'.$product->id.':bad.token',
+            'locale:xx',
+        ] as $index => $data) {
+            $this->postTelegramWebhook($this->callbackUpdate(
+                3180710 + $index,
+                'malformed-'.$index,
+                $data,
+                [],
+                318071,
+                'private',
+                88071,
+            ))->assertOk();
+        }
+
+        Cache::put(app(TelegramIntentSession::class)->key($customer), [
+            'productId' => $product->id,
+            'quantity' => 0,
+            'interactionToken' => 'not-a-token',
+            'locale' => 'xx',
+            'mode' => 'browsing',
+        ], now()->addMinutes(15));
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180718,
+            'corrupt-session',
+            'detail:pay:qris:'.$product->id.':deadbeefdeadbeef',
+            [],
+            318071,
+            'private',
+            88071,
+        ))->assertOk();
+
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, TelegramOutboundEffect::count());
+        $this->assertSame(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
+    }
+
+    public function test_repeated_qris_taps_reuse_one_checkout_and_one_outbound_effect(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => false,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318081, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Repeated QRIS Product',
+            'price_amount' => 11000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $callback = 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'];
+        $this->postTelegramWebhook($this->callbackUpdate(3180811, 'qris-first', $callback, [], 318081, 'private', 88081))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180812, 'qris-repeat', $callback, [], 318081, 'private', 88081))->assertOk();
+
+        $this->assertSame(1, Cart::count());
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::ManualCheckoutInstructions->value)
+            ->count());
+        $this->assertSame(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
     }
 
     private function openDetail(Customer $customer, Product $product): void

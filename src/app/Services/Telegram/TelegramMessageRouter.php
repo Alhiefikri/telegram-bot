@@ -38,14 +38,14 @@ class TelegramMessageRouter
         $text = TelegramBroadcastCommand::normalize((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->chatPrivacy->denyMessage($customer, $chatId);
 
             return;
         }
 
         if ($text === '/start' || str_starts_with($text, '/start ')) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             if ($customer->locale === null) {
                 $this->menu->sendLanguagePicker($chatId, $customer);
 
@@ -74,13 +74,13 @@ class TelegramMessageRouter
         }
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
 
             return;
         }
 
         if (in_array($text, ['📊 Statistik', '📊 Statistik Harian'], true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
 
@@ -93,7 +93,7 @@ class TelegramMessageRouter
         }
 
         if ($text === '📦 Cek Stok' || $text === '/stok') {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
 
@@ -106,42 +106,42 @@ class TelegramMessageRouter
         }
 
         if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->catalog->sendCategoryCatalog($customer, $chatId);
 
             return;
         }
 
         if (in_array($text, ['/menu', '☰ Menu'], true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
             return;
         }
 
         if (in_array($text, self::SUPPORT_COMMANDS, true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->menu->sendSupport($customer, $chatId);
 
             return;
         }
 
         if ($text === '📣 Broadcast Info') {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->broadcasts->handleMenu($customer, $chatId);
 
             return;
         }
 
         if ($this->isBroadcastCommand($text)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->broadcasts->handleCommand($customer, $chatId, $text, $message);
 
             return;
         }
 
         if (in_array($text, self::ACCOUNT_COMMANDS, true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->menu->sendAccountSummary($customer, $chatId);
 
             return;
@@ -150,7 +150,7 @@ class TelegramMessageRouter
         if ($text === '/cari' || str_starts_with($text, '/cari ')
             || $text === '/carian' || str_starts_with($text, '/carian ')
             || $text === '/search' || str_starts_with($text, '/search ')) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $command = str_starts_with($text, '/search')
                 ? '/search'
                 : (str_starts_with($text, '/carian') ? '/carian' : '/cari');
@@ -167,14 +167,14 @@ class TelegramMessageRouter
         }
 
         if ($text === '/cancel' || str_starts_with($text, '/cancel ')) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->manualPayments->cancelPendingOrderFromTelegram($customer, $chatId, trim(substr($text, strlen('/cancel'))));
 
             return;
         }
 
         if ($text === '/batal') {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->binanceVerify->cancelPrompt($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.cancelled'));
@@ -183,7 +183,7 @@ class TelegramMessageRouter
         }
 
         if ($text === '/payment' || str_starts_with($text, '/payment ')) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->manualPayments->submitManualPaymentProof($customer, $chatId, $message, trim(substr($text, strlen('/payment'))));
 
             return;
@@ -196,21 +196,21 @@ class TelegramMessageRouter
         }
 
         if (in_array($text, self::ORDER_STATUS_COMMANDS, true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->orders->sendLatestOrderStatus($customer, $chatId);
 
             return;
         }
 
         if (in_array($text, self::ORDER_HISTORY_COMMANDS, true)) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->orders->sendOrderHistory($customer, $chatId);
 
             return;
         }
 
         if ($text === '/order' || str_starts_with($text, '/order ')) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $invoice = trim(substr($text, strlen('/order')));
             if ($invoice === '') {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.detail.invoice_prompt', [
@@ -230,7 +230,7 @@ class TelegramMessageRouter
 
         $selection = $this->session->get($customer);
         if ($selection !== null && ! $isPrivateChat) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
             $this->chatPrivacy->denyMessage($customer, $chatId);
 
             return;
@@ -243,7 +243,7 @@ class TelegramMessageRouter
         }
 
         if ($selection !== null) {
-            $this->session->forget($customer);
+            $this->session->forgetWithLock($customer);
         }
 
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.unknown_command'));
