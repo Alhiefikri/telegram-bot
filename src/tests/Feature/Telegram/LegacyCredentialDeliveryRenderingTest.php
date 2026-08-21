@@ -26,12 +26,17 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
 
         $rendered = app(TelegramReceiptNotifier::class)->render($order->fresh());
-        $receiptUnit = collect($rendered['units'])->first(
+        $credentialUnit = collect($rendered['units'])->first(
+            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'email : legacy@example.test'),
+        );
+        $tutorialUnit = collect($rendered['units'])->first(
             fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'Auth Token : tutorial text'),
         );
 
-        $this->assertInstanceOf(TelegramMessageUnit::class, $receiptUnit);
-        $this->assertCount(3, $receiptUnit->entities());
+        $this->assertInstanceOf(TelegramMessageUnit::class, $credentialUnit);
+        $this->assertInstanceOf(TelegramMessageUnit::class, $tutorialUnit);
+        $this->assertCount(3, $credentialUnit->entities());
+        $this->assertCount(0, $tutorialUnit->entities());
 
         app(TelegramOrderIntents::class)->sendOrderDetail(
             $customer,

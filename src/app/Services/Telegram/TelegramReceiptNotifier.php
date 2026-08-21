@@ -2,13 +2,16 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\PaymentStatus;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
 
 class TelegramReceiptNotifier
 {
@@ -20,6 +23,7 @@ class TelegramReceiptNotifier
         private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
         private TelegramSupportContact $supportContact,
+        private PaidInvoiceRenderer $invoiceRenderer,
     ) {}
 
     /**
@@ -39,7 +43,7 @@ class TelegramReceiptNotifier
 
         $pipeline = app(ReceiptDeliveryPipeline::class);
         while ($effect !== null) {
-            $pipeline->deliver($effect, $this, dispatchNext: false, throwOnAmbiguous: true);
+            $pipeline->deliver($effect, $this, dispatchNext: true, throwOnAmbiguous: true);
             $effect = TelegramOutboundEffect::query()
                 ->where('effect_group_key', $effect->effect_group_key)
                 ->where('sequence', '>', $effect->sequence)
@@ -51,12 +55,147 @@ class TelegramReceiptNotifier
     }
 
     /**
+     * Render the new buyer receipt: one shared invoice photo followed by
+     * compact localized Product Detail units.
+     *
+     * @return array{chunks: list<string>, units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
+     */
+    public function render(Order $order): array
+    {
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+        $customer = $order->customer;
+        if (! $customer instanceof Customer) {
+            return ['chunks' => [''], 'units' => [new TelegramMessageUnit('')], 'guides' => []];
+        }
+
+        $invoice = $this->renderInvoiceUnit($order);
+        $detailUnits = $this->renderProductDetail($order, $customer);
+        $units = [$invoice, ...$detailUnits['units']];
+
+        return $this->rendered($units, $detailUnits['guides']);
+    }
+
+    /**
+     * Count new receipt units without rendering or retaining PNG bytes.
+     */
+    public function deliveryUnitCount(Order $order): int
+    {
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+        $customer = $order->customer;
+        if (! $customer instanceof Customer) {
+            return 1;
+        }
+
+        return 1 + count($this->renderProductDetail($order, $customer)['units']);
+    }
+
+    /**
+     * Render only the invoice unit for the current send attempt.
+     */
+    public function renderInvoiceUnit(Order $order): TelegramPhotoUnit
+    {
+        try {
+            $result = $this->invoiceRenderer->render($order);
+        } catch (\Throwable $exception) {
+            throw new TelegramOutboundPreSendException(
+                'Telegram paid invoice rendering failed before send.',
+                $exception,
+            );
+        }
+
+        return new TelegramPhotoUnit(
+            photoContents: $result->bytes,
+            filename: $result->filename,
+        );
+    }
+
+    /**
+     * Render Product Detail without touching the shared invoice renderer.
+     *
+     * @return array{units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
+     */
+    public function renderProductDetail(Order $order, ?Customer $customer = null): array
+    {
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+        $customer ??= $order->customer;
+        if (! $customer instanceof Customer) {
+            throw new TelegramOutboundPreSendException('Telegram receipt target is missing.');
+        }
+
+        $delivery = $this->credentialPresentation->forCustomer($customer, $order);
+        $payment = $this->canonicalPaidPayment($order);
+        $summaryLines = [
+            $this->locale->translate($customer, 'receipt.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'receipt.order_id', [
+                'order' => $order->invoice_number ?: $order->getKey(),
+            ]),
+            $this->locale->translate($customer, 'receipt.products'),
+        ];
+        foreach ($order->orderItems as $item) {
+            $summaryLines[] = '- '.$item->product_name.' x '.$item->quantity;
+        }
+        $summaryLines[] = $this->locale->translate($customer, 'receipt.payment_method', [
+            'method' => $payment instanceof Payment
+                ? $this->locale->paymentMethod($customer, $payment)
+                : $this->locale->translate($customer, 'payment.method.unknown'),
+        ]);
+        $summaryLines[] = $this->locale->translate($customer, 'receipt.paid_at', [
+            'date' => $this->locale->formatDate($customer, $payment?->paid_at ?? $order->updated_at ?? now()),
+        ]);
+        $summaryLines[] = $this->locale->translate($customer, 'receipt.total_quantity', [
+            'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
+        ]);
+        $summaryLines[] = $this->locale->translate($customer, 'receipt.amount_paid', [
+            'amount' => $this->formatPaidAmount($order, $payment),
+        ]);
+        $summaryLines[] = '';
+        $summaryLines[] = $this->locale->translate($customer, 'receipt.product_detail');
+
+        $guides = $delivery->usageGuides();
+        if ($delivery->isEmpty()) {
+            $units = $this->unitsFromLines([
+                ...$summaryLines,
+                $this->locale->translate($customer, 'receipt.no_credentials'),
+                '',
+                $this->locale->translate($customer, 'receipt.save_details'),
+                $this->locale->translate($customer, 'receipt.copy_guidance'),
+                $this->locale->translate($customer, 'receipt.thanks'),
+            ], $customer, $guides, withReplyMarkup: true);
+
+            return ['units' => $units, 'guides' => $guides];
+        }
+
+        $units = $this->unitsFromLines($summaryLines);
+        array_push(
+            $units,
+            ...$this->credentialRenderer->groupedAccountUnits(
+                customer: $customer,
+                delivery: $delivery,
+                accountLabelTranslationKey: 'receipt.account_label',
+                otpButtonTranslationKey: 'receipt.otp_button',
+                deliveryNoteTranslationKey: 'receipt.delivery_note',
+            ),
+        );
+        $units[] = new TelegramMessageUnit(
+            implode("\n", [
+                $this->locale->translate($customer, 'receipt.save_details'),
+                $this->locale->translate($customer, 'receipt.copy_guidance'),
+                $this->locale->translate($customer, 'receipt.thanks'),
+            ]),
+            replyMarkup: $this->receiptReplyMarkup($customer, $guides),
+        );
+
+        return ['units' => $units, 'guides' => $guides];
+    }
+
+    /**
      * Render a receipt in memory. The returned credential-bearing strings are
      * deliberately never persisted in the outbound effect ledger.
      *
      * @return array{chunks: list<string>, units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
      */
-    public function render(Order $order): array
+    public function renderLegacy(Order $order): array
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
 
@@ -126,17 +265,50 @@ class TelegramReceiptNotifier
             throw new TelegramOutboundPreSendException('Telegram receipt delivery is not configured.');
         }
 
-        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
         $customer = $order->customer;
         if (! $customer instanceof Customer || $customer->telegram_id === null) {
             throw new TelegramOutboundPreSendException('Telegram receipt target is missing.');
         }
 
-        $rendered = $this->render($order);
-        $index = max(0, (int) $effect->sequence - 1);
-        $unit = $rendered['units'][$index] ?? null;
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+        $isLegacy = $effect->telegram_method !== 'sendPhoto'
+            && $effect->template_version !== TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE;
+        if ($isLegacy) {
+            $rendered = $this->renderLegacy($order);
+            $index = max(0, (int) $effect->sequence - 1);
+            $unit = $rendered['units'][$index] ?? null;
+            if (! $unit instanceof TelegramMessageUnit) {
+                throw new TelegramOutboundPreSendException('Legacy Telegram receipt unit is no longer renderable.');
+            }
+
+            return $this->bot->sendMessage(
+                $customer->telegram_id,
+                $unit->text(),
+                $unit->replyMarkup(),
+                $unit->options(),
+            );
+        }
+
+        $role = (string) ($metadata['unit_role'] ?? ((int) $effect->sequence === 1 ? 'invoice' : 'product_detail'));
+        if ($role === 'invoice') {
+            $unit = $this->renderInvoiceUnit($order);
+
+            return $this->bot->sendPhoto(
+                $customer->telegram_id,
+                $unit->photoContents(),
+                $unit->filename(),
+                $unit->text() !== '' ? $unit->text() : null,
+                $unit->replyMarkup(),
+                $unit->options(),
+            );
+        }
+
+        $detail = $this->renderProductDetail($order, $customer);
+        $index = max(0, (int) $effect->sequence - 2);
+        $unit = $detail['units'][$index] ?? null;
         if (! $unit instanceof TelegramMessageUnit) {
-            throw new TelegramOutboundPreSendException('Telegram receipt delivery unit is no longer renderable.');
+            throw new TelegramOutboundPreSendException('Telegram Product Detail unit is no longer renderable.');
         }
 
         return $this->bot->sendMessage(
@@ -250,6 +422,38 @@ class TelegramReceiptNotifier
         }
 
         return false;
+    }
+
+    private function canonicalPaidPayment(Order $order): ?Payment
+    {
+        return $order->payments
+            ->filter(fn ($payment): bool => $payment instanceof Payment
+                && (string) $payment->order_id === (string) $order->getKey()
+                && $payment->status === PaymentStatus::Paid
+                && $payment->paid_at !== null)
+            ->sortBy([
+                ['paid_at', 'asc'],
+                ['id', 'asc'],
+            ])
+            ->first();
+    }
+
+    private function formatPaidAmount(Order $order, ?Payment $payment): string
+    {
+        $currency = strtoupper(trim((string) ($payment?->currency ?: $order->currency ?: 'IDR')));
+        $amount = $payment?->provider_total_payment !== null
+            ? (int) $payment->provider_total_payment
+            : (int) ($payment?->amount ?: $order->total_amount);
+
+        if ($currency === 'USDT') {
+            return number_format($amount / 1_000_000, 6, '.', '').' USDT';
+        }
+
+        if ($currency === 'IDR') {
+            return $this->locale->idr(max(0, $amount));
+        }
+
+        return number_format(max(0, $amount), 0, ',', '.').' '.$currency;
     }
 
     private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array

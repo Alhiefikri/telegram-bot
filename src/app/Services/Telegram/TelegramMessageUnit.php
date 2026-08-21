@@ -8,7 +8,7 @@ use LogicException;
  * One in-memory Telegram send unit. Credential-bearing text and OTP URLs are
  * intentionally kept out of durable effect rows and cannot be serialized.
  */
-final readonly class TelegramMessageUnit
+readonly class TelegramMessageUnit
 {
     /**
      * @param  list<array{type: string, offset: int, length: int}>  $entities

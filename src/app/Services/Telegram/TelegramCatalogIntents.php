@@ -197,7 +197,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
         } else {
             $lines[] = '';
-            $lines[] = $this->locale->translate($customer, 'catalog.qris_support');
+            $lines[] = $this->locale->qrisCrossBorderSupport($customer);
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -272,7 +272,6 @@ class TelegramCatalogIntents
                     $this->locale->code($customer),
                 );
             }
-
 
             $candidate = trim($text);
             $quantity = preg_match('/^[0-9]+$/D', $candidate) === 1

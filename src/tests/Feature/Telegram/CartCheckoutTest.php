@@ -717,7 +717,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $locales = [
             'id' => [
                 'chat_id' => 45201,
-                'quantity' => '🔢 Jumlah: 1',
+                'quantity' => 'Jumlah: 1',
                 'custom' => 'Masukkan jumlah kustom',
                 'subtotal' => 'Subtotal: Rp25.000',
                 'qris' => 'Bayar dengan QRIS · Rp25.000',
@@ -726,7 +726,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             ],
             'en' => [
                 'chat_id' => 45202,
-                'quantity' => '🔢 Quantity: 1',
+                'quantity' => 'Quantity: 1',
                 'custom' => 'Enter custom quantity',
                 'subtotal' => 'Subtotal: Rp25.000',
                 'qris' => 'Pay with QRIS · Rp25.000',
@@ -735,7 +735,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             ],
             'ms' => [
                 'chat_id' => 45203,
-                'quantity' => '🔢 Kuantiti: 1',
+                'quantity' => 'Kuantiti: 1',
                 'custom' => 'Masukkan kuantiti tersuai',
                 'subtotal' => 'Subjumlah: Rp25.000',
                 'qris' => 'Bayar dengan QRIS · Rp25.000',

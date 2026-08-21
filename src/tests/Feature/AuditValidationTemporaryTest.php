@@ -14,6 +14,8 @@ use App\Models\Customer;
 use App\Models\CustomerLoginLink;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\TelegramOutboundEffect;
@@ -41,42 +43,65 @@ class AuditValidationTemporaryTest extends TelegramBotTestSupport
     public function test_ambiguous_telegram_receipt_failure_keeps_the_durable_claim(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['name' => 'Audit Receipt Product']);
         $order = Order::factory()->for($customer)->create([
             'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->for($order)->create([
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 1,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
         ]);
         $telegramAccepted = false;
 
         Http::preventStrayRequests();
         Http::fake([
-            'https://api.telegram.org/*/sendMessage' => function () use (&$telegramAccepted): never {
+            'https://api.telegram.org/*/sendPhoto' => function () use (&$telegramAccepted): never {
                 $telegramAccepted = true;
-                throw new ConnectionException('timeout after Telegram accepted the request');
+                throw new ConnectionException('timeout after Telegram accepted the invoice photo');
             },
-            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 123457],
+            ]),
         ]);
 
         try {
             app(TelegramReceiptNotifier::class)->send($order);
             $this->fail('The simulated ambiguous Telegram failure should be surfaced to the queue worker.');
         } catch (\RuntimeException $exception) {
-            $this->assertStringContainsString('Telegram Bot API sendMessage request failed', $exception->getMessage());
+            $this->assertStringContainsString('Telegram Bot API sendPhoto request failed', $exception->getMessage());
         }
 
         $this->assertTrue($telegramAccepted);
+        $receiptEffects = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->orderBy('sequence')
+            ->get();
+        $this->assertCount(2, $receiptEffects);
         $this->assertSame(
             TelegramOutboundEffectState::Unknown,
-            TelegramOutboundEffect::query()->sole()->state,
-            'An ambiguous send outcome must remain in the ledger instead of being retried automatically.',
+            $receiptEffects->first()->state,
+            'An ambiguous invoice outcome must remain unknown instead of being retried automatically.',
         );
+        $this->assertSame(
+            TelegramOutboundEffectState::Sent,
+            $receiptEffects->last()->state,
+            'Product Detail remains independently dispatchable after invoice ambiguity.',
+        );
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_public_telegram_checkout_keeps_claim_after_ambiguous_customer_send(): void
     {
-        config()->set('services.telegram.payment_mode', 'manual');
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'audit-buyer', 'locale' => 'id']);
-        $product = Product::factory()->create(['name' => 'Audit Product', 'stock' => 1, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $product = Product::factory()->create(['name' => 'Audit Checkout Product', 'stock' => 1, 'reserved_stock' => 0]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
         $telegramAccepted = false;
 

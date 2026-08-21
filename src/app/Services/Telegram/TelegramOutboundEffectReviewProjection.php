@@ -65,11 +65,12 @@ final class TelegramOutboundEffectReviewProjection
             return;
         }
 
-        $hasUnsentUnit = TelegramOutboundEffect::query()
+        $hasUnsentTextUnit = TelegramOutboundEffect::query()
             ->where('effect_group_key', $effect->effect_group_key)
             ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
-            ->exists();
-        if ($hasUnsentUnit) {
+            ->get()
+            ->contains(fn (TelegramOutboundEffect $candidate): bool => ! $this->isInvoiceEffect($candidate));
+        if ($hasUnsentTextUnit) {
             return;
         }
 
@@ -85,6 +86,15 @@ final class TelegramOutboundEffectReviewProjection
                 ->onQueue('notifications')
                 ->afterCommit();
         }
+    }
+
+    private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+
+        return ($metadata['unit_role'] ?? null) === 'invoice'
+            || ($effect->telegram_method === 'sendPhoto'
+                && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
     }
 
     private function paymentProof(TelegramOutboundEffect $effect, CarbonInterface $at): void

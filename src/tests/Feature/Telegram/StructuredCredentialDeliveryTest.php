@@ -126,18 +126,27 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
             )->toArray(),
         ]);
 
-        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $invoice = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($invoice);
+        $detail = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $invoice->effect_group_key)
+            ->where('sequence', 2)
+            ->firstOrFail();
         Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 901],
+            ]),
             'https://api.telegram.org/*/sendMessage' => function (): never {
                 throw new ConnectionException('transport timeout after Telegram accepted the request');
             },
-            'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
 
-        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        app(ReceiptDeliveryPipeline::class)->deliver($invoice, dispatchNext: false);
+        app(ReceiptDeliveryPipeline::class)->deliver($detail, dispatchNext: false);
 
-        $this->assertSame('unknown', $effect->fresh()->state->value ?? $effect->fresh()->state);
-        $this->assertStringNotContainsString($secret, json_encode($effect->fresh()->getAttributes(), JSON_THROW_ON_ERROR));
+        $this->assertSame('unknown', $detail->fresh()->state->value ?? $detail->fresh()->state);
+        $this->assertStringNotContainsString($secret, json_encode($detail->fresh()->getAttributes(), JSON_THROW_ON_ERROR));
     }
 
     public function test_paid_order_detail_uses_the_same_account_unit_and_matching_otp_button(): void

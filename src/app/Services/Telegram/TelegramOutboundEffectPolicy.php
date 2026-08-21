@@ -120,7 +120,21 @@ final class TelegramOutboundEffectPolicy
                                             ->from('telegram_outbound_effects as receipt_predecessors')
                                             ->whereColumn('receipt_predecessors.effect_group_key', 'telegram_outbound_effects.effect_group_key')
                                             ->whereColumn('receipt_predecessors.sequence', '<', 'telegram_outbound_effects.sequence')
-                                            ->where('receipt_predecessors.state', '<>', TelegramOutboundEffectState::Sent->value);
+                                            ->where(function ($blocking): void {
+                                                $blocking
+                                                    ->where('receipt_predecessors.state', '<>', TelegramOutboundEffectState::Sent->value)
+                                                    ->where(function ($resolvedInvoice): void {
+                                                        $resolvedInvoice
+                                                            ->where('receipt_predecessors.state', 'not in', [
+                                                                TelegramOutboundEffectState::Failed->value,
+                                                                TelegramOutboundEffectState::Unknown->value,
+                                                            ])
+                                                            ->orWhere('receipt_predecessors.telegram_method', '<>', 'sendPhoto')
+                                                            ->orWhereNull('receipt_predecessors.telegram_method')
+                                                            ->orWhere('receipt_predecessors.template_version', '<>', TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE)
+                                                            ->orWhereNull('receipt_predecessors.template_version');
+                                                    });
+                                            });
                                     });
                             });
                     });
@@ -247,7 +261,21 @@ final class TelegramOutboundEffectPolicy
         return ! TelegramOutboundEffect::query()
             ->where('effect_group_key', $effect->effect_group_key)
             ->where('sequence', '<', $effect->sequence)
-            ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
+            ->where(function (Builder $blocking): void {
+                $blocking
+                    ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
+                    ->where(function (Builder $resolvedInvoice): void {
+                        $resolvedInvoice
+                            ->where('state', 'not in', [
+                                TelegramOutboundEffectState::Failed->value,
+                                TelegramOutboundEffectState::Unknown->value,
+                            ])
+                            ->orWhere('telegram_method', '<>', 'sendPhoto')
+                            ->orWhereNull('telegram_method')
+                            ->orWhere('template_version', '<>', TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE)
+                            ->orWhereNull('template_version');
+                    });
+            })
             ->exists();
     }
 

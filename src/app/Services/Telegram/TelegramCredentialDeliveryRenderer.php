@@ -49,6 +49,181 @@ final class TelegramCredentialDeliveryRenderer
     }
 
     /**
+     * Render compact Product Detail groups without merging account boundaries.
+     *
+     * @return list<TelegramMessageUnit>
+     */
+    public function groupedAccountUnits(
+        Customer $customer,
+        CredentialDelivery $delivery,
+        string $accountLabelTranslationKey,
+        string $otpButtonTranslationKey,
+        string $deliveryNoteTranslationKey,
+    ): array {
+        $units = [];
+        $emittedGuides = [];
+
+        foreach ($delivery->groups() as $group) {
+            $firstAccount = true;
+            foreach ($group->accounts() as $account) {
+                array_push(
+                    $units,
+                    ...$this->groupedAccountUnitsFor(
+                        $customer,
+                        $group,
+                        $account,
+                        $accountLabelTranslationKey,
+                        $otpButtonTranslationKey,
+                        $deliveryNoteTranslationKey,
+                        $firstAccount,
+                    ),
+                );
+                $firstAccount = false;
+            }
+
+            if ($group->defaultTutorial() !== null) {
+                $units[] = new TelegramMessageUnit(implode("\n", [
+                    $group->productName(),
+                    '',
+                    $this->locale->translate($customer, $deliveryNoteTranslationKey),
+                    $group->defaultTutorial(),
+                ]));
+            }
+
+            $guide = $group->usageGuide();
+            if ($guide !== null) {
+                $guideKey = $guide['title']."\n".$guide['url'];
+                if (! isset($emittedGuides[$guideKey])) {
+                    $units[] = new TelegramMessageUnit(implode("\n", [
+                        '📘 '.$guide['title'],
+                        $guide['url'],
+                    ]));
+                    $emittedGuides[$guideKey] = true;
+                }
+            }
+        }
+
+        return $this->messageChunker->fromAtomicUnits($units, self::MESSAGE_LIMIT);
+    }
+
+    /**
+     * @return list<TelegramMessageUnit>
+     */
+    private function groupedAccountUnitsFor(
+        Customer $customer,
+        CredentialDeliveryProductGroup $group,
+        CredentialDeliveryAccount $account,
+        string $accountLabelTranslationKey,
+        string $otpButtonTranslationKey,
+        string $deliveryNoteTranslationKey,
+        bool $firstAccount,
+    ): array {
+        $label = $this->locale->translate($customer, $accountLabelTranslationKey, [
+            'number' => $account->number(),
+        ]);
+        $lines = [];
+        if ($firstAccount) {
+            $lines[] = $group->productName();
+            $lines[] = '';
+        }
+        $lines[] = $label;
+        $fields = [];
+
+        if ($account->isStructured()) {
+            $email = $account->email();
+            $password = $account->password();
+            if (! is_string($email) || ! is_string($password)) {
+                throw new InvalidArgumentException('Structured credential fields are invalid.');
+            }
+
+            $lines[] = 'email : '.$email;
+            $fields[] = ['label' => 'email', 'value' => $email];
+            $lines[] = 'password : '.$password;
+            $fields[] = ['label' => 'password', 'value' => $password];
+        } else {
+            $lines[] = $account->text();
+        }
+
+        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
+            $domain = $this->validatedDomain($account->accessValue());
+            if ($domain !== null) {
+                $lines[] = 'OTP Mail: '.$domain;
+            }
+        }
+
+        $token = null;
+        if ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
+            $token = $account->accessValue();
+            if (! is_string($token) || $token === '') {
+                throw new InvalidArgumentException('Structured Auth Token is invalid.');
+            }
+        }
+
+        $tokenLines = $token === null
+            ? []
+            : ['Auth Token Outlook/Hotmail', 'Auth Token : '.$token];
+        $tokenFields = $token === null
+            ? []
+            : [['label' => 'Auth Token', 'value' => $token]];
+
+        $tutorial = $account->tutorial() !== null
+            && $account->tutorial() !== $group->defaultTutorial()
+            ? $account->tutorial()
+            : null;
+        $credentialLines = [...$lines, ...$tokenLines];
+        $withTutorial = $tutorial === null
+            ? $credentialLines
+            : [...$credentialLines, '', $this->locale->translate($customer, $deliveryNoteTranslationKey), $tutorial];
+        $tokenNeedsOwnUnit = $token !== null
+            && mb_strlen(implode("\n", $withTutorial), 'UTF-8') > self::MESSAGE_LIMIT;
+        if ($tokenNeedsOwnUnit) {
+            $withTutorial = $tutorial === null
+                ? $lines
+                : [...$lines, '', $this->locale->translate($customer, $deliveryNoteTranslationKey), $tutorial];
+        }
+
+        $accountText = implode("\n", $withTutorial);
+        if (mb_strlen($accountText, 'UTF-8') > self::MESSAGE_LIMIT) {
+            throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
+        }
+
+        $accountEntities = $this->credentialFormatter->codeEntitiesForFields(
+            $accountText,
+            [...$fields, ...($tokenNeedsOwnUnit ? [] : $tokenFields)],
+        );
+        if ($accountEntities === [] && $account->isLegacy()) {
+            $accountEntities = $this->credentialFormatter->codeEntities($accountText);
+        }
+
+        $units = [
+            new TelegramMessageUnit(
+                text: $accountText,
+                entities: $accountEntities,
+                replyMarkup: $this->otpReplyMarkup($customer, $account, $otpButtonTranslationKey),
+            ),
+        ];
+
+        if ($tokenNeedsOwnUnit) {
+            $tokenUnitLines = [
+                ...($account->number() === 1 && $firstAccount ? [$group->productName(), ''] : []),
+                $label.' — Auth Token Outlook/Hotmail',
+                ...$tokenLines,
+            ];
+            $tokenText = implode("\n", $tokenLines);
+            if (mb_strlen($tokenText, 'UTF-8') > self::MESSAGE_LIMIT) {
+                throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
+            }
+
+            $units[] = new TelegramMessageUnit(
+                text: $tokenText,
+                entities: $this->credentialFormatter->codeEntitiesForFields($tokenText, $tokenFields),
+            );
+        }
+
+        return $units;
+    }
+
+    /**
      * @return list<TelegramMessageUnit>
      */
     private function accountUnitsFor(

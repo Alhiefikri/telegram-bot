@@ -87,11 +87,14 @@ final class ReceiptDeliveryPipeline
             }
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
-                $this->ledger->finalizeUnknown(
+                $finalized = $this->ledger->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                if ($finalized !== null && $dispatchNext && $this->isInvoiceEffect($finalized)) {
+                    $this->dispatchNextReceiptEffect($finalized);
+                }
 
                 if ($throwOnAmbiguous) {
                     throw $exception;
@@ -100,11 +103,14 @@ final class ReceiptDeliveryPipeline
                 return;
             }
 
-            $this->ledger->finalizeFailed(
+            $finalized = $this->ledger->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
             );
+            if ($finalized !== null && $dispatchNext && $this->isInvoiceEffect($finalized)) {
+                $this->dispatchNextReceiptEffect($finalized);
+            }
         }
     }
 
@@ -134,17 +140,35 @@ final class ReceiptDeliveryPipeline
             ->first(fn (TelegramOutboundEffect $candidate): bool => $this->ledger->isDispatchable($candidate));
     }
 
+    private function dispatchNextReceiptEffect(TelegramOutboundEffect $effect): void
+    {
+        $next = $this->nextReceiptEffect($effect);
+        if ($next !== null) {
+            $this->dispatcher->dispatch($next);
+        }
+    }
+
+    private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+
+        return ($metadata['unit_role'] ?? null) === 'invoice'
+            || ($effect->telegram_method === 'sendPhoto'
+                && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
+    }
+
     private function synchronizeSentProjection(TelegramOutboundEffect $effect, int|string $orderId): void
     {
         if ($effect->effect_group_key !== TelegramOutboundEffectService::receiptEffectGroupKey((string) $orderId)) {
             return;
         }
 
-        $hasUnsentUnit = TelegramOutboundEffect::query()
+        $hasUnsentTextUnit = TelegramOutboundEffect::query()
             ->where('effect_group_key', $effect->effect_group_key)
             ->where('state', '<>', 'sent')
-            ->exists();
-        if ($hasUnsentUnit) {
+            ->get()
+            ->contains(fn (TelegramOutboundEffect $candidate): bool => ! $this->isInvoiceEffect($candidate));
+        if ($hasUnsentTextUnit) {
             return;
         }
 
