@@ -1,8 +1,8 @@
 # Telegram Store Bot Direct Purchase Design
 
-**Date:** 2026-08-21  
-**Status:** Ready for agent  
-**Scope:** Simplify Store Bot catalog selection, quantity selection, and direct QRIS/Binance payment without changing checkout, stock, or provider ownership.
+- **Date:** 2026-08-21
+- **Status:** Ready for agent
+- **Scope:** Simplify Store Bot catalog selection, quantity selection, and direct QRIS/Binance payment without changing checkout, stock, or provider ownership.
 
 ## Goal
 

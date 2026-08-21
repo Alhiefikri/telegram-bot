@@ -96,8 +96,9 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 
             $product = Product::publicVisible()->whereKey($productId)->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
+            $selectedQuantity = (int) $selection['quantity'];
             if ($action === 'current') {
-                if (! $product || $availableStock < (int) $selection['quantity']) {
+                if (! $product || $availableStock < $selectedQuantity) {
                     $this->session->forget($context->customer);
                     $this->sendUnavailable($context);
 
@@ -123,12 +124,20 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                     return;
                 }
 
+                $stockChanged = $selectedQuantity > $availableStock;
                 $next = $this->session->awaitCustomQuantity(
                     $context->customer,
-                    $selection,
+                    $stockChanged
+                        ? [...$selection, 'quantity' => $availableStock]
+                        : $selection,
                     $this->locale->code($context->customer),
                 );
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->bot->answerCallbackQuery(
+                    $context->callbackQueryId,
+                    $stockChanged
+                        ? $this->locale->translate($context->customer, 'catalog.quantity.stock_changed')
+                        : null,
+                );
                 $this->catalog->sendCustomQuantityPrompt($context->customer, $context->chatId, $product, $next);
 
                 return;
@@ -141,13 +150,20 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                     return;
                 }
 
+                $previousQuantity = min((int) $selection['previousQuantity'], $availableStock);
+                $stockChanged = $previousQuantity !== (int) $selection['previousQuantity'];
                 $next = $this->session->browsing(
                     $context->customer,
                     $selection,
-                    (int) $selection['previousQuantity'],
+                    $previousQuantity,
                     $this->locale->code($context->customer),
                 );
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->bot->answerCallbackQuery(
+                    $context->callbackQueryId,
+                    $stockChanged
+                        ? $this->locale->translate($context->customer, 'catalog.quantity.stock_changed')
+                        : null,
+                );
                 $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
 
                 return;
@@ -159,7 +175,26 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            $quantity = (int) $selection['quantity'] + ($action === '+' ? 1 : -1);
+            // A stale detail prompt may still contain a quantity above live
+            // stock. Re-render the highest valid selection instead of leaving
+            // the old payment keyboard actionable.
+            if ($selectedQuantity > $availableStock) {
+                $next = $this->session->browsing(
+                    $context->customer,
+                    $selection,
+                    $availableStock,
+                    $this->locale->code($context->customer),
+                );
+                $this->bot->answerCallbackQuery(
+                    $context->callbackQueryId,
+                    $this->locale->translate($context->customer, 'catalog.quantity.stock_changed'),
+                );
+                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+
+                return;
+            }
+
+            $quantity = $selectedQuantity + ($action === '+' ? 1 : -1);
             if ($quantity < 1) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.minimum'));
 

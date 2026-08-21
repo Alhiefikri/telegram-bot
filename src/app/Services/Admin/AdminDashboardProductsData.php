@@ -217,16 +217,21 @@ final class AdminDashboardProductsData
         $structuredPayload = $format === CredentialFormat::StructuredAccount
             ? $this->structuredPayload($stockItem)
             : null;
-        $status = $this->stockItemStatus($stockItem, $order, $payment, $format, $structuredPayload);
+        $legacySecret = $format === CredentialFormat::Legacy
+            ? $this->legacySecret($stockItem)
+            : null;
+        $status = $this->stockItemStatus($stockItem, $order, $payment, $format, $structuredPayload, $legacySecret);
         $available = $stockItem->order_item_id === null && $stockItem->retired_at === null;
-        $editable = $available && ($format === CredentialFormat::Legacy || $structuredPayload !== null);
+        $editable = $available
+            && (($format === CredentialFormat::Legacy && $legacySecret !== null)
+                || ($format === CredentialFormat::StructuredAccount && $structuredPayload !== null));
 
         return [
             'id' => $stockItem->id,
             'credential_format' => $format?->value ?? 'repair_required',
             'credential_payload' => $structuredPayload,
             'access_domain' => $this->accessDomain($structuredPayload),
-            'secret' => $format === CredentialFormat::Legacy ? $stockItem->secret : null,
+            'secret' => $legacySecret,
             'status' => $status,
             'invoice' => $order?->invoice_number,
             'reserved_at' => $order?->created_at?->toDateTimeString(),
@@ -244,14 +249,24 @@ final class AdminDashboardProductsData
     /**
      * @param  array<string, mixed>|null  $structuredPayload
      */
-    private function stockItemStatus(ProductStockItem $stockItem, $order, $payment, ?CredentialFormat $format, ?array $structuredPayload): string
-    {
-        if ($stockItem->retired_at !== null) {
-            return 'RETIRED';
+    private function stockItemStatus(
+        ProductStockItem $stockItem,
+        $order,
+        $payment,
+        ?CredentialFormat $format,
+        ?array $structuredPayload,
+        ?string $legacySecret,
+    ): string {
+        if (
+            $format === null
+            || ($format === CredentialFormat::StructuredAccount && $structuredPayload === null)
+            || ($format === CredentialFormat::Legacy && $legacySecret === null)
+        ) {
+            return 'REPAIR';
         }
 
-        if ($format === null || ($format === CredentialFormat::StructuredAccount && $structuredPayload === null)) {
-            return 'REPAIR';
+        if ($stockItem->retired_at !== null) {
+            return 'RETIRED';
         }
 
         if (! $order) {
@@ -289,6 +304,17 @@ final class AdminDashboardProductsData
             'EXPIRED', 'CANCELLED' => $order->invoice_number.' · perlu repair',
             default => $order->invoice_number,
         };
+    }
+
+    private function legacySecret(ProductStockItem $stockItem): ?string
+    {
+        try {
+            $secret = $stockItem->secret;
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_string($secret) && trim($secret) !== '' ? $secret : null;
     }
 
     /**

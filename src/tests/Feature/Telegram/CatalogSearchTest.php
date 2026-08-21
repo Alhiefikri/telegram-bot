@@ -140,11 +140,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains((string) $request['text'], 'Daftar Produk'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Netflix Premium')
-            && str_contains((string) $request['text'], '💰 Price: Rp25.000')
-            && str_contains((string) $request['text'], '✅ Status: Available')
-            && str_contains((string) $request['text'], '📦 Stock: 2')
+            && str_contains((string) $request['text'], 'Price: Rp25.000')
+            && str_contains((string) $request['text'], 'Available stock: 2')
             && str_contains((string) $request['text'], '📝 Product details')
-            && ! str_contains((string) $request['text'], 'Harga:')
+            && ! str_contains((string) $request['text'], '💰')
+            && ! str_contains((string) $request['text'], '📦 Stock:')
             && ! str_contains((string) $request['text'], 'Status: Ready')
             && ! str_contains((string) $request['text'], 'Status: Tersedia')
             && ! str_contains((string) $request['text'], 'Detail produk'));
@@ -287,8 +287,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories')
-            && str_contains($r['text'], '💎 Binance Pay: 1.25 USDT')
-            && ! str_contains($r['text'], 'Stok 3')
+            && str_contains($r['text'], 'Rp15.000 · Binance: 1.25 USDT')
+            && ! str_contains($r['text'], '💰 Harga:')
+            && ! str_contains($r['text'], '💎 Binance Pay:')
             && ! str_contains($r['text'], 'Stok 0')
             && ! str_contains($r['text'], 'Voucher MLBB instant.')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
@@ -369,6 +370,58 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $this->assertCount(1, $navigationRow);
             $this->assertSame('back:categories', $navigationRow[0]['callback_data'] ?? null);
         }
+    }
+
+    public function test_category_product_list_exposes_explicit_pagination_after_twelve_products(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $category = Category::factory()->create(['name' => 'Paged Catalog']);
+        foreach (range(1, 13) as $number) {
+            Product::factory()->create([
+                'name' => sprintf('Paged Product %02d', $number),
+                'category_id' => $category->id,
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->callbackUpdate(137, 'paged-first', 'category:'.$category->id))->assertOk();
+
+        $firstPage = Http::recorded()
+            ->map(fn (array $record) => $record[0])
+            ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+                && str_contains((string) $request['text'], 'Category: Paged Catalog')
+                && str_contains((string) $request['text'], 'Page 1 of 2'));
+        $this->assertNotNull($firstPage);
+        $firstKeyboard = $firstPage['reply_markup']['inline_keyboard'] ?? [];
+        $firstNumericRows = array_slice($firstKeyboard, 0, 4);
+        $this->assertSame(
+            array_map(static fn (int $number): string => (string) $number, range(1, 12)),
+            array_column(array_merge(...$firstNumericRows), 'text'),
+        );
+        foreach ($firstNumericRows as $row) {
+            $this->assertLessThanOrEqual(3, count($row));
+        }
+        $this->assertCount(1, $firstKeyboard[4]);
+        $this->assertSame('Next ➡️', $firstKeyboard[4][0]['text']);
+        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[4][0]['callback_data']);
+
+
+        $this->postTelegramWebhook($this->callbackUpdate(138, 'paged-second', sprintf('category:%d:page:2', $category->id)))->assertOk();
+
+
+        $secondPage = Http::recorded()
+            ->map(fn (array $record) => $record[0])
+            ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+                && str_contains((string) $request['text'], 'Category: Paged Catalog')
+                && str_contains((string) $request['text'], 'Page 2 of 2'));
+        $this->assertNotNull($secondPage);
+        $secondKeyboard = $secondPage['reply_markup']['inline_keyboard'] ?? [];
+        $this->assertSame(['1'], array_column($secondKeyboard[0], 'text'));
+        $this->assertCount(1, $secondKeyboard[1]);
+        $this->assertSame('⬅️ Previous', $secondKeyboard[1][0]['text']);
+        $this->assertSame(sprintf('category:%d:page:1', $category->id), $secondKeyboard[1][0]['callback_data']);
     }
 
     public function test_unavailable_and_empty_category_messages_follow_customer_error_voice(): void
@@ -510,7 +563,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], '✅ Netflix Premium')
             && str_contains($r['text'], '❌ Netflix Habis')
             && str_contains($r['text'], 'Rp25.000')
-            && ! str_contains($r['text'], 'stok 5')
+            && ! str_contains($r['text'], '💰 Harga:')
             && ! str_contains($r['text'], 'stok 0')
             && str_contains($r['text'], 'Akun streaming')
             && ! str_contains($r['text'], 'Netflix Inactive')
@@ -552,11 +605,12 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Canva Pro')
-            && str_contains($r['text'], '✅ Status: Tersedia')
+            && str_contains($r['text'], 'Stok tersedia: 5')
             && ! str_contains($r['text'], 'Status: Ready')
             && str_contains($r['text'], '📝 Detail produk')
-            && str_contains($r['text'], '🛒 Terjual: 2')
+            && ! str_contains($r['text'], '🛒 Terjual: 2')
             && str_contains($r['text'], 'Desain premium siap pakai.')
+            && str_contains($r['text'], '🌏 QRIS Antarnegara:')
             && str_contains($r['text'], 'Jumlah: 1')
             && str_contains($r['text'], 'Subtotal: Rp25.000')
             && str_contains(json_encode($r->data()), 'detail:pay:qris:'.$product->id.':')

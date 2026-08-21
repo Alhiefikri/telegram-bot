@@ -91,6 +91,32 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('credential_format', false);
     }
 
+    public function test_malformed_legacy_secret_is_projected_as_repair_instead_of_breaking_products_tab(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+
+        ProductStockItem::query()->insert([
+            'product_id' => $product->id,
+            'order_item_id' => null,
+            'secret' => 'sandbox-invalid-encrypted-secret',
+            'credential_format' => CredentialFormat::Legacy->value,
+            'credential_payload' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->get('/admin?tab=produk');
+
+        $response->assertOk();
+        $item = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload']['stockItems'][0];
+
+        $this->assertSame('REPAIR', $item['status']);
+        $this->assertNull($item['secret']);
+        $this->assertTrue($item['repair_needed']);
+        $this->assertFalse($item['editable']);
+    }
+
     public function test_available_structured_stock_item_can_be_updated_without_changing_stock_and_old_identity_is_retained(): void
     {
         config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');

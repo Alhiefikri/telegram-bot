@@ -33,7 +33,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return in_array($context->data, ['katalog', 'back:categories', 'balance'], true)
-            || preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $context->data) === 1
+            || preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:[1-9][0-9]*)?$/', $context->data) === 1
             || preg_match('/^product:([1-9][0-9]*)$/', $context->data) === 1;
     }
 
@@ -47,10 +47,15 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if (preg_match('/^category:([1-9][0-9]*|uncategorized)$/', $context->data, $matches)) {
+        if (preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:([1-9][0-9]*))?$/', $context->data, $matches)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
-            $this->catalog->sendCategoryProducts($context->customer, $context->chatId, $matches[1]);
+            $this->catalog->sendCategoryProducts(
+                $context->customer,
+                $context->chatId,
+                $matches[1],
+                isset($matches[2]) ? (int) $matches[2] : 1,
+            );
 
             return true;
         }
@@ -63,7 +68,6 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
         if (preg_match('/^product:([1-9][0-9]*)$/', $context->data, $matches)) {
             $product = Product::publicVisible()->whereKey((int) $matches[1])->first();
-            $availableStock = $product ? $product->availableStock() : 0;
             if (! $product) {
                 $this->session->forgetWithLock($context->customer);
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_unavailable'));

@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\RedirectToCanonicalHost;
+use App\Providers\AppServiceProvider;
+use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -214,5 +216,28 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('private function isPhpUnitProcess(): bool', $provider);
         $this->assertStringContainsString('FakeTelegramBotClient::class', $provider);
         $this->assertStringContainsString("DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true'", $browserSpec);
+    }
+
+    public function test_local_runtime_resolves_real_telegram_client(): void
+    {
+        config()->set('app.env', 'local');
+        config()->set('services.dogfood_timing.fake_telegram_outbound', false);
+
+        (new AppServiceProvider($this->app))->register();
+
+        $this->assertSame(TelegramBotClient::class, get_class($this->app->make(TelegramBotClient::class)));
+    }
+
+    public function test_telegram_http_timeout_defaults_match_docker_runtime_configuration(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $environment = file_get_contents(base_path('.env.example'));
+
+        $this->assertSame(30.0, config('services.telegram.http_timeout_seconds'));
+        $this->assertSame(10.0, config('services.telegram.http_connect_timeout_seconds'));
+        $this->assertStringContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS: ${TELEGRAM_HTTP_TIMEOUT_SECONDS:-30}', $compose);
+        $this->assertStringContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS: ${TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS:-10}', $compose);
+        $this->assertStringContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS=30', $environment);
+        $this->assertStringContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS=10', $environment);
     }
 }

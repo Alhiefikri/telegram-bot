@@ -2,17 +2,16 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Customer;
-use App\Models\OrderItem;
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 
 class TelegramCatalogIntents
 {
+    private const PRODUCTS_PER_PAGE = 12;
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
@@ -76,15 +75,36 @@ class TelegramCatalogIntents
     public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null): void
     {
         $availableStock ??= max(0, $product->availableStock());
+        $quantity = $selection['quantity'] ?? null;
+        if ($selection !== null && $selection['mode'] === 'browsing') {
+            if ($availableStock < 1 || ! is_int($quantity) || $quantity < 1) {
+                $this->session->forget($customer);
+                $selection = null;
+                $quantity = null;
+            } elseif ($quantity > $availableStock) {
+                $selection = $this->session->browsing(
+                    $customer,
+                    $selection,
+                    $availableStock,
+                    $this->locale->code($customer),
+                );
+                $quantity = $availableStock;
+            }
+        }
+
         $maintenance = $this->maintenance->current();
+        $selectionCanPay = $selection !== null
+            && $selection['mode'] === 'browsing'
+            && is_int($quantity)
+            && $quantity >= 1
+            && $quantity <= $availableStock;
         $binanceAvailable = ! $maintenance->active
             && $availableStock > 0
             && $product->usdt_price_amount !== null
             && $this->checkout->binancePayEnabled();
         $keyboard = [];
-        $quantity = $selection['quantity'] ?? null;
 
-        if ($selection !== null && $availableStock > 0 && $selection['mode'] === 'browsing') {
+        if ($selectionCanPay) {
             $productId = (int) $product->getKey();
             $token = $selection['interactionToken'];
             $keyboard[] = [[
@@ -110,7 +130,7 @@ class TelegramCatalogIntents
             } else {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'catalog.detail.pay_qris', [
-                        'amount' => number_format($product->price_amount * (int) $quantity, 0, ',', '.'),
+                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
                     ]),
                     'callback_data' => 'detail:pay:qris:'.$productId.':'.$token,
                     'style' => 'success',
@@ -118,7 +138,7 @@ class TelegramCatalogIntents
                 if ($binanceAvailable) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'catalog.detail.pay_binance', [
-                            'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * (int) $quantity),
+                            'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity),
                         ]),
                         'callback_data' => 'detail:pay:binance:'.$productId.':'.$token,
                     ]];
@@ -152,13 +172,11 @@ class TelegramCatalogIntents
                 'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount),
             ]);
         }
-        $lines[] = $availableStock > 0
-            ? $this->locale->translate($customer, 'catalog.status.available')
-            : $this->locale->translate($customer, 'catalog.status.sold_out');
         if ($availableStock > 0) {
             $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
+        } else {
+            $lines[] = $this->locale->translate($customer, 'catalog.status.sold_out');
         }
-        $lines[] = $this->locale->translate($customer, 'catalog.sold').$this->soldQuantity($product);
         if ($quantity !== null) {
             $lines[] = $this->locale->translate($customer, 'catalog.detail.quantity', ['quantity' => $quantity]);
             $lines[] = $this->locale->translate($customer, 'catalog.detail.subtotal', [
@@ -168,16 +186,18 @@ class TelegramCatalogIntents
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
         $lines[] = $this->descriptionText($customer, $product);
-        $lines[] = '';
         if ($maintenance->active) {
+            $lines[] = '';
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
             if ($availableStock < 1) {
                 $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
             }
+        } elseif ($availableStock < 1) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
         } else {
-            $lines[] = $availableStock > 0
-                ? $this->locale->qrisCrossBorderSupport($customer)
-                : $this->locale->translate($customer, 'catalog.sold_out_guidance');
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'catalog.qris_support');
         }
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -244,6 +264,15 @@ class TelegramCatalogIntents
 
                 return;
             }
+            $stockChanged = (int) $selection['quantity'] > $availableStock;
+            if ($stockChanged) {
+                $selection = $this->session->awaitCustomQuantity(
+                    $customer,
+                    [...$selection, 'quantity' => $availableStock],
+                    $this->locale->code($customer),
+                );
+            }
+
 
             $candidate = trim($text);
             $quantity = preg_match('/^[0-9]+$/D', $candidate) === 1
@@ -255,12 +284,16 @@ class TelegramCatalogIntents
                     $selection,
                     $this->locale->code($customer),
                 );
+                $feedback = $stockChanged
+                    ? $this->locale->translate($customer, 'catalog.quantity.stock_changed')."\n\n"
+                        .$this->locale->translate($customer, 'catalog.quantity.retry')
+                    : $this->locale->translate($customer, 'catalog.quantity.retry');
                 $this->sendCustomQuantityPrompt(
                     $customer,
                     $chatId,
                     $product,
                     $retry,
-                    $this->locale->translate($customer, 'catalog.quantity.retry'),
+                    $feedback,
                 );
 
                 return;
@@ -287,8 +320,9 @@ class TelegramCatalogIntents
         });
     }
 
-    public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId): void
+    public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId, int $page = 1): void
     {
+        $page = max(1, $page);
         $query = Product::publicVisible()->storefrontOrder();
         $category = null;
         if ($categoryId === 'uncategorized') {
@@ -305,9 +339,21 @@ class TelegramCatalogIntents
             $title = $category->name;
         }
 
-        $products = $query->withAvailability()->limit(12)->get();
+        $totalProducts = (clone $query)->count();
+        $lastPage = max(1, (int) ceil($totalProducts / self::PRODUCTS_PER_PAGE));
+        $page = min($page, $lastPage);
+        $products = $query
+            ->withAvailability()
+            ->forPage($page, self::PRODUCTS_PER_PAGE)
+            ->get();
         $maintenance = $this->maintenance->current();
         $lines = [$this->locale->translate($customer, 'catalog.category.title'), '━━━━━━━━━━━━━━', $this->locale->translate($customer, 'catalog.category.label').$title];
+        if ($lastPage > 1) {
+            $lines[] = $this->locale->translate($customer, 'catalog.category.page', [
+                'page' => $page,
+                'pages' => $lastPage,
+            ]);
+        }
         if ($category?->description) {
             $lines[] = '';
             $lines[] = $category->description;
@@ -323,6 +369,24 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
         $keyboard = $this->productKeyboard($products);
+        if ($lastPage > 1) {
+            $pageButtons = [];
+            if ($page > 1) {
+                $pageButtons[] = [
+                    'text' => $this->locale->translate($customer, 'catalog.category.previous_page'),
+                    'callback_data' => 'category:'.$categoryId.':page:'.($page - 1),
+                ];
+            }
+            if ($page < $lastPage) {
+                $pageButtons[] = [
+                    'text' => $this->locale->translate($customer, 'catalog.category.next_page'),
+                    'callback_data' => 'category:'.$categoryId.':page:'.($page + 1),
+                ];
+            }
+            if ($pageButtons !== []) {
+                $keyboard[] = $pageButtons;
+            }
+        }
         if ($this->hasMultipleCategoryOptions()) {
             $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.category.back'), 'callback_data' => 'back:categories']];
         }
@@ -373,12 +437,7 @@ class TelegramCatalogIntents
         }
         foreach ($products as $i => $product) {
             $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-            $lines[] = '   '.$this->productPrice($customer, $product);
-            if ($this->hasBinancePrice($product)) {
-                $lines[] = '   '.$this->locale->translate($customer, 'catalog.payment.binance_total', [
-                    'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
-                ]);
-            }
+            $lines[] = '   '.$this->compactProductPrice($customer, $product);
             $lines[] = '   📝 '.$this->descriptionExcerpt($customer, $product);
         }
         if ($hasMore) {
@@ -421,12 +480,23 @@ class TelegramCatalogIntents
     private function appendProductSummary(array &$lines, Customer $customer, Product $product, int $number): void
     {
         $lines[] = $number.'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-        $lines[] = '   '.$this->productPrice($customer, $product);
+        $lines[] = '   '.$this->compactProductPrice($customer, $product);
+    }
+
+    private function compactProductPrice(Customer $customer, Product $product): string
+    {
+        $parts = [
+            $this->locale->translate($customer, 'catalog.payment.price_compact', [
+                'amount' => number_format($product->price_amount, 0, ',', '.'),
+            ]),
+        ];
         if ($this->hasBinancePrice($product)) {
-            $lines[] = '   '.$this->locale->translate($customer, 'catalog.payment.binance_total', [
+            $parts[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
                 'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
             ]);
         }
+
+        return implode(' · ', $parts);
     }
 
     private function productPrice(Customer $customer, Product $product): string
@@ -439,16 +509,6 @@ class TelegramCatalogIntents
         return $product->isAvailable()
             && $product->usdt_price_amount !== null
             && $this->checkout->binancePayEnabled();
-    }
-
-    private function soldQuantity(Product $product): int
-    {
-        return (int) OrderItem::query()
-            ->where('product_id', $product->id)
-            ->whereHas('order', fn ($order) => $order
-                ->where('order_status', OrderStatus::Completed)
-                ->where('payment_status', PaymentStatus::Paid))
-            ->sum('quantity');
     }
 
     private function descriptionExcerpt(Customer $customer, Product $product): string

@@ -28,47 +28,46 @@ Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail 
 Alur customer berjalan dari Telegram:
 
 1. Customer mengirim `/start`.
-2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka alur produk.
+2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka detail produk.
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
-4. Customer memilih kategori dari tombol inline, atau memilih hasil pencarian.
-5. Bot menampilkan produk aktif dengan stok tersedia pada kategori tersebut atau dari hasil pencarian.
-6. Customer memilih produk.
-7. Bot menampilkan pilihan quantity berdasarkan stok tersedia. Customer dapat memilih tombol quantity, atau mengetik angka ketika bot sedang menunggu input jumlah.
-8. Produk dimasukkan ke cart aktif.
-9. Bot menampilkan tombol checkout/pembayaran.
-10. Saat checkout, sistem membuat order dan payment dengan status awal pending.
-11. Customer menerima instruksi pembayaran.
-12. Customer dapat membatalkan cart aktif dengan `/batal`.
-13. Customer dapat mengecek status order terakhir dengan `/status` atau `/pesanan`, melihat riwayat dengan `/riwayat`, dan membuka detail invoice dengan `/order NOMOR_INVOICE`.
+4. Customer memilih kategori dari tombol inline. Product List menampilkan ringkasan bernomor, harga, status ketersediaan, konteks halaman, dan tombol angka ringkas (maksimal tiga per baris); navigasi halaman dan kembali ke kategori memakai baris terpisah.
+5. Customer memilih produk. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
+6. Quantity dimulai dari `1`, dapat dinaikkan/diturunkan dengan `−`/`+`, atau diisi sekali melalui `Enter custom quantity`. Input custom yang tidak valid tetap di mode input; Cancel kembali ke quantity sebelumnya yang masih valid terhadap live stock.
+7. Customer menekan QRIS, atau Binance bila rail tersebut aktif dan produk memiliki harga USDT. Tidak ada halaman payment-choice atau generic checkout tambahan dalam direct purchase flow.
+8. Callback payment memvalidasi ulang visibility product, live stock, harga, harga USDT, rail, dan Checkout Maintenance sebelum memakai CartService dan OrderCheckoutService. Cart dibuat sebagai detail internal checkout; bot tidak menampilkan halaman cart terpisah.
+9. Saat checkout, sistem membuat Order dan Payment dengan status awal pending, lalu mengirim instruksi payment melalui queue Telegram outbound.
+10. Customer dapat membatalkan Cart aktif dengan `/batal`, mengecek status order terakhir dengan `/status` atau `/pesanan`, melihat riwayat dengan `/riwayat`, dan membuka detail invoice dengan `/order NOMOR_INVOICE`.
 
 Diagram sederhana:
 
 ```text
 /start, /katalog, atau /cari keyword
         ↓
-Pilih kategori / hasil pencarian
+Pilih kategori / halaman Product List
         ↓
 Pilih produk
         ↓
-Pilih/ketik quantity
+Product Detail (quantity 1)
         ↓
-Produk masuk cart
+− / + atau Enter custom quantity
         ↓
-Checkout
+QRIS atau Binance langsung
         ↓
 Order + payment pending dibuat
         ↓
-Instruksi pembayaran dikirim
+Instruksi payment dikirim
         ↓
 Payment paid / expired / failed / refunded
 ```
 
 Catatan:
 
-- `/batal` membatalkan cart aktif, bukan membatalkan semua histori order.
-- `/cari keyword` mencari produk aktif dengan stok tersedia. Jika hasil tidak ditemukan, customer diarahkan kembali ke `/katalog`.
-- `/status` dan `/pesanan` menampilkan order terakhir customer dengan kombinasi status order dan status payment.
-- `/riwayat` menampilkan hingga 5 order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail order milik customer yang sama.
+- Selection state memiliki token singkat dan live-stock revalidation. Tombol lama, malformed, atau tampered tidak membuat Cart, Order, Payment, reservation, provider instruction, maupun Telegram Outbound Effect.
+- QRIS selalu ditampilkan lebih dulu; Binance hanya muncul ketika konfigurasi Binance aktif dan produk memiliki harga USDT.
+- `/batal` membatalkan Cart aktif, bukan membatalkan seluruh histori Order.
+- `/cari keyword` mencari product aktif. Hasilnya memakai tombol angka yang sama untuk membuka Product Detail.
+- `/status` dan `/pesanan` menampilkan Order terakhir customer dengan kombinasi status Order dan status Payment.
+- `/riwayat` menampilkan hingga 5 Order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail Order milik customer yang sama.
 
 ## 3. Payment Flow
 
