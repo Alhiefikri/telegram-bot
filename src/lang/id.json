@@ -79,7 +79,6 @@
   "catalog.category.title": "🛍️ Daftar Produk",
   "catalog.category.label": "Kategori: ",
   "catalog.category.choose_product": "Pilih produk untuk melihat detail.",
-  "catalog.product_button": "Pilih #:number",
   "catalog.category.empty": "📂 Belum ada produk di kategori ini\nCoba cek kategori lain dulu ya.",
   "catalog.category.unavailable": "Kategori ini sudah tidak tersedia. Coba pilih kategori lain.",
   "catalog.description_missing": "Deskripsi produk belum ditambahkan. Tapi tenang, produknya tetap bisa dicek dari info harga dan stok.",

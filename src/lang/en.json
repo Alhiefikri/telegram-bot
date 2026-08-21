@@ -79,7 +79,6 @@
   "catalog.category.title": "🛍️ Product List",
   "catalog.category.label": "Category: ",
   "catalog.category.choose_product": "Choose a product to view its details.",
-  "catalog.product_button": "Choose #:number",
   "catalog.category.empty": "📂 No products in this category\nPlease check another category.",
   "catalog.category.unavailable": "This category is no longer available. Please choose another category.",
   "catalog.description_missing": "No product description has been added yet. You can still check the price and stock information.",

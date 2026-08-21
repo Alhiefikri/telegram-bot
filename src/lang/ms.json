@@ -79,7 +79,6 @@
   "catalog.category.title": "🛍️ Senarai Produk",
   "catalog.category.label": "Kategori: ",
   "catalog.category.choose_product": "Pilih produk untuk melihat butirannya.",
-  "catalog.product_button": "Pilih #:number",
   "catalog.category.empty": "📂 Tiada produk dalam kategori ini\nSila semak kategori lain.",
   "catalog.category.unavailable": "Kategori ini tidak lagi tersedia. Sila pilih kategori lain.",
   "catalog.description_missing": "Penerangan produk belum ditambahkan. Anda masih boleh menyemak harga dan maklumat stok.",

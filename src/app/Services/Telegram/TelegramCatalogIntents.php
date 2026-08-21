@@ -15,7 +15,6 @@ class TelegramCatalogIntents
 {
     public function __construct(
         private TelegramBotClient $bot,
-        private ProductBrandIconResolver $icons,
         private TelegramLocale $locale,
         private TelegramCheckoutIntents $checkout,
         private CheckoutMaintenance $maintenance,
@@ -217,7 +216,7 @@ class TelegramCatalogIntents
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
-        $keyboard = $products->values()->map(fn ($product, $index) => [$this->productButton($customer, $product, $index + 1)])->all();
+        $keyboard = $this->productKeyboard($products);
         if ($this->hasMultipleCategoryOptions()) {
             $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.category.back'), 'callback_data' => 'back:categories']];
         }
@@ -281,7 +280,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'search.more');
         }
 
-        $keyboard = $products->map(fn ($product, $index) => [$this->productButton($customer, $product, $index + 1)])->all();
+        $keyboard = $this->productKeyboard($products);
         $keyboard[] = [['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -354,25 +353,32 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @return array{text: string, callback_data: string, style?: string, icon_custom_emoji_id?: string}
+     * @param  iterable<int, Product>  $products
+     * @return list<list<array{text: string, callback_data: string, style: string}>>
      */
-    private function productButton(Customer $customer, Product $product, int $number): array
+    private function productKeyboard(iterable $products): array
+    {
+        $buttons = [];
+        $number = 1;
+        foreach ($products as $product) {
+            $buttons[] = $this->productButton($product, $number);
+            $number++;
+        }
+
+        return array_chunk($buttons, 3);
+    }
+
+    /**
+     * @return array{text: string, callback_data: string, style: string}
+     */
+    private function productButton(Product $product, int $number): array
     {
         $availableStock = max(0, $product->availableStock());
-        $icon = $this->icons->resolve($product->name);
-        $customEmojiId = $icon['custom_emoji_id'];
-        $fallbackIcon = $customEmojiId ? '' : $icon['fallback'].' ';
 
-        $button = [
-            'text' => $fallbackIcon.$this->locale->translate($customer, 'catalog.product_button', ['number' => $number]),
+        return [
+            'text' => (string) $number,
             'callback_data' => 'product:'.$product->id,
             'style' => $availableStock > 0 ? 'success' : 'danger',
         ];
-
-        if ($customEmojiId) {
-            $button['icon_custom_emoji_id'] = $customEmojiId;
-        }
-
-        return $button;
     }
 }
