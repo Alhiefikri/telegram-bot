@@ -31,6 +31,18 @@ final class PaidInvoiceRenderer
 
     private const TEMPLATE_VERSION = 'nota-b.v1';
 
+    private const PRODUCT_LAYOUT_TOP = 438;
+
+    private const PRODUCT_LAYOUT_BOTTOM = 700;
+
+    private const PRODUCT_NAME_WIDTH = 270;
+
+    private const PRODUCT_MAX_LINES = 3;
+
+    private const PRODUCT_MIN_FONT_SIZE = 6;
+
+    private const PRODUCT_MAX_FONT_SIZE = 14;
+
     private const TIMEZONE = 'Asia/Jakarta';
 
     /** @var array<int, string> */
@@ -386,10 +398,10 @@ final class PaidInvoiceRenderer
      */
     private function productLayout(array $items, string $font): array
     {
-        $availableHeight = 700 - 438;
+        $availableHeight = self::PRODUCT_LAYOUT_BOTTOM - self::PRODUCT_LAYOUT_TOP;
         $additionalHeight = count($items) > 0 ? 28 : 0;
-        $low = 6;
-        $high = 14;
+        $low = self::PRODUCT_MIN_FONT_SIZE;
+        $high = self::PRODUCT_MAX_FONT_SIZE;
         $best = null;
 
         while ($low <= $high) {
@@ -403,7 +415,7 @@ final class PaidInvoiceRenderer
             }
         }
 
-        return $best ?? $this->layoutAtFontSize($items, $font, 6, $additionalHeight);
+        return $best ?? $this->layoutAtFontSize($items, $font, self::PRODUCT_MIN_FONT_SIZE, $additionalHeight);
     }
 
     /**
@@ -416,7 +428,12 @@ final class PaidInvoiceRenderer
         $rows = [];
         $height = 42 + $additionalHeight;
         foreach ($items as $item) {
-            $lines = $this->wrapText($item['product_name'], 270, $fontSize, $font);
+            $lines = $this->boundedProductLines(
+                $this->wrapText($this->normalizeProductName($item['product_name']), self::PRODUCT_NAME_WIDTH, $fontSize, $font),
+                self::PRODUCT_NAME_WIDTH,
+                $fontSize,
+                $font,
+            );
             $rowHeight = max(42, count($lines) * $lineHeight + 18);
             $rows[] = [
                 'item' => $item,
@@ -453,7 +470,7 @@ final class PaidInvoiceRenderer
         $this->drawText($image, 'Harga', 414, 420, 10, $colors['muted'], $boldFont);
         $this->drawRightAligned($image, 'Total', 636, 420, 10, $colors['muted'], $boldFont, 84);
 
-        $cursor = 438;
+        $cursor = self::PRODUCT_LAYOUT_TOP;
         foreach ($layout['rows'] as $row) {
             $item = $row['item'];
             $baseline = $cursor + $layout['line_height'];
@@ -716,6 +733,44 @@ final class PaidInvoiceRenderer
         return $lines === [] ? [''] : $lines;
     }
 
+    /**
+     * @param  list<string>  $lines
+     * @return list<string>
+     */
+    private function boundedProductLines(array $lines, int $maxWidth, float $fontSize, string $font): array
+    {
+        if (count($lines) <= self::PRODUCT_MAX_LINES) {
+            return $lines;
+        }
+
+        $lines = array_slice($lines, 0, self::PRODUCT_MAX_LINES);
+        $lastLine = array_pop($lines) ?? '';
+        $lines[] = $this->appendEllipsis($lastLine, $maxWidth, $fontSize, $font);
+
+        return $lines;
+    }
+
+    private function appendEllipsis(string $line, int $maxWidth, float $fontSize, string $font): string
+    {
+        $line = rtrim($line);
+        $ellipsis = '…';
+        if ($line === '') {
+            return $ellipsis;
+        }
+
+        if ($this->textWidthWithFallback($line.' '.$ellipsis, $fontSize, $font) <= $maxWidth) {
+            return $line.' '.$ellipsis;
+        }
+
+        $characters = preg_split('//u', $line, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        while ($characters !== []
+            && $this->textWidthWithFallback(implode('', $characters).$ellipsis, $fontSize, $font) > $maxWidth) {
+            array_pop($characters);
+        }
+
+        return rtrim(implode('', $characters)).$ellipsis;
+    }
+
     /** @return list<string> */
     private function wrapLongToken(string $token, int $maxWidth, float $fontSize, string $font): array
     {
@@ -760,6 +815,14 @@ final class PaidInvoiceRenderer
         $clean = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $value);
 
         return trim(is_string($clean) ? $clean : $value);
+    }
+
+    private function normalizeProductName(string $value): string
+    {
+        $clean = $this->presentationText($value);
+        $normalized = preg_replace('/\s+/u', ' ', $clean);
+
+        return trim(is_string($normalized) ? $normalized : $clean);
     }
 
     private function fontPath(bool $bold): string

@@ -130,6 +130,95 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame(0, $metadata['provider_fee']);
     }
 
+    public function test_it_keeps_required_invoice_regions_visible_for_pathological_product_names(): void
+    {
+        $cases = [
+            'maximum Unicode name' => [
+                [
+                    'product_name' => str_repeat('商品🙂', 85),
+                    'quantity' => 1,
+                    'unit_price' => 10000,
+                    'subtotal' => 10000,
+                ],
+            ],
+            'newline-heavy name' => [
+                [
+                    'product_name' => 'Produkt'.str_repeat("\n", 248),
+                    'quantity' => 1,
+                    'unit_price' => 20000,
+                    'subtotal' => 20000,
+                ],
+            ],
+            'three long rows' => array_map(
+                static fn (int $index): array => [
+                    'product_name' => str_repeat('Long Product ', 19).'NameTest',
+                    'quantity' => $index + 1,
+                    'unit_price' => 10000 * ($index + 1),
+                    'subtotal' => 10000 * ($index + 1) ** 2,
+                ],
+                range(0, 2),
+            ),
+        ];
+
+        foreach ($cases as $case => $items) {
+            $order = $this->order(
+                customerTelegramId: 8581234505,
+                invoiceNumber: 'INV-326-'.strtoupper(str_replace(' ', '-', $case)),
+                items: $items,
+                payment: [
+                    'method' => 'qris',
+                    'provider_fee' => 2500,
+                    'provider_total_payment' => array_sum(array_column($items, 'subtotal')) + 2500,
+                    'paid_at' => CarbonImmutable::parse('2026-08-22 00:00:00 UTC'),
+                ],
+            );
+
+            $result = app(PaidInvoiceRenderer::class)->render($order);
+            $decoded = getimagesizefromstring($result->bytes);
+
+            $this->assertSame('image/png', $decoded['mime'] ?? null, $case);
+            $this->assertSame(PaidInvoiceRenderer::WIDTH, $decoded[0] ?? null, $case);
+            $this->assertSame(PaidInvoiceRenderer::HEIGHT, $decoded[1] ?? null, $case);
+            $this->assertLessThanOrEqual(PaidInvoiceRenderer::MAX_BYTES, strlen($result->bytes), $case);
+            $this->assertSame($items[0]['product_name'], $result->metadata['items'][0]['product_name'], $case);
+            $this->assertInvoiceColorPresent($result->bytes, [24, 109, 214], 600, $case.' summary');
+            $this->assertInvoiceColorPresent($result->bytes, [24, 109, 214], 680, $case.' total');
+            $this->assertInvoiceColorPresent($result->bytes, [184, 61, 76], 600, $case.' paid stamp');
+            $this->assertInvoiceColorPresent($result->bytes, [101, 119, 140], 740, $case.' footer');
+        }
+    }
+
+    /**
+     * @param  array{0: int, 1: int, 2: int}  $rgb
+     */
+    private function assertInvoiceColorPresent(string $png, array $rgb, int $minimumY, string $label): void
+    {
+        $image = imagecreatefromstring($png);
+        if (! $image instanceof \GdImage) {
+            $this->fail($label.' could not decode its PNG.');
+        }
+
+        $found = false;
+        try {
+            for ($y = $minimumY; $y < PaidInvoiceRenderer::HEIGHT && ! $found; $y++) {
+                for ($x = 0; $x < PaidInvoiceRenderer::WIDTH; $x++) {
+                    $color = imagecolorat($image, $x, $y);
+                    if ((($color >> 16) & 0xFF) === $rgb[0]
+                        && (($color >> 8) & 0xFF) === $rgb[1]
+                        && ($color & 0xFF) === $rgb[2]) {
+                        $found = true;
+
+                        break;
+                    }
+                }
+            }
+        } finally {
+            unset($image);
+        }
+
+        $this->assertTrue($found, $label.' was not visible inside the canvas.');
+    }
+
     public function test_it_rejects_an_order_without_a_canonical_paid_payment(): void
     {
         $order = $this->order(
