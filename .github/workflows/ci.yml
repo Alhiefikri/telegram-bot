@@ -51,6 +51,7 @@ jobs:
       APP_FORCE_HTTPS: false
     defaults:
       run:
+        shell: bash
         working-directory: src
     steps:
       - name: Check out repository
@@ -125,6 +126,13 @@ jobs:
           ./scripts/test-check-migration-prefixes.sh
           ./scripts/test-concurrency-deploy-gate.sh
 
+      - name: Restore self-hosted workspace ownership
+        if: always()
+        working-directory: .
+        run: |
+          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
+          chown -R "$host_owner" "$GITHUB_WORKSPACE"
+
   postgres-release-gate:
     name: PostgreSQL migration and concurrency release gate
     runs-on: [self-hosted, Linux, X64]
@@ -166,6 +174,7 @@ jobs:
       CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
     defaults:
       run:
+        shell: bash
         working-directory: src
     steps:
       - name: Check out repository
@@ -255,6 +264,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Restore self-hosted workspace ownership
+        if: always()
+        working-directory: .
+        run: |
+          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
+          chown -R "$host_owner" "$GITHUB_WORKSPACE"
+
   frontend-build:
     name: Frontend build and asset smoke
     runs-on: [self-hosted, Linux, X64]
@@ -288,6 +304,7 @@ jobs:
       APP_FORCE_HTTPS: false
     defaults:
       run:
+        shell: bash
         working-directory: src
     steps:
       - name: Check out repository
@@ -340,6 +357,13 @@ jobs:
             src/storage/logs/*.log
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Restore self-hosted workspace ownership
+        if: always()
+        working-directory: .
+        run: |
+          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
+          chown -R "$host_owner" "$GITHUB_WORKSPACE"
 
   docker-build:
     name: Build, verify, and publish production image

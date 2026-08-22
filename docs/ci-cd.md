@@ -23,6 +23,10 @@ The runner host must provide Docker and outbound HTTPS access. PHP test jobs run
 inside `ubuntu:24.04` job containers so `setup-php` has its supported Linux
 environment independent of the host distribution. The PostgreSQL service is
 reached through its `postgres` service-network alias from that job container.
+Container jobs explicitly use Bash because Ubuntu job containers otherwise
+default to `sh`, which rejects `set -o pipefail`. Their final `always()` step
+restores the workspace to the host runner UID/GID obtained from `RUNNER_TEMP`;
+without that boundary, a later host job cannot clean root-owned checkout files.
 
 ## Workflows
 
