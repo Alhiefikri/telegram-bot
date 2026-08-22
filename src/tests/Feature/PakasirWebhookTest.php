@@ -24,6 +24,7 @@ use App\Models\StoreChannelSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
@@ -237,7 +238,10 @@ class PakasirWebhookTest extends TestCase
             && str_contains((string) ($request['text'] ?? ''), 'Produk terjual'));
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count());
         $this->assertSame('77', SalesProofPost::firstOrFail()->telegram_message_id);
-        $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
+        $copy = app(SalesProofPostFormatter::class)->format(
+            app(PaidInvoiceOrderPresentationAdapter::class)->present($order->fresh(['customer', 'orderItems', 'payments'])),
+            1,
+        );
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $copy);
         $this->assertStringContainsString('Order ID: '.$order->invoice_number, $copy);
         $this->assertStringContainsString('Thank you for choosing Lhie Store.', $copy);

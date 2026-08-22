@@ -2,63 +2,57 @@
 
 namespace App\Services\PaidInvoice;
 
-use App\Enums\PaymentStatus;
-use App\Models\Customer;
-use App\Models\Order;
-use App\Models\OrderItem;
-use App\Models\Payment;
-use App\Services\PaymentReceiptReport;
-use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
-use Illuminate\Support\Collection;
-use InvalidArgumentException;
 use RuntimeException;
-use Throwable;
 
 /**
  * Renders the one public-safe paid invoice used by every delivery target.
  *
- * The renderer deliberately depends on OrderItem snapshots and the canonical
- * paid Payment only. It never follows Product descriptions or credential rows.
+ * The renderer accepts only the immutable PaidInvoicePresentation seam. It
+ * never loads Orders, Products, Payments, or credential relations.
  */
 final class PaidInvoiceRenderer
 {
     public const WIDTH = 720;
 
-    public const HEIGHT = 960;
+    public const HEIGHT = 720;
 
     public const MAX_BYTES = 300 * 1024;
 
-    private const TEMPLATE_VERSION = 'nota-b.v1';
+    private const TEMPLATE_VERSION = 'nota-b.neo-invoice.v6';
 
-    private const PRODUCT_LAYOUT_TOP = 438;
+    private const PRODUCT_LAYOUT_TOP = 350;
 
-    private const PRODUCT_LAYOUT_BOTTOM = 700;
+    private const PRODUCT_LAYOUT_BOTTOM = 510;
 
     private const PRODUCT_NAME_WIDTH = 270;
 
-    private const PRODUCT_MAX_LINES = 3;
+    private const PRODUCT_LAYOUT_MAX_CHARS = 128;
 
-    private const PRODUCT_MIN_FONT_SIZE = 6;
+    private const PRODUCT_MAX_LINES = 2;
+
+    private const PRODUCT_MIN_FONT_SIZE = 8;
 
     private const PRODUCT_MAX_FONT_SIZE = 14;
 
-    private const TIMEZONE = 'Asia/Jakarta';
-
-    /** @var array<int, string> */
-    private const MONTHS = [
-        1 => 'Januari',
-        2 => 'Februari',
-        3 => 'Maret',
-        4 => 'April',
-        5 => 'Mei',
-        6 => 'Juni',
-        7 => 'Juli',
-        8 => 'Agustus',
-        9 => 'September',
-        10 => 'Oktober',
-        11 => 'November',
-        12 => 'Desember',
+    /** @var list<string> */
+    private const SYSTEM_LABELS = [
+        'INVOICE',
+        'DIGITAL PAYMENT RECEIPT',
+        'INVOICE NO.',
+        'BUYER',
+        'PAID AT',
+        'PAYMENT METHOD',
+        'ORDER DETAILS',
+        'PRODUCT',
+        'QTY',
+        'UNIT PRICE',
+        'LINE TOTAL',
+        'SUBTOTAL',
+        'PROVIDER / ADMIN FEE',
+        'TOTAL PAID',
+        'PAID',
+        'Thank you for choosing Lhie Store.',
+        'Keep this invoice for your records.',
     ];
 
     /** @var array<string, int> */
@@ -73,9 +67,10 @@ final class PaidInvoiceRenderer
 
     private ?\GdImage $logo = null;
 
-    public function __construct(
-        private readonly PaymentReceiptReport $receiptReport,
-    ) {
+    private ?\GdImage $paidStamp = null;
+
+    public function __construct()
+    {
         if (! extension_loaded('gd') || ! function_exists('imagettfbbox')) {
             return;
         }
@@ -88,7 +83,7 @@ final class PaidInvoiceRenderer
         }
     }
 
-    public function render(Order $order): PaidInvoiceRenderResult
+    public function render(PaidInvoicePresentation $presentation): PaidInvoiceRenderResult
     {
         if (! extension_loaded('gd')
             || ! function_exists('imagecreatetruecolor')
@@ -98,39 +93,16 @@ final class PaidInvoiceRenderer
         }
 
         $this->textWidthCache = [];
-
-        $order->loadMissing(['customer', 'orderItems', 'payments']);
-
-        $payment = $this->canonicalPaidPayment($order);
-        $items = $this->snapshotItems($order);
-        $orderId = $this->orderIdentifier($order);
-        $maskedBuyer = $this->maskBuyerTelegramId($order->customer);
-        $currency = $this->currency($payment, $order);
-        $paidAt = $this->paidAt($payment);
-        $paymentMethod = $this->paymentMethod($payment);
-        $subtotal = array_sum(array_map(static fn (array $item): int => $item['subtotal'], $items));
-        $providerFee = max(0, (int) ($payment->provider_fee ?? 0));
-        $totalPaid = $payment->provider_total_payment !== null
-            ? max(0, (int) $payment->provider_total_payment)
-            : max(0, (int) $order->total_amount);
-        $displayItems = array_slice($items, 0, 3);
-        $additionalProductCount = max(0, count($items) - count($displayItems));
-
         $metadata = [
             'template_version' => self::TEMPLATE_VERSION,
-            'order_id' => $orderId,
-            'buyer_telegram_id' => $maskedBuyer,
-            'paid_at_wib' => $this->formatPaidAt($paidAt),
-            'payment_method' => $paymentMethod,
-            'status' => 'LUNAS',
-            'currency' => $currency,
-            'items' => $items,
-            'display_items' => $displayItems,
-            'additional_product_count' => $additionalProductCount,
-            'subtotal' => $subtotal,
-            'provider_fee' => $providerFee,
-            'total_paid' => $totalPaid,
+            ...$presentation->metadata(),
+            'system_labels' => self::SYSTEM_LABELS,
         ];
+        $displayItems = $presentation->displayItems();
+        $currency = $presentation->currency;
+        $subtotal = $presentation->subtotal();
+        $providerFee = max(0, $presentation->providerFee);
+        $totalPaid = max(0, $presentation->totalPaid);
 
         $font = $this->font !== '' ? $this->font : $this->fontPath(false);
         $boldFont = $this->boldFont !== '' ? $this->boldFont : $this->fontPath(true);
@@ -146,7 +118,15 @@ final class PaidInvoiceRenderer
             $this->drawPaper($canvas, $colors);
             $this->drawLogo($canvas);
 
-            $this->drawHeader($canvas, $colors, $font, $boldFont, $metadata);
+            $this->drawHeader($canvas, $colors, $boldFont, $metadata);
+            $this->drawPaymentDetails(
+                $canvas,
+                $colors,
+                $font,
+                $boldFont,
+                192,
+                $metadata,
+            );
             $layout = $this->productLayout($displayItems, $font);
             $tableBottom = $this->drawProducts(
                 $canvas,
@@ -155,9 +135,9 @@ final class PaidInvoiceRenderer
                 $boldFont,
                 $layout,
                 $currency,
-                $additionalProductCount,
+                $presentation->additionalProductCount(),
             );
-            $summaryTop = max(600, $tableBottom + 18);
+            $summaryTop = max(474, $tableBottom + 12);
             $this->drawSummary(
                 $canvas,
                 $colors,
@@ -169,7 +149,7 @@ final class PaidInvoiceRenderer
                 $providerFee,
                 $totalPaid,
             );
-            $this->drawFooter($canvas, $colors, $font, $summaryTop);
+            $this->drawFooter($canvas, $colors, $font);
 
             ob_start();
             $encoded = imagepng($canvas, null, 4, PNG_FILTER_NONE);
@@ -185,126 +165,11 @@ final class PaidInvoiceRenderer
 
         return new PaidInvoiceRenderResult(
             bytes: $png,
-            filename: $this->filename($orderId),
+            filename: $this->filename($presentation->invoiceId),
             width: self::WIDTH,
             height: self::HEIGHT,
             metadata: $metadata,
         );
-    }
-
-    private function canonicalPaidPayment(Order $order): Payment
-    {
-        $payments = $order->payments;
-        if (! $payments instanceof Collection) {
-            throw new InvalidArgumentException('Paid invoice Order payments are not available.');
-        }
-
-        $paidPayments = $payments
-            ->filter(fn ($payment): bool => $payment instanceof Payment
-                && (string) $payment->order_id === (string) $order->getKey()
-                && $payment->status === PaymentStatus::Paid
-                && $payment->paid_at !== null);
-
-        $canonical = $this->receiptReport->canonicalFromPayments($paidPayments)->first();
-        if (! $canonical instanceof Payment) {
-            throw new InvalidArgumentException('Paid invoice requires a canonical paid Payment.');
-        }
-
-        return $canonical;
-    }
-
-    /**
-     * @return list<array{product_name: string, quantity: int, unit_price: int, subtotal: int}>
-     */
-    private function snapshotItems(Order $order): array
-    {
-        $items = $order->orderItems;
-        if (! $items instanceof Collection) {
-            throw new InvalidArgumentException('Paid invoice Order Items are not available.');
-        }
-
-        return $items
-            ->filter(fn ($item): bool => $item instanceof OrderItem)
-            ->map(static fn (OrderItem $item): array => [
-                'product_name' => (string) $item->product_name,
-                'quantity' => max(0, (int) $item->quantity),
-                'unit_price' => max(0, (int) $item->unit_price),
-                'subtotal' => max(0, (int) $item->subtotal),
-            ])
-            ->values()
-            ->all();
-    }
-
-    private function orderIdentifier(Order $order): string
-    {
-        $invoice = trim((string) $order->invoice_number);
-        if ($invoice !== '') {
-            return $this->presentationText($invoice);
-        }
-
-        $key = trim((string) $order->getKey());
-
-        return $key !== '' ? $this->presentationText($key) : 'ORDER';
-    }
-
-    private function maskBuyerTelegramId(?Customer $customer): string
-    {
-        $raw = $customer?->getRawOriginal('telegram_id');
-        $identifier = is_scalar($raw) ? trim((string) $raw) : trim((string) ($customer?->telegram_id ?? ''));
-
-        if (! preg_match('/^\d{6,}$/', $identifier)) {
-            return 'ID pembeli';
-        }
-
-        return substr($identifier, 0, 3).'*****'.substr($identifier, -2);
-    }
-
-    private function currency(Payment $payment, Order $order): string
-    {
-        $currency = trim((string) ($payment->currency ?: $order->currency ?: 'IDR'));
-
-        return strtoupper($currency !== '' ? $currency : 'IDR');
-    }
-
-    private function paidAt(Payment $payment): CarbonImmutable
-    {
-        $value = $payment->paid_at;
-        if ($value === null) {
-            throw new InvalidArgumentException('Paid invoice Payment timestamp is missing.');
-        }
-
-        try {
-            return ($value instanceof CarbonInterface
-                ? CarbonImmutable::instance($value)
-                : CarbonImmutable::parse($value)
-            )->setTimezone(self::TIMEZONE);
-        } catch (Throwable $exception) {
-            throw new InvalidArgumentException('Paid invoice Payment timestamp is invalid.', previous: $exception);
-        }
-    }
-
-    private function paymentMethod(Payment $payment): string
-    {
-        $method = strtolower(trim((string) $payment->method));
-        $label = trim((string) $payment->payment_method_label);
-
-        $label = match ($method) {
-            'api_qris', 'qris' => 'QRIS',
-            'binance_pay_id' => 'Binance Pay',
-            'hosted' => 'Pakasir',
-            default => $label !== '' ? $label : $method,
-        };
-
-        $label = $this->presentationText($label);
-
-        return $label !== '' ? $label : 'Tidak diketahui';
-    }
-
-    private function formatPaidAt(CarbonInterface $paidAt): string
-    {
-        $month = self::MONTHS[(int) $paidAt->format('n')] ?? $paidAt->format('F');
-
-        return $paidAt->format('d').' '.$month.' '.$paidAt->format('Y, H:i').' WIB';
     }
 
     private function filename(string $orderId): string
@@ -321,27 +186,33 @@ final class PaidInvoiceRenderer
     private function colors(\GdImage $image): array
     {
         return [
-            'background' => imagecolorallocate($image, 239, 245, 251),
-            'paper' => imagecolorallocate($image, 255, 255, 255),
-            'paper_edge' => imagecolorallocate($image, 209, 224, 239),
-            'ink' => imagecolorallocate($image, 22, 38, 58),
-            'muted' => imagecolorallocate($image, 101, 119, 140),
-            'line' => imagecolorallocate($image, 199, 215, 231),
-            'blue' => imagecolorallocate($image, 24, 109, 214),
-            'blue_soft' => imagecolorallocate($image, 231, 242, 255),
-            'green' => imagecolorallocate($image, 20, 126, 76),
-            'green_soft' => imagecolorallocate($image, 230, 248, 239),
-            'stamp' => imagecolorallocate($image, 184, 61, 76),
-            'stamp_soft' => imagecolorallocate($image, 255, 238, 239),
+            'background' => imagecolorallocate($image, 238, 244, 255),
+            'paper' => imagecolorallocate($image, 255, 253, 248),
+            'paper_edge' => imagecolorallocate($image, 204, 213, 230),
+            'ink' => imagecolorallocate($image, 11, 18, 32),
+            'muted' => imagecolorallocate($image, 102, 112, 133),
+            'line' => imagecolorallocate($image, 169, 180, 196),
+            'blue' => imagecolorallocate($image, 0, 92, 255),
+            'green_soft' => imagecolorallocate($image, 47, 203, 132),
+            'lavender' => imagecolorallocate($image, 178, 157, 255),
+            'yellow' => imagecolorallocate($image, 255, 228, 92),
+            'pink' => imagecolorallocate($image, 255, 143, 199),
         ];
     }
 
     /** @param array<string, int> $colors */
     private function drawPaper(\GdImage $image, array $colors): void
     {
-        $this->roundedRectangle($image, 39, 34, 685, 931, 28, $colors['paper_edge']);
-        $this->roundedRectangle($image, 33, 27, 679, 923, 28, $colors['paper']);
-        imagefilledrectangle($image, 88, 238, 624, 241, $colors['blue']);
+        $this->roundedRectangle($image, 8, 8, 718, 718, 18, $colors['lavender']);
+        $this->roundedRectangle($image, 2, 2, 714, 714, 18, $colors['paper_edge']);
+        $this->roundedRectangle($image, 5, 5, 711, 711, 16, $colors['paper']);
+        $this->dashedLine($image, 20, 20, 696, $colors['ink']);
+        $this->dashedLine($image, 20, 712, 696, $colors['ink']);
+        $this->dashedVerticalLine($image, 20, 20, 712, $colors['ink']);
+        $this->dashedVerticalLine($image, 696, 20, 712, $colors['ink']);
+
+        imagefilledpolygon($image, [18, 42, 96, 28, 102, 54, 24, 68], 4, $colors['yellow']);
+        imagefilledpolygon($image, [622, 28, 700, 42, 694, 68, 616, 54], 4, $colors['pink']);
     }
 
     private function drawLogo(\GdImage $canvas): void
@@ -349,10 +220,10 @@ final class PaidInvoiceRenderer
         $logo = $this->logo();
         $width = imagesx($logo);
         $height = imagesy($logo);
-        $x = (self::WIDTH - $width) >> 1;
+        $x = 48;
 
         imagealphablending($canvas, true);
-        if (! imagecopy($canvas, $logo, $x, 48, 0, 0, $width, $height)) {
+        if (! imagecopy($canvas, $logo, $x, 14, 0, 0, $width, $height)) {
             throw new RuntimeException('Paid invoice branding asset could not be drawn.');
         }
     }
@@ -405,19 +276,84 @@ final class PaidInvoiceRenderer
      * @param  array<string, int|string|list<array<string, mixed>>>  $metadata
      * @param  array<string, int>  $colors
      */
-    private function drawHeader(\GdImage $image, array $colors, string $font, string $boldFont, array $metadata): void
+    private function drawHeader(\GdImage $image, array $colors, string $boldFont, array $metadata): void
     {
-        $this->drawCentered($image, 'LHIE STORE', 195, 18, $colors['blue'], $boldFont);
-        $this->drawCentered($image, 'NOTA PEMBAYARAN', 220, 20, $colors['ink'], $boldFont);
-        $this->roundedRectangle($image, 555, 187, 644, 220, 16, $colors['green_soft']);
-        $this->drawCenteredInBox($image, 'LUNAS', 555, 187, 644, 220, 13, $colors['green'], $boldFont);
+        $this->drawText($image, 'INVOICE', 286, 62, 22, $colors['blue'], $boldFont);
+        $this->drawText($image, 'DIGITAL PAYMENT RECEIPT', 289, 84, 9, $colors['muted'], $boldFont);
 
-        $this->drawLabelValue($image, 'PEMBELI', (string) $metadata['buyer_telegram_id'], 76, 260, 76, 280, 260, $colors, $font, $boldFont);
-        $this->drawLabelValue($image, 'ORDER ID', (string) $metadata['order_id'], 390, 260, 390, 280, 250, $colors, $font, $boldFont);
-        $this->drawLabelValue($image, 'WAKTU BAYAR', (string) $metadata['paid_at_wib'], 76, 306, 76, 326, 260, $colors, $font, $boldFont);
-        $this->drawLabelValue($image, 'METODE', (string) $metadata['payment_method'], 390, 306, 390, 326, 250, $colors, $font, $boldFont);
+        $this->roundedRectangle($image, 552, 55, 674, 99, 4, $colors['ink']);
+        $this->roundedRectangle($image, 547, 50, 669, 94, 4, $colors['green_soft']);
+        $this->drawCenteredInBox($image, '✓ PAID', 547, 50, 669, 94, 13, $colors['ink'], $boldFont);
 
-        $this->dashedLine($image, 76, 360, 636, $colors['line']);
+        imagefilledrectangle($image, 48, 146, 672, 150, $colors['blue']);
+        $this->drawText($image, 'INVOICE NO.', 48, 177, 9, $colors['muted'], $boldFont);
+        $orderId = (string) $metadata['order_id'];
+        $orderSize = $this->fitFontSize($orderId, 470, 14, 9, $boldFont);
+        $this->drawText($image, $orderId, 158, 178, $orderSize, $colors['ink'], $boldFont);
+    }
+
+    private function drawProducts(
+        \GdImage $image,
+        array $colors,
+        string $font,
+        string $boldFont,
+        array $layout,
+        string $currency,
+        int $additionalProductCount,
+    ): int {
+        $this->drawText($image, 'ORDER DETAILS', 48, 320, 12, $colors['ink'], $boldFont);
+        $this->drawText($image, 'PRODUCT', 48, 345, 9, $colors['blue'], $boldFont);
+        $this->drawText($image, 'QTY', 348, 345, 9, $colors['blue'], $boldFont);
+        $this->drawText($image, 'UNIT PRICE', 414, 345, 9, $colors['blue'], $boldFont);
+        $this->drawRightAligned($image, 'LINE TOTAL', 672, 345, 9, $colors['blue'], $boldFont, 570);
+        imagefilledrectangle($image, 48, 351, 672, 354, $colors['blue']);
+
+        $cursor = self::PRODUCT_LAYOUT_TOP;
+        foreach ($layout['rows'] as $row) {
+            $item = $row['item'];
+            $bottom = $cursor + $row['height'];
+            $baseline = $cursor + $layout['line_height'] + 8;
+            $this->drawLines($image, $row['lines'], 48, $baseline, $layout['font_size'], $layout['line_height'], $colors['ink'], $boldFont);
+            $this->drawRightAligned($image, (string) $item['quantity'], 390, $baseline, 11, $colors['ink'], $boldFont, 338);
+            $this->drawRightAligned($image, $this->money($item['unit_price'], $currency), 535, $baseline, 10, $colors['ink'], $font, 405);
+            $this->drawRightAligned($image, $this->money($item['subtotal'], $currency), 672, $baseline, 11, $colors['ink'], $boldFont, 540);
+            $this->dashedLine($image, 48, $bottom - 2, 672, $colors['line']);
+            $cursor = $bottom;
+        }
+
+        if ($additionalProductCount > 0) {
+            $this->drawText($image, '+'.$additionalProductCount.' other products', 48, $cursor + 18, 10, $colors['blue'], $boldFont);
+            $cursor += 26;
+        }
+
+        return max($cursor, 412);
+    }
+
+    private function drawPaymentDetails(
+        \GdImage $image,
+        array $colors,
+        string $font,
+        string $boldFont,
+        int $top,
+        array $metadata,
+    ): int {
+        $this->drawText($image, 'BUYER', 48, $top + 11, 9, $colors['muted'], $boldFont);
+        $buyer = (string) $metadata['buyer_telegram_id'];
+        $buyerSize = $this->fitFontSize($buyer, 270, 12, 9, $boldFont);
+        $this->drawText($image, $buyer, 48, $top + 36, $buyerSize, $colors['ink'], $boldFont);
+
+        $this->drawText($image, 'PAID AT', 370, $top + 11, 9, $colors['muted'], $boldFont);
+        $paidAt = (string) $metadata['paid_at_wib'];
+        $paidAtSize = $this->fitFontSize($paidAt, 302, 12, 8, $boldFont);
+        $this->drawText($image, $paidAt, 370, $top + 36, $paidAtSize, $colors['ink'], $boldFont);
+
+        $this->drawText($image, 'PAYMENT METHOD', 48, $top + 65, 9, $colors['muted'], $boldFont);
+        $method = (string) $metadata['payment_method'];
+        $methodSize = $this->fitFontSize($method, 270, 12, 9, $boldFont);
+        $this->drawText($image, $method, 48, $top + 90, $methodSize, $colors['ink'], $boldFont);
+        $this->dashedLine($image, 48, $top + 106, 672, $colors['line']);
+
+        return $top + 106;
     }
 
     /**
@@ -427,7 +363,7 @@ final class PaidInvoiceRenderer
     private function productLayout(array $items, string $font): array
     {
         $availableHeight = self::PRODUCT_LAYOUT_BOTTOM - self::PRODUCT_LAYOUT_TOP;
-        $additionalHeight = count($items) > 0 ? 28 : 0;
+        $additionalHeight = 0;
         $low = self::PRODUCT_MIN_FONT_SIZE;
         $high = self::PRODUCT_MAX_FONT_SIZE;
         $best = null;
@@ -454,15 +390,15 @@ final class PaidInvoiceRenderer
     {
         $lineHeight = max(10, (int) round($fontSize * 1.25));
         $rows = [];
-        $height = 42 + $additionalHeight;
+        $height = $additionalHeight;
         foreach ($items as $item) {
             $lines = $this->boundedProductLines(
-                $this->wrapText($this->normalizeProductName($item['product_name']), self::PRODUCT_NAME_WIDTH, $fontSize, $font),
+                $this->wrapText($this->productLayoutName($item['product_name']), self::PRODUCT_NAME_WIDTH, $fontSize, $font),
                 self::PRODUCT_NAME_WIDTH,
                 $fontSize,
                 $font,
             );
-            $rowHeight = max(42, count($lines) * $lineHeight + 18);
+            $rowHeight = max(52, count($lines) * $lineHeight + 20);
             $rows[] = [
                 'item' => $item,
                 'lines' => $lines,
@@ -479,45 +415,6 @@ final class PaidInvoiceRenderer
         ];
     }
 
-    /**
-     * @param  array{font_size: int, line_height: int, rows: list<array{item: array{product_name: string, quantity: int, unit_price: int, subtotal: int}, lines: list<string>, height: int}>}  $layout
-     * @param  array<string, int>  $colors
-     */
-    private function drawProducts(
-        \GdImage $image,
-        array $colors,
-        string $font,
-        string $boldFont,
-        array $layout,
-        string $currency,
-        int $additionalProductCount,
-    ): int {
-        $this->drawText($image, 'RINCIAN PESANAN', 76, 394, 14, $colors['blue'], $boldFont);
-        $this->drawText($image, 'Produk', 76, 420, 10, $colors['muted'], $boldFont);
-        $this->drawText($image, 'Qty', 362, 420, 10, $colors['muted'], $boldFont);
-        $this->drawText($image, 'Harga', 414, 420, 10, $colors['muted'], $boldFont);
-        $this->drawRightAligned($image, 'Total', 636, 420, 10, $colors['muted'], $boldFont, 84);
-
-        $cursor = self::PRODUCT_LAYOUT_TOP;
-        foreach ($layout['rows'] as $row) {
-            $item = $row['item'];
-            $baseline = $cursor + $layout['line_height'];
-            $this->drawLines($image, $row['lines'], 76, $baseline, $layout['font_size'], $layout['line_height'], $colors['ink'], $font);
-            $this->drawText($image, (string) $item['quantity'], 362, $baseline, 11, $colors['ink'], $boldFont);
-            $this->drawRightAligned($image, $this->money($item['unit_price'], $currency), 523, $baseline, 10, $colors['ink'], $font, 100);
-            $this->drawRightAligned($image, $this->money($item['subtotal'], $currency), 636, $baseline, 10, $colors['ink'], $boldFont, 106);
-            $this->dashedLine($image, 76, $cursor + $row['height'] - 8, 636, $colors['line']);
-            $cursor += $row['height'];
-        }
-
-        if ($additionalProductCount > 0) {
-            $this->drawText($image, '+'.$additionalProductCount.' produk lainnya', 76, $cursor + 20, 11, $colors['blue'], $font);
-            $cursor += 28;
-        }
-
-        return max($cursor, 462);
-    }
-
     /** @param array<string, int> $colors */
     private function drawSummary(
         \GdImage $image,
@@ -530,47 +427,79 @@ final class PaidInvoiceRenderer
         int $providerFee,
         int $totalPaid,
     ): void {
-        $this->dashedLine($image, 76, $top, 636, $colors['line']);
-        $this->drawText($image, 'RINGKASAN PEMBAYARAN', 250, $top + 19, 12, $colors['blue'], $boldFont);
-        $this->roundedRectangle($image, 76, $top + 23, 216, $top + 88, 16, $colors['stamp_soft']);
-        $this->roundedRectangle($image, 79, $top + 26, 213, $top + 85, 14, $colors['stamp']);
-        $this->drawCenteredInBox($image, 'LUNAS', 79, $top + 29, 213, $top + 60, 15, $colors['stamp_soft'], $boldFont);
-        $this->drawCenteredInBox($image, 'TERBAYAR', 79, $top + 58, 213, $top + 82, 8, $colors['stamp_soft'], $font);
+        $this->drawText($image, 'SUBTOTAL', 238, $top + 15, 10, $colors['muted'], $font);
+        $this->drawRightAligned($image, $this->money($subtotal, $currency), 520, $top + 15, 11, $colors['ink'], $boldFont, 392);
+        $this->drawText($image, 'PROVIDER / ADMIN FEE', 238, $top + 39, 10, $colors['muted'], $font);
+        $this->drawRightAligned($image, $this->money($providerFee, $currency), 520, $top + 39, 11, $colors['ink'], $boldFont, 392);
+        imagefilledrectangle($image, 188, $top + 53, 520, $top + 56, $colors['ink']);
 
-        $this->drawText($image, 'Subtotal', 250, $top + 47, 11, $colors['muted'], $font);
-        $this->drawRightAligned($image, $this->money($subtotal, $currency), 636, $top + 47, 11, $colors['ink'], $font, 250);
-        $this->drawText($image, 'Biaya provider/admin', 250, $top + 73, 11, $colors['muted'], $font);
-        $this->drawRightAligned($image, $this->money($providerFee, $currency), 636, $top + 73, 11, $colors['ink'], $font, 250);
-        $this->drawText($image, 'TOTAL DIBAYAR', 250, $top + 108, 14, $colors['ink'], $boldFont);
-        $this->drawRightAligned($image, $this->money($totalPaid, $currency), 636, $top + 108, 17, $colors['blue'], $boldFont, 250);
+        imagefilledrectangle($image, 188, $top + 67, 318, $top + 94, $colors['yellow']);
+        $this->drawText($image, 'TOTAL PAID', 196, $top + 88, 12, $colors['ink'], $boldFont);
+        $this->drawRightAligned($image, $this->money($totalPaid, $currency), 520, $top + 89, 22, $colors['blue'], $boldFont, 350);
+
+        $this->drawPaidStamp($image, 548, $top + 3, $boldFont);
     }
 
-    /** @param array<string, int> $colors */
-    private function drawFooter(\GdImage $image, array $colors, string $font, int $summaryTop): void
+    private function drawPaidStamp(\GdImage $canvas, int $left, int $top, string $boldFont): void
     {
-        $lineY = min(854, $summaryTop + 144);
-        $this->dashedLine($image, 76, $lineY, 636, $colors['line']);
-        $this->drawCentered($image, 'Terima kasih telah memilih Lhie Store', $lineY + 30, 12, $colors['ink'], $font);
-        $this->drawCentered($image, 'Dokumen pembayaran digital • Simpan untuk referensi', $lineY + 52, 9, $colors['muted'], $font);
+        $stamp = $this->paidStamp($boldFont);
+        if (! imagecopy($canvas, $stamp, $left, $top, 0, 0, imagesx($stamp), imagesy($stamp))) {
+            throw new RuntimeException('Paid invoice PAID stamp could not be drawn.');
+        }
+    }
+
+    private function paidStamp(string $boldFont): \GdImage
+    {
+        if ($this->paidStamp instanceof \GdImage) {
+            return $this->paidStamp;
+        }
+
+        $source = imagecreatetruecolor(100, 100);
+        if (! $source instanceof \GdImage) {
+            throw new RuntimeException('Paid invoice PAID stamp canvas could not be created.');
+        }
+
+        imagealphablending($source, false);
+        imagesavealpha($source, true);
+        $transparent = imagecolorallocatealpha($source, 255, 255, 255, 127);
+        imagefilledrectangle($source, 0, 0, 99, 99, $transparent);
+        imagealphablending($source, true);
+
+        $stamp = imagecolorallocatealpha($source, 201, 72, 86, 5);
+        $stampSoft = imagecolorallocatealpha($source, 255, 238, 239, 112);
+        imagefilledellipse($source, 50, 50, 86, 86, $stampSoft);
+        imagesetthickness($source, 3);
+        imageellipse($source, 50, 50, 86, 86, $stamp);
+        imagesetthickness($source, 2);
+        imageellipse($source, 50, 50, 74, 74, $stamp);
+        imagesetthickness($source, 1);
+        for ($angle = 0; $angle < 360; $angle += 24) {
+            imagearc($source, 50, 50, 64, 64, $angle, $angle + 12, $stamp);
+        }
+
+        $this->drawCenteredInBox($source, 'LHIE STORE', 18, 20, 82, 37, 5, $stamp, $boldFont);
+        $this->drawCenteredInBox($source, 'PAID', 12, 34, 88, 68, 15, $stamp, $boldFont);
+        $this->drawCenteredInBox($source, 'VERIFIED', 12, 65, 88, 82, 5, $stamp, $boldFont);
+
+        $rotated = imagerotate($source, -13, $transparent);
+        imagedestroy($source);
+        if (! $rotated instanceof \GdImage) {
+            throw new RuntimeException('Paid invoice PAID stamp could not be rotated.');
+        }
+
+        imagealphablending($rotated, true);
+        imagesavealpha($rotated, true);
+        $this->paidStamp = $rotated;
+
+        return $rotated;
     }
 
     /** @param array<string, int> $colors */
-    private function drawLabelValue(
-        \GdImage $image,
-        string $label,
-        string $value,
-        int $labelX,
-        int $labelY,
-        int $valueX,
-        int $valueY,
-        int $width,
-        array $colors,
-        string $font,
-        string $boldFont,
-    ): void {
-        $this->drawText($image, $label, $labelX, $labelY, 8, $colors['muted'], $boldFont);
-        $size = $this->fitFontSize($value, $width, 12, 8, $font);
-        $this->drawText($image, $value, $valueX, $valueY, $size, $colors['ink'], $font);
+    private function drawFooter(\GdImage $image, array $colors, string $font): void
+    {
+        $this->dashedLine($image, 48, 662, 520, $colors['line']);
+        $this->drawCentered($image, 'Thank you for choosing Lhie Store.', 687, 11, $colors['ink'], $font);
+        $this->drawCentered($image, 'Keep this invoice for your records.', 706, 9, $colors['muted'], $font);
     }
 
     /** @param list<string> $lines */
@@ -656,10 +585,9 @@ final class PaidInvoiceRenderer
     /** @return list<array{text: string, font: string}> */
     private function textRuns(string $text, string $defaultFont): array
     {
-        if ($text === '' || $this->scriptFonts === [] || preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{08A0}-\x{08FF}\x{0900}-\x{097F}\x{0980}-\x{09FF}\x{3040}-\x{30FF}\x{3400}-\x{9FFF}\x{AC00}-\x{D7AF}]/u', $text) !== 1) {
+        if ($text === '' || $this->scriptFonts === [] || preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{08A0}-\x{08FF}\x{0900}-\x{097F}\x{0980}-\x{09FF}\x{1F000}-\x{1FAFF}\x{2300}-\x{23FF}\x{2600}-\x{27BF}\x{3040}-\x{30FF}\x{3400}-\x{9FFF}\x{AC00}-\x{D7AF}]/u', $text) !== 1) {
             return [['text' => $text, 'font' => $defaultFont]];
         }
-
         $runs = [];
         $current = '';
         $currentFont = $defaultFont;
@@ -687,6 +615,7 @@ final class PaidInvoiceRenderer
     private function fontForCharacter(string $character, string $defaultFont): string
     {
         $script = match (true) {
+            preg_match('/[\x{1F000}-\x{1FAFF}\x{2300}-\x{23FF}\x{2600}-\x{27BF}]/u', $character) === 1 => 'symbols',
             preg_match('/[\x{3040}-\x{30FF}\x{3400}-\x{9FFF}\x{AC00}-\x{D7AF}]/u', $character) === 1 => 'cjk',
             preg_match('/[\x{0600}-\x{06FF}\x{0750}-\x{077F}\x{08A0}-\x{08FF}]/u', $character) === 1 => 'arabic',
             preg_match('/[\x{0900}-\x{097F}]/u', $character) === 1 => 'devanagari',
@@ -903,6 +832,16 @@ final class PaidInvoiceRenderer
         return trim(is_string($normalized) ? $normalized : $clean);
     }
 
+    private function productLayoutName(string $value): string
+    {
+        $normalized = $this->normalizeProductName($value);
+        if (mb_strlen($normalized, 'UTF-8') <= self::PRODUCT_LAYOUT_MAX_CHARS) {
+            return $normalized;
+        }
+
+        return rtrim(mb_substr($normalized, 0, self::PRODUCT_LAYOUT_MAX_CHARS - 1, 'UTF-8')).'…';
+    }
+
     private function fontPath(bool $bold): string
     {
         $configured = config($bold ? 'paid-invoice.font_bold_path' : 'paid-invoice.font_path');
@@ -925,7 +864,7 @@ final class PaidInvoiceRenderer
     }
 
     /**
-     * @return array{default: string, cjk: string, arabic: string, devanagari: string, bengali: string}
+     * @return array{default: string, cjk: string, arabic: string, devanagari: string, bengali: string, symbols: string}
      */
     private function resolveScriptFonts(string $default): array
     {
@@ -934,6 +873,14 @@ final class PaidInvoiceRenderer
             'cjk' => $this->optionalFontPath(
                 config('paid-invoice.font_cjk_path'),
                 ['/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'],
+                $default,
+            ),
+            'symbols' => $this->optionalFontPath(
+                config('paid-invoice.font_symbols_path'),
+                [
+                    '/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf',
+                    '/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf',
+                ],
                 $default,
             ),
             'arabic' => $this->optionalFontPath(
@@ -997,7 +944,6 @@ final class PaidInvoiceRenderer
         throw new RuntimeException('Paid invoice Lhie Store branding asset is unavailable.');
     }
 
-    /** @param array<string, int> $colors */
     private function roundedRectangle(\GdImage $image, int $left, int $top, int $right, int $bottom, int $radius, int $color): void
     {
         $radius = min($radius, intdiv($right - $left, 2), intdiv($bottom - $top, 2));
@@ -1013,6 +959,13 @@ final class PaidInvoiceRenderer
     {
         for ($x = $left; $x < $right; $x += 16) {
             imageline($image, $x, $y, min($right, $x + 8), $y, $color);
+        }
+    }
+
+    private function dashedVerticalLine(\GdImage $image, int $x, int $top, int $bottom, int $color): void
+    {
+        for ($y = $top; $y < $bottom; $y += 16) {
+            imageline($image, $x, $y, $x, min($bottom, $y + 8), $color);
         }
     }
 

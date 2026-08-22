@@ -28,6 +28,7 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\SalesProofPostNumbering;
@@ -1038,7 +1039,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count(), (string) SalesProofPost::first()?->last_error);
-        $copy = app(SalesProofPostFormatter::class)->format($order->fresh(['customer', 'orderItems']));
+        $copy = app(SalesProofPostFormatter::class)->format(
+            app(PaidInvoiceOrderPresentationAdapter::class)->present($order->fresh(['customer', 'orderItems', 'payments'])),
+            1,
+        );
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $copy);
         $this->assertStringContainsString('Buyer ID: 123*****89', $copy);
         $this->assertStringContainsString('Paid via:', $copy);

@@ -8,7 +8,10 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
+use App\Services\PaidInvoice\PaidInvoiceRenderResult;
+use App\Services\PaidInvoice\PaidInvoiceSyntheticPresentationAdapter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -37,7 +40,7 @@ class PaidInvoiceRendererTest extends TestCase
         $liveProduct = new Product(['name' => 'Mutable live product description with secret']);
         $order->orderItems->first()->setRelation('product', $liveProduct);
 
-        $result = app(PaidInvoiceRenderer::class)->render($order);
+        $result = $this->renderOrder($order);
         $metadata = $result->metadata;
         $decoded = getimagesizefromstring($result->bytes);
 
@@ -47,8 +50,27 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertLessThanOrEqual(PaidInvoiceRenderer::MAX_BYTES, strlen($result->bytes));
         $this->assertSame('858*****05', $metadata['buyer_telegram_id']);
         $this->assertSame('QRIS', $metadata['payment_method']);
-        $this->assertSame('LUNAS', $metadata['status']);
-        $this->assertSame('21 Agustus 2026, 12:34 WIB', $metadata['paid_at_wib']);
+        $this->assertSame('PAID', $metadata['status']);
+        $this->assertSame('21 August 2026, 12:34 WIB', $metadata['paid_at_wib']);
+        $this->assertSame([
+            'INVOICE',
+            'DIGITAL PAYMENT RECEIPT',
+            'INVOICE NO.',
+            'BUYER',
+            'PAID AT',
+            'PAYMENT METHOD',
+            'ORDER DETAILS',
+            'PRODUCT',
+            'QTY',
+            'UNIT PRICE',
+            'LINE TOTAL',
+            'SUBTOTAL',
+            'PROVIDER / ADMIN FEE',
+            'TOTAL PAID',
+            'PAID',
+            'Thank you for choosing Lhie Store.',
+            'Keep this invoice for your records.',
+        ], $metadata['system_labels']);
         $this->assertSame('Snapshot 東京 — Plan', $metadata['items'][0]['product_name']);
         $this->assertSame(50000, $metadata['subtotal']);
         $this->assertSame(2500, $metadata['provider_fee']);
@@ -57,6 +79,215 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertStringNotContainsString('Mutable live product', json_encode($metadata, JSON_UNESCAPED_UNICODE));
         $this->assertStringNotContainsString('8581234505', json_encode($metadata));
         $this->assertStringNotContainsString('secret', json_encode($metadata));
+    }
+
+    public function test_synthetic_product_presentation_renders_without_persisted_order_or_payment(): void
+    {
+        $product = new Product([
+            'name' => 'Synthetic USDT Product',
+            'price_amount' => 150000,
+            'usdt_price_amount' => 1250000,
+            'currency' => 'USDT',
+        ]);
+        $product->setAttribute('id', 77);
+
+        $presentation = app(PaidInvoiceSyntheticPresentationAdapter::class)->present(
+            $product,
+            CarbonImmutable::parse('2026-08-22 04:00:00 UTC'),
+        );
+
+        $this->assertStringStartsWith('FAKE-', $presentation->invoiceId);
+        $this->assertLessThanOrEqual(64, mb_strlen($presentation->invoiceId));
+        $this->assertSame('FAKE***', $presentation->buyerIdentifier);
+        $this->assertSame('QRIS', $presentation->paymentMethod);
+        $this->assertSame('USDT', $presentation->currency);
+        $this->assertSame(1, $presentation->items[0]['quantity']);
+        $this->assertSame(1_250_000, $presentation->items[0]['subtotal']);
+        $this->assertSame(0, $presentation->providerFee);
+        $this->assertSame(1_250_000, $presentation->totalPaid);
+
+        $result = app(PaidInvoiceRenderer::class)->render($presentation);
+        $decoded = getimagesizefromstring($result->bytes);
+
+        $this->assertSame('image/png', $decoded['mime'] ?? null);
+        $this->assertSame(720, $decoded[0] ?? null);
+        $this->assertSame(720, $decoded[1] ?? null);
+        $this->assertSame('USDT', $result->metadata['currency']);
+        $this->assertSame(1_250_000, $result->metadata['total_paid']);
+    }
+
+    public function test_three_products_and_additional_products_remain_bounded_in_presentation(): void
+    {
+        $items = array_map(static fn (int $index): array => [
+            'product_name' => 'Product '.$index,
+            'quantity' => 1,
+            'unit_price' => 1000 * $index,
+            'subtotal' => 1000 * $index,
+        ], range(1, 5));
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present(
+            $this->order(
+                customerTelegramId: 8581234505,
+                invoiceNumber: 'INV-THREE-ROWS',
+                items: $items,
+                payment: ['method' => 'qris', 'provider_fee' => 0],
+            ),
+        );
+
+        $this->assertCount(5, $presentation->items);
+        $this->assertCount(3, $presentation->displayItems());
+        $this->assertSame(2, $presentation->additionalProductCount());
+        $this->assertSame(15_000, $presentation->subtotal());
+        $this->assertSame(15_000, $presentation->totalPaid);
+
+        $result = app(PaidInvoiceRenderer::class)->render($presentation);
+
+        $this->assertSame(2, $result->metadata['additional_product_count']);
+        $this->assertLessThanOrEqual(PaidInvoiceRenderer::MAX_BYTES, strlen($result->bytes));
+    }
+
+    public function test_wrapped_product_name_stays_inside_its_invoice_table_row(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 1241234504,
+            invoiceNumber: 'REAL-WRAPPED-PRODUCT',
+            items: [[
+                'product_name' => 'Real Smoke Manual Account 20260822-163621',
+                'quantity' => 1,
+                'unit_price' => 150000,
+                'subtotal' => 150000,
+            ]],
+            payment: [
+                'method' => 'manual',
+                'provider_fee' => 0,
+                'provider_total_payment' => null,
+                'paid_at' => CarbonImmutable::parse('2026-08-22 08:36:21 UTC'),
+            ],
+        );
+
+        $result = $this->renderOrder($order);
+        $image = imagecreatefromstring($result->bytes);
+        $this->assertInstanceOf(\GdImage::class, $image);
+
+        $nameBottom = null;
+        $rowLine = null;
+        for ($y = 360; $y <= 450; $y++) {
+            for ($x = 48; $x <= 330; $x++) {
+                $color = imagecolorat($image, $x, $y);
+                if (((($color >> 16) & 0xFF) === 11)
+                    && ((($color >> 8) & 0xFF) === 18)
+                    && (($color & 0xFF) === 32)) {
+                    $nameBottom = $y;
+                }
+            }
+
+            for ($x = 48; $x <= 672 && $rowLine === null; $x++) {
+                $color = imagecolorat($image, $x, $y);
+                if (((($color >> 16) & 0xFF) === 169)
+                    && ((($color >> 8) & 0xFF) === 180)
+                    && (($color & 0xFF) === 196)) {
+                    $rowLine = $y;
+                }
+            }
+        }
+
+        $this->assertNotNull($nameBottom);
+        $this->assertNotNull($rowLine);
+        $this->assertLessThan($rowLine, $nameBottom + 4, 'Wrapped Product name overlaps the next invoice row.');
+    }
+
+    public function test_telegram_thumbnail_uses_a_square_canvas(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 1241234504,
+            invoiceNumber: 'REAL-SQUARE-THUMBNAIL',
+            items: [[
+                'product_name' => 'Square Telegram Invoice',
+                'quantity' => 1,
+                'unit_price' => 150000,
+                'subtotal' => 150000,
+            ]],
+            payment: [
+                'method' => 'manual',
+                'provider_fee' => 0,
+                'provider_total_payment' => null,
+                'paid_at' => CarbonImmutable::parse('2026-08-22 08:36:21 UTC'),
+            ],
+        );
+
+        $result = $this->renderOrder($order);
+        $decoded = getimagesizefromstring($result->bytes);
+
+        $this->assertSame(720, $decoded[0] ?? null);
+        $this->assertSame(720, $decoded[1] ?? null);
+    }
+
+    public function test_product_rows_use_an_open_invoice_table_instead_of_filled_cards(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 1241234504,
+            invoiceNumber: 'REAL-OPEN-TABLE',
+            items: [[
+                'product_name' => 'Open Invoice Product Row',
+                'quantity' => 1,
+                'unit_price' => 150000,
+                'subtotal' => 150000,
+            ]],
+            payment: [
+                'method' => 'manual',
+                'provider_fee' => 0,
+                'provider_total_payment' => null,
+                'paid_at' => CarbonImmutable::parse('2026-08-22 08:36:21 UTC'),
+            ],
+        );
+
+        $result = $this->renderOrder($order);
+        $image = imagecreatefromstring($result->bytes);
+        $this->assertInstanceOf(\GdImage::class, $image);
+
+        $filledPixels = 0;
+        for ($y = 240; $y <= 500; $y++) {
+            for ($x = 40; $x <= 680; $x++) {
+                $color = imagecolorat($image, $x, $y);
+                if (((($color >> 16) & 0xFF) === 226)
+                    && ((($color >> 8) & 0xFF) === 239)
+                    && (($color & 0xFF) === 255)) {
+                    $filledPixels++;
+                }
+            }
+        }
+
+        $this->assertLessThan(3000, $filledPixels, 'Product detail still renders as a thick filled card.');
+    }
+
+    public function test_paid_stamp_is_on_the_right_edge_of_the_total_block(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 1241234504,
+            invoiceNumber: 'REAL-RIGHT-STAMP',
+            items: [[
+                'product_name' => 'Right Stamp Telegram Invoice',
+                'quantity' => 1,
+                'unit_price' => 150000,
+                'subtotal' => 150000,
+            ]],
+            payment: [
+                'method' => 'manual',
+                'provider_fee' => 0,
+                'provider_total_payment' => null,
+                'paid_at' => CarbonImmutable::parse('2026-08-22 08:36:21 UTC'),
+            ],
+        );
+
+        $result = $this->renderOrder($order);
+
+        $this->assertInvoiceRedInkPresentInRegion(
+            $result->bytes,
+            520,
+            430,
+            680,
+            680,
+            'right-aligned PAID stamp',
+        );
     }
 
     public function test_it_selects_the_earliest_paid_payment_deterministically(): void
@@ -85,7 +316,7 @@ class PaidInvoiceRendererTest extends TestCase
         ]);
         $order->setRelation('payments', new Collection([$late, $order->payments->first()]));
 
-        $metadata = app(PaidInvoiceRenderer::class)->render($order)->metadata;
+        $metadata = $this->renderOrder($order)->metadata;
 
         $this->assertSame('manual', $metadata['payment_method']);
         $this->assertSame(999, $metadata['provider_fee']);
@@ -119,9 +350,9 @@ class PaidInvoiceRendererTest extends TestCase
             ],
         );
 
-        $metadata = app(PaidInvoiceRenderer::class)->render($order)->metadata;
+        $metadata = $this->renderOrder($order)->metadata;
 
-        $this->assertSame('ID pembeli', $metadata['buyer_telegram_id']);
+        $this->assertSame('Buyer ID unavailable', $metadata['buyer_telegram_id']);
         $this->assertCount(5, $metadata['items']);
         $this->assertCount(3, $metadata['display_items']);
         $this->assertSame(2, $metadata['additional_product_count']);
@@ -173,7 +404,7 @@ class PaidInvoiceRendererTest extends TestCase
                 ],
             );
 
-            $result = app(PaidInvoiceRenderer::class)->render($order);
+            $result = $this->renderOrder($order);
             $decoded = getimagesizefromstring($result->bytes);
 
             $this->assertSame('image/png', $decoded['mime'] ?? null, $case);
@@ -181,10 +412,12 @@ class PaidInvoiceRendererTest extends TestCase
             $this->assertSame(PaidInvoiceRenderer::HEIGHT, $decoded[1] ?? null, $case);
             $this->assertLessThanOrEqual(PaidInvoiceRenderer::MAX_BYTES, strlen($result->bytes), $case);
             $this->assertSame($items[0]['product_name'], $result->metadata['items'][0]['product_name'], $case);
-            $this->assertInvoiceColorPresent($result->bytes, [24, 109, 214], 600, $case.' summary');
-            $this->assertInvoiceColorPresent($result->bytes, [24, 109, 214], 680, $case.' total');
-            $this->assertInvoiceColorPresent($result->bytes, [184, 61, 76], 600, $case.' paid stamp');
-            $this->assertInvoiceColorPresent($result->bytes, [101, 119, 140], 740, $case.' footer');
+            $this->assertInvoiceColorPresent($result->bytes, [0, 92, 255], 240, $case.' product card');
+            $this->assertInvoiceColorPresent($result->bytes, [178, 157, 255], 240, $case.' sticker shadow');
+            $this->assertInvoiceColorPresent($result->bytes, [0, 92, 255], 430, $case.' total');
+            $this->assertInvoiceRedInkPresentInRegion($result->bytes, 520, 430, 680, PaidInvoiceRenderer::HEIGHT - 1, $case.' paid stamp');
+            $this->assertInvoiceColorPresent($result->bytes, [102, 112, 133], 630, $case.' footer');
+            $this->assertTotalAndFooterBandsDoNotOverlap($result->bytes, $case);
         }
     }
 
@@ -219,6 +452,83 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertTrue($found, $label.' was not visible inside the canvas.');
     }
 
+    private function assertInvoiceRedInkPresentInRegion(
+        string $png,
+        int $left,
+        int $top,
+        int $right,
+        int $bottom,
+        string $label,
+    ): void {
+        $image = imagecreatefromstring($png);
+        if (! $image instanceof \GdImage) {
+            $this->fail($label.' could not decode its PNG.');
+        }
+
+        $found = false;
+        try {
+            for ($y = $top; $y <= $bottom && ! $found; $y++) {
+                for ($x = $left; $x <= $right; $x++) {
+                    $color = imagecolorat($image, $x, $y);
+                    $red = (($color >> 16) & 0xFF);
+                    $green = (($color >> 8) & 0xFF);
+                    $blue = ($color & 0xFF);
+                    if ($red >= 180 && $green <= 160 && $blue <= 170 && $red - $green >= 40) {
+                        $found = true;
+
+                        break;
+                    }
+                }
+            }
+        } finally {
+            unset($image);
+        }
+
+        $this->assertTrue($found, $label.' was not visible inside the expected region.');
+    }
+
+    private function assertTotalAndFooterBandsDoNotOverlap(string $png, string $label): void
+    {
+        $image = imagecreatefromstring($png);
+        if (! $image instanceof \GdImage) {
+            $this->fail($label.' could not decode its PNG.');
+        }
+
+        $totalBottom = null;
+        $footerTop = null;
+        try {
+            for ($y = 500; $y <= 660; $y++) {
+                for ($x = 220; $x <= 530; $x++) {
+                    $color = imagecolorat($image, $x, $y);
+                    if (((($color >> 16) & 0xFF) === 0)
+                        && ((($color >> 8) & 0xFF) === 92)
+                        && (($color & 0xFF) === 255)) {
+                        $totalBottom = $y;
+                    }
+                }
+            }
+
+            for ($y = 620; $y < PaidInvoiceRenderer::HEIGHT && $footerTop === null; $y++) {
+                for ($x = 48; $x <= 672; $x++) {
+                    $color = imagecolorat($image, $x, $y);
+                    if (((($color >> 16) & 0xFF) === 169)
+                        && ((($color >> 8) & 0xFF) === 180)
+                        && (($color & 0xFF) === 196)) {
+                        $footerTop = $y;
+
+                        break;
+                    }
+                }
+            }
+        } finally {
+            unset($image);
+        }
+
+        $this->assertNotNull($totalBottom, $label.' total amount band was not found.');
+        $this->assertNotNull($footerTop, $label.' footer separator was not found.');
+        $this->assertLessThan($footerTop, $totalBottom + 8, $label.' total amount overlaps the footer separator.');
+    }
+
     public function test_it_rejects_an_order_without_a_canonical_paid_payment(): void
     {
         $order = $this->order(
@@ -232,7 +542,14 @@ class PaidInvoiceRendererTest extends TestCase
         );
 
         $this->expectException(InvalidArgumentException::class);
-        app(PaidInvoiceRenderer::class)->render($order);
+        app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+    }
+
+    private function renderOrder(Order $order): PaidInvoiceRenderResult
+    {
+        return app(PaidInvoiceRenderer::class)->render(
+            app(PaidInvoiceOrderPresentationAdapter::class)->present($order),
+        );
     }
 
     /**

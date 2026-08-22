@@ -18,7 +18,11 @@ This plan captures the domain decisions and implementation slices for adding a S
 - Sales Proof Posts are triggered after payment is `paid` and the inventory sale has been recorded.
 - Every paid order from every payment method creates at most one Sales Proof Post.
 - Sales Proof Post failure never rolls back or blocks the order. Failed posts retry automatically up to three times, then can be retried manually from the order detail page.
-- The public Sales Proof Post hides prices and order totals.
+- The public Sales Proof Post is one English `sendPhoto` delivery: the shared
+  public-safe invoice image plus an English caption with masked buyer ID,
+  invoice/order ID, item summary, payment method, WIB completion time,
+  quantity, subtotal, amount paid, successful-order number, thanks, and the
+  `🛒 Shop Now` action.
 - Product category lists and search results show active products even when unavailable, using `✅` for available products and `❌` for unavailable products.
 - Unavailable products can be opened, but cannot be bought or added to cart.
 - Checkout must revalidate stock and reject cart items that became unavailable.
@@ -29,12 +33,15 @@ Do not implement this as a god file. In particular, avoid growing the Telegram r
 
 Recommended seams:
 
-- **Telegram Bot API client**: low-level wrapper for `sendMessage`, `getChat`, `getChatMember`, and `deleteMessage`. It should return Telegram payloads where callers need `message_id`.
+- **Telegram Bot API client**: low-level wrapper for `sendMessage`, `sendPhoto`,
+  `getChat`, `getChatMember`, and `deleteMessage`. It should return Telegram
+  payloads where callers need `message_id`.
 - **Store Channel settings**: database-backed source of truth for channel username/link, resolved channel ID, toggles, setup status, and last test result.
 - **Store Channel setup verifier**: resolves public channel username/link, checks whether the bot can access/post, sends an actual test message, and records the result.
 - **Community Gate**: checks current channel membership, blocks store flows, reuses one active join prompt per customer, deletes the prompt after successful verification, and releases the customer into the existing `/start` welcome flow.
 - **Sales Proof publisher**: idempotently publishes public proof posts after paid-order events and owns retry state.
-- **Sales Proof formatter**: pure formatting for buyer masking, product summary, total successful proof count, and CTA button.
+- **Paid invoice presentation**: adapts a real paid Order or an in-memory synthetic Product presentation into the one shared public-safe invoice renderer.
+- **Sales Proof formatter**: pure English formatting over the immutable invoice presentation, with bounded Product names and a 1,024-character caption limit.
 - **Product availability presenter**: renders `✅`/`❌` rows and unavailable detail state separately from cart/checkout stock validation.
 
 ## Data model
@@ -101,18 +108,17 @@ Per-customer prompt reuse/deletion state:
 1. Payment becomes `paid` and inventory sale has been recorded.
 2. A lightweight job runs after the database commit.
 3. The job claims the order in Sales Proof Post storage. If the order is already sent, it stops.
-4. The formatter builds a plain-text post with:
-   - “Pesanan Berhasil Diproses!”,
-   - primary product,
-   - `+ N produk lainnya` for multi-product orders,
-   - masked buyer such as `Ad***`,
-   - quantity summary,
-   - thank-you copy,
-   - count of successfully sent Sales Proof Posts,
-   - CTA deep link to `https://t.me/lhiestore_bot?start=from_channel`.
-5. The bot sends the post to the Store Channel.
+4. The real publisher adapts the paid Order to the shared public-safe invoice presentation. The formatter builds a bounded English caption with:
+   - `ORDER PAYMENT CONFIRMED`,
+   - masked Buyer ID and full invoice/order ID,
+   - one item line or bounded multi-item list,
+   - `Paid via` and English WIB completion time,
+   - quantity, subtotal, amount paid, and successful-order number,
+   - `Thank you for choosing Lhie Store.`,
+5. The bot sends one `sendPhoto` request with the shared invoice PNG, caption, and `🛒 Shop Now` action.
 6. Success stores Telegram `message_id` and marks the post `sent`.
-7. Failure increments attempts, schedules retry, and eventually marks the post `failed` without affecting the order.
+7. Definite failure increments attempts and remains retryable; ambiguous delivery becomes `unknown` and is never automatically resent. Finalization synchronizes the SalesProofPost projection without affecting the paid Order.
+
 
 ### Product availability
 

@@ -23,6 +23,7 @@ use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
@@ -329,7 +330,9 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     ): void {
         $order = $this->paidOrderWithAmountMismatch($currency, $orderTotal, $paymentAmount);
 
-        $invoice = app(PaidInvoiceRenderer::class)->render($order);
+        $invoice = app(PaidInvoiceRenderer::class)->render(
+            app(PaidInvoiceOrderPresentationAdapter::class)->present($order),
+        );
         $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'][0];
 
         $this->assertSame($currency, $invoice->metadata['currency']);
@@ -350,7 +353,9 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $order->payments()->sole()->forceFill(['provider_total_payment' => 13_579])->save();
         $order->refresh()->load(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
 
-        $invoice = app(PaidInvoiceRenderer::class)->render($order);
+        $invoice = app(PaidInvoiceRenderer::class)->render(
+            app(PaidInvoiceOrderPresentationAdapter::class)->present($order),
+        );
         $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'][0];
 
         $this->assertSame(13_579, $invoice->metadata['total_paid']);
@@ -909,6 +914,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(TelegramMessageChunker::class),
             app(TelegramSupportContact::class),
             app(PaidInvoiceRenderer::class),
+            app(PaidInvoiceOrderPresentationAdapter::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('deterministic invoice image failure'));
@@ -956,6 +962,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(TelegramMessageChunker::class),
             app(TelegramSupportContact::class),
             app(PaidInvoiceRenderer::class),
+            app(PaidInvoiceOrderPresentationAdapter::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('Telegram paid invoice rendering failed before send.'));

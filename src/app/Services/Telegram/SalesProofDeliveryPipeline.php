@@ -10,6 +10,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Services\InventoryLedger;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Storefront\StorefrontUrl;
 use InvalidArgumentException;
@@ -30,6 +31,7 @@ final class SalesProofDeliveryPipeline
         private readonly InventoryLedger $inventory,
         private readonly StorefrontUrl $urls,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
+        private readonly PaidInvoiceOrderPresentationAdapter $invoicePresentation,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect): void
@@ -70,20 +72,26 @@ final class SalesProofDeliveryPipeline
             }
 
             if ($this->isPhotoEffect($claimed)) {
-                $invoice = $this->invoiceRenderer->render($order);
+                $presentation = $this->invoicePresentation->present($order);
+                $invoice = $this->invoiceRenderer->render($presentation);
                 $postNumber = $this->numbering->reserveNextNumber();
-                $response = $this->bot->sendPhoto(
-                    (string) $claimed->telegram_chat_id,
-                    $invoice->bytes,
-                    $invoice->filename,
-                    $this->formatter->format($order, $postNumber, $invoice->metadata),
-                    [
-                        'inline_keyboard' => [[[
-                            'text' => '🛒 Shop Now',
-                            'url' => $this->salesProofShoppingButtonUrl($order),
-                        ]]],
-                    ],
-                );
+
+                try {
+                    $response = $this->bot->sendPhoto(
+                        (string) $claimed->telegram_chat_id,
+                        $invoice->bytes,
+                        $invoice->filename,
+                        $this->formatter->format($presentation, $postNumber),
+                        [
+                            'inline_keyboard' => [[[
+                                'text' => '🛒 Shop Now',
+                                'url' => $this->salesProofShoppingButtonUrl($order),
+                            ]]],
+                        ],
+                    );
+                } finally {
+                    unset($invoice, $presentation);
+                }
             } else {
                 $postNumber = $this->numbering->reserveNextNumber();
                 $response = $this->bot->sendMessage(

@@ -12,6 +12,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 
 class TelegramReceiptNotifier
@@ -27,6 +28,7 @@ class TelegramReceiptNotifier
         private TelegramMessageChunker $messageChunker,
         private TelegramSupportContact $supportContact,
         private PaidInvoiceRenderer $invoiceRenderer,
+        private PaidInvoiceOrderPresentationAdapter $invoicePresentation,
     ) {}
 
     /**
@@ -220,7 +222,8 @@ class TelegramReceiptNotifier
     public function renderInvoiceUnit(Order $order): TelegramPhotoUnit
     {
         try {
-            $result = $this->invoiceRenderer->render($order);
+            $presentation = $this->invoicePresentation->present($order);
+            $result = $this->invoiceRenderer->render($presentation);
         } catch (\Throwable $exception) {
             throw new TelegramOutboundPreSendException(
                 'Telegram paid invoice rendering failed before send.',

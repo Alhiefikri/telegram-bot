@@ -2,79 +2,50 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\PaymentStatus;
 use App\Models\Order;
-use App\Models\Payment;
 use App\Models\SalesProofPost;
-use App\Services\PaymentReceiptReport;
-use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
-use Illuminate\Support\Collection;
+use App\Services\PaidInvoice\PaidInvoicePresentation;
 
 class SalesProofPostFormatter
 {
+    public const MAX_CAPTION_LENGTH = 1024;
+
     public function __construct(
         private readonly SalesProofPostNumbering $numbering,
-        private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
     /**
-     * Format the public Store Channel caption for a photo-capable Sales Proof.
-     *
-     * @param  array<string, mixed>|null  $invoiceMetadata
+     * Format the public English Store Channel caption for a photo-capable
+     * Sales Proof. The input is already a public-safe immutable presentation,
+     * so fake publication never needs a persisted Order.
      */
-    public function format(Order $order, ?int $successfulPostNumber = null, ?array $invoiceMetadata = null): string
+    public function format(PaidInvoicePresentation $presentation, ?int $successfulPostNumber = null): string
     {
-        $order->loadMissing(['customer', 'orderItems', 'payments']);
-        $successfulPostNumber ??= $this->nextSuccessfulPostNumber($order);
-        $metadata = $invoiceMetadata ?? $this->fallbackMetadata($order);
-        $items = $this->captionItems($order, $metadata);
-        $payment = $this->canonicalPaidPayment($order);
+        $successfulPostNumber ??= $this->numbering->nextNumber();
+        $items = $presentation->items;
         $quantity = array_sum(array_map(
             static fn (array $item): int => max(0, (int) ($item['quantity'] ?? 0)),
             $items,
         ));
-        $subtotal = array_key_exists('subtotal', $metadata)
-            ? max(0, (int) $metadata['subtotal'])
-            : array_sum(array_map(
-                static fn (array $item): int => max(0, (int) ($item['subtotal'] ?? 0)),
-                $items,
-            ));
-        $currency = $this->metadataString($metadata, 'currency', $this->currency($payment, $order));
-        $totalPaid = array_key_exists('total_paid', $metadata)
-            ? max(0, (int) $metadata['total_paid'])
-            : max(0, (int) ($payment?->provider_total_payment ?? $order->total_amount));
-        $orderId = $this->metadataString(
-            $metadata,
-            'order_id',
-            trim((string) ($order->invoice_number ?: $order->getKey())),
-        );
-        $buyerId = $this->metadataString(
-            $metadata,
-            'buyer_telegram_id',
-            $this->maskBuyerTelegramId($order),
-        );
-        $paidVia = $this->metadataString($metadata, 'payment_method', $this->paymentMethod($payment));
-        $itemLines = $this->itemSummaryLines($items);
 
         $lines = [
             'ORDER PAYMENT CONFIRMED',
             '',
-            'Buyer ID: '.$buyerId,
-            'Order ID: '.$orderId,
-            ...$itemLines,
-            'Paid via: '.$paidVia,
-            'Completed: '.$this->englishPaidAt($payment),
+            'Buyer ID: '.$presentation->buyerIdentifier,
+            'Order ID: '.$presentation->invoiceId,
+            ...$this->itemSummaryLines($items),
+            'Paid via: '.$presentation->paymentMethod,
+            'Completed: '.$presentation->paidAtWib(),
             'Quantity: '.$quantity,
-            'Subtotal: '.$this->money($subtotal, $currency),
-            'Amount paid: '.$this->money($totalPaid, $currency),
+            'Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
+            'Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
             'Successful orders: #'.$successfulPostNumber,
             '',
             '━━━━━━━━━━━━━━',
             'Thank you for choosing Lhie Store.',
         ];
 
-        return implode("\n", $lines);
+        return $this->boundedCaption($lines);
     }
 
     /**
@@ -94,30 +65,6 @@ class SalesProofPostFormatter
             (int) $order->orderItems->sum('quantity'),
             $successfulPostNumber,
         );
-    }
-
-    public function formatFake(string $buyerMask, string $productName, int $quantity, int $successfulPostNumber): string
-    {
-        return $this->formatLegacyMessage($buyerMask, $productName, $quantity, $successfulPostNumber);
-    }
-
-    /**
-     * @return list<array{product_name: string, quantity: int, unit_price?: int, subtotal?: int}>
-     */
-    private function captionItems(Order $order, array $metadata): array
-    {
-        $items = $metadata['items'] ?? null;
-        if (! is_array($items)) {
-            $items = $order->orderItems
-                ->map(static fn ($item): array => [
-                    'product_name' => (string) $item->product_name,
-                    'quantity' => max(0, (int) $item->quantity),
-                    'subtotal' => max(0, (int) $item->subtotal),
-                ])
-                ->all();
-        }
-
-        return array_values(array_filter($items, static fn ($item): bool => is_array($item)));
     }
 
     /**
@@ -162,46 +109,11 @@ class SalesProofPostFormatter
         return $name.' × '.max(0, (int) ($item['quantity'] ?? 0));
     }
 
-    /** @return array<string, mixed> */
-    private function fallbackMetadata(Order $order): array
-    {
-        $payment = $this->canonicalPaidPayment($order);
-        $items = $this->captionItems($order, []);
-
-        return [
-            'order_id' => trim((string) ($order->invoice_number ?: $order->getKey())),
-            'buyer_telegram_id' => $this->maskBuyerTelegramId($order),
-            'payment_method' => $this->paymentMethod($payment),
-            'currency' => $this->currency($payment, $order),
-            'items' => $items,
-            'subtotal' => array_sum(array_map(
-                static fn (array $item): int => max(0, (int) ($item['subtotal'] ?? 0)),
-                $items,
-            )),
-            'total_paid' => max(0, (int) ($payment?->provider_total_payment ?? $order->total_amount)),
-        ];
-    }
-
     private function nextSuccessfulPostNumber(Order $order): int
     {
         return $order->salesProofPost?->status === SalesProofPost::STATUS_SENT
             ? $this->numbering->sentCount()
             : $this->numbering->nextNumber();
-    }
-
-    private function canonicalPaidPayment(Order $order): ?Payment
-    {
-        $payments = $order->payments;
-        if (! $payments instanceof Collection) {
-            return null;
-        }
-
-        return $this->receiptReport->canonicalFromPayments(
-            $payments->filter(fn ($payment): bool => $payment instanceof Payment
-                && (string) $payment->order_id === (string) $order->getKey()
-                && $payment->status === PaymentStatus::Paid
-                && $payment->paid_at !== null),
-        )->first();
     }
 
     private function maskLegacyBuyer(Order $order): string
@@ -212,58 +124,20 @@ class SalesProofPostFormatter
         return mb_substr($name, 0, 2).'***';
     }
 
-    private function maskBuyerTelegramId(Order $order): string
+    /** @param list<string> $lines */
+    private function boundedCaption(array $lines): string
     {
-        $raw = $order->customer?->getRawOriginal('telegram_id');
-        $identifier = is_scalar($raw)
-            ? trim((string) $raw)
-            : trim((string) ($order->customer?->telegram_id ?? ''));
-
-        if (! preg_match('/^\d{6,}$/', $identifier)) {
-            return 'ID pembeli';
+        $caption = implode("\n", $lines);
+        if (mb_strlen($caption, 'UTF-8') <= self::MAX_CAPTION_LENGTH) {
+            return $caption;
         }
 
-        return substr($identifier, 0, 3).'*****'.substr($identifier, -2);
-    }
+        $tail = implode("\n", array_slice($lines, -4));
+        $head = implode("\n", array_slice($lines, 0, -4));
+        $budget = max(1, self::MAX_CAPTION_LENGTH - mb_strlen($tail, 'UTF-8') - 2);
+        $head = rtrim(mb_substr($head, 0, max(1, $budget - 1), 'UTF-8')).'…';
 
-    private function paymentMethod(?Payment $payment): string
-    {
-        $method = strtolower(trim((string) $payment?->method));
-        $label = trim((string) $payment?->payment_method_label);
-        $label = match ($method) {
-            'api_qris', 'qris' => 'QRIS',
-            'binance_pay_id' => 'Binance Pay',
-            'hosted' => 'Pakasir',
-            default => $label !== '' ? $label : $method,
-        };
-
-        return $this->cleanText($label !== '' ? $label : 'Unknown');
-    }
-
-    private function currency(?Payment $payment, Order $order): string
-    {
-        $currency = trim((string) ($payment?->currency ?: $order->currency ?: 'IDR'));
-
-        return strtoupper($currency !== '' ? $currency : 'IDR');
-    }
-
-    private function englishPaidAt(?Payment $payment): string
-    {
-        $value = $payment?->paid_at;
-        if ($value === null) {
-            return 'Unknown';
-        }
-
-        try {
-            $paidAt = ($value instanceof CarbonInterface
-                ? CarbonImmutable::instance($value)
-                : CarbonImmutable::parse($value)
-            )->setTimezone('Asia/Jakarta');
-
-            return $paidAt->format('d F Y, H:i').' WIB';
-        } catch (\Throwable) {
-            return 'Unknown';
-        }
+        return $head."\n\n".$tail;
     }
 
     private function money(int $amount, string $currency): string
@@ -277,18 +151,6 @@ class SalesProofPostFormatter
         $formatted = number_format($amount, 0, ',', '.');
 
         return $currency === 'IDR' ? 'Rp '.$formatted : $currency.' '.$formatted;
-    }
-
-    private function metadataString(array $metadata, string $key, string $fallback): string
-    {
-        $value = $metadata[$key] ?? null;
-        if (! is_scalar($value)) {
-            return $fallback;
-        }
-
-        $value = $this->cleanText((string) $value);
-
-        return $value !== '' ? $value : $fallback;
     }
 
     private function cleanText(string $value): string

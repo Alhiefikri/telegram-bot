@@ -280,7 +280,7 @@ class AdminStoreChannelTest extends TestCase
         ]);
 
         Http::fake([
-            'https://api.telegram.org/botbot-token/sendMessage' => Http::response([
+            'https://api.telegram.org/botbot-token/sendPhoto' => Http::response([
                 'ok' => true,
                 'result' => ['message_id' => 901],
             ]),
@@ -292,17 +292,28 @@ class AdminStoreChannelTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function (Request $request) use ($selectedProduct, $otherActiveProduct): bool {
-            $text = (string) ($request['text'] ?? '');
-            $replyMarkup = $request['reply_markup'] ?? [];
+            $caption = (string) $this->multipartField($request, 'caption');
+            $photo = (string) $this->multipartField($request, 'photo');
+            $replyMarkup = json_decode((string) $this->multipartField($request, 'reply_markup'), true);
+            $dimensions = getimagesizefromstring($photo);
+            $amount = number_format((int) $selectedProduct->price_amount, 0, ',', '.');
 
-            return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
-                && $request['chat_id'] === '-100123'
-                && str_contains($text, 'SUCCESSFUL PURCHASE')
-                && preg_match('/Buyer: [A-Za-z0-9_]{2}\*\*\*/', $text) === 1
-                && str_contains($text, $selectedProduct->name)
-                && ! str_contains($text, $otherActiveProduct->name)
-                && str_contains($text, 'Quantity: 1x')
-                && str_contains($text, 'Successful orders: #1')
+            return $request->url() === 'https://api.telegram.org/botbot-token/sendPhoto'
+                && $this->multipartField($request, 'chat_id') === '-100123'
+                && ($dimensions['mime'] ?? null) === 'image/png'
+                && ($dimensions[0] ?? null) === 720
+                && ($dimensions[1] ?? null) === 720
+                && str_contains($caption, 'ORDER PAYMENT CONFIRMED')
+                && str_contains($caption, 'Buyer ID: FAKE***')
+                && preg_match('/Order ID: FAKE-[A-Z0-9_-]+/', $caption) === 1
+                && str_contains($caption, $selectedProduct->name.' × 1')
+                && ! str_contains($caption, $otherActiveProduct->name)
+                && str_contains($caption, 'Paid via: QRIS')
+                && str_contains($caption, 'Subtotal: Rp '.$amount)
+                && str_contains($caption, 'Amount paid: Rp '.$amount)
+                && str_contains($caption, 'Successful orders: #1')
+                && str_contains($caption, 'Thank you for choosing Lhie Store.')
+                && mb_strlen($caption, 'UTF-8') <= 1024
                 && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Shop Now'
                 && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=product_'.$selectedProduct->id;
         });
@@ -319,6 +330,42 @@ class AdminStoreChannelTest extends TestCase
         $this->assertSame(0, $stats['paid_orders']);
         $this->assertSame(0, $stats['sold_products']);
         $this->assertSame(0, $stats['earning']);
+    }
+
+    public function test_fake_sales_proof_rejects_missing_message_id_with_safe_admin_feedback(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        $product = Product::factory()->create([
+            'name' => 'Invalid Response Voucher',
+            'is_active' => true,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+            'sales_proof_enabled' => true,
+        ]);
+        Http::fake([
+            'https://api.telegram.org/botbot-token/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => [],
+            ]),
+        ]);
+
+        $this->post(route('admin.store-channel.fake-sales-proof'), [
+            'product_id' => $product->id,
+        ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof')
+            ->assertSessionHas('error');
+
+        $feedback = (string) session('error');
+        $this->assertStringContainsString('Gagal mengirim info pembelian fake', $feedback);
+        $this->assertStringNotContainsString('buyer@example.test', $feedback);
+        $this->assertSame(4, $product->refresh()->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertNoRealOrderPersistence();
+        $this->assertNoFakeSalesProofPosts();
     }
 
     public function test_fake_sales_proof_cooldown_labels_render_in_configured_app_timezone(): void
@@ -343,7 +390,7 @@ class AdminStoreChannelTest extends TestCase
                 'last_test_success' => true,
                 'sales_proof_enabled' => true,
             ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 905]])]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 905]])]);
 
             $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
 
@@ -386,7 +433,7 @@ class AdminStoreChannelTest extends TestCase
                 'last_test_success' => true,
                 'sales_proof_enabled' => true,
             ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 902]])]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 902]])]);
 
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
@@ -414,7 +461,7 @@ class AdminStoreChannelTest extends TestCase
                 'last_test_success' => true,
                 'sales_proof_enabled' => true,
             ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 903]])]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 903]])]);
 
             $this->actingAs(User::factory()->create(['role' => $role]))
                 ->post(route('admin.store-channel.fake-sales-proof'), [
@@ -444,7 +491,7 @@ class AdminStoreChannelTest extends TestCase
                 'last_test_success' => true,
                 'sales_proof_enabled' => true,
             ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 904]])]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 904]])]);
 
             $this->post(route('admin.store-channel.fake-sales-proof'), [
                 'product_id' => $product->id,
@@ -455,16 +502,19 @@ class AdminStoreChannelTest extends TestCase
             ])->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-fake-sales-proof');
 
             $matchingSends = Http::recorded(function (Request $request) use ($product): bool {
-                $text = (string) ($request['text'] ?? '');
+                $caption = (string) $this->multipartField($request, 'caption');
 
-                return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
-                    && $request['chat_id'] === '-100123'
-                    && str_contains($text, 'SUCCESSFUL PURCHASE')
-                    && str_contains($text, $product->name);
+                return $request->url() === 'https://api.telegram.org/botbot-token/sendPhoto'
+                    && $this->multipartField($request, 'chat_id') === '-100123'
+                    && str_contains($caption, 'ORDER PAYMENT CONFIRMED')
+                    && str_contains($caption, $product->name.' × 1');
             });
 
             $this->assertCount(2, $matchingSends);
-            preg_match_all('/Successful orders: #(\d+)/', implode("\n", $matchingSends->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))->all()), $orderNumberMatches);
+            $captions = $matchingSends
+                ->map(fn (array $record): string => (string) $this->multipartField($record[0], 'caption'))
+                ->implode("\n");
+            preg_match_all('/Successful orders: #(\d+)/', $captions, $orderNumberMatches);
             $this->assertSame(['1', '2'], $orderNumberMatches[1]);
             $this->assertSame(4, $product->refresh()->stock);
             $this->assertSame(0, $product->reserved_stock);
@@ -490,24 +540,25 @@ class AdminStoreChannelTest extends TestCase
                 'last_test_success' => true,
                 'sales_proof_enabled' => true,
             ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 906]])]);
+            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 906]])]);
 
             $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
 
             Carbon::setTestNow($now->copy()->addHour());
 
-            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
-
-            Http::assertSentCount(1);
             Http::assertSent(function (Request $request) use ($availableProduct, $inactiveProduct, $soldOutProduct): bool {
-                $text = (string) ($request['text'] ?? '');
+                $caption = (string) $this->multipartField($request, 'caption');
+                $photo = (string) $this->multipartField($request, 'photo');
+                $dimensions = getimagesizefromstring($photo);
 
-                return $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
-                    && $request['chat_id'] === '-100123'
-                    && str_contains($text, 'SUCCESSFUL PURCHASE')
-                    && str_contains($text, $availableProduct->name)
-                    && ! str_contains($text, $inactiveProduct->name)
-                    && ! str_contains($text, $soldOutProduct->name);
+                return $request->url() === 'https://api.telegram.org/botbot-token/sendPhoto'
+                    && $this->multipartField($request, 'chat_id') === '-100123'
+                    && ($dimensions['mime'] ?? null) === 'image/png'
+                    && str_contains($caption, 'ORDER PAYMENT CONFIRMED')
+                    && str_contains($caption, $availableProduct->name.' × 1')
+                    && ! str_contains($caption, $inactiveProduct->name)
+                    && ! str_contains($caption, $soldOutProduct->name)
+                    && mb_strlen($caption, 'UTF-8') <= 1024;
             });
             $this->assertSame(4, $availableProduct->refresh()->stock);
             $this->assertSame(0, $availableProduct->reserved_stock);
@@ -546,5 +597,12 @@ class AdminStoreChannelTest extends TestCase
         if (Schema::hasTable('fake_sales_proof_posts')) {
             $this->assertDatabaseCount('fake_sales_proof_posts', 0);
         }
+    }
+
+    private function multipartField(Request $request, string $name): mixed
+    {
+        $field = collect($request->data())->firstWhere('name', $name);
+
+        return is_array($field) ? ($field['contents'] ?? null) : null;
     }
 }

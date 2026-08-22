@@ -88,6 +88,15 @@ Status payment canonical: `pending`, `paid`, `failed`, `expired`, `refunded`.
 ### Store Channel dan Sales Proof Post
 
 `StoreChannelSetting` menyimpan konfigurasi Store Channel, Community Gate, dan Sales Proof Post. `SalesProofPost` dipublish setelah payment paid dan inventory sale tercatat; publikasi dilakukan job sehingga OrderLifecycle tidak mengirim pesan Telegram langsung.
+The shared public-safe invoice image is owned by
+[`PaidInvoiceRenderer`](../../src/app/Services/PaidInvoice/PaidInvoiceRenderer.php)
+and accepts only the immutable
+[`PaidInvoicePresentation`](../../src/app/Services/PaidInvoice/PaidInvoicePresentation.php)
+value. `PaidInvoiceOrderPresentationAdapter` reads paid Order snapshots and the
+canonical paid Payment; `PaidInvoiceSyntheticPresentationAdapter` reads one
+selected available Product in memory for Fake Sales Proof. Buyer receipts and
+real/fake Store Channel posts use the same renderer; fake publication never
+creates an Order, Payment, inventory movement, or durable Sales Proof effect.
 
 ## 3. Ownership aturan bisnis
 

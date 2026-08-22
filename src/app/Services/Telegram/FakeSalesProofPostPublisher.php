@@ -4,11 +4,12 @@ namespace App\Services\Telegram;
 
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
+use App\Services\PaidInvoice\PaidInvoiceSyntheticPresentationAdapter;
 use App\Storefront\StorefrontUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use RuntimeException;
 use Throwable;
 
 class FakeSalesProofPostPublisher
@@ -23,35 +24,14 @@ class FakeSalesProofPostPublisher
 
     private const CACHE_AUTO_INTERVAL_HOURS = 'fake-sales-proof:interval-hours';
 
-    /** @var list<string> */
-    private const BUYER_NAMES = [
-        'Aditya',
-        'Aisyah',
-        'Bima',
-        'Citra',
-        'Daffa',
-        'Dewi',
-        'Dymas',
-        'Fajar',
-        'Farhan',
-        'Gita',
-        'Hafiz',
-        'Intan',
-        'Kevin',
-        'Laras',
-        'Nadia',
-        'Raka',
-        'Rizky',
-        'Salsa',
-        'Tasya',
-        'Yudha',
-    ];
-
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly SalesProofPostFormatter $formatter,
         private readonly SalesProofPostNumbering $numbering,
         private readonly StorefrontUrl $urls,
+        private readonly PaidInvoiceRenderer $invoiceRenderer,
+        private readonly PaidInvoiceSyntheticPresentationAdapter $invoicePresentation,
+        private readonly TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
     /**
@@ -208,14 +188,20 @@ class FakeSalesProofPostPublisher
 
     private function sendFakeSalesProof(int|string $chatId, Product $product): void
     {
-        $response = $this->bot->sendMessage(
-            $chatId,
-            $this->formatter->formatFake($this->randomBuyerMask(), $product->name, 1, $this->fakeOrderNumber()),
-            $this->shoppingButtonMarkup($product),
-        );
-        $messageId = data_get($response, 'result.message_id');
-        if (data_get($response, 'ok') !== true || ! $messageId) {
-            throw new RuntimeException('Telegram sendMessage did not return a successful message id.');
+        $presentation = $this->invoicePresentation->present($product);
+        $invoice = $this->invoiceRenderer->render($presentation);
+
+        try {
+            $response = $this->bot->sendPhoto(
+                $chatId,
+                $invoice->bytes,
+                $invoice->filename,
+                $this->formatter->format($presentation, $this->fakeOrderNumber()),
+                $this->shoppingButtonMarkup($product),
+            );
+            $this->responseValidator->messageIdFromResponse($response, 'Telegram fake Sales Proof');
+        } finally {
+            unset($invoice, $presentation);
         }
     }
 
@@ -301,13 +287,6 @@ class FakeSalesProofPostPublisher
             ])
             ->values()
             ->all();
-    }
-
-    private function randomBuyerMask(): string
-    {
-        $name = self::BUYER_NAMES[array_rand(self::BUYER_NAMES)];
-
-        return mb_substr($name, 0, 2).'***';
     }
 
     private function fakeOrderNumber(): int

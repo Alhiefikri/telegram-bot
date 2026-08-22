@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
@@ -119,6 +120,7 @@ $app->make(ConsoleKernel::class)->bootstrap();
 $definition = $scenarioDefinitions[$scenarioName];
 $order = benchmarkOrder($definition['items'], $scenarioName);
 $renderer = app(PaidInvoiceRenderer::class);
+$presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
 
 $baselinePeakRss = peakRssBytes();
 if ($baselinePeakRss === null) {
@@ -126,7 +128,7 @@ if ($baselinePeakRss === null) {
 }
 
 for ($index = 0; $index < $warmupRuns; $index++) {
-    $warmup = $renderer->render($order);
+    $warmup = $renderer->render($presentation);
     unset($warmup);
 }
 gc_collect_cycles();
@@ -138,7 +140,7 @@ $peakAfterRender = $baselinePeakRss;
 
 for ($index = 0; $index < $runs; $index++) {
     $startedAt = hrtime(true);
-    $result = $renderer->render($order);
+    $result = $renderer->render($presentation);
     $elapsedMs = (hrtime(true) - $startedAt) / 1_000_000;
     $samples[] = round($elapsedMs, 3);
 
