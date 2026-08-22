@@ -1012,7 +1012,14 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create(['telegram_id' => 123456789, 'username' => 'AdamSecret', 'locale' => 'id']);
-        $first = Product::factory()->create(['name' => 'Email Account', 'stock' => 5, 'price_amount' => 12000]);
+        $first = Product::factory()->create([
+            'name' => 'Email Account',
+            'stock' => 5,
+            'price_amount' => 12000,
+            'delivery_note' => 'Buyer-only product note',
+            'usage_guide_title' => 'Buyer-only guide',
+            'usage_guide_url' => 'https://guide.example.test/private',
+        ]);
         $second = Product::factory()->create(['name' => 'Canva Pro', 'stock' => 5, 'price_amount' => 34000]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $first, 1);
@@ -1020,6 +1027,11 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(301, 'cb-manual-proof', 'checkout', chatId: 123456789))->assertOk();
         $order = Order::firstOrFail();
+        ProductStockItem::create([
+            'product_id' => $first->id,
+            'order_item_id' => $order->orderItems()->where('product_id', $first->id)->sole()->id,
+            'secret' => 'buyer@example.test|Buyer-password|Buyer Auth Token|https://otp.example.test/private',
+        ]);
         $this->postTelegramWebhook($this->paymentPhotoUpdate(302, $order->invoice_number, ['username' => 'AdamSecret'], chatId: 123456789))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(303, 'approve-proof', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
@@ -1046,6 +1058,13 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $channelPhotos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
             && (string) $this->telegramRequestField($request, 'chat_id') === '-100123');
         $this->assertCount(1, $channelPhotos);
+        $channelEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+            ->where('source_id', $order->id)
+            ->sole();
+        $this->assertSame('store_channel', $channelEffect->target_type);
+        $this->assertSame('en', $channelEffect->locale);
+        $this->assertSame('sendPhoto', $channelEffect->telegram_method);
         $channelCaption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $channelCaption);
         $this->assertStringContainsString('Buyer ID: 123*****89', $channelCaption);
@@ -1053,6 +1072,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Thank you for choosing Lhie Store.', $channelCaption);
         $this->assertStringNotContainsString('AdamSecret', $channelCaption);
         $this->assertStringNotContainsString('12345', $channelCaption);
+        foreach ([
+            'buyer@example.test',
+            'Buyer-password',
+            'Buyer Auth Token',
+            'https://otp.example.test/private',
+            'Buyer-only product note',
+            'Buyer-only guide',
+            'https://guide.example.test/private',
+        ] as $buyerOnlyValue) {
+            $this->assertStringNotContainsString($buyerOnlyValue, $channelCaption);
+        }
     }
 
     public function test_already_materialized_text_sales_proof_remains_dispatchable_after_photo_cutover(): void

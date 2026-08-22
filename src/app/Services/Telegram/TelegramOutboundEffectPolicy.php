@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
  */
 final class TelegramOutboundEffectPolicy
 {
+    public const RECEIPT_MAX_ATTEMPTS = 3;
     public const SALES_PROOF_MAX_ATTEMPTS = 3;
 
     public const ADMIN_BROADCAST_MAX_ATTEMPTS = 5;
@@ -57,6 +58,7 @@ final class TelegramOutboundEffectPolicy
 
     /** @var array<string, int> */
     private const MAX_ATTEMPTS = [
+        TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::SalesProofPost->value => self::SALES_PROOF_MAX_ATTEMPTS,
         TelegramOutboundEffectType::AdminBroadcastRecipient->value => self::ADMIN_BROADCAST_MAX_ATTEMPTS,
         TelegramOutboundEffectType::StockNotificationRecipient->value => self::STOCK_NOTIFICATION_MAX_ATTEMPTS,
@@ -66,6 +68,7 @@ final class TelegramOutboundEffectPolicy
 
     /** @var array<string, string> */
     private const ATTEMPTS_EXHAUSTED_CODES = [
+        TelegramOutboundEffectType::ReceiptCredentials->value => 'receipt_attempts_exhausted',
         TelegramOutboundEffectType::AdminBroadcastRecipient->value => 'broadcast_recipient_attempts_exhausted',
         TelegramOutboundEffectType::StockNotificationRecipient->value => 'stock_notification_attempts_exhausted',
         TelegramOutboundEffectType::PriceChangeNotificationRecipient->value => 'price_change_recipient_attempts_exhausted',

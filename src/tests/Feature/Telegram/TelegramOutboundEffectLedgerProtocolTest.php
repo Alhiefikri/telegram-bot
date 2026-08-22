@@ -133,6 +133,39 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertFalse($protocol->isTerminalFailure($failed));
     }
 
+    public function test_receipt_retries_are_bounded_to_three_definite_attempts(): void
+    {
+        $effect = TelegramOutboundEffect::factory()->create([
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ]);
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            $claimed = $protocol->claim((string) $effect->id);
+            $this->assertNotNull($claimed);
+
+            $failed = $protocol->finalizeFailed(
+                (string) $effect->id,
+                (string) $claimed->claim_token,
+                new RuntimeException('Telegram response missing message id'),
+            );
+            $this->assertNotNull($failed);
+
+            if ($attempt < 3) {
+                $this->assertSame('telegram_response_missing_message_id', $failed->last_error_code);
+                $this->assertNotNull($failed->next_attempt_at);
+                $effect->fresh()->forceFill(['next_attempt_at' => now()->subSecond()])->save();
+            }
+        }
+
+        $failed = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertSame('receipt_attempts_exhausted', $failed->last_error_code);
+        $this->assertNull($failed->next_attempt_at);
+        $this->assertTrue($protocol->isTerminalFailure($failed));
+        $this->assertFalse($protocol->readyToDispatchQuery(now()->addDay())->whereKey($effect->id)->exists());
+    }
+
     public function test_retryable_query_keeps_scheduled_failures_visible_without_dispatching_them_early(): void
     {
         $effect = TelegramOutboundEffect::factory()->create();
