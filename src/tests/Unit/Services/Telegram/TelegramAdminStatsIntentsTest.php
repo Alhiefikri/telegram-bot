@@ -161,6 +161,30 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertStringContainsString('web_app', $replyMarkup);
     }
 
+    public function test_ngrok_dashboard_uses_regular_url_button_for_local_testing(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        config()->set('app.timezone', 'Asia/Jakarta');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.mini_app_url', 'https://substandard-miguelina-soberingly.ngrok-free.dev/admin');
+
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+        ]);
+
+        $customer = Customer::factory()->create();
+
+        app(TelegramAdminStatsIntents::class)->showStoreGrowth($customer, 'admin-chat-123');
+
+        $sends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $request = $sends->first()[0];
+        $button = $request['reply_markup']['inline_keyboard'][0][0] ?? [];
+
+        $this->assertSame('🌐 Mini App Dashboard', $button['text'] ?? null);
+        $this->assertStringStartsWith('https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=', (string) ($button['url'] ?? ''));
+        $this->assertArrayNotHasKey('web_app', $button);
+    }
+
     public function test_store_growth_output_formats_all_change_indicator_baseline_states_truthfully(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));

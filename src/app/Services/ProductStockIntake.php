@@ -310,13 +310,12 @@ final class ProductStockIntake
 
     public function structuredInputEnabled(): bool
     {
-        return (bool) config('services.credentials.structured_stock_input_enabled', false)
-            && $this->identityBackfillReadiness->isReady();
+        return $this->identityBackfillReadiness->isReady();
     }
 
     /**
-     * The rollout switch is checked before credential-bearing normalization so
-     * a disabled request does not needlessly hold plaintext in the service.
+     * The persisted identity registry readiness is checked before credential-
+     * bearing normalization so an incomplete backfill cannot accept new input.
      */
     public function assertStructuredInputEnabled(): void
     {
@@ -563,6 +562,7 @@ final class ProductStockIntake
 
         return mb_substr($local, 0, 1).'•••@'.$domain;
     }
+
     /**
      * @param  array<string, list<string>>  $errors
      * @param  array<int,array<string,bool>>  $duplicates

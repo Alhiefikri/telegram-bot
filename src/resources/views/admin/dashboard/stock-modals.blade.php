@@ -309,7 +309,7 @@
                         </div>
                         @else
                             <x-admin-dashboard.notice tone="neutral" class="mb-0 text-xs">
-                                Input Akun sementara dinonaktifkan sampai backfill identitas dan proof rollout selesai. Input Cepat tetap tersedia.
+                                Input Akun belum tersedia karena pemeriksaan kesiapan identitas belum selesai. Input Cepat tetap tersedia.
                             </x-admin-dashboard.notice>
                         @endif
                     </x-admin-dashboard.modal-shell>

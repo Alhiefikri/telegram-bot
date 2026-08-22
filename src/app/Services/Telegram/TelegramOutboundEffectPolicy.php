@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Builder;
 final class TelegramOutboundEffectPolicy
 {
     public const RECEIPT_MAX_ATTEMPTS = 3;
+
     public const SALES_PROOF_MAX_ATTEMPTS = 3;
 
     public const ADMIN_BROADCAST_MAX_ATTEMPTS = 5;

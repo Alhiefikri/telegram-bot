@@ -18,7 +18,7 @@ final readonly class AccountInputReceiptPreview
     public function __construct(private TelegramLocale $locale) {}
 
     /**
-     * @param list<StructuredCredentialPayload> $accounts
+     * @param  list<StructuredCredentialPayload>  $accounts
      * @return array<string, mixed>
      */
     public function metadata(Product $product, array $accounts, ?string $buyerLocale): array
@@ -113,6 +113,7 @@ final readonly class AccountInputReceiptPreview
                 $chunks[] = $current;
                 $current = $line;
                 $limit = TelegramReceiptPlan::MESSAGE_TEXT_LIMIT;
+
                 continue;
             }
             $current = $candidate;

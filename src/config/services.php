@@ -5,13 +5,6 @@ return [
         // Separate from APP_KEY so its lifecycle is explicit; keep it stable
         // after registry rows are created without rotating encrypted payloads.
         'identity_fingerprint_key' => env('CREDENTIAL_IDENTITY_FINGERPRINT_KEY'),
-        // Keep the new intake path off until the retained-identity backfill and
-        // controlled non-production proof have completed. Existing structured
-        // rows remain readable/deliverable while this switch is off.
-        'structured_stock_input_enabled' => filter_var(
-            env('STRUCTURED_STOCK_INPUT_ENABLED', false),
-            FILTER_VALIDATE_BOOLEAN,
-        ),
     ],
 
     'binance' => [

@@ -79,10 +79,24 @@ class TelegramAdminStatsIntents
         $this->sendMessageWithDashboard($chatId, $this->formatMessage($stats, $title));
     }
 
+    public function sendDashboardLink(string $chatId): void
+    {
+        $adminDashboardButton = $this->adminDashboardInlineButton('🌐 Buka Dashboard');
+        if ($adminDashboardButton === null) {
+            $this->bot->sendMessage($chatId, 'Dashboard admin belum punya URL HTTPS publik yang valid.');
+
+            return;
+        }
+
+        $this->bot->sendMessage($chatId, 'Buka dashboard admin:', [
+            'inline_keyboard' => [[$adminDashboardButton]],
+        ]);
+    }
+
     private function sendMessageWithDashboard(string $chatId, string $message): void
     {
         $keyboard = [];
-        $adminDashboardButton = $this->adminDashboardWebAppButton('🌐 Mini App Dashboard');
+        $adminDashboardButton = $this->adminDashboardInlineButton('🌐 Mini App Dashboard');
         if ($adminDashboardButton !== null) {
             $keyboard[] = [$adminDashboardButton];
         }

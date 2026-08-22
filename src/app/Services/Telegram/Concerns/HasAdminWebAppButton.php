@@ -18,6 +18,27 @@ trait HasAdminWebAppButton
         ];
     }
 
+    protected function adminDashboardInlineButton(string $text): ?array
+    {
+        $url = $this->adminDashboardWebAppUrl();
+
+        if ($this->isTelegramWebAppUrl($url)) {
+            return [
+                'text' => $text,
+                'web_app' => ['url' => $url],
+            ];
+        }
+
+        if (! $this->isTelegramDashboardUrl($url)) {
+            return null;
+        }
+
+        return [
+            'text' => $text,
+            'url' => $url,
+        ];
+    }
+
     protected function adminDashboardWebAppUrl(): string
     {
         $configuredUrl = config('services.telegram.mini_app_url');
@@ -29,6 +50,16 @@ trait HasAdminWebAppButton
     }
 
     protected function isTelegramWebAppUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        return $this->isTelegramDashboardUrl($url)
+            && ! str_ends_with($host, '.ngrok-free.app')
+            && ! str_ends_with($host, '.ngrok-free.dev');
+    }
+
+    protected function isTelegramDashboardUrl(string $url): bool
     {
         $parts = parse_url($url);
         $host = strtolower((string) ($parts['host'] ?? ''));

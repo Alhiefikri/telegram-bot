@@ -253,7 +253,7 @@ class ProductStockItemManager
      * Existing encrypted legacy overrides are retained until their stock item
      * is retired. Account Input and this editor cannot create or replace one.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      */
     private function assertNoNewTutorialOverride(array $input): void
     {

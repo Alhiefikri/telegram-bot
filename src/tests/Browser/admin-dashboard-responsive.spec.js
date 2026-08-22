@@ -1536,7 +1536,7 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
     "aria-controls",
     "stock-input-account-panel"
   );
-  await expect(dialog.getByRole("tabpanel")).toHaveCount(2);
+  await expect(dialog.locator('[role="tabpanel"]')).toHaveCount(2);
   await accountTab.click();
   await expect(dialog.locator("#account-email-0")).toBeFocused();
   await expect(dialog.getByText("1 / 20 akun")).toBeVisible();
@@ -2169,7 +2169,6 @@ function appEnv() {
     APP_URL: baseUrl ?? "http://127.0.0.1",
     DB_CONNECTION: "sqlite",
     DB_DATABASE: dbPath,
-    STRUCTURED_STOCK_INPUT_ENABLED: "true",
     CREDENTIAL_IDENTITY_FINGERPRINT_KEY: "browser-only-fingerprint-key",
     SESSION_DRIVER: "file",
     CACHE_STORE: "array",

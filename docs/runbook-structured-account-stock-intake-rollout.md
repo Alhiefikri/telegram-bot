@@ -4,15 +4,14 @@ This runbook enables **Input Akun** additively while preserving Input Cepat, exi
 
 ## Safety contract
 
-- Keep `STRUCTURED_STOCK_INPUT_ENABLED=false` during schema/code rollout and backfill.
 - Keep `CREDENTIAL_IDENTITY_FINGERPRINT_KEY` stable after the registry has rows. It is a keyed fingerprint secret, not a value to print or copy into evidence.
-- The backfill command persists a singleton readiness record keyed to a digest of the configured fingerprint key. Account Input requires that record to be `ready`; the environment flag alone is insufficient.
+- The backfill command persists a singleton readiness record keyed to a digest of the configured fingerprint key. Account Input is available only when that persisted readiness is `ready`.
 - Never select decrypted `secret` or `credential_payload` values into command output, logs, screenshots, issue comments, or CI artifacts.
 - Do not delete `credential_identities` during rollback. Its retained fingerprints are the no-reuse history.
 
 ## 1. Additive deployment
 
-Deploy the migrations and application code with Account Input disabled. Run the normal migration and config-refresh procedure:
+Deploy the migrations and application code. Account Input availability is determined by the persisted identity readiness check, not an environment feature switch. Run the normal migration and config-refresh procedure:
 
 ```bash
 cd src
@@ -40,7 +39,7 @@ cd src
 php artisan credentials:backfill-identity-registry --chunk=100
 ```
 
-The commit run must exit `0` with `ready=true`. Re-running from the beginning is safe and idempotent; `--after-id=<last_id>` may be used for an interrupted bounded run. Enablement is blocked while any retained duplicate or malformed structured row remains unresolved.
+The commit run must exit `0` with `ready=true`. Re-running from the beginning is safe and idempotent; `--after-id=<last_id>` may be used for an interrupted bounded run. Availability is blocked while any retained duplicate or malformed structured row remains unresolved.
 
 Verify the durable deployment gate, which reports only safe counts and IDs:
 
@@ -49,7 +48,7 @@ cd src
 php artisan credentials:check-identity-readiness --json
 ```
 
-This command must exit `0` immediately before enabling the flag. It also fails closed if the fingerprint key is missing or differs from the key used for the successful backfill.
+This command must exit `0` before making Input Akun available. It also fails closed if the fingerprint key is missing or differs from the key used for the successful backfill.
 
 Safe evidence consists of the command, exit code, `scanned/registered/already_registered/skipped_unrecognized/conflicts/unresolved/last_id`, and the reported row IDs. It must not contain credential content.
 
@@ -64,7 +63,7 @@ With the same additive code and a non-production database:
 5. Complete one controlled paid Order and verify the same account grouping through Store Bot receipt delivery and Web Recovery Key/order access. Verify an ambiguous Telegram send is Manual Delivery Review and is never blindly resent or restocked.
 6. Inspect only safe counts, row IDs, status values, and redacted operational metadata. Do not save credential-bearing screenshots or response bodies.
 
-Run the relevant gates before enabling the flag:
+Run the relevant gates before making Input Akun available:
 
 ```bash
 cd src
@@ -73,21 +72,15 @@ composer test:concurrency-gate
 npm run build
 ```
 
-Also run the supported responsive browser suites and the two-axis Standards + Spec review. The PostgreSQL gate is mandatory for enablement; SQLite alone cannot prove the lock/unique-conflict races.
+Also run the supported responsive browser suites and the two-axis Standards + Spec review. The PostgreSQL gate is mandatory for availability; SQLite alone cannot prove the lock/unique-conflict races.
 
-## 4. Enable Account Input
+## 4. Make Account Input available
 
-After the proof, the commit run, and `credentials:check-identity-readiness` are green, set the runtime environment variable:
-
-```text
-STRUCTURED_STOCK_INPUT_ENABLED=true
-```
-
-Refresh cached configuration and restart PHP-FPM, queue workers, and the scheduler through the normal deployment mechanism. Confirm the admin dashboard shows Input Akun while Input Cepat remains present. The feature switch does not migrate, rewrite, or delete existing credentials.
+After the proof, the commit run, and `credentials:check-identity-readiness` are green, no environment change is required. Refresh cached configuration and restart PHP-FPM, queue workers, and the scheduler only as part of the normal deployment procedure. Confirm the admin dashboard shows Input Akun while Input Cepat remains present.
 
 ## Rollback
 
-Set `STRUCTURED_STOCK_INPUT_ENABLED=false`, refresh cached configuration, and restart the application processes. The persisted readiness record is intentionally retained so a later enablement can reuse the same successful backfill while the fingerprint key remains stable. This hides/rejects new Account Input submissions while preserving:
+There is no environment rollback switch for Account Input. If an emergency stop is required, deploy the previous application release through the normal release process. Preserve the readiness record, fingerprint key, structured columns, and credential identity rows so existing structured Product Stock Items remain allocatable and deliverable.
 
 - Input Cepat;
 - existing structured Product Stock Items and their identity history;

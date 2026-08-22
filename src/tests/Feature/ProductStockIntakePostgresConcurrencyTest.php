@@ -39,7 +39,6 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
         parent::setUp();
 
         config()->set('services.credentials.identity_fingerprint_key', self::FINGERPRINT_KEY);
-        config()->set('services.credentials.structured_stock_input_enabled', true);
     }
 
     public function test_same_idempotency_key_commits_one_intake_and_replays_one_result(): void
@@ -466,7 +465,6 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
     {
         DB::disconnect();
         config()->set('services.credentials.identity_fingerprint_key', self::FINGERPRINT_KEY);
-        config()->set('services.credentials.structured_stock_input_enabled', true);
 
         $deadline = microtime(true) + 10;
         while (! is_file($releaseFile)) {

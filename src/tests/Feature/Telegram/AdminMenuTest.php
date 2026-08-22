@@ -60,6 +60,27 @@ class AdminMenuTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya'));
     }
 
+    public function test_ngrok_admin_dashboard_menu_uses_text_button_and_sends_url_link(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        config()->set('services.telegram.mini_app_url', 'https://substandard-miguelina-soberingly.ngrok-free.dev/admin');
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
+
+        $this->postTelegramWebhook($this->messageUpdate(308, '/menu', ['id' => 999], 12345))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(309, '🛠️ Admin Dashboard', ['id' => 999], 12345))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], 'Menu utama')
+            && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
+            && ! array_key_exists('web_app', $request['reply_markup']['keyboard'][2][0] ?? []));
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && $request['text'] === 'Buka dashboard admin:'
+            && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][0][0]['url'] ?? ''), 'https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=')
+            && ! array_key_exists('web_app', $request['reply_markup']['inline_keyboard'][0][0] ?? []));
+    }
+
     public function test_local_admin_url_does_not_send_web_app_button(): void
     {
         config()->set('app.url', 'http://localhost');

@@ -407,9 +407,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('Next ➡️', $firstKeyboard[4][0]['text']);
         $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[4][0]['callback_data']);
 
-
         $this->postTelegramWebhook($this->callbackUpdate(138, 'paged-second', sprintf('category:%d:page:2', $category->id)))->assertOk();
-
 
         $secondPage = Http::recorded()
             ->map(fn (array $record) => $record[0])

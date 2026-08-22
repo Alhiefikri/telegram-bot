@@ -32,6 +32,7 @@ final class SalesProofDeliveryPipeline
         private readonly StorefrontUrl $urls,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
         private readonly PaidInvoiceOrderPresentationAdapter $invoicePresentation,
+        private readonly SalesProofEffectNormalizer $effectNormalizer,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect): void
@@ -40,6 +41,7 @@ final class SalesProofDeliveryPipeline
             throw new InvalidArgumentException('Unsupported Telegram Sales Proof effect type.');
         }
 
+        $effect = $this->effectNormalizer->normalize($effect);
         $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
             return;

@@ -79,6 +79,19 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($text === '🛠️ Admin Dashboard') {
+            $this->session->forgetWithLock($customer);
+            if (! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
+
+                return;
+            }
+
+            $this->adminStats->sendDashboardLink($chatId);
+
+            return;
+        }
+
         if (in_array($text, ['📊 Statistik', '📊 Statistik Harian'], true)) {
             $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {

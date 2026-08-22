@@ -120,11 +120,7 @@ class TelegramCommunityGate
         Cache::lock('telegram:community-gate-prompt:'.$customer->id, 30)->get(function () use ($customer, $chatId) {
             $existing = TelegramCommunityGatePrompt::query()->where('customer_id', $customer->id)->first();
             if ($existing?->message_id) {
-                try {
-                    $this->bot->deleteMessage($existing->chat_id, $existing->message_id);
-                } catch (Throwable) {
-                    // The old prompt may be missing or too old to delete; a fresh prompt must still be sent.
-                }
+                return;
             }
 
             $setting = StoreChannelSetting::current();

@@ -8,6 +8,6 @@ final class StructuredStockInputDisabled extends RuntimeException
 {
     public function __construct()
     {
-        parent::__construct('Structured stock input is disabled until rollout checks are complete.');
+        parent::__construct('Structured stock input is unavailable until credential identity readiness checks are complete.');
     }
 }

@@ -24,8 +24,20 @@ This plan captures the domain decisions and implementation slices for adding a S
   quantity, subtotal, amount paid, successful-order number, thanks, and the
   `🛒 Shop Now` action.
 - Product category lists and search results show active products even when unavailable, using `✅` for available products and `❌` for unavailable products.
+
 - Unavailable products can be opened, but cannot be bought or added to cart.
 - Checkout must revalidate stock and reject cart items that became unavailable.
+
+### Public financial exposure audit
+
+The shared public invoice intentionally includes subtotal, provider/admin fee
+when present, and amount paid. This is an approved product contract, not an
+incidental renderer leak: issue [#322](https://github.com/Alhiefikri/telegram-bot/issues/322)
+approved those fields in the shared invoice, and issue
+[#324](https://github.com/Alhiefikri/telegram-bot/issues/324) approved the same
+invoice and English totals in Store Channel Sales Proof. The implementation
+must continue excluding credentials, OTP destinations, access tokens, Recovery
+Keys, support contacts, usernames, display names, and full Telegram IDs.
 
 ## Architecture boundaries
 
@@ -118,6 +130,12 @@ Per-customer prompt reuse/deletion state:
 5. The bot sends one `sendPhoto` request with the shared invoice PNG, caption, and `🛒 Shop Now` action.
 6. Success stores Telegram `message_id` and marks the post `sent`.
 7. Definite failure increments attempts and remains retryable; ambiguous delivery becomes `unknown` and is never automatically resent. Finalization synchronizes the SalesProofPost projection without affecting the paid Order.
+
+Pre-cutover text effects remain an explicit compatibility exception only when
+their template is `sales-proof-post-v1`. The repair migration and runtime
+normalizer change only retryable `pending`/`failed` effects that still combine
+`sendMessage` with `sales-proof-post-v2`; `sent`, `unknown`, and
+`manual_review` effects are never rewritten or automatically resent.
 
 
 ### Product availability

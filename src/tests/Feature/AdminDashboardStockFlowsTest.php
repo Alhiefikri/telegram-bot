@@ -214,6 +214,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame([null, null, null], array_column($payload['stockItems'], 'update_url'));
         $this->assertSame([null, null, null], array_column($payload['stockItems'], 'delete_url'));
     }
+
     public function test_structured_edit_preserves_a_retained_legacy_tutorial_override(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

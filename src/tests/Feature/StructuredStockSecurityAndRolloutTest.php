@@ -39,56 +39,44 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
         parent::setUp();
 
         config()->set('services.credentials.identity_fingerprint_key', 'security-test-fingerprint-key');
-        config()->set('services.credentials.structured_stock_input_enabled', true);
         $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
     }
 
-    public function test_account_input_rollout_switch_fails_closed_without_touching_stock(): void
+    public function test_account_input_ignores_legacy_environment_feature_switch(): void
     {
+        // Simulate a stale cached value from the removed runtime switch.
         config()->set('services.credentials.structured_stock_input_enabled', false);
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
         $admin = User::factory()->create(['role' => UserRole::Admin]);
-        $password = 'rollout-disabled-'.Str::random(16);
+        $password = 'legacy-switch-'.Str::random(16);
 
-        try {
-            app(ProductStockIntake::class)->submit(
-                $product,
-                ProductStockIntakeSubmission::structured([[
-                    'email' => 'rollout-disabled@example.test',
-                    'password' => $password,
-                    'access_method' => CredentialAccessMethod::None->value,
-                ]]),
-                $admin,
-                dispatchNotifications: false,
-            );
-            $this->fail('Disabled structured input was accepted.');
-        } catch (StructuredStockInputDisabled $exception) {
-            $this->assertStringNotContainsString($password, $exception->getMessage());
-        }
+        $this->assertTrue(app(ProductStockIntake::class)->structuredInputEnabled());
+
+        $this->actingAs($admin)
+            ->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Input Akun')
+            ->assertSee('id="stock-input-account-panel"', false);
 
         $response = $this->actingAs($admin)->postJson(
             route('admin.products.stock.accounts.store', $product),
             [
                 'operation_key' => (string) Str::uuid(),
                 'accounts' => [[
-                    'email' => 'rollout-disabled@example.test',
+                    'email' => 'legacy-switch@example.test',
                     'password' => $password,
                     'access_method' => CredentialAccessMethod::None->value,
                 ]],
             ],
         );
 
-        $response->assertStatus(503)->assertJsonPath('code', 'structured_stock_input_disabled');
+        $response->assertCreated()->assertJsonPath('item_count', 1);
+        $this->assertSame(1, ProductStockItem::query()->count());
+        $this->assertSame(1, DB::table('product_stock_intake_operations')->count());
         $this->assertStringNotContainsString($password, $response->getContent());
-        $this->actingAs($admin)
-            ->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertDontSee('account-email-0', false);
-        $this->assertSame(0, ProductStockItem::query()->count());
-        $this->assertSame(0, DB::table('product_stock_intake_operations')->count());
     }
 
-    public function test_account_input_requires_persisted_backfill_readiness_even_when_flag_and_key_are_set(): void
+    public function test_account_input_requires_persisted_backfill_readiness_before_accepting_accounts(): void
     {
         $this->resetBackfillReadiness();
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
@@ -178,7 +166,6 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
 
     public function test_changing_the_fingerprint_key_invalidates_persisted_readiness(): void
     {
-        config()->set('services.credentials.structured_stock_input_enabled', true);
         $this->assertTrue(app(ProductStockIntake::class)->structuredInputEnabled());
 
         config()->set('services.credentials.identity_fingerprint_key', 'a-different-fingerprint-key');

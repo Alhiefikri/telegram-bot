@@ -150,6 +150,7 @@ final class PaidInvoiceOrderPresentationAdapter
             'api_qris', 'qris' => 'QRIS',
             'binance_pay_id' => 'Binance Pay',
             'hosted' => 'Pakasir',
+            'qr_manual' => 'QR Manual',
             default => $label !== '' ? $label : $method,
         };
 

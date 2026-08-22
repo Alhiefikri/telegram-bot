@@ -150,7 +150,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
-    public function test_non_member_is_blocked_and_receives_a_fresh_prompt_for_each_store_action(): void
+    public function test_non_member_is_blocked_without_spamming_gate_prompt_for_each_store_action(): void
     {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
@@ -180,13 +180,12 @@ class CommunityGateTest extends TelegramBotTestSupport
 
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->assertSame(0, CartItem::count());
-        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
-        $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
+        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
+        $this->assertSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/getChatMember')
             && $r['chat_id'] === '-100123'
             && $r['user_id'] === 12345);
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
-            && $r['chat_id'] === '12345'
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
             && $r['message_id'] === $firstPromptMessageId);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data()), 'Gabung kanal')
@@ -194,7 +193,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'community_gate:verify'));
     }
 
-    public function test_prompt_delete_failure_still_sends_and_stores_a_fresh_prompt(): void
+    public function test_prompt_send_is_reused_when_membership_check_still_fails(): void
     {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
@@ -211,7 +210,7 @@ class CommunityGateTest extends TelegramBotTestSupport
                 return Http::response(['ok' => true, 'result' => ['status' => 'left']]);
             }
             if (str_ends_with($request->url(), '/deleteMessage')) {
-                return Http::response(['ok' => false, 'description' => 'Bad Request: message cannot be deleted'], 400);
+                return Http::response(['ok' => true]);
             }
             if (str_ends_with($request->url(), '/sendMessage')) {
                 return Http::response(['ok' => true, 'result' => ['message_id' => ++$nextMessageId]]);
@@ -224,9 +223,9 @@ class CommunityGateTest extends TelegramBotTestSupport
         $firstPromptMessageId = TelegramCommunityGatePrompt::query()->sole()->message_id;
         $this->postTelegramWebhook($this->messageUpdate(4, '/katalog'))->assertOk();
 
-        $this->assertSame(2, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
-        $this->assertNotSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
+        $this->assertSame(1, $this->sentCount('/sendMessage', 'Gabung kanal dulu'));
+        $this->assertSame($firstPromptMessageId, TelegramCommunityGatePrompt::query()->sole()->message_id);
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/deleteMessage')
             && $r['message_id'] === $firstPromptMessageId);
     }
 

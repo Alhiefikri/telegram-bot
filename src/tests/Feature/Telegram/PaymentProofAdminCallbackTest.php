@@ -1039,12 +1039,15 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
         $this->assertSame(1, SalesProofPost::where('status', SalesProofPost::STATUS_SENT)->count(), (string) SalesProofPost::first()?->last_error);
+        $this->assertSame('QR_MANUAL', $order->payments()->sole()->method);
         $copy = app(SalesProofPostFormatter::class)->format(
             app(PaidInvoiceOrderPresentationAdapter::class)->present($order->fresh(['customer', 'orderItems', 'payments'])),
             1,
         );
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $copy);
         $this->assertStringContainsString('Buyer ID: 123*****89', $copy);
+        $this->assertStringContainsString('Paid via: QR Manual', $copy);
+        $this->assertStringNotContainsString('Paid via: QR_MANUAL', $copy);
         $this->assertStringContainsString('Paid via:', $copy);
         $this->assertStringContainsString('Completed:', $copy);
         $this->assertStringContainsString('Items:', $copy);
@@ -1125,6 +1128,211 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF_LEGACY, $effect->fresh()->template_version);
         $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')));
+    }
+
+    public function test_migrated_photo_template_effect_is_normalized_before_delivery(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['username' => 'MigratedBuyer']);
+        $product = Product::factory()->create(['name' => 'Migrated Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Migrated Product');
+        $post = SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_PENDING,
+        ]);
+        $effect = TelegramOutboundEffect::factory()->create([
+            'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'target_type' => 'store_channel',
+            'telegram_chat_id' => '-100123',
+            'queue' => TelegramOutboundEffectService::SALES_PROOF_QUEUE,
+            'telegram_method' => 'sendMessage',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+            'state' => TelegramOutboundEffectState::Pending,
+            'attempts' => 0,
+            'next_attempt_at' => now(),
+        ]);
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 702],
+            ]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 703],
+            ]),
+        ]);
+
+        app()->call([new PublishSalesProofPost($order->id, effectId: $effect->id), 'handle']);
+
+        $effect = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame('sendPhoto', $effect->telegram_method);
+        $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF, $effect->template_version);
+        $this->assertNull($effect->claim_token);
+        $this->assertSame('702', $effect->telegram_message_id);
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->fresh()->status);
+
+        $photos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $photos);
+        $this->assertCount(0, $messages);
+
+        $photoRequest = $photos->first()[0];
+        $caption = (string) $this->telegramRequestField($photoRequest, 'caption');
+        $photoBytes = $this->telegramRequestField($photoRequest, 'photo');
+        $dimensions = is_string($photoBytes) ? @getimagesizefromstring($photoBytes) : false;
+
+        $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $caption);
+        $this->assertStringContainsString('Thank you for choosing Lhie Store.', $caption);
+        $this->assertStringContainsString('Shop Now', (string) $this->telegramRequestField($photoRequest, 'reply_markup'));
+        $this->assertIsArray($dimensions);
+        $this->assertSame('image/png', $dimensions['mime'] ?? null);
+        $this->assertSame(720, $dimensions[0] ?? null);
+        $this->assertSame(720, $dimensions[1] ?? null);
+    }
+
+    public function test_migrated_failed_photo_template_retries_as_photo_without_duplicate_send(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['username' => 'MigratedRetryBuyer']);
+        $product = Product::factory()->create(['name' => 'Migrated Retry Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Migrated Retry Product');
+        $post = SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_FAILED,
+            'attempts' => 1,
+            'last_error' => 'temporary channel failure',
+        ]);
+        $effect = TelegramOutboundEffect::factory()->create([
+            'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'target_type' => 'store_channel',
+            'telegram_chat_id' => '-100123',
+            'queue' => TelegramOutboundEffectService::SALES_PROOF_QUEUE,
+            'telegram_method' => 'sendMessage',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+            'state' => TelegramOutboundEffectState::Failed,
+            'attempts' => 1,
+            'next_attempt_at' => now(),
+            'last_error' => 'Telegram delivery failed before completion.',
+        ]);
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 704],
+            ]),
+        ]);
+
+        $job = new PublishSalesProofPost($order->id, effectId: $effect->id);
+        app()->call([$job, 'handle']);
+        app()->call([$job, 'handle']);
+
+        $effect = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame('sendPhoto', $effect->telegram_method);
+        $this->assertSame(2, $effect->attempts);
+        $this->assertSame('704', $effect->telegram_message_id);
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->fresh()->status);
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')));
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+    }
+
+    public function test_migrated_terminal_sales_proof_states_are_not_normalized_or_resent(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        Http::fake();
+
+        foreach ([
+            [TelegramOutboundEffectState::Sent, SalesProofPost::STATUS_SENT, '705'],
+            [TelegramOutboundEffectState::Unknown, SalesProofPost::STATUS_UNKNOWN, null],
+            [TelegramOutboundEffectState::ManualReview, SalesProofPost::STATUS_MANUAL_REVIEW, null],
+        ] as [$state, $postStatus, $messageId]) {
+            $customer = Customer::factory()->create();
+            $product = Product::factory()->create(['name' => 'Terminal Product']);
+            $order = $this->paidOrderWithSaleProof($customer, $product, 'Terminal Product');
+            $post = SalesProofPost::create([
+                'order_id' => $order->id,
+                'status' => $postStatus,
+                'attempts' => 1,
+                'telegram_message_id' => $messageId,
+            ]);
+            $effect = TelegramOutboundEffect::factory()->create([
+                'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+                'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+                'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                'source_type' => Order::class,
+                'source_id' => $order->id,
+                'target_type' => 'store_channel',
+                'telegram_chat_id' => '-100123',
+                'queue' => TelegramOutboundEffectService::SALES_PROOF_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+                'state' => $state,
+                'attempts' => 1,
+                'next_attempt_at' => null,
+                'telegram_message_id' => $messageId,
+            ]);
+
+            app()->call([new PublishSalesProofPost($order->id, effectId: $effect->id), 'handle']);
+
+            $fresh = $effect->fresh();
+            $this->assertSame($state, $fresh->state);
+            $this->assertSame('sendMessage', $fresh->telegram_method);
+            $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF, $fresh->template_version);
+            $this->assertNull($fresh->claim_token);
+            $this->assertSame($messageId, $fresh->telegram_message_id);
+            $this->assertSame($postStatus, $post->fresh()->status);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_sales_proof_repair_migration_only_normalizes_retryable_effects(): void
+    {
+        $effects = [];
+        foreach ([
+            TelegramOutboundEffectState::Pending,
+            TelegramOutboundEffectState::Failed,
+            TelegramOutboundEffectState::Sent,
+            TelegramOutboundEffectState::Unknown,
+            TelegramOutboundEffectState::ManualReview,
+        ] as $state) {
+            $effects[] = TelegramOutboundEffect::factory()->create([
+                'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                'telegram_method' => 'sendMessage',
+                'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+                'state' => $state,
+            ]);
+        }
+
+        $migration = require database_path('migrations/2026_08_22_000001_repair_sales_proof_photo_effect_contract.php');
+        $migration->up();
+
+        $this->assertSame('sendPhoto', $effects[0]->fresh()->telegram_method);
+        $this->assertSame('sendPhoto', $effects[1]->fresh()->telegram_method);
+        foreach (array_slice($effects, 2) as $effect) {
+            $this->assertSame('sendMessage', $effect->fresh()->telegram_method);
+            $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF, $effect->fresh()->template_version);
+        }
     }
 
     public function test_sales_proof_post_failure_is_recorded_and_can_retry_up_to_success(): void

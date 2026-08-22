@@ -91,6 +91,8 @@ class TelegramMenuIntents
             $adminDashboardButton = $this->adminDashboardWebAppButton('🛠️ Admin Dashboard');
             if ($adminDashboardButton !== null) {
                 $keyboard[] = [$adminDashboardButton];
+            } elseif ($this->adminDashboardInlineButton('🛠️ Admin Dashboard') !== null) {
+                $keyboard[] = [['text' => '🛠️ Admin Dashboard']];
             }
             $keyboard[] = [['text' => '📊 Statistik'], ['text' => '📦 Cek Stok']];
             $keyboard[] = [['text' => '📣 Broadcast Info']];
