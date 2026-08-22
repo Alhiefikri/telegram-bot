@@ -17,9 +17,11 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -64,6 +66,60 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->first()->getAttributes(), JSON_THROW_ON_ERROR));
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->last()->getAttributes(), JSON_THROW_ON_ERROR));
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    #[DataProvider('receiptAmountFallbackCases')]
+    public function test_invoice_metadata_and_buyer_text_use_order_total_when_provider_total_is_missing(
+        string $currency,
+        int $orderTotal,
+        int $paymentAmount,
+        string $expectedAmount,
+        string $unexpectedAmount,
+    ): void {
+        $order = $this->paidOrderWithAmountMismatch($currency, $orderTotal, $paymentAmount);
+
+        $invoice = app(PaidInvoiceRenderer::class)->render($order);
+        $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'][0];
+
+        $this->assertSame($currency, $invoice->metadata['currency']);
+        $this->assertSame($orderTotal, $invoice->metadata['total_paid']);
+        $this->assertStringContainsString('Jumlah dibayar: '.$expectedAmount, $detail->text());
+        $this->assertStringNotContainsString('Jumlah dibayar: '.$unexpectedAmount, $detail->text());
+    }
+
+    public static function receiptAmountFallbackCases(): iterable
+    {
+        yield 'IDR' => ['IDR', 12_345, 98_765, 'Rp 12.345', 'Rp 98.765'];
+        yield 'USDT' => ['USDT', 2_500_000, 4_000_000, '2.500000 USDT', '4.000000 USDT'];
+    }
+
+    public function test_invoice_metadata_and_buyer_text_keep_provider_total_when_present(): void
+    {
+        $order = $this->paidOrderWithAmountMismatch('IDR', 12_345, 98_765);
+        $order->payments()->sole()->forceFill(['provider_total_payment' => 13_579])->save();
+        $order->refresh()->load(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+
+        $invoice = app(PaidInvoiceRenderer::class)->render($order);
+        $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'][0];
+
+        $this->assertSame(13_579, $invoice->metadata['total_paid']);
+        $this->assertStringContainsString('Jumlah dibayar: Rp 13.579', $detail->text());
+    }
+
+    private function paidOrderWithAmountMismatch(string $currency, int $orderTotal, int $paymentAmount): Order
+    {
+        $order = $this->paidOrderWithoutCredentials();
+        $order->forceFill([
+            'currency' => $currency,
+            'total_amount' => $orderTotal,
+        ])->save();
+        $order->payments()->sole()->forceFill([
+            'amount' => $paymentAmount,
+            'currency' => $currency,
+            'provider_total_payment' => null,
+        ])->save();
+
+        return $order->fresh(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
     }
 
     public function test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure(): void

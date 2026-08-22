@@ -443,7 +443,7 @@ class TelegramReceiptNotifier
         $currency = strtoupper(trim((string) ($payment?->currency ?: $order->currency ?: 'IDR')));
         $amount = $payment?->provider_total_payment !== null
             ? (int) $payment->provider_total_payment
-            : (int) ($payment?->amount ?: $order->total_amount);
+            : (int) $order->total_amount;
 
         if ($currency === 'USDT') {
             return number_format($amount / 1_000_000, 6, '.', '').' USDT';
