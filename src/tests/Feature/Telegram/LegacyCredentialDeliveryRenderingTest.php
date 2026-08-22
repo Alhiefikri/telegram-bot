@@ -36,7 +36,19 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
         $this->assertInstanceOf(TelegramMessageUnit::class, $credentialUnit);
         $this->assertInstanceOf(TelegramMessageUnit::class, $tutorialUnit);
         $this->assertCount(3, $credentialUnit->entities());
-        $this->assertCount(0, $tutorialUnit->entities());
+        $tutorialPosition = strpos($tutorialUnit->text(), 'Auth Token : tutorial text');
+        $this->assertNotFalse($tutorialPosition);
+        $tutorialOffset = intdiv(
+            strlen(mb_convert_encoding(
+                substr($tutorialUnit->text(), 0, $tutorialPosition),
+                'UTF-16LE',
+                'UTF-8',
+            )),
+            2,
+        );
+        $this->assertFalse(collect($tutorialUnit->entities())->contains(
+            fn (array $entity): bool => $entity['offset'] === $tutorialOffset,
+        ));
 
         app(TelegramOrderIntents::class)->sendOrderDetail(
             $customer,

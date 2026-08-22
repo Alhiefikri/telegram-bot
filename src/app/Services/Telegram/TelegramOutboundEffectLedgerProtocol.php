@@ -369,16 +369,16 @@ class TelegramOutboundEffectLedgerProtocol
 
     private function failureCode(Throwable $exception): string
     {
+        $message = strtolower($exception->getMessage());
         if ($exception instanceof TelegramOutboundPreSendException
-            && str_contains(strtolower($exception->getMessage()), 'no longer renderable')) {
+            && (str_contains($message, 'no longer renderable')
+                || str_contains($message, 'paid invoice rendering failed before send'))) {
             return 'receipt_render_changed';
         }
 
         if ($exception instanceof RequestException && $exception->response !== null) {
             return 'telegram_http_'.(int) $exception->response->status();
         }
-
-        $message = strtolower($exception->getMessage());
 
         return str_contains($message, 'message id')
             ? 'telegram_response_missing_message_id'

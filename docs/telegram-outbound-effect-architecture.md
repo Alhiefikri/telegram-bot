@@ -145,26 +145,27 @@ is an Ambiguous Telegram Delivery unless a pre-send validation error proves
 that no request could have been sent. HTTP 400/403 and family terminal errors
 remain definite failures according to policy.
 
-Receipt effects are grouped and sequenced, with one explicit non-credential
-exception. The first `invoice` `sendPhoto` unit is a public-safe presentation
-unit: a definite `failed` outcome or an ambiguous `unknown` outcome is
-resolved for ordering and unlocks later Product Detail/text units. The invoice
-effect remains independently reviewable, and `unknown` is never automatically
-redispatched. A `manual_review` invoice remains blocked until an operator
-marks it sent or creates an explicit resend.
+Legacy receipt effects have one explicit non-credential exception. The first
+`invoice` `sendPhoto` unit is a public-safe presentation unit: a definite
+`failed` outcome or an ambiguous `unknown` outcome is resolved for ordering
+and unlocks later Product Detail/text units. The invoice effect remains
+independently reviewable, and `unknown` is never automatically redispatched.
+A `manual_review` invoice remains blocked until an operator marks it sent or
+creates an explicit resend.
 
-Product Detail and credential/text units retain strict predecessor ordering:
-any earlier unit that is not `sent`, including `failed`, `unknown`, or
-`manual_review`, blocks later units. Marking the predecessor sent through
-Manual Delivery Review unlocks the next unit; it does not resend the
-predecessor.
+New `receipt-photo-caption-v1` groups use an `invoice_caption` photo that can
+contain credentials. The photo is therefore a strict predecessor: `failed`,
+`unknown`, or `manual_review` blocks every continuation. The explicit
+text-fallback template and all later chunks retain the same strict ordering.
+Manual Delivery Review can mark a predecessor sent to unlock the next unit,
+but it never resends the predecessor.
 
-Buyer fulfillment projection is based on the text/credential units. When all
-non-invoice units are `sent`, `ReceiptDeliveryPipeline` sets
+Buyer fulfillment projection follows the group version. Legacy groups require
+all non-invoice units to be `sent`; photo-caption and text-fallback groups
+require every child to be `sent`. `ReceiptDeliveryPipeline` then sets
 `orders.telegram_receipt_sent_at` and dispatches `DeleteBuyerCheckoutMessages`.
-That marker and best-effort cleanup do not require the invoice photo to be
-`sent`, so cleanup may run while the photo remains `unknown`; cleanup never
-changes that ledger outcome or triggers an automatic resend.
+That marker and cleanup never change a ledger outcome or trigger an automatic
+resend.
 
 Focused receipt evidence is kept at
 `src/tests/Feature/Telegram/TelegramReceiptOutboundEffectTest.php`:

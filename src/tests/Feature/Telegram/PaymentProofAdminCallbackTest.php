@@ -757,36 +757,39 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(222, 'approve-secret', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
-        $receiptMessages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '12345');
-        $this->assertCount(
-            1,
-            $receiptMessages->filter(fn (array $record): bool => str_contains((string) ($record[0]['text'] ?? ''), 'Secret-123')),
-        );
-        $receiptText = $receiptMessages
-            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
-            ->implode("\n");
-        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
-            && str_contains($request->body(), 'filename="nota-b-')
-            && str_contains($request->body(), "\r\n12345\r\n")));
+        $receiptPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '12345'
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Payment received'));
+        $this->assertCount(1, $receiptPhotos);
+        $receiptPhoto = $receiptPhotos->first()[0];
+        $receiptText = (string) $this->telegramRequestField($receiptPhoto, 'caption');
         $this->assertStringContainsString('Payment received', $receiptText);
-        $this->assertStringContainsString('email: buyer@example.test | password: Secret-123', $receiptText);
+        $this->assertStringContainsString('buyer@example.test', $receiptText);
+        $this->assertStringContainsString('Secret-123', $receiptText);
         $this->assertStringContainsString('Delivery note:', $receiptText);
         $this->assertStringContainsString('Rotate the password and MFA after signing in.', $receiptText);
         $this->assertStringContainsString('Netflix setup guide', $receiptText);
-        $this->assertStringContainsString(url('/netflix/setup'), $receiptText);
+        $this->assertStringNotContainsString(url('/netflix/setup'), $receiptText);
         $this->assertStringContainsString('Thank you for shopping at LHIE STORE.', $receiptText);
         $this->assertStringNotContainsString('🌙', $receiptText);
         $this->assertStringNotContainsString('Need help signing in and securing the account?', $receiptText);
         $this->assertStringNotContainsString('/gpt/panduan-login-akun', $receiptText);
-        $guideRequest = $receiptMessages->first(
-            fn (array $record): bool => ($record[0]['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === 'Netflix setup guide',
+
+        $guideMarkup = json_decode(
+            (string) $this->telegramRequestField($receiptPhoto, 'reply_markup'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
         );
-        $this->assertNotNull($guideRequest);
-        $this->assertSame(url('/netflix/setup'), $guideRequest[0]['reply_markup']['inline_keyboard'][0][0]['url'] ?? null);
-        $this->assertSame('Contact Support', $guideRequest[0]['reply_markup']['inline_keyboard'][1][0]['text'] ?? null);
-        $this->assertSame('https://t.me/store_support', $guideRequest[0]['reply_markup']['inline_keyboard'][1][0]['url'] ?? null);
-        $visibleReceipt = json_encode($receiptMessages->map(fn (array $record): mixed => $record[0]->data())->all(), JSON_THROW_ON_ERROR);
+        $this->assertSame('Netflix setup guide', data_get($guideMarkup, 'inline_keyboard.0.0.text'));
+        $this->assertSame(url('/netflix/setup'), data_get($guideMarkup, 'inline_keyboard.0.0.url'));
+        $this->assertSame('Contact Support', data_get($guideMarkup, 'inline_keyboard.1.0.text'));
+        $this->assertSame('https://t.me/store_support', data_get($guideMarkup, 'inline_keyboard.1.0.url'));
+
+        $visibleReceipt = json_encode([
+            'caption' => $receiptText,
+            'markup' => $guideMarkup,
+        ], JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('Pembayaran diterima', $visibleReceipt);
         $this->assertStringNotContainsString('Data akun', $visibleReceipt);
         $this->assertStringNotContainsString('Catatan pengiriman', $visibleReceipt);
@@ -842,12 +845,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && str_contains($request->body(), 'filename="nota-b-')
             && str_contains($request->body(), "\r\n12345\r\n"));
         $this->assertCount(1, $photos);
-        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '12345');
-        $this->assertGreaterThan(1, $messages->count());
-        $text = $messages
-            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
-            ->implode("\n");
+        $photo = $photos->sole()[0];
+        $text = (string) $this->telegramRequestField($photo, 'caption');
         $this->assertStringContainsString($copy['title'], $text);
         $this->assertStringContainsString($copy['deliveryNote'], $text);
         $this->assertStringContainsString('merchant-delivery-note::KEEP-OPAQUE', $text);
@@ -856,6 +855,15 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString($copy['thanks'], $text);
         $this->assertStringNotContainsString($copy['otherTitle'], $text);
         $this->assertStringNotContainsString($copy['otherDeliveryNote'], $text);
+        $this->assertStringNotContainsString(url('/locale-guide'), $text);
+
+        $markup = json_decode(
+            (string) $this->telegramRequestField($photo, 'reply_markup'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $this->assertSame(url('/locale-guide'), data_get($markup, 'inline_keyboard.0.0.url'));
     }
 
     public static function receiptLocaleCases(): array
@@ -968,10 +976,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === 12345
-            && str_contains($r['text'], 'Pembayaran diterima')
-            && str_contains($r['text'], 'Email Account'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($r, 'chat_id') === '12345'
+            && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Pembayaran diterima')
+            && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Email Account'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
             && str_contains((string) ($r['text'] ?? ''), 'Produk terjual'));
@@ -983,9 +991,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $receiptCount = 0;
         Http::assertSent(function ($r) use (&$receiptCount) {
-            if (str_ends_with($r->url(), '/sendMessage')
-                && $r['chat_id'] === 12345
-                && str_contains((string) ($r['text'] ?? ''), 'Pembayaran diterima')) {
+            if (str_ends_with($r->url(), '/sendPhoto')
+                && (string) $this->telegramRequestField($r, 'chat_id') === '12345'
+                && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Pembayaran diterima')) {
                 $receiptCount++;
             }
 
@@ -1713,7 +1721,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $sent = 0;
         Http::assertSent(function ($r) use (&$sent) {
-            if (str_ends_with($r->url(), '/sendMessage') && ($r['chat_id'] ?? null) === 888) {
+            if (str_ends_with($r->url(), '/sendPhoto')
+                && (string) $this->telegramRequestField($r, 'chat_id') === '888'
+                && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Pembayaran diterima')) {
                 $sent++;
             }
 

@@ -83,18 +83,16 @@ class AuditValidationTemporaryTest extends TelegramBotTestSupport
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
             ->orderBy('sequence')
             ->get();
-        $this->assertCount(2, $receiptEffects);
+        $this->assertCount(1, $receiptEffects);
         $this->assertSame(
             TelegramOutboundEffectState::Unknown,
-            $receiptEffects->first()->state,
-            'An ambiguous invoice outcome must remain unknown instead of being retried automatically.',
+            $receiptEffects->sole()->state,
+            'A credential-bearing photo ambiguity must remain unknown and block continuations.',
         );
-        $this->assertSame(
-            TelegramOutboundEffectState::Sent,
-            $receiptEffects->last()->state,
-            'Product Detail remains independently dispatchable after invoice ambiguity.',
+        $this->assertNull(
+            $order->fresh()->telegram_receipt_sent_at,
+            'Receipt completion must wait for a resolved credential-bearing photo.',
         );
-        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_public_telegram_checkout_keeps_claim_after_ambiguous_customer_send(): void

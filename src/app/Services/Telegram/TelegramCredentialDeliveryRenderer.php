@@ -107,6 +107,258 @@ final class TelegramCredentialDeliveryRenderer
     }
 
     /**
+     * Render receipt-specific atomic blocks. Each returned unit is safe to
+     * move between chunks without splitting a credential field.
+     *
+     * @return list<TelegramMessageUnit>
+     */
+    public function receiptBlocks(Customer $customer, CredentialDelivery $delivery): array
+    {
+        $blocks = [];
+
+        foreach ($this->mergedReceiptGroups($delivery) as $entry) {
+            $group = $entry['group'];
+            $firstAccount = true;
+            $accountNumber = 1;
+            foreach ($entry['groups'] as $sourceGroup) {
+                foreach ($sourceGroup->accounts() as $account) {
+                    array_push(
+                        $blocks,
+                        ...$this->receiptAccountBlocksFor(
+                            $customer,
+                            $group,
+                            $account,
+                            $firstAccount,
+                            $accountNumber,
+                        ),
+                    );
+                    $firstAccount = false;
+                    $accountNumber++;
+                }
+            }
+
+            $defaultTutorial = $group->defaultTutorial();
+            if ($defaultTutorial !== null && trim($defaultTutorial) !== '') {
+                array_push(
+                    $blocks,
+                    ...$this->nonSecretBlocks([
+                        $group->productName(),
+                        '',
+                        $this->locale->translate($customer, 'receipt.delivery_note'),
+                        $defaultTutorial,
+                    ]),
+                );
+            }
+
+            $guide = $group->usageGuide();
+            if ($guide !== null) {
+                $blocks[] = new TelegramMessageUnit(
+                    text: '📘 '.$guide['title'],
+                    replyMarkup: [
+                        'inline_keyboard' => [[[
+                            'text' => $guide['title'],
+                            'url' => $guide['url'],
+                        ]]],
+                    ],
+                );
+            }
+        }
+
+        return $blocks;
+    }
+
+    public function receiptProductCount(CredentialDelivery $delivery): int
+    {
+        return count($this->mergedReceiptGroups($delivery));
+    }
+
+    /**
+     * @return list<array{group: CredentialDeliveryProductGroup, groups: list<CredentialDeliveryProductGroup>}>
+     */
+    private function mergedReceiptGroups(CredentialDelivery $delivery): array
+    {
+        $merged = [];
+
+        foreach ($delivery->groups() as $group) {
+            foreach ($merged as $index => $entry) {
+                if (! $this->sameReceiptProductSnapshot($entry['group'], $group)) {
+                    continue;
+                }
+
+                $merged[$index]['groups'][] = $group;
+
+                continue 2;
+            }
+
+            $merged[] = [
+                'group' => $group,
+                'groups' => [$group],
+            ];
+        }
+
+        return $merged;
+    }
+
+    private function sameReceiptProductSnapshot(
+        CredentialDeliveryProductGroup $left,
+        CredentialDeliveryProductGroup $right,
+    ): bool {
+        return $left->productName() === $right->productName()
+            && $left->defaultTutorial() === $right->defaultTutorial()
+            && $left->usageGuide() === $right->usageGuide();
+    }
+
+    /**
+     * @return list<TelegramMessageUnit>
+     */
+    private function receiptAccountBlocksFor(
+        Customer $customer,
+        CredentialDeliveryProductGroup $group,
+        CredentialDeliveryAccount $account,
+        bool $firstAccount,
+        int $displayNumber,
+    ): array {
+        $label = $this->locale->translate($customer, 'receipt.account_label', [
+            'number' => $displayNumber,
+        ]);
+        $lines = $firstAccount
+            ? [$group->productName(), '', $label]
+            : [$label];
+        $fields = [];
+
+        if ($account->isStructured()) {
+            $email = $account->email();
+            $password = $account->password();
+            if (! is_string($email) || ! is_string($password)) {
+                throw new InvalidArgumentException('Structured credential fields are invalid.');
+            }
+
+            $lines[] = 'email : '.$email;
+            $fields[] = ['label' => 'email', 'value' => $email];
+            $lines[] = 'password : '.$password;
+            $fields[] = ['label' => 'password', 'value' => $password];
+        } else {
+            $lines[] = $account->text();
+        }
+
+        $replyMarkup = $this->otpReplyMarkup(
+            $customer,
+            $account,
+            'receipt.otp_button',
+            displayNumber: $displayNumber,
+        );
+        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
+            $domain = $this->validatedDomain($account->accessValue());
+            if ($domain === null) {
+                throw new InvalidArgumentException('Structured OTP Mail Link is invalid.');
+            }
+            $lines[] = $this->locale->translate($customer, 'receipt.access_otp', ['domain' => $domain]);
+        }
+
+        $token = null;
+        if ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
+            $token = $account->accessValue();
+            if (! is_string($token) || $token === '') {
+                throw new InvalidArgumentException('Structured Auth Token is invalid.');
+            }
+        }
+
+        $tokenLines = $token === null
+            ? []
+            : [
+                $this->locale->translate($customer, 'receipt.access_auth_token'),
+                'Auth Token : '.$token,
+            ];
+        $tokenFields = $token === null
+            ? []
+            : [['label' => 'Auth Token', 'value' => $token]];
+        $tokenNeedsOwnUnit = false;
+
+        $withToken = [...$lines, ...$tokenLines];
+        if ($token !== null && mb_strlen(implode("\n", $withToken), 'UTF-8') <= self::MESSAGE_LIMIT) {
+            $lines = $withToken;
+            $fields = [...$fields, ...$tokenFields];
+        } elseif ($token !== null) {
+            $tokenNeedsOwnUnit = true;
+        }
+
+        $accountText = implode("\n", $lines);
+        $tutorial = $account->tutorial() !== null
+            && $account->tutorial() !== $group->defaultTutorial()
+            ? $account->tutorial()
+            : null;
+        $tutorialSeparate = false;
+        if ($tutorial !== null) {
+            $withTutorial = implode("\n", [
+                $accountText,
+                '',
+                $this->locale->translate($customer, 'receipt.delivery_note'),
+                $tutorial,
+            ]);
+            if (mb_strlen($withTutorial, 'UTF-8') <= self::MESSAGE_LIMIT) {
+                $accountText = $withTutorial;
+            } else {
+                $tutorialSeparate = true;
+            }
+        }
+
+        if (mb_strlen($accountText, 'UTF-8') > self::MESSAGE_LIMIT) {
+            throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
+        }
+
+        $entities = $fields === []
+            ? ($account->legacyParts() !== null ? $this->credentialFormatter->codeEntities($accountText) : [])
+            : $this->credentialFormatter->codeEntitiesForFields($accountText, $fields);
+        $blocks = [
+            new TelegramMessageUnit(
+                text: $accountText,
+                entities: $entities,
+                replyMarkup: $replyMarkup,
+            ),
+        ];
+
+        if ($tokenNeedsOwnUnit) {
+            $tokenText = implode("\n", [
+                $label,
+                ...$tokenLines,
+            ]);
+            if (mb_strlen($tokenText, 'UTF-8') > self::MESSAGE_LIMIT) {
+                throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
+            }
+
+            $blocks[] = new TelegramMessageUnit(
+                text: $tokenText,
+                entities: $this->credentialFormatter->codeEntitiesForFields($tokenText, $tokenFields),
+            );
+        }
+
+        if ($tutorialSeparate && $tutorial !== null) {
+            array_push(
+                $blocks,
+                ...$this->nonSecretBlocks([
+                    $label,
+                    $this->locale->translate($customer, 'receipt.delivery_note'),
+                    $tutorial,
+                ]),
+            );
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @return list<TelegramMessageUnit>
+     */
+    private function nonSecretBlocks(array $lines): array
+    {
+        return array_map(
+            static fn (string $text): TelegramMessageUnit => new TelegramMessageUnit($text),
+            $this->messageChunker->fromLines($lines, self::MESSAGE_LIMIT),
+        );
+    }
+
+    /**
      * @return list<TelegramMessageUnit>
      */
     private function groupedAccountUnitsFor(
@@ -378,6 +630,7 @@ final class TelegramCredentialDeliveryRenderer
         Customer $customer,
         CredentialDeliveryAccount $account,
         string $translationKey,
+        ?int $displayNumber = null,
     ): array {
         if ($account->accessMethod() !== CredentialAccessMethod::OtpMailLink) {
             return [];
@@ -391,7 +644,9 @@ final class TelegramCredentialDeliveryRenderer
 
         return [
             'inline_keyboard' => [[[
-                'text' => $this->locale->translate($customer, $translationKey, ['number' => $account->number()]),
+                'text' => $this->locale->translate($customer, $translationKey, [
+                    'number' => $displayNumber ?? $account->number(),
+                ]),
                 'url' => $url,
             ]]],
         ];

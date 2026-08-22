@@ -34,27 +34,33 @@ new auditable effect version and leaves the ambiguous record unchanged.
 
 ### Receipt ordering exception
 
-Receipt effects remain ordered, but the first invoice photo is a
-non-credential unit. Its `failed` state (including a deterministic render or
-definite Telegram failure) and its `unknown` state (an ambiguous transport
-outcome) are both resolved for ordering, so Product Detail may continue. The
-invoice row remains independently reviewable; `unknown` is never converted
-back to `pending` or automatically resent. An invoice in `manual_review`
-remains blocked until an operator marks it sent or creates an explicit resend.
+Legacy receipt effects keep one explicit ordering exception: the first
+invoice-photo unit is non-credential. Its `failed` state (including
+deterministic render or definite Telegram failure) and its `unknown` state
+(ambiguous transport) are resolved for ordering, so Product Detail may
+continue. The legacy invoice row remains independently reviewable; `unknown`
+is never converted back to `pending` or automatically resent. A legacy
+invoice in `manual_review` remains blocked until an operator marks it sent or
+creates an explicit resend.
 
-Every later Product Detail/text unit is credential-bearing or part of the
-credential delivery plan and keeps strict predecessor ordering. A predecessor
-in any state other than `sent` — including `failed`, `unknown`, or
-`manual_review` — blocks later units. Operator mark-sent finalization unlocks
-the next unit without resending the predecessor. Claim-token fencing and the
-duplicate-risk acknowledgement required for explicit resend are unchanged.
+New `receipt-photo-caption-v1` groups are different: the first
+`invoice_caption` photo can contain credentials, so it is a strict
+predecessor. Its `failed`, `unknown`, or `manual_review` state blocks every
+continuation. The same strict rule applies to the explicit text-fallback
+template and every later chunk. This prevents a timeout after a credential
+photo request from being followed by an uncoordinated continuation.
 
-Buyer fulfillment completion is projected from successful text/credential
-delivery, not invoice-photo success. When all non-invoice units are `sent`,
-the pipeline writes `orders.telegram_receipt_sent_at` and dispatches the
-best-effort `DeleteBuyerCheckoutMessages` cleanup. Cleanup may therefore run
-while the invoice remains `unknown`; it does not alter the invoice ledger
-outcome, delete the review history, or trigger an automatic resend.
+Buyer fulfillment completion is projected from successful delivery of all
+credential-bearing units. For legacy groups, the non-invoice Product
+Detail/text units determine completion and the invoice exception may still be
+unknown. For photo-caption and text-fallback groups, every child must be
+`sent`. Claim-token fencing and the duplicate-risk acknowledgement required
+for explicit resend are unchanged.
+
+The pipeline writes `orders.telegram_receipt_sent_at` only after the relevant
+completion rule holds, then dispatches the best-effort
+`DeleteBuyerCheckoutMessages` cleanup. Cleanup does not alter the invoice
+ledger outcome, delete review history, or trigger an automatic resend.
 
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,

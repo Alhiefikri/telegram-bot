@@ -137,22 +137,22 @@ Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Pr
 
 Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, dan `ProductPriceChangeNotificationService`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
 
-Receipt memiliki satu pengecualian ordering yang eksplisit: unit `invoice`
-pertama memakai `sendPhoto` dan bukan unit credential. Jika hasilnya `failed`
-(termasuk render gagal atau penolakan Telegram definitif) atau `unknown`
-(Ambiguous Telegram Delivery), unit Product Detail/text berikutnya boleh
-berjalan; effect foto tetap dapat direview dan `unknown` tidak pernah di-resend
-otomatis. `manual_review` pada invoice tetap menahan urutan sampai operator
-menandainya `sent` atau membuat explicit resend.
+Receipt legacy invoice-photo effects memiliki satu pengecualian ordering:
+unit `invoice` pertama memakai `sendPhoto` dan bukan unit credential. Jika
+hasilnya `failed` (termasuk render gagal atau penolakan Telegram definitif)
+atau `unknown` (Ambiguous Telegram Delivery), unit Product Detail/text
+berikutnya boleh berjalan; effect foto tetap dapat direview dan `unknown`
+tidak pernah di-resend otomatis. `manual_review` pada invoice tetap menahan
+urutan sampai operator menandainya `sent` atau membuat explicit resend.
 
-Unit Product Detail/text setelah invoice tetap strict ordered. Predecessor dalam
-state apa pun selain `sent`, termasuk `failed`, `unknown`, dan `manual_review`,
-memblokir unit berikutnya. Completion buyer ditentukan oleh seluruh unit
-non-invoice yang `sent`: pipeline mengisi
-`orders.telegram_receipt_sent_at` lalu mengantrekan
-`DeleteBuyerCheckoutMessages`. Karena marker dan cleanup tidak bergantung pada
-keberhasilan foto, cleanup dapat berjalan saat invoice masih `unknown`; cleanup
-tidak mengubah state ledger, claim-token fencing, atau aturan explicit resend.
+Group baru `receipt-photo-caption-v1` memakai `invoice_caption` yang dapat
+memuat credential, sehingga seluruh child strict ordered sejak sequence
+pertama. `failed`, `unknown`, atau `manual_review` pada photo maupun
+continuation memblokir child berikutnya. Explicit text-fallback memakai aturan
+strict yang sama. Buyer completion untuk group baru terjadi setelah semua
+child `sent`; group legacy tetap memakai aturan non-invoice lama. Pipeline lalu
+mengisi `orders.telegram_receipt_sent_at` dan mengantrekan
+`DeleteBuyerCheckoutMessages`.
 
 ### 4.2 Web Storefront
 

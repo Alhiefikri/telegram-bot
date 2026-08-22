@@ -58,21 +58,34 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         app(TelegramReceiptNotifier::class)->send($order->fresh());
 
-        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '445566');
-        $otpMessage = $messages->first(fn ($record): bool => str_contains((string) ($record[0]['text'] ?? ''), 'otp@example.test'))[0];
-        $authMessage = $messages->first(fn ($record): bool => str_contains((string) ($record[0]['text'] ?? ''), 'auth@example.test'))[0];
+        $photos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $photos);
+        $photo = $photos->sole()[0];
+        $caption = (string) $this->telegramRequestField($photo, 'caption');
+        $this->assertStringContainsString('mail.example.test', $caption);
+        $this->assertStringNotContainsString($otpUrl, $caption);
+        $this->assertStringContainsString('fake-auth-token-value', $caption);
 
-        $this->assertStringContainsString('mail.example.test', $otpMessage['text']);
-        $this->assertStringNotContainsString($otpUrl, $otpMessage['text']);
-        $this->assertSame('Buka OTP Mail #1', data_get($otpMessage, 'reply_markup.inline_keyboard.0.0.text'));
-        $this->assertSame($otpUrl, data_get($otpMessage, 'reply_markup.inline_keyboard.0.0.url'));
-        $this->assertStringContainsString('Tutorial akun OTP.', $otpMessage['text']);
+        $markup = json_decode(
+            (string) $this->telegramRequestField($photo, 'reply_markup'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $this->assertSame('Buka OTP Mail #1', data_get($markup, 'inline_keyboard.0.0.text'));
+        $this->assertSame($otpUrl, data_get($markup, 'inline_keyboard.0.0.url'));
+        $this->assertStringContainsString('Tutorial akun OTP.', $caption);
 
-        $this->assertStringContainsString('fake-auth-token-value', $authMessage['text']);
-        $this->assertStringNotContainsString('fake-auth-token-value', json_encode($authMessage['reply_markup'] ?? [], JSON_THROW_ON_ERROR));
-        $this->assertStringNotContainsString('fake-auth-token-value', json_encode($authMessage['options'] ?? [], JSON_THROW_ON_ERROR));
-        $this->assertCount(3, $authMessage['entities'] ?? []);
+        $entities = json_decode(
+            (string) $this->telegramRequestField($photo, 'caption_entities'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $this->assertTrue(collect($entities)->contains(
+            fn (array $entity): bool => $entity['type'] === 'code'
+                && $entity['length'] === strlen('fake-auth-token-value'),
+        ));
 
         foreach (TelegramOutboundEffect::query()->where('source_id', (string) $order->id)->get() as $effect) {
             $attributes = json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR);
@@ -108,6 +121,19 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
         $this->assertLessThanOrEqual(3900, mb_strlen((string) $message['text'], 'UTF-8'));
         $this->assertCount(3, $message['entities'] ?? []);
         $this->assertSame(3400, $message['entities'][2]['length']);
+        $tokenPosition = strpos((string) $message['text'], $token);
+        $this->assertNotFalse($tokenPosition);
+        $this->assertSame(
+            intdiv(
+                strlen(mb_convert_encoding(
+                    substr((string) $message['text'], 0, $tokenPosition),
+                    'UTF-16LE',
+                    'UTF-8',
+                )),
+                2,
+            ),
+            $message['entities'][2]['offset'],
+        );
     }
 
     public function test_grouped_long_auth_token_keeps_product_and_account_context(): void

@@ -100,6 +100,9 @@ class TelegramOutboundEffectService
     /** New private buyer photo with its complete caption. */
     public const TEMPLATE_RECEIPT_PHOTO_CAPTION = 'receipt-photo-caption-v1';
 
+    /** Explicit pre-send fallback when the invoice image cannot render. */
+    public const TEMPLATE_RECEIPT_TEXT_FALLBACK = 'receipt-text-fallback-v1';
+
     public const TEMPLATE_ADMIN_ORDER_PENDING = 'admin-order-pending-v1';
 
     public const TEMPLATE_ADMIN_ORDER_PAID = 'admin-order-paid-v1';
@@ -168,6 +171,14 @@ class TelegramOutboundEffectService
         'unit_role',
         'receipt_chunk_index',
         'receipt_chunk_count',
+        'product_count',
+        'account_count',
+        'caption_length_bucket',
+        'continuation_length_bucket',
+        'has_photo',
+        'has_header',
+        'has_footer',
+        'render_mode',
         'attachment_type',
         'attachment_present',
         'payment_method',
@@ -733,17 +744,30 @@ class TelegramOutboundEffectService
             }
 
             $groupKeys = [
+                self::receiptTextFallbackEffectGroupKey((string) $locked->getKey()),
                 self::receiptEffectGroupKey((string) $locked->getKey()),
                 self::legacyReceiptEffectGroupKey((string) $locked->getKey()),
             ];
-            $existing = TelegramOutboundEffect::query()
+            $existingGroups = TelegramOutboundEffect::query()
                 ->whereIn('effect_group_key', $groupKeys)
                 ->orderBy('sequence')
                 ->orderByDesc('created_at')
-                ->first();
+                ->get()
+                ->groupBy('effect_group_key');
 
-            if ($existing !== null) {
-                return $this->firstReadyReceiptEffect($existing->effect_group_key);
+            foreach ($groupKeys as $groupKey) {
+                if (! $existingGroups->has($groupKey)) {
+                    continue;
+                }
+
+                $ready = $this->firstReadyReceiptEffect($groupKey);
+                if ($ready !== null) {
+                    return $ready;
+                }
+            }
+
+            if ($existingGroups->isNotEmpty()) {
+                return null;
             }
 
             if ($locked->telegram_receipt_sent_at !== null) {
@@ -752,6 +776,55 @@ class TelegramOutboundEffectService
 
             return $this->createReceiptEffectGroup($locked, $customer);
         }, 5);
+    }
+
+    /**
+     * Materialize a safe text-only replacement after a v2 photo failed before
+     * Telegram was called. The failed photo effect remains immutable history.
+     */
+    public function recordReceiptTextFallback(TelegramOutboundEffect $failed): ?TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($failed): ?TelegramOutboundEffect {
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($failed->getKey());
+            if ($locked->state !== TelegramOutboundEffectState::Failed
+                || $locked->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION
+                || $locked->sequence !== 1
+                || $locked->last_error_code !== 'receipt_render_changed') {
+                return null;
+            }
+
+            $order = Order::query()->lockForUpdate()->findOrFail($locked->source_id);
+            $customer = $order->customer;
+            if (! $this->receiptEligible($order, $customer)) {
+                return null;
+            }
+
+            $groupKey = self::receiptTextFallbackEffectGroupKey((string) $order->getKey());
+            if (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists()) {
+                return $this->firstReadyReceiptEffect($groupKey);
+            }
+
+            try {
+                $plan = $this->receiptNotifier->receiptPlan($order);
+            } catch (\Throwable) {
+                return null;
+            }
+
+            return $this->createReceiptTransportEffectGroup(
+                $order,
+                $customer,
+                $groupKey,
+                $plan,
+                textFallback: true,
+                explicit: false,
+                supersedes: $locked,
+            );
+        }, 5);
+    }
+
+    public static function receiptTextFallbackEffectGroupKey(string $orderId): string
+    {
+        return self::receiptEffectGroupKey($orderId).':text-fallback';
     }
 
     /**
@@ -1043,13 +1116,7 @@ class TelegramOutboundEffectService
         bool $explicit = false,
         ?TelegramOutboundEffect $supersedes = null,
     ): TelegramOutboundEffect {
-        $photoCaption = $this->receiptNotifier->photoCaptionFits($order);
-        $unitCount = $photoCaption
-            ? 1
-            : max(2, $this->receiptNotifier->deliveryUnitCount($order));
-        $baseGroupKey = $photoCaption
-            ? self::receiptEffectGroupKey((string) $order->getKey())
-            : self::legacyReceiptEffectGroupKey((string) $order->getKey());
+        $baseGroupKey = self::receiptEffectGroupKey((string) $order->getKey());
         $groupKey = $baseGroupKey;
 
         if ($explicit) {
@@ -1060,18 +1127,55 @@ class TelegramOutboundEffectService
             } while (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists());
         }
 
+        try {
+            $plan = $this->receiptNotifier->receiptPlan($order);
+        } catch (\Throwable) {
+            return $this->createReceiptRenderFailureEffect($order, $customer, $groupKey, $explicit, $supersedes);
+        }
+
+        $textFallback = false;
+        try {
+            $this->receiptNotifier->renderInvoiceUnit($order);
+        } catch (\Throwable) {
+            $textFallback = true;
+        }
+
+        return $this->createReceiptTransportEffectGroup(
+            $order,
+            $customer,
+            $groupKey,
+            $plan,
+            textFallback: $textFallback,
+            explicit: $explicit,
+            supersedes: $supersedes,
+        );
+    }
+
+    private function createReceiptTransportEffectGroup(
+        Order $order,
+        Customer $customer,
+        string $groupKey,
+        TelegramReceiptPlan $plan,
+        bool $textFallback,
+        bool $explicit,
+        ?TelegramOutboundEffect $supersedes,
+    ): TelegramOutboundEffect {
+        $unitCount = $textFallback ? $plan->textUnitCount() : $plan->photoUnitCount();
+        $template = $textFallback
+            ? self::TEMPLATE_RECEIPT_TEXT_FALLBACK
+            : self::TEMPLATE_RECEIPT_PHOTO_CAPTION;
+        $planMetadata = $this->receiptPlanMetadata($plan, $textFallback);
+        $planMetadata['render_mode'] = $textFallback ? 'text_fallback' : 'photo_caption';
+
         $first = null;
         for ($sequence = 1; $sequence <= $unitCount; $sequence++) {
-            $role = $photoCaption
-                ? 'invoice_caption'
-                : ($sequence === 1 ? 'invoice' : 'product_detail');
             $metadata = [
+                ...$planMetadata,
                 'delivery_context' => $explicit ? 'explicit_resend' : 'receipt',
-                'unit_role' => $role,
+                'unit_role' => $textFallback || $sequence > 1 ? 'receipt_chunk' : 'invoice_caption',
                 'receipt_chunk_index' => $sequence - 1,
-                'receipt_chunk_count' => $unitCount,
             ];
-            if ($photoCaption) {
+            if (! $textFallback) {
                 $metadata['attachment_type'] = 'photo';
                 $metadata['attachment_present'] = true;
             }
@@ -1094,11 +1198,11 @@ class TelegramOutboundEffectService
                     'target_type' => 'customer',
                     'telegram_chat_id' => (string) $customer->telegram_id,
                     'queue' => self::RECEIPT_QUEUE,
-                    'telegram_method' => $photoCaption || $role === 'invoice' ? 'sendPhoto' : 'sendMessage',
+                    'telegram_method' => $textFallback
+                        ? 'sendMessage'
+                        : ($sequence === 1 ? 'sendPhoto' : 'sendMessage'),
                     'locale' => $customer->locale,
-                    'template_version' => $photoCaption
-                        ? self::TEMPLATE_RECEIPT_PHOTO_CAPTION
-                        : self::TEMPLATE_RECEIPT_INVOICE,
+                    'template_version' => $template,
                     'state' => TelegramOutboundEffectState::Pending->value,
                     'attempts' => 0,
                     'next_attempt_at' => now(),
@@ -1110,6 +1214,87 @@ class TelegramOutboundEffectService
         }
 
         return $first ?? throw new RuntimeException('Telegram receipt effect group was empty.');
+    }
+
+    /** @return array<string, int|string|bool> */
+    private function receiptPlanMetadata(TelegramReceiptPlan $plan, bool $textFallback): array
+    {
+        $units = $textFallback ? $plan->textUnits() : $plan->photoUnits();
+        $continuationLength = 0;
+        foreach (array_slice($units, 1) as $unit) {
+            $continuationLength = max($continuationLength, $unit->characterLength());
+        }
+
+        return [
+            'receipt_chunk_count' => count($units),
+            'product_count' => $plan->productCount(),
+            'account_count' => $plan->accountCount(),
+            'caption_length_bucket' => $this->receiptLengthBucket($plan->photoUnit(1)->characterLength()),
+            'continuation_length_bucket' => $this->receiptLengthBucket($continuationLength),
+            'has_photo' => ! $textFallback,
+            'has_header' => true,
+            'has_footer' => true,
+        ];
+    }
+
+    private function receiptLengthBucket(int $length): string
+    {
+        return match (true) {
+            $length <= 1024 => '0-1024',
+            $length <= 2048 => '1025-2048',
+            $length <= 3072 => '2049-3072',
+            default => '3073-4096',
+        };
+    }
+
+    private function createReceiptRenderFailureEffect(
+        Order $order,
+        Customer $customer,
+        string $groupKey,
+        bool $explicit,
+        ?TelegramOutboundEffect $supersedes,
+    ): TelegramOutboundEffect {
+        $metadata = [
+            'delivery_context' => $explicit ? 'explicit_resend' : 'receipt',
+            'unit_role' => 'receipt_render_failure',
+            'receipt_chunk_index' => 0,
+            'receipt_chunk_count' => 1,
+            'render_mode' => 'failed',
+            'has_photo' => false,
+            'has_header' => false,
+            'has_footer' => false,
+        ];
+        if ($explicit) {
+            $metadata['duplicate_risk_acknowledged'] = true;
+            if ($supersedes !== null) {
+                $metadata['supersedes_effect_id'] = (string) $supersedes->getKey();
+            }
+        }
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => self::receiptEffectKeyForGroup($groupKey, 1)],
+            [
+                'effect_group_key' => $groupKey,
+                'supersedes_effect_id' => $supersedes?->getKey(),
+                'sequence' => 1,
+                'effect_type' => self::TYPE_RECEIPT_CREDENTIALS,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_RECEIPT_TEXT_FALLBACK,
+                'state' => TelegramOutboundEffectState::Failed->value,
+                'attempts' => 0,
+                'next_attempt_at' => null,
+                'failed_at' => now(),
+                'last_error_code' => 'receipt_render_changed',
+                'last_error' => 'Telegram receipt rendering requires manual review.',
+                'outcome_metadata' => $metadata,
+            ],
+        );
     }
 
     private function recordAdminOrderNotification(
@@ -1453,17 +1638,35 @@ class TelegramOutboundEffectService
             $value = $metadata[$key];
             if ($key === 'duplicate_risk_acknowledged' && is_bool($value)) {
                 $safe[$key] = $value;
-            } elseif (in_array($key, ['http_status', 'resolution_actor_id', 'receipt_chunk_index', 'receipt_chunk_count'], true)
+            } elseif (in_array($key, [
+                'http_status',
+                'resolution_actor_id',
+                'receipt_chunk_index',
+                'receipt_chunk_count',
+                'product_count',
+                'account_count',
+            ], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
                 $safe[$key] = (int) $value;
-            } elseif (in_array($key, ['attachment_present', 'late_evidence'], true) && is_bool($value)) {
+            } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer'], true)
+                && is_bool($value)) {
                 $safe[$key] = $value;
             } elseif ($key === 'exception' && is_string($value)
-                && preg_match('/\\A[A-Za-z_][A-Za-z0-9_\\\\]*\\z/', $value) === 1) {
+                && preg_match('/\A[A-Za-z_][A-Za-z0-9_\\\\]*\z/', $value) === 1) {
                 $safe[$key] = class_basename($value);
-            } elseif (in_array($key, ['reason', 'delivery_context', 'unit_role', 'resolution', 'attachment_type', 'payment_method', 'proof_status'], true)
-                && is_string($value)) {
-                $safeValue = $this->safeErrorCode(is_string($value) ? $value : null);
+            } elseif (in_array($key, [
+                'reason',
+                'delivery_context',
+                'unit_role',
+                'resolution',
+                'attachment_type',
+                'payment_method',
+                'proof_status',
+                'caption_length_bucket',
+                'continuation_length_bucket',
+                'render_mode',
+            ], true) && is_string($value)) {
+                $safeValue = $this->safeErrorCode($value);
                 if ($safeValue !== null) {
                     $safe[$key] = $safeValue;
                 }
