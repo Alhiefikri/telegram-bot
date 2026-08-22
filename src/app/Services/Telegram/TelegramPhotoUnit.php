@@ -26,7 +26,10 @@ final readonly class TelegramPhotoUnit extends TelegramMessageUnit
     /** @return array<string, mixed> */
     public function options(): array
     {
-        return $this->entities() === [] ? [] : ['caption_entities' => $this->entities()];
+        return array_merge(
+            ['protect_content' => true],
+            $this->entities() === [] ? [] : ['caption_entities' => $this->entities()],
+        );
     }
 
     public function filename(): string

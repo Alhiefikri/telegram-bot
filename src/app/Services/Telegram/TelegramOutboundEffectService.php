@@ -94,7 +94,11 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
+    /** Legacy invoice-photo template with a separate Product Detail delivery. */
     public const TEMPLATE_RECEIPT_INVOICE = 'receipt-invoice-v2';
+
+    /** New private buyer photo with its complete caption. */
+    public const TEMPLATE_RECEIPT_PHOTO_CAPTION = 'receipt-photo-caption-v1';
 
     public const TEMPLATE_ADMIN_ORDER_PENDING = 'admin-order-pending-v1';
 
@@ -728,14 +732,18 @@ class TelegramOutboundEffectService
                 return null;
             }
 
-            $groupKey = self::receiptEffectGroupKey((string) $locked->getKey());
+            $groupKeys = [
+                self::receiptEffectGroupKey((string) $locked->getKey()),
+                self::legacyReceiptEffectGroupKey((string) $locked->getKey()),
+            ];
             $existing = TelegramOutboundEffect::query()
-                ->where('effect_group_key', $groupKey)
+                ->whereIn('effect_group_key', $groupKeys)
                 ->orderBy('sequence')
+                ->orderByDesc('created_at')
                 ->first();
 
             if ($existing !== null) {
-                return $this->firstReadyReceiptEffect($groupKey);
+                return $this->firstReadyReceiptEffect($existing->effect_group_key);
             }
 
             if ($locked->telegram_receipt_sent_at !== null) {
@@ -767,7 +775,17 @@ class TelegramOutboundEffectService
 
     public static function receiptEffectGroupKey(string $orderId): string
     {
+        return 'order:'.$orderId.':'.self::TYPE_RECEIPT_CREDENTIALS.':v2';
+    }
+
+    public static function legacyReceiptEffectGroupKey(string $orderId): string
+    {
         return 'order:'.$orderId.':'.self::TYPE_RECEIPT_CREDENTIALS.':v1';
+    }
+
+    public static function receiptPhotoCaptionEffectGroupKey(string $orderId): string
+    {
+        return self::receiptEffectGroupKey($orderId);
     }
 
     public static function receiptEffectKey(string $orderId, int $sequence): string
@@ -1025,8 +1043,13 @@ class TelegramOutboundEffectService
         bool $explicit = false,
         ?TelegramOutboundEffect $supersedes = null,
     ): TelegramOutboundEffect {
-        $unitCount = max(2, $this->receiptNotifier->deliveryUnitCount($order));
-        $baseGroupKey = self::receiptEffectGroupKey((string) $order->getKey());
+        $photoCaption = $this->receiptNotifier->photoCaptionFits($order);
+        $unitCount = $photoCaption
+            ? 1
+            : max(2, $this->receiptNotifier->deliveryUnitCount($order));
+        $baseGroupKey = $photoCaption
+            ? self::receiptEffectGroupKey((string) $order->getKey())
+            : self::legacyReceiptEffectGroupKey((string) $order->getKey());
         $groupKey = $baseGroupKey;
 
         if ($explicit) {
@@ -1039,13 +1062,19 @@ class TelegramOutboundEffectService
 
         $first = null;
         for ($sequence = 1; $sequence <= $unitCount; $sequence++) {
-            $role = $sequence === 1 ? 'invoice' : 'product_detail';
+            $role = $photoCaption
+                ? 'invoice_caption'
+                : ($sequence === 1 ? 'invoice' : 'product_detail');
             $metadata = [
                 'delivery_context' => $explicit ? 'explicit_resend' : 'receipt',
                 'unit_role' => $role,
                 'receipt_chunk_index' => $sequence - 1,
                 'receipt_chunk_count' => $unitCount,
             ];
+            if ($photoCaption) {
+                $metadata['attachment_type'] = 'photo';
+                $metadata['attachment_present'] = true;
+            }
             if ($explicit) {
                 $metadata['duplicate_risk_acknowledged'] = true;
                 if ($supersedes !== null) {
@@ -1065,9 +1094,11 @@ class TelegramOutboundEffectService
                     'target_type' => 'customer',
                     'telegram_chat_id' => (string) $customer->telegram_id,
                     'queue' => self::RECEIPT_QUEUE,
-                    'telegram_method' => $role === 'invoice' ? 'sendPhoto' : 'sendMessage',
+                    'telegram_method' => $photoCaption || $role === 'invoice' ? 'sendPhoto' : 'sendMessage',
                     'locale' => $customer->locale,
-                    'template_version' => self::TEMPLATE_RECEIPT_INVOICE,
+                    'template_version' => $photoCaption
+                        ? self::TEMPLATE_RECEIPT_PHOTO_CAPTION
+                        : self::TEMPLATE_RECEIPT_INVOICE,
                     'state' => TelegramOutboundEffectState::Pending->value,
                     'attempts' => 0,
                     'next_attempt_at' => now(),

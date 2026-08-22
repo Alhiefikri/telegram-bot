@@ -191,25 +191,30 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
 
         $invoice = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
         $this->assertNotNull($invoice);
-        $detail = TelegramOutboundEffect::query()
+        $next = TelegramOutboundEffect::query()
             ->where('effect_group_key', $invoice->effect_group_key)
-            ->where('sequence', 2)
-            ->firstOrFail();
+            ->where('sequence', '>', $invoice->sequence)
+            ->orderBy('sequence')
+            ->first();
         Http::fake([
-            'https://api.telegram.org/*/sendPhoto' => Http::response([
-                'ok' => true,
-                'result' => ['message_id' => 901],
-            ]),
-            'https://api.telegram.org/*/sendMessage' => function (): never {
+            'https://api.telegram.org/*/sendPhoto' => function (): never {
                 throw new ConnectionException('transport timeout after Telegram accepted the request');
             },
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 902],
+            ]),
         ]);
 
         app(ReceiptDeliveryPipeline::class)->deliver($invoice, dispatchNext: false);
-        app(ReceiptDeliveryPipeline::class)->deliver($detail, dispatchNext: false);
 
-        $this->assertSame('unknown', $detail->fresh()->state->value ?? $detail->fresh()->state);
-        $this->assertStringNotContainsString($secret, json_encode($detail->fresh()->getAttributes(), JSON_THROW_ON_ERROR));
+        $this->assertSame('unknown', $invoice->fresh()->state->value ?? $invoice->fresh()->state);
+        $this->assertStringNotContainsString($secret, json_encode($invoice->fresh()->getAttributes(), JSON_THROW_ON_ERROR));
+        if ($next !== null) {
+            app(ReceiptDeliveryPipeline::class)->deliver($next, dispatchNext: false);
+            $this->assertSame('unknown', $next->fresh()->state->value ?? $next->fresh()->state);
+        }
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_paid_order_detail_uses_the_same_account_unit_and_matching_otp_button(): void

@@ -322,6 +322,8 @@
   "receipt.paid_at": "Waktu dibayar: :date",
   "receipt.total_quantity": "Total kuantitas: :quantity",
   "receipt.amount_paid": "Jumlah dibayar: :amount",
+  "receipt.access_otp": "akses: OTP Mail Link · :domain",
+  "receipt.access_auth_token": "akses: Auth Token",
   "receipt.product_detail": "🔐 Detail Produk",
   "receipt.account_label": "Data akun #:number",
   "receipt.copy_guidance": "💡 Ketuk nilai akun untuk menyalin. Jangan bagikan data ini.",

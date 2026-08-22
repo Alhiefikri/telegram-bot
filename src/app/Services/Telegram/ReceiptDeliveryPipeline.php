@@ -159,7 +159,10 @@ final class ReceiptDeliveryPipeline
 
     private function synchronizeSentProjection(TelegramOutboundEffect $effect, int|string $orderId): void
     {
-        if ($effect->effect_group_key !== TelegramOutboundEffectService::receiptEffectGroupKey((string) $orderId)) {
+        if (! in_array($effect->effect_group_key, [
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $orderId),
+            TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $orderId),
+        ], true)) {
             return;
         }
 

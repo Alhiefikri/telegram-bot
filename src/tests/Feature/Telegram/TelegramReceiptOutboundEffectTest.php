@@ -55,7 +55,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 
         $this->assertCount(2, $receiptEffects);
         $this->assertSame(
-            TelegramOutboundEffectService::receiptEffectGroupKey($order->id),
+            TelegramOutboundEffectService::legacyReceiptEffectGroupKey($order->id),
             $receiptEffects->first()->effect_group_key,
         );
         $this->assertSame(TelegramOutboundEffectState::Pending, $receiptEffects->first()->state);
@@ -70,6 +70,127 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->first()->getAttributes(), JSON_THROW_ON_ERROR));
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->last()->getAttributes(), JSON_THROW_ON_ERROR));
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    #[DataProvider('singleStructuredPhotoCases')]
+    public function test_single_structured_account_receipt_is_one_protected_localized_photo(
+        string $locale,
+        CredentialAccessMethod $accessMethod,
+    ): void {
+        Queue::fake();
+        [$order, $sensitiveValues] = $this->paidSingleStructuredReceiptOrder($locale, $accessMethod);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 834001],
+            ]),
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        $effects = TelegramOutboundEffect::query()
+            ->where('effect_group_key', TelegramOutboundEffectService::receiptPhotoCaptionEffectGroupKey((string) $order->id))
+            ->orderBy('sequence')
+            ->get();
+        $this->assertCount(1, $effects);
+        $this->assertSame('sendPhoto', $effects->sole()->telegram_method);
+        $this->assertSame(
+            TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION,
+            $effects->sole()->template_version,
+        );
+        $this->assertSame('invoice_caption', $effects->sole()->outcome_metadata['unit_role']);
+
+        $photoRequests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $photoRequests);
+        $this->assertCount(
+            0,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
+        );
+        $photo = $photoRequests->sole()[0];
+        $caption = (string) $this->telegramRequestField($photo, 'caption');
+        $this->assertLessThan(TelegramReceiptNotifier::PHOTO_CAPTION_LIMIT, mb_strlen($caption, 'UTF-8'));
+        $this->assertStringContainsString($order->invoice_number, $caption);
+        $this->assertStringContainsString('Issue 334 Product', $caption);
+        $this->assertStringContainsString('Product note once', $caption);
+        $this->assertSame(1, substr_count($caption, 'Product note once'));
+        $this->assertStringContainsString('LHIE STORE', $caption);
+        $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+
+        $expectedTitles = [
+            'id' => '✅ Pembayaran diterima',
+            'en' => '✅ Payment received',
+            'ms' => '✅ Bayaran diterima',
+        ];
+        $expectedPaymentLabels = [
+            'id' => 'Metode pembayaran: QRIS',
+            'en' => 'Payment method: QRIS',
+            'ms' => 'Kaedah bayaran: QRIS',
+        ];
+        $this->assertStringContainsString($expectedTitles[$locale], $caption);
+        $this->assertStringContainsString($expectedPaymentLabels[$locale], $caption);
+        $this->assertStringContainsString(
+            match ($locale) {
+                'id' => '🔐 Detail Produk',
+                'en' => '🔐 Product Detail',
+                'ms' => '🔐 Butiran Produk',
+            },
+            $caption,
+        );
+
+        $email = $sensitiveValues['email'];
+        $password = $sensitiveValues['password'];
+        $this->assertStringContainsString($email, $caption);
+        $this->assertStringContainsString($password, $caption);
+        $fields = [$email, $password];
+        if ($accessMethod === CredentialAccessMethod::OtpMailLink) {
+            $this->assertStringContainsString('otp.issue334.example.test', $caption);
+            $this->assertStringNotContainsString($sensitiveValues['access_value'], $caption);
+            $markup = json_decode((string) $this->telegramRequestField($photo, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR);
+            $this->assertSame($sensitiveValues['access_value'], data_get($markup, 'inline_keyboard.0.0.url'));
+        } elseif ($accessMethod === CredentialAccessMethod::AuthToken) {
+            $this->assertStringContainsString($locale === 'en' ? 'access: Auth Token' : 'akses: Auth Token', $caption);
+            $this->assertStringContainsString($sensitiveValues['access_value'], $caption);
+            $this->assertStringNotContainsString($sensitiveValues['access_value'], json_encode([
+                'reply_markup' => $this->telegramRequestField($photo, 'reply_markup'),
+                'options' => $this->telegramRequestField($photo, 'caption_entities'),
+            ], JSON_THROW_ON_ERROR));
+            $fields[] = $sensitiveValues['access_value'];
+        } else {
+            $this->assertStringNotContainsString('akses:', $caption);
+        }
+
+        $entities = json_decode((string) $this->telegramRequestField($photo, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertCount(count($fields), $entities);
+        foreach ($fields as $field) {
+            $byteOffset = strpos($caption, $field);
+            $this->assertNotFalse($byteOffset);
+            $prefix = substr($caption, 0, $byteOffset);
+            $this->assertTrue(collect($entities)->contains(
+                fn (array $entity): bool => $entity['type'] === 'code'
+                    && $entity['offset'] === intdiv(strlen(mb_convert_encoding($prefix, 'UTF-16LE', 'UTF-8')), 2)
+                    && $entity['length'] === intdiv(strlen(mb_convert_encoding($field, 'UTF-16LE', 'UTF-8')), 2),
+            ));
+        }
+
+        $photoBytes = $this->telegramRequestField($photo, 'photo');
+        foreach ($sensitiveValues as $value) {
+            $this->assertStringNotContainsString($value, $photoBytes);
+        }
+        $effectJson = json_encode($effects->sole()->getAttributes(), JSON_THROW_ON_ERROR);
+        foreach ($sensitiveValues as $value) {
+            $this->assertStringNotContainsString($value, $effectJson);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    /** @return iterable<string, array{string, CredentialAccessMethod}> */
+    public static function singleStructuredPhotoCases(): iterable
+    {
+        foreach (['id', 'en', 'ms'] as $locale) {
+            yield $locale.' none' => [$locale, CredentialAccessMethod::None];
+            yield $locale.' otp' => [$locale, CredentialAccessMethod::OtpMailLink];
+            yield $locale.' auth token' => [$locale, CredentialAccessMethod::AuthToken];
+        }
     }
 
     public function test_direct_receipt_send_processes_photo_and_text_once_without_successor_jobs(): void
@@ -105,7 +226,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
                 TelegramOutboundEffectState::Sent,
             ],
             TelegramOutboundEffect::query()
-                ->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))
+                ->where('effect_group_key', TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $order->id))
                 ->orderBy('sequence')
                 ->pluck('state')
                 ->all(),
@@ -180,7 +301,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
 
         $effects = TelegramOutboundEffect::query()
-            ->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))
+            ->where('effect_group_key', TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $order->id))
             ->orderBy('sequence')
             ->get();
         $this->assertGreaterThanOrEqual(2, $effects->count());
@@ -370,7 +491,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     public function test_preexisting_text_only_receipt_template_remains_dispatchable(): void
     {
         $order = $this->paidOrderWithoutCredentials();
-        $groupKey = TelegramOutboundEffectService::receiptEffectGroupKey($order->id);
+        $groupKey = TelegramOutboundEffectService::legacyReceiptEffectGroupKey($order->id);
         $effect = TelegramOutboundEffect::create([
             'effect_key' => $groupKey.':unit:1',
             'effect_group_key' => $groupKey,
@@ -560,6 +681,77 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Failed, $freshEffect->state);
         $this->assertNull($freshEffect->telegram_message_id);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    /** @return array{0: Order, 1: array{email: string, password: string, access_value?: string, otp_domain?: string}} */
+    private function paidSingleStructuredReceiptOrder(string $locale, CredentialAccessMethod $accessMethod): array
+    {
+        $localeIndex = array_search($locale, ['id', 'en', 'ms'], true);
+        $methodIndex = array_search($accessMethod, [
+            CredentialAccessMethod::None,
+            CredentialAccessMethod::OtpMailLink,
+            CredentialAccessMethod::AuthToken,
+        ], true);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 334000 + ((int) $localeIndex * 10) + (int) $methodIndex,
+            'locale' => $locale,
+        ]);
+        $product = Product::factory()->create(['name' => 'Issue 334 Product']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-334-'.$locale.'-'.$accessMethod->value,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 12_500,
+            'currency' => 'IDR',
+        ]);
+        $item = OrderItem::factory()->for($order)->create([
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'delivery_note' => 'Product note once',
+            'delivery_note_snapshotted' => true,
+            'quantity' => 1,
+            'unit_price' => 12_500,
+            'subtotal' => 12_500,
+        ]);
+        Payment::factory()->for($order)->create([
+            'method' => 'QR_MANUAL',
+            'amount' => 12_500,
+            'provider_total_payment' => 12_500,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        $email = 'issue334-'.$locale.'-'.$accessMethod->value.'@example.test';
+        $password = 'Issue334-'.$locale.'-password';
+        $accessValue = match ($accessMethod) {
+            CredentialAccessMethod::None => null,
+            CredentialAccessMethod::OtpMailLink => 'https://otp.issue334.example.test/mail?opaque=issue334-'.$locale,
+            CredentialAccessMethod::AuthToken => 'Issue334-'.$locale.'-auth-token',
+        };
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                $email,
+                $password,
+                $accessMethod,
+                $accessValue,
+            )->toArray(),
+        ]);
+
+        $sensitiveValues = [
+            'email' => $email,
+            'password' => $password,
+        ];
+        if ($accessValue !== null) {
+            $sensitiveValues['access_value'] = $accessValue;
+        }
+        if ($accessMethod === CredentialAccessMethod::OtpMailLink) {
+            $sensitiveValues['otp_domain'] = 'otp.issue334.example.test';
+        }
+
+        return [$order->fresh(), $sensitiveValues];
     }
 
     private function paidOrderWithoutCredentials(): Order

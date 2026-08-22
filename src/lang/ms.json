@@ -321,6 +321,8 @@
   "receipt.paid_at": "Dibayar pada: :date",
   "receipt.total_quantity": "Jumlah kuantiti: :quantity",
   "receipt.amount_paid": "Jumlah dibayar: :amount",
+  "receipt.access_otp": "akses: Pautan Mel OTP · :domain",
+  "receipt.access_auth_token": "akses: Auth Token",
   "receipt.product_detail": "🔐 Butiran Produk",
   "receipt.account_label": "Data akaun #:number",
   "receipt.copy_guidance": "💡 Ketik nilai akaun untuk menyalinnya. Jangan kongsikan butiran ini.",

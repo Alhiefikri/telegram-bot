@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\CredentialAccessMethod;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
@@ -16,6 +17,8 @@ use App\Services\PaidInvoice\PaidInvoiceRenderer;
 
 class TelegramReceiptNotifier
 {
+    public const PHOTO_CAPTION_LIMIT = 1024;
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
@@ -88,6 +91,21 @@ class TelegramReceiptNotifier
      */
     public function render(Order $order): array
     {
+        $captionPlan = $this->buildPhotoCaptionPlan($order);
+        if ($captionPlan !== null) {
+            $invoice = $this->renderInvoiceUnit($order);
+            $caption = $captionPlan['unit'];
+            $photo = new TelegramPhotoUnit(
+                photoContents: $invoice->photoContents(),
+                filename: $invoice->filename(),
+                caption: $caption->text(),
+                captionEntities: $caption->entities(),
+                replyMarkup: $caption->replyMarkup(),
+            );
+
+            return $this->rendered([$photo], $captionPlan['guides']);
+        }
+
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
         $customer = $order->customer;
         if (! $customer instanceof Customer) {
@@ -101,12 +119,61 @@ class TelegramReceiptNotifier
         return $this->rendered($units, $detailUnits['guides']);
     }
 
+    public function photoCaptionFits(Order $order): bool
+    {
+        try {
+            $plan = $this->buildPhotoCaptionPlan($order);
+
+            return $plan !== null
+                && $plan['unit']->characterLength() <= self::PHOTO_CAPTION_LIMIT;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    public function renderPhotoCaption(Order $order): TelegramMessageUnit
+    {
+        $plan = $this->buildPhotoCaptionPlan($order);
+        if ($plan === null || $plan['unit']->characterLength() > self::PHOTO_CAPTION_LIMIT) {
+            throw new TelegramOutboundPreSendException(
+                'Telegram buyer receipt caption is no longer renderable within the photo limit.',
+            );
+        }
+
+        return $plan['unit'];
+    }
+
+    public function renderReceiptPhotoUnit(Order $order): TelegramPhotoUnit
+    {
+        $plan = $this->buildPhotoCaptionPlan($order);
+        if ($plan === null || $plan['unit']->characterLength() > self::PHOTO_CAPTION_LIMIT) {
+            throw new TelegramOutboundPreSendException(
+                'Telegram buyer receipt caption is no longer renderable within the photo limit.',
+            );
+        }
+
+        $invoice = $this->renderInvoiceUnit($order);
+        $caption = $plan['unit'];
+
+        return new TelegramPhotoUnit(
+            photoContents: $invoice->photoContents(),
+            filename: $invoice->filename(),
+            caption: $caption->text(),
+            captionEntities: $caption->entities(),
+            replyMarkup: $caption->replyMarkup(),
+        );
+    }
+
     /**
      * Count new receipt units without rendering or retaining PNG bytes.
      */
     public function deliveryUnitCount(Order $order): int
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+        if ($this->photoCaptionFits($order)) {
+            return 1;
+        }
+
         $customer = $order->customer;
         if (! $customer instanceof Customer) {
             return 1;
@@ -297,6 +364,19 @@ class TelegramReceiptNotifier
             throw new TelegramOutboundPreSendException('Telegram receipt target is missing.');
         }
 
+        if ($effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION) {
+            $unit = $this->renderReceiptPhotoUnit($order);
+
+            return $this->bot->sendPhoto(
+                $customer->telegram_id,
+                $unit->photoContents(),
+                $unit->filename(),
+                $unit->text() !== '' ? $unit->text() : null,
+                $unit->replyMarkup(),
+                $unit->options(),
+            );
+        }
+
         $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
         $isLegacy = $effect->telegram_method !== 'sendPhoto'
             && $effect->template_version !== TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE;
@@ -343,6 +423,168 @@ class TelegramReceiptNotifier
             $unit->replyMarkup(),
             $unit->options(),
         );
+    }
+
+    /**
+     * Build the private single-structured-account receipt caption without
+     * retaining any credential-bearing value in a durable object.
+     *
+     * @return ?array{unit: TelegramMessageUnit, guides: list<array{title: string, url: string}>}
+     */
+    private function buildPhotoCaptionPlan(Order $order): ?array
+    {
+        $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
+        $customer = $order->customer;
+        if (! $customer instanceof Customer) {
+            return null;
+        }
+
+        $delivery = $this->credentialPresentation->forCustomer($customer, $order);
+        $groups = $delivery->groups();
+        if (count($groups) !== 1) {
+            return null;
+        }
+
+        $group = $groups[0];
+        $accounts = $group->accounts();
+        if (count($accounts) !== 1 || ! $accounts[0]->isStructured()) {
+            return null;
+        }
+
+        $account = $accounts[0];
+        $email = $account->email();
+        $password = $account->password();
+        if (! is_string($email) || ! is_string($password)) {
+            throw new TelegramOutboundPreSendException('Structured credential fields are invalid.');
+        }
+
+        $payment = $this->canonicalPaidPayment($order);
+        $lines = [
+            $this->locale->translate($customer, 'receipt.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'receipt.order_id', [
+                'order' => $order->invoice_number ?: $order->getKey(),
+            ]),
+            $this->locale->translate($customer, 'receipt.products'),
+        ];
+        foreach ($order->orderItems as $item) {
+            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
+        }
+        $lines[] = $this->locale->translate($customer, 'receipt.payment_method', [
+            'method' => $payment instanceof Payment
+                ? $this->locale->paymentMethod($customer, $payment)
+                : $this->locale->translate($customer, 'payment.method.unknown'),
+        ]);
+        $lines[] = $this->locale->translate($customer, 'receipt.paid_at', [
+            'date' => $this->locale->formatDate($customer, $payment?->paid_at ?? $order->updated_at ?? now()),
+        ]);
+        $lines[] = $this->locale->translate($customer, 'receipt.total_quantity', [
+            'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
+        ]);
+        $lines[] = $this->locale->translate($customer, 'receipt.amount_paid', [
+            'amount' => $this->formatPaidAmount($order, $payment),
+        ]);
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'receipt.product_detail');
+        $lines[] = '';
+        $lines[] = $group->productName();
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'receipt.account_label', [
+            'number' => $account->number(),
+        ]);
+        $lines[] = 'email : '.$email;
+        $lines[] = 'password : '.$password;
+        $fields = [
+            ['label' => 'email', 'value' => $email],
+            ['label' => 'password', 'value' => $password],
+        ];
+
+        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
+            $domain = $this->validatedOtpDomain($account->accessValue());
+            if ($domain === null) {
+                throw new TelegramOutboundPreSendException('Structured OTP Mail Link is invalid.');
+            }
+            $lines[] = $this->locale->translate($customer, 'receipt.access_otp', ['domain' => $domain]);
+        } elseif ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
+            $token = $account->accessValue();
+            if (! is_string($token) || $token === '') {
+                throw new TelegramOutboundPreSendException('Structured Auth Token is invalid.');
+            }
+            $lines[] = $this->locale->translate($customer, 'receipt.access_auth_token');
+            $lines[] = 'Auth Token : '.$token;
+            $fields[] = ['label' => 'Auth Token', 'value' => $token];
+        }
+
+        $tutorial = $account->tutorial() ?? $group->defaultTutorial();
+        if ($tutorial !== null && trim($tutorial) !== '') {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'receipt.delivery_note');
+            $lines[] = $tutorial;
+        }
+
+        $guides = $delivery->usageGuides();
+        $guide = $group->usageGuide();
+        if ($guide !== null) {
+            $lines[] = '';
+            $lines[] = '📘 '.$guide['title'];
+            if (! in_array($guide, $guides, true)) {
+                $guides[] = $guide;
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'receipt.save_details');
+        $lines[] = $this->locale->translate($customer, 'receipt.copy_guidance');
+        $lines[] = $this->locale->translate($customer, 'receipt.thanks');
+        $text = implode("\n", $lines);
+        if (mb_strlen($text, 'UTF-8') > self::PHOTO_CAPTION_LIMIT) {
+            return null;
+        }
+
+        $replyMarkup = $this->receiptReplyMarkup($customer, $guides);
+        $rows = $replyMarkup['inline_keyboard'] ?? [];
+        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
+            $url = $account->accessValue();
+            if (! is_string($url) || $this->validatedOtpDomain($url) === null) {
+                throw new TelegramOutboundPreSendException('Structured OTP Mail Link is invalid.');
+            }
+            array_unshift($rows, [[
+                'text' => $this->locale->translate($customer, 'receipt.otp_button', [
+                    'number' => $account->number(),
+                ]),
+                'url' => $url,
+            ]]);
+        }
+
+        return [
+            'unit' => new TelegramMessageUnit(
+                text: $text,
+                entities: $this->credentialFormatter->codeEntitiesForFields($text, $fields),
+                replyMarkup: $rows === [] ? [] : ['inline_keyboard' => $rows],
+            ),
+            'guides' => $guides,
+        ];
+    }
+
+    private function validatedOtpDomain(?string $url): ?string
+    {
+        if ($url === null || filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return null;
+        }
+
+        $parts = parse_url($url);
+        $host = is_array($parts) ? ($parts['host'] ?? null) : null;
+        $scheme = is_array($parts) ? strtolower((string) ($parts['scheme'] ?? '')) : '';
+        if ($scheme !== 'https'
+            || ! is_string($host)
+            || $host === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            return null;
+        }
+
+        return strtolower($host);
     }
 
     /**

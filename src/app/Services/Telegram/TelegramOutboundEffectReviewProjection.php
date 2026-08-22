@@ -61,7 +61,10 @@ final class TelegramOutboundEffectReviewProjection
 
     private function receipt(TelegramOutboundEffect $effect, CarbonInterface $at): void
     {
-        if ($effect->effect_group_key !== TelegramOutboundEffectService::receiptEffectGroupKey((string) $effect->source_id)) {
+        if (! in_array($effect->effect_group_key, [
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $effect->source_id),
+            TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $effect->source_id),
+        ], true)) {
             return;
         }
 

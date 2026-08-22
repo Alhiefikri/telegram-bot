@@ -323,6 +323,8 @@
   "receipt.paid_at": "Paid at: :date",
   "receipt.total_quantity": "Total quantity: :quantity",
   "receipt.amount_paid": "Amount paid: :amount",
+  "receipt.access_otp": "access: OTP Mail Link · :domain",
+  "receipt.access_auth_token": "access: Auth Token",
   "receipt.product_detail": "🔐 Product Detail",
   "receipt.account_label": "Account #:number",
   "receipt.copy_guidance": "💡 Tap an account value to copy it. Do not share these details.",
