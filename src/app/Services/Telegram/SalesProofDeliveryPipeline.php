@@ -69,9 +69,9 @@ final class SalesProofDeliveryPipeline
                 return;
             }
 
-            $postNumber = $this->numbering->reserveNextNumber();
             if ($this->isPhotoEffect($claimed)) {
                 $invoice = $this->invoiceRenderer->render($order);
+                $postNumber = $this->numbering->reserveNextNumber();
                 $response = $this->bot->sendPhoto(
                     (string) $claimed->telegram_chat_id,
                     $invoice->bytes,
@@ -85,6 +85,7 @@ final class SalesProofDeliveryPipeline
                     ],
                 );
             } else {
+                $postNumber = $this->numbering->reserveNextNumber();
                 $response = $this->bot->sendMessage(
                     (string) $claimed->telegram_chat_id,
                     $this->formatter->formatLegacy($order, $postNumber),

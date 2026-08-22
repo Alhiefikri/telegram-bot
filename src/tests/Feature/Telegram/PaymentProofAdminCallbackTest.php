@@ -30,6 +30,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\SalesProofPostNumbering;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
@@ -40,6 +41,7 @@ use App\Services\Telegram\TelegramReceiptNotifier;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -1111,6 +1113,85 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('99', $post->telegram_message_id);
         $this->assertNull($post->last_error);
         $this->assertNotNull($post->sent_at);
+    }
+
+    public function test_sales_proof_render_failure_does_not_consume_number_before_later_success(): void
+    {
+        Cache::flush();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['username' => 'RenderFailureBuyer']);
+        $product = Product::factory()->create(['name' => 'Render Failure Product']);
+        $failedOrder = $this->paidOrderWithSaleProof($customer, $product, 'Render Failure Product');
+        $failedPost = SalesProofPost::create([
+            'order_id' => $failedOrder->id,
+            'status' => SalesProofPost::STATUS_PENDING,
+        ]);
+        Payment::query()
+            ->where('order_id', $failedOrder->id)
+            ->update(['paid_at' => null]);
+
+        $successfulOrder = $this->paidOrderWithSaleProof($customer, $product, 'Render Failure Product');
+        SalesProofPost::create([
+            'order_id' => $successfulOrder->id,
+            'status' => SalesProofPost::STATUS_PENDING,
+        ]);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 100],
+            ]),
+        ]);
+
+        app()->call([new PublishSalesProofPost($failedOrder->id), 'handle']);
+
+        $this->assertSame(SalesProofPost::STATUS_FAILED, $failedPost->fresh()->status);
+        $this->assertSame(0, app(SalesProofPostNumbering::class)->publishedCount());
+
+        app()->call([new PublishSalesProofPost($successfulOrder->id), 'handle']);
+
+        $channelPhotos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '-100123');
+        $this->assertCount(1, $channelPhotos);
+        $caption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
+        $this->assertStringContainsString('Successful orders: #1', $caption);
+    }
+
+    public function test_sales_proof_retry_after_success_does_not_allocate_another_number(): void
+    {
+        Cache::flush();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['username' => 'RetryNumberBuyer']);
+        $product = Product::factory()->create(['name' => 'Retry Number Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Retry Number Product');
+        SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_PENDING,
+        ]);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 101],
+            ]),
+        ]);
+
+        $job = new PublishSalesProofPost($order->id);
+        app()->call([$job, 'handle']);
+        app()->call([$job, 'handle']);
+
+        $channelPhotos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '-100123');
+        $this->assertCount(1, $channelPhotos);
+        $caption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
+        $this->assertStringContainsString('Successful orders: #1', $caption);
+        $this->assertSame(1, app(SalesProofPostNumbering::class)->publishedCount());
     }
 
     #[DataProvider('invalidSalesProofTelegramResponses')]
