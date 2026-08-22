@@ -32,6 +32,37 @@ become `unknown`; they are not returned to `pending` by recovery. Operator
 resolution uses the same protocol boundary, while an explicit resend creates a
 new auditable effect version and leaves the ambiguous record unchanged.
 
+### Receipt ordering exception
+
+Receipt effects remain ordered, but the first invoice photo is a
+non-credential unit. Its `failed` state (including a deterministic render or
+definite Telegram failure) and its `unknown` state (an ambiguous transport
+outcome) are both resolved for ordering, so Product Detail may continue. The
+invoice row remains independently reviewable; `unknown` is never converted
+back to `pending` or automatically resent. An invoice in `manual_review`
+remains blocked until an operator marks it sent or creates an explicit resend.
+
+Every later Product Detail/text unit is credential-bearing or part of the
+credential delivery plan and keeps strict predecessor ordering. A predecessor
+in any state other than `sent` — including `failed`, `unknown`, or
+`manual_review` — blocks later units. Operator mark-sent finalization unlocks
+the next unit without resending the predecessor. Claim-token fencing and the
+duplicate-risk acknowledgement required for explicit resend are unchanged.
+
+Buyer fulfillment completion is projected from successful text/credential
+delivery, not invoice-photo success. When all non-invoice units are `sent`,
+the pipeline writes `orders.telegram_receipt_sent_at` and dispatches the
+best-effort `DeleteBuyerCheckoutMessages` cleanup. Cleanup may therefore run
+while the invoice remains `unknown`; it does not alter the invoice ledger
+outcome, delete the review history, or trigger an automatic resend.
+
+The focused contract is covered by
+`TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,
+`TelegramReceiptOutboundEffectTest::test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`,
+and
+`TelegramReceiptOutboundEffectTest::test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units`.
+
+
 ### Deferred Admin Broadcast materialization
 
 Admin Broadcast is an explicit deferred-materialization exception to the

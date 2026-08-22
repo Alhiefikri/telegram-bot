@@ -145,10 +145,34 @@ is an Ambiguous Telegram Delivery unless a pre-send validation error proves
 that no request could have been sent. HTTP 400/403 and family terminal errors
 remain definite failures according to policy.
 
-Receipt effects are grouped and sequenced. A later receipt unit is not
-dispatchable while an earlier unit is unresolved. Marking a unit sent through
-Manual Delivery Review unlocks the next unit; it does not resend an earlier
-unit.
+Receipt effects are grouped and sequenced, with one explicit non-credential
+exception. The first `invoice` `sendPhoto` unit is a public-safe presentation
+unit: a definite `failed` outcome or an ambiguous `unknown` outcome is
+resolved for ordering and unlocks later Product Detail/text units. The invoice
+effect remains independently reviewable, and `unknown` is never automatically
+redispatched. A `manual_review` invoice remains blocked until an operator
+marks it sent or creates an explicit resend.
+
+Product Detail and credential/text units retain strict predecessor ordering:
+any earlier unit that is not `sent`, including `failed`, `unknown`, or
+`manual_review`, blocks later units. Marking the predecessor sent through
+Manual Delivery Review unlocks the next unit; it does not resend the
+predecessor.
+
+Buyer fulfillment projection is based on the text/credential units. When all
+non-invoice units are `sent`, `ReceiptDeliveryPipeline` sets
+`orders.telegram_receipt_sent_at` and dispatches `DeleteBuyerCheckoutMessages`.
+That marker and best-effort cleanup do not require the invoice photo to be
+`sent`, so cleanup may run while the photo remains `unknown`; cleanup never
+changes that ledger outcome or triggers an automatic resend.
+
+Focused receipt evidence is kept at
+`src/tests/Feature/Telegram/TelegramReceiptOutboundEffectTest.php`:
+`test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`
+and `test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`
+cover the invoice exception, while
+`test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units`
+proves that a later unit remains pending after credential ambiguity.
 
 ## Operational recovery
 

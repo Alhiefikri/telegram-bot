@@ -343,6 +343,10 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             ->where('effect_group_key', $first->effect_group_key)
             ->where('sequence', 3)
             ->firstOrFail();
+        $later = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 4)
+            ->firstOrFail();
 
         $photoCount = 0;
         $sendCount = 0;
@@ -367,13 +371,14 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $pipeline->deliver($first, dispatchNext: false);
         $pipeline->deliver($summary, dispatchNext: false);
         $pipeline->deliver($credential, dispatchNext: false);
-        $pipeline->deliver($credential, dispatchNext: false);
+        $pipeline->deliver($later, dispatchNext: false);
 
         $this->assertSame(1, $photoCount);
         $this->assertSame(2, $sendCount);
         $this->assertSame(TelegramOutboundEffectState::Sent, $first->fresh()->state);
         $this->assertSame(TelegramOutboundEffectState::Sent, $summary->fresh()->state);
         $this->assertSame(TelegramOutboundEffectState::Unknown, $credential->fresh()->state);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $later->fresh()->state);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertStringNotContainsString(
             'buyer0@example.test',
