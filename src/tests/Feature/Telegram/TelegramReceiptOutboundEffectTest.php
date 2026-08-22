@@ -68,6 +68,73 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_direct_receipt_send_processes_photo_and_text_once_without_successor_jobs(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 810001],
+            ]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 810002],
+            ]),
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')),
+        );
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
+        );
+        $this->assertSame(
+            [
+                TelegramOutboundEffectState::Sent,
+                TelegramOutboundEffectState::Sent,
+            ],
+            TelegramOutboundEffect::query()
+                ->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))
+                ->orderBy('sequence')
+                ->pluck('state')
+                ->all(),
+        );
+    }
+
+    public function test_queued_receipt_delivery_dispatches_one_successor_effect(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+        $invoice = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($invoice);
+        $detail = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $invoice->effect_group_key)
+            ->where('sequence', 2)
+            ->firstOrFail();
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 810003],
+            ]),
+        ]);
+
+        app(ReceiptDeliveryPipeline::class)->deliver($invoice);
+
+        Queue::assertPushedTimes(SendTelegramReceipt::class, 1);
+        Queue::assertPushed(
+            SendTelegramReceipt::class,
+            fn (SendTelegramReceipt $job): bool => $job->effectId === (string) $detail->id,
+        );
+    }
+
     #[DataProvider('receiptAmountFallbackCases')]
     public function test_invoice_metadata_and_buyer_text_use_order_total_when_provider_total_is_missing(
         string $currency,

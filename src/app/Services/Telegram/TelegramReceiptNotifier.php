@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Customer;
 use App\Models\Order;
@@ -42,8 +43,20 @@ class TelegramReceiptNotifier
             : $outboundEffects->recordReceipt($order);
 
         $pipeline = app(ReceiptDeliveryPipeline::class);
+        $ambiguousInvoiceException = null;
         while ($effect !== null) {
-            $pipeline->deliver($effect, $this, dispatchNext: true, throwOnAmbiguous: true);
+            try {
+                $pipeline->deliver($effect, $this, dispatchNext: false, throwOnAmbiguous: true);
+            } catch (\Throwable $exception) {
+                $freshEffect = $effect->fresh();
+                if (! $this->isInvoiceEffect($freshEffect)
+                    || $freshEffect->state !== TelegramOutboundEffectState::Unknown) {
+                    throw $exception;
+                }
+
+                $ambiguousInvoiceException ??= $exception;
+            }
+
             $effect = TelegramOutboundEffect::query()
                 ->where('effect_group_key', $effect->effect_group_key)
                 ->where('sequence', '>', $effect->sequence)
@@ -52,6 +65,19 @@ class TelegramReceiptNotifier
                 ->get()
                 ->first(fn (TelegramOutboundEffect $candidate): bool => app(TelegramOutboundEffectLedgerProtocol::class)->isDispatchable($candidate));
         }
+
+        if ($ambiguousInvoiceException !== null) {
+            throw $ambiguousInvoiceException;
+        }
+    }
+
+    private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+
+        return ($metadata['unit_role'] ?? null) === 'invoice'
+            || ($effect->telegram_method === 'sendPhoto'
+                && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
     }
 
     /**
