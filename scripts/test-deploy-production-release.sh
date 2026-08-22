@@ -94,6 +94,7 @@ run_scenario() {
 if [ "$(cat "$MOCK_WORKSPACE/scenario")" = "compose-validation-failure" ]; then
   exit 1
 fi
+printf 'Compose configuration is valid; resolved config intentionally not printed.\n'
 exit 0
 SCRIPT
   chmod +x "$workspace/scripts/safe-compose-config.sh"

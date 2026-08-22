@@ -61,7 +61,7 @@ RELEASE_STATE_FILE="$RELEASE_ARTIFACT_DIR/release-state.env"
 
 validate_compose_config() {
   [ "$COMPOSE_CONFIG_STATUS" = validated ] && return 0
-  if ! "$SAFE_COMPOSE_CONFIG" --project "$COMPOSE_PROJECT_NAME" --env-file .env; then
+  if ! "$SAFE_COMPOSE_CONFIG" --project "$COMPOSE_PROJECT_NAME" --env-file .env >&2; then
     COMPOSE_CONFIG_STATUS=invalid
     return 1
   fi
