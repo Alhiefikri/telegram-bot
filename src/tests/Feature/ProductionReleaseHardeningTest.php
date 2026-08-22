@@ -846,6 +846,11 @@ SH);
         $this->assertStringContainsString('phpunit-failure-', $ci);
         $this->assertStringContainsString('playwright-failure-', $ci);
         $this->assertStringContainsString('docker-failure-', $ci);
+        $this->assertStringNotContainsString('cache: npm', $ci);
+        $this->assertStringNotContainsString('type=gha', $ci);
+        $this->assertStringContainsString('name: telegram-bot-production', $ci);
+        $this->assertStringContainsString('keep-state: true', $ci);
+        $this->assertStringContainsString('cache-binary: false', $ci);
 
         $dependabot = file_get_contents(base_path('../.github/dependabot.yml'));
         foreach (['github-actions', 'composer', 'npm'] as $ecosystem) {

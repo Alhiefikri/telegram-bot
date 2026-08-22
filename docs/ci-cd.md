@@ -27,6 +27,16 @@ Container jobs explicitly use Bash because Ubuntu job containers otherwise
 default to `sh`, which rejects `set -o pipefail`. Their final `always()` step
 restores the workspace to the host runner UID/GID obtained from `RUNNER_TEMP`;
 without that boundary, a later host job cannot clean root-owned checkout files.
+The runner must block host sleep only while a workflow job is active. Configure
+the runner's job-started/job-completed hooks to acquire and release a
+`systemd-inhibit --what=sleep --mode=block` lock; suspending or rebooting this
+single workstation leaves every remaining job queued.
+
+Do not enable `setup-node`'s GitHub Actions npm cache on this persistent runner.
+Uploading the local npm cache over the runner's slower uplink costs more time
+than `npm ci` saves. The production image uses the fixed Buildx builder
+`telegram-bot-production` with `keep-state: true`, retaining BuildKit state
+locally instead of uploading a `mode=max` cache after every build.
 
 ## Workflows
 
@@ -41,7 +51,7 @@ without that boundary, a later host job cannot clean root-owned checkout files.
   - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
   - Node 24 + `npm ci`.
   - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
-  - Builds the production image once with BuildKit, reusing the GitHub Actions cache without changing the resulting content-addressed image.
+  - Builds the production image once with a persistent named BuildKit builder, retaining cache locally without changing the resulting content-addressed image.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
   - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
   - Every job has a bounded timeout. Failed PHPUnit, Playwright, and Docker jobs upload diagnostic artifacts retained for 14 days.
