@@ -9,6 +9,12 @@ if [ "$RELEASE_OPERATION" = "deploy" ]; then
   : "${DEPLOY_BRANCH:?DEPLOY_BRANCH is required}"
   : "${DEPLOY_SHA:?DEPLOY_SHA is required}"
   : "${APP_IMAGE:?APP_IMAGE is required}"
+elif [ "$RELEASE_OPERATION" = "contract" ] || [ "$RELEASE_OPERATION" = "reconcile" ]; then
+  : "${DEPLOY_SHA:?DEPLOY_SHA is required for $RELEASE_OPERATION}"
+  : "${APP_IMAGE:?APP_IMAGE is required for $RELEASE_OPERATION}"
+elif [ "$RELEASE_OPERATION" != "rollback" ]; then
+  echo "Unsupported release operation: $RELEASE_OPERATION" >&2
+  exit 2
 fi
 
 cd "$PRODUCTION_PATH"
@@ -41,9 +47,137 @@ sed -E \
 RELEASE_DIAGNOSTIC_REDACTOR
 fi
 chmod 0700 "$REDACTOR_PATH"
+SAFE_COMPOSE_CONFIG="$RELEASE_ARTIFACT_DIR/safe-compose-config.sh"
+if [ -x ./scripts/safe-compose-config.sh ]; then
+  cp ./scripts/safe-compose-config.sh "$SAFE_COMPOSE_CONFIG"
+else
+  echo "Safe Compose validator is missing from the current release checkout." >&2
+  exit 1
+fi
+chmod 0700 "$SAFE_COMPOSE_CONFIG"
+
+COMPOSE_CONFIG_STATUS=unvalidated
+RELEASE_STATE_FILE="$RELEASE_ARTIFACT_DIR/release-state.env"
+
+validate_compose_config() {
+  [ "$COMPOSE_CONFIG_STATUS" = validated ] && return 0
+  if ! "$SAFE_COMPOSE_CONFIG" --project "$COMPOSE_PROJECT_NAME" --env-file .env; then
+    COMPOSE_CONFIG_STATUS=invalid
+    return 1
+  fi
+  COMPOSE_CONFIG_STATUS=validated
+}
+
 
 compose() {
+  validate_compose_config || return 1
   docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"
+}
+
+write_release_state() {
+  local state="$1"
+  local temporary="${RELEASE_STATE_FILE}.tmp"
+  {
+    printf 'state=%s\n' "$state"
+    printf 'deploy_sha=%s\n' "${DEPLOY_SHA:-}"
+    printf 'app_image=%s\n' "${APP_IMAGE:-}"
+    printf 'previous_commit=%s\n' "${PREVIOUS_COMMIT:-}"
+    printf 'previous_image=%s\n' "${PREVIOUS_IMAGE:-}"
+    printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$RELEASE_STATE_FILE"
+  printf '%s state=%s deploy_sha=%s app_image=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$state" "${DEPLOY_SHA:-}" "${APP_IMAGE:-}" \
+    >> "$RELEASE_ARTIFACT_DIR/release-journal.log"
+  chmod 0600 "$RELEASE_ARTIFACT_DIR/release-journal.log"
+}
+
+release_state_value() {
+  local key="$1"
+  [ -f "$RELEASE_STATE_FILE" ] || return 0
+  sed -n "s/^${key}=//p" "$RELEASE_STATE_FILE" | sed -n '1p'
+}
+
+write_release_marker() {
+  local release_sha="$1"
+  compose exec -T app sh -c 'printf "%s\n" "$1" > /var/www/html/public/release-sha.txt' \
+    sh "$release_sha" </dev/null
+}
+
+verify_release_marker() {
+  local expected_sha="$1"
+  local actual_sha
+  actual_sha="$(compose exec -T app sh -c 'cat /var/www/html/public/release-sha.txt' </dev/null)"
+  [ "$actual_sha" = "$expected_sha" ]
+}
+verify_app_url() {
+  [ -z "${EXPECTED_APP_URL:-}" ] && return 0
+  local expected_app_url="${EXPECTED_APP_URL%/}"
+  local actual_app_url
+  actual_app_url="$(compose exec -T app sh -c 'printf "%s\n" "$APP_URL"' </dev/null)"
+  actual_app_url="${actual_app_url%/}"
+  [ "$actual_app_url" = "$expected_app_url" ] || {
+    echo "Candidate APP_URL $actual_app_url does not match expected smoke URL $expected_app_url." >&2
+    return 1
+  }
+}
+
+
+is_immutable_image_reference() {
+  local reference="$1"
+  local digest="${reference##*@sha256:}"
+  case "$reference" in
+    ghcr.io/*@sha256:*) ;;
+    *) return 1 ;;
+  esac
+  [ "${#digest}" -eq 64 ] && [[ "$digest" =~ ^[0-9a-f]+$ ]]
+}
+
+
+run_verified_database_backup() {
+  local backup_log="$RELEASE_ARTIFACT_DIR/contract-backup.log"
+  local backup_file verification checksum
+  local backup_dir="$RELEASE_ARTIFACT_DIR/contract-backup"
+
+  mkdir -p "$backup_dir"
+  echo "Creating and verifying encrypted production backup before contract recovery."
+  if ! BACKUP_DIR="$backup_dir" \
+    COMPOSE="docker compose -p $COMPOSE_PROJECT_NAME --env-file .env" \
+    COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
+    COMPOSE_ENV_FILE=.env \
+    COMPOSE_CONFIG_SCRIPT="$SAFE_COMPOSE_CONFIG" \
+    ./scripts/backup-db.sh > "$backup_log"; then
+    echo "Encrypted production backup failed; refusing destructive contract migration." >&2
+    return 1
+  fi
+
+  backup_file="$(sed -n 's/^Backup written to //p' "$backup_log" | sed -n '1p')"
+  verification="$(sed -n 's/^Backup verification: //p' "$backup_log" | sed -n '1p')"
+  [ -n "$backup_file" ] && [ -s "$backup_file" ] || {
+    echo "Encrypted production backup did not produce a readable file." >&2
+    return 1
+  }
+  [ "$verification" = "encrypted-and-readable" ] || {
+    echo "Encrypted production backup did not produce a verification marker." >&2
+    return 1
+  }
+
+  checksum="$(sha256sum "$backup_file")"
+  checksum="${checksum%% *}"
+  [[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Encrypted production backup checksum is invalid." >&2
+    return 1
+  }
+
+  {
+    printf 'backup_file=%s\n' "$backup_file"
+    printf 'sha256=%s\n' "$checksum"
+    printf 'verification=%s\n' "$verification"
+    printf 'verified_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$RELEASE_ARTIFACT_DIR/contract-backup-verified.txt"
+  chmod 0600 "$RELEASE_ARTIFACT_DIR/contract-backup-verified.txt"
+  echo "Encrypted production backup verified: sha256=$checksum"
 }
 
 run_expand_migrations() {
@@ -94,12 +228,24 @@ run_deferred_telegram_contract() {
     echo "Deferred Telegram outbound contract found app image $running_image instead of $APP_IMAGE." >&2
     return 1
   fi
+  verify_app_url || return 1
+  write_release_state "backup-started"
+
+  run_verified_database_backup || return 1
+  write_release_state "backup-verified"
+
 
   echo "Recording Telegram outbound contract preflight before recovery."
-  compose exec -T app php artisan telegram:outbound-contract --json </dev/null > "$before_report"
+  if ! compose exec -T app php artisan telegram:outbound-contract --json </dev/null > "$before_report"; then
+    echo "Telegram outbound contract preflight failed." >&2
+    return 1
+  fi
 
   echo "Recovering eligible Telegram outbound effects before contract migration."
-  compose exec -T app php artisan telegram:recover-outbound --chunk=100 --queue=telegram-outbound </dev/null
+  if ! compose exec -T app php artisan telegram:recover-outbound --chunk=100 --queue=telegram-outbound </dev/null; then
+    echo "Telegram outbound effect recovery failed." >&2
+    return 1
+  fi
 
   for attempt in $(seq 1 "${TELEGRAM_OUTBOUND_CONTRACT_ATTEMPTS:-36}"); do
     if compose exec -T app php artisan telegram:outbound-contract --json --strict </dev/null > "$after_report"; then
@@ -112,15 +258,29 @@ run_deferred_telegram_contract() {
     sleep "${TELEGRAM_OUTBOUND_CONTRACT_INTERVAL:-5}"
   done
 
+  write_release_state "contract-migration-started"
   echo "Applying deferred Telegram outbound contract migration."
-  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+  if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan migrate --force --isolated </dev/null
+    app php artisan migrate --force --isolated </dev/null; then
+    echo "Deferred Telegram outbound contract migration failed." >&2
+    return 1
+  fi
+  write_release_state "contract-migration-succeeded"
 
-  compose exec -T app php artisan queue:restart </dev/null
-  wait_for_health
-  compose exec -T app php artisan telegram:outbound-contract --strict </dev/null
+  if ! compose exec -T app php artisan queue:restart </dev/null; then
+    echo "Queue worker restart failed after the deferred Telegram outbound contract." >&2
+    return 1
+  fi
+  if ! wait_for_health; then
+    echo "Health verification failed after the deferred Telegram outbound contract." >&2
+    return 1
+  fi
+  if ! compose exec -T app php artisan telegram:outbound-contract --strict </dev/null; then
+    echo "Strict Telegram outbound contract verification failed after migration." >&2
+    return 1
+  fi
 }
 
 record_result() {
@@ -129,13 +289,21 @@ record_result() {
 
 collect_release_diagnostics() {
   local health_summary_temp="$RELEASE_ARTIFACT_DIR/health-summary.json.tmp"
+
+  if [ "$COMPOSE_CONFIG_STATUS" != validated ]; then
+    printf '{"status":"unavailable","reason":"compose-validation-failed"}\n' > "$RELEASE_ARTIFACT_DIR/compose-ps.json"
+    printf '{"status":"unavailable","reason":"compose-validation-failed"}\n' > "$RELEASE_ARTIFACT_DIR/health-summary.json"
+    printf 'Compose diagnostics unavailable because safe Compose validation did not pass.\n' > "$RELEASE_ARTIFACT_DIR/compose.log"
+    return 0
+  fi
+
   compose ps --format json > "$RELEASE_ARTIFACT_DIR/compose-ps.json" 2>/dev/null || true
   if [ -s "$FAILED_JOBS_BASELINE_FILE" ]; then
     if compose exec -T app php artisan ops:release-health-summary --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE" > "$health_summary_temp" 2>/dev/null; then
       mv "$health_summary_temp" "$RELEASE_ARTIFACT_DIR/health-summary.json"
     fi
   else
-    if compose exec -T app php artisan ops:release-health-summary > "$health_summary_temp" 2>/dev/null; then
+    if compose exec -T app php artisan ops:release-health-summary </dev/null > "$health_summary_temp" 2>/dev/null; then
       mv "$health_summary_temp" "$RELEASE_ARTIFACT_DIR/health-summary.json"
     fi
   fi
@@ -182,7 +350,7 @@ verify_release_gates() {
   wait_for_health || return 1
 
   if [ "${RECOVER_FAILED_TELEGRAM_UPDATES:-false}" = "true" ]; then
-    if ! compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable; then
+    if ! compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null; then
       echo "Release gate failed: Telegram update recovery failed." >&2
       return 1
     fi
@@ -211,58 +379,149 @@ verify_release_gates() {
   fi
 }
 
+load_previous_release() {
+  PREVIOUS_COMMIT="$(cat "$RELEASE_ARTIFACT_DIR/previous-commit.txt")"
+  PREVIOUS_IMAGE="$(cat "$RELEASE_ARTIFACT_DIR/previous-image.txt")"
+  [[ "$PREVIOUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "Recorded rollback commit is invalid." >&2
+    return 1
+  }
+  is_immutable_image_reference "$PREVIOUS_IMAGE" || {
+    echo "Recorded rollback image is not an immutable GHCR digest reference." >&2
+    return 1
+  }
+}
+
 restore_previous_release() {
   local failure_reason="${FAILURE_REASON:-deploy-failed}"
   echo "Release verification failed ($failure_reason). Restoring previous release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
+  write_release_state "rollback-started"
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
-  APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans
+  COMPOSE_CONFIG_STATUS=unvalidated
+  export RELEASE_SHA="$PREVIOUS_COMMIT"
 
-  if verify_service_images "$PREVIOUS_IMAGE" && wait_for_health; then
+  if ! docker pull "$PREVIOUS_IMAGE"; then
+    record_result "${failure_reason}-rollback-failed"
+    write_release_state "rollback-failed"
+    echo "DEPLOY FAILED: previous immutable image could not be pulled." >&2
+    return 1
+  fi
+  if ! APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans; then
+    record_result "${failure_reason}-rollback-failed"
+    write_release_state "rollback-failed"
+    echo "DEPLOY FAILED: previous release could not be started." >&2
+    return 1
+  fi
+
+  if verify_service_images "$PREVIOUS_IMAGE" \
+    && wait_for_health \
+    && verify_app_url \
+    && write_release_marker "$PREVIOUS_COMMIT" \
+    && verify_release_marker "$PREVIOUS_COMMIT"; then
+    APP_IMAGE="$PREVIOUS_IMAGE"
     record_result "${failure_reason}-rollback-succeeded"
+    write_release_state "rollback-succeeded"
     echo "DEPLOY FAILED: rollback succeeded and previous release is healthy." >&2
     return 0
   fi
 
   record_result "${failure_reason}-rollback-failed"
+  write_release_state "rollback-failed"
   echo "DEPLOY FAILED: rollback failed or the restored release is unhealthy. Manual recovery is required." >&2
   return 1
 }
 
+verify_candidate_release() {
+  local current_commit current_app_container running_image
+  current_commit="$(git rev-parse HEAD)"
+  [ "$current_commit" = "$DEPLOY_SHA" ] || return 1
+  current_app_container="$(compose ps -q app)"
+  [ -n "$current_app_container" ] || return 1
+  running_image="$(docker inspect "$current_app_container" --format '{{.Config.Image}}')"
+  verify_service_images "$APP_IMAGE" && wait_for_health && verify_app_url
+}
+
+reconcile_remote_release() {
+  local state="${1:-}"
+  if [ -z "$state" ]; then
+    echo "Remote release journal is missing; refusing to infer mutation outcome." >&2
+    if load_previous_release; then
+      FAILURE_REASON=remote-state-reconcile
+      restore_previous_release || true
+    fi
+    return 1
+  fi
+
+  case "$state" in
+    candidate-cutover-started|candidate-healthy|compatible-candidate-running)
+      COMPOSE_CONFIG_STATUS=unvalidated
+      export RELEASE_SHA="$DEPLOY_SHA"
+      if verify_candidate_release; then
+        if ! verify_release_marker "$DEPLOY_SHA"; then
+          write_release_marker "$DEPLOY_SHA" && verify_release_marker "$DEPLOY_SHA" || {
+            echo "Candidate is healthy but its public release marker could not be repaired." >&2
+            load_previous_release && FAILURE_REASON=remote-state-reconcile && restore_previous_release || true
+            return 1
+          }
+        fi
+        [ -s "$RELEASE_ARTIFACT_DIR/release-result.txt" ] \
+          || record_result "deploy-succeeded-compatible-contract-pending"
+        write_release_state "compatible-candidate-running"
+        echo "Remote release reconciliation proved the candidate is healthy."
+        return 0
+      fi
+      echo "Remote release journal says candidate mutation started, but candidate health is not proven." >&2
+      if load_previous_release; then
+        FAILURE_REASON=remote-state-reconcile
+        restore_previous_release || true
+      fi
+      return 1
+      ;;
+    deploy-started|previous-release-recorded|candidate-checkout|image-pulled|candidate-migrations-started|migration-succeeded|backup-started|backup-verified)
+      echo "Remote release journal does not prove a healthy cutover: state=$state." >&2
+      if load_previous_release; then
+        FAILURE_REASON=remote-state-reconcile
+        restore_previous_release || true
+      fi
+      return 1
+      ;;
+    *)
+      echo "Remote release journal has an unknown state: $state." >&2
+      return 1
+      ;;
+  esac
+}
+
+
 FAILED_JOBS_BASELINE_FILE="$RELEASE_ARTIFACT_DIR/failed-jobs-baseline.json"
 trap 'status=$?; collect_release_diagnostics; exit "$status"' EXIT
 exec 9>"$PRODUCTION_PATH/.production-mutation.lock"
-if ! flock -n 9; then
+if [ "$RELEASE_OPERATION" = "reconcile" ]; then
+  flock -w "${RELEASE_RECONCILE_LOCK_TIMEOUT:-120}" 9 \
+    || { echo "Timed out waiting for the active release to finish before reconciliation." >&2; exit 1; }
+elif ! flock -n 9; then
   echo "Another production deployment or recovery is already running; refusing to overlap." >&2
   exit 1
 fi
 
 if [ "$RELEASE_OPERATION" = "contract" ]; then
-  : "${DEPLOY_SHA:?DEPLOY_SHA is required for the deferred contract phase}"
-  : "${APP_IMAGE:?APP_IMAGE is required for the deferred contract phase}"
-
+  write_release_state "contract-started"
   if run_deferred_telegram_contract; then
     record_result "deploy-succeeded"
+    write_release_state "contract-succeeded"
     echo "Deferred Telegram outbound contract succeeded: commit=$DEPLOY_SHA image=$APP_IMAGE"
     exit 0
   fi
 
   record_result "contract-failed-candidate-remains"
+  write_release_state "contract-failed-candidate-remains"
   echo "DEPLOY FAILED: deferred Telegram outbound contract did not complete; candidate remains running for investigation." >&2
   exit 1
 fi
 
 if [ "$RELEASE_OPERATION" = "rollback" ]; then
-  PREVIOUS_COMMIT="$(cat "$RELEASE_ARTIFACT_DIR/previous-commit.txt")"
-  PREVIOUS_IMAGE="$(cat "$RELEASE_ARTIFACT_DIR/previous-image.txt")"
-  case "$PREVIOUS_COMMIT" in
-    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-    *) echo "Recorded rollback commit is invalid." >&2; exit 1 ;;
-  esac
-  case "$PREVIOUS_IMAGE" in
-    ""|*[[:space:]]*) echo "Recorded rollback image is invalid." >&2; exit 1 ;;
-    *) ;;
-  esac
+  load_previous_release || exit 1
   FAILURE_REASON="${FAILURE_REASON:-external-smoke-failed}"
   if restore_previous_release; then
     exit 0
@@ -270,6 +529,15 @@ if [ "$RELEASE_OPERATION" = "rollback" ]; then
   exit 1
 fi
 
+if [ "$RELEASE_OPERATION" = "reconcile" ]; then
+  state="$(release_state_value state)"
+  if reconcile_remote_release "$state"; then
+    exit 0
+  fi
+  exit 1
+fi
+
+write_release_state "deploy-started"
 git fetch --prune origin "$DEPLOY_BRANCH"
 git cat-file -e "${DEPLOY_SHA}^{commit}"
 
@@ -277,58 +545,62 @@ PREVIOUS_COMMIT="$(git rev-parse HEAD)"
 previous_app_container="$(compose ps -q app)"
 [ -n "$previous_app_container" ] || { echo "Cannot identify the currently running app container." >&2; exit 1; }
 PREVIOUS_IMAGE="$(docker inspect "$previous_app_container" --format '{{.Config.Image}}')"
-case "$PREVIOUS_IMAGE" in
-  *@sha256:????????????????????????????????????????????????????????????????)
-    echo "Current app image is an immutable digest reference: $PREVIOUS_IMAGE"
-    ;;
-  ""|*[[:space:]]*)
-    echo "Current app image reference is invalid and cannot be used for rollback: $PREVIOUS_IMAGE" >&2
-    exit 1
-    ;;
-  *)
-    echo "Current app image is a legacy mutable/local reference: $PREVIOUS_IMAGE" >&2
-    echo "Proceeding with first immutable-image cutover; rollback will reuse this existing local image with --no-build." >&2
-    ;;
-esac
+if ! is_immutable_image_reference "$PREVIOUS_IMAGE"; then
+  echo "Current app image is not an immutable GHCR digest reference and cannot be used for rollback: $PREVIOUS_IMAGE" >&2
+  exit 1
+fi
+echo "Current app image is an immutable digest reference: $PREVIOUS_IMAGE"
 printf '%s\n' "$PREVIOUS_COMMIT" > "$RELEASE_ARTIFACT_DIR/previous-commit.txt"
 printf '%s\n' "$PREVIOUS_IMAGE" > "$RELEASE_ARTIFACT_DIR/previous-image.txt"
+write_release_state "previous-release-recorded"
 echo "Recorded rollback target commit=$PREVIOUS_COMMIT image=$PREVIOUS_IMAGE"
 
 git checkout --detach "$DEPLOY_SHA"
 git reset --hard "$DEPLOY_SHA"
-./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
+COMPOSE_CONFIG_STATUS=unvalidated
+export RELEASE_SHA="$DEPLOY_SHA"
+write_release_state "candidate-checkout"
+validate_compose_config
 
-echo "Pulling CI-approved production image: $APP_IMAGE"
-case "$APP_IMAGE" in
-  ghcr.io/*)
-    : "${GHCR_USERNAME:?GHCR_USERNAME is required to pull GHCR production images}"
-    : "${GHCR_TOKEN:?GHCR_TOKEN is required to pull GHCR production images}"
-    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin >/dev/null
-    ;;
-esac
+if ! is_immutable_image_reference "$APP_IMAGE"; then
+  echo "Candidate image is not an immutable GHCR digest reference: $APP_IMAGE" >&2
+  exit 1
+fi
+echo "Pulling CI-approved production image from the VPS Docker credential store: $APP_IMAGE"
 docker pull "$APP_IMAGE"
+write_release_state "image-pulled"
 
 echo "Recording the pre-release failed-job ID watermark with the candidate image."
 APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE"
 
+write_release_state "candidate-migrations-started"
 echo "Running candidate expand migrations before application cutover."
 if ! run_expand_migrations; then
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
+  COMPOSE_CONFIG_STATUS=unvalidated
+  export RELEASE_SHA="$PREVIOUS_COMMIT"
+  write_release_state "migration-failed-no-cutover"
   record_result "migration-failed-no-cutover"
   echo "DEPLOY FAILED: migration failed before cutover. The previous release remains running." >&2
   exit 1
 fi
+write_release_state "migration-succeeded"
 
 echo "Migration succeeded. Cutting over application services."
+write_release_state "candidate-cutover-started"
 if ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --remove-orphans \
   || ! verify_service_images "$APP_IMAGE" \
-  || ! verify_release_gates; then
+  || ! verify_release_gates \
+  || ! verify_app_url \
+  || ! write_release_marker "$DEPLOY_SHA" \
+  || ! verify_release_marker "$DEPLOY_SHA"; then
   if restore_previous_release; then
     exit 20
   fi
   exit 21
 fi
+write_release_state "candidate-healthy"
 
 compose ps
 
@@ -346,4 +618,5 @@ if [ -n "$duplicate_projects" ]; then
 fi
 
 record_result "deploy-succeeded-compatible-contract-pending"
+write_release_state "compatible-candidate-running"
 echo "Production compatible release succeeded; deferred Telegram outbound contract remains pending: commit=$DEPLOY_SHA image=$APP_IMAGE"

@@ -11,6 +11,8 @@ CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: failed-job snapshot can consume the streamed SSH script stdin\n' >&2; exit 1; }
+grep -Fq 'telegram:recover-failed-updates --prune-unrecoverable </dev/null' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: failed Telegram update recovery can consume the streamed SSH script stdin\n' >&2; exit 1; }
 grep -Fq 'php artisan migrate --force' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: candidate migration can consume the streamed SSH script stdin\n' >&2; exit 1; }
 grep -Fq '2026_08_18_000001_contract_telegram_outbound_effects.php' "$RELEASE_SCRIPT" \
@@ -19,8 +21,26 @@ grep -Fq 'telegram:outbound-contract --strict' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: deferred Telegram outbound contract must have a strict preflight\n' >&2; exit 1; }
 grep -Fq 'telegram:recover-outbound --chunk=100 --queue=telegram-outbound' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: deferred Telegram outbound contract must recover effects before contracting\n' >&2; exit 1; }
-grep -Fq 'php artisan queue:restart' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: deferred Telegram outbound contract must restart long-lived workers\n' >&2; exit 1; }
+grep -Fq 'contract-backup-verified.txt' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: destructive contract must record verified backup evidence\n' >&2; exit 1; }
+grep -Fq 'release-state.env' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: release must persist a remote mutation journal\n' >&2; exit 1; }
+grep -Fq 'is_immutable_image_reference' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: rollback image validation must require an immutable digest\n' >&2; exit 1; }
+grep -Fq 'safe-compose-config.sh' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: release must validate Compose before Compose actions\n' >&2; exit 1; }
+grep -Fq 'RELEASE_OPERATION=reconcile' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: production workflow must reconcile remote state after SSH failure\n' >&2; exit 1; }
+grep -Fq 'ref: ${{ env.DEPLOY_SHA }}' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: deploy checkout must use the selected deployment SHA\n' >&2; exit 1; }
+grep -Fq 'EXPECTED_RELEASE_SHA' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: external smoke must bind to the candidate release identity\n' >&2; exit 1; }
+! grep -Fq 'GHCR_TOKEN' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: GitHub token must not be forwarded to the VPS\n' >&2; exit 1; }
+grep -Fq 'Re-run external public smoke after rollback' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: rollback must repeat public smoke after restoration\n' >&2; exit 1; }
+! grep -Fq 'docker login ghcr.io' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: release must use the VPS Docker credential store\n' >&2; exit 1; }
 grep -Fq 'RELEASE_OPERATION=contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
   || { printf 'FAIL: production workflow must invoke the deferred contract phase explicitly\n' >&2; exit 1; }
 grep -Fq 'apply_telegram_outbound_contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
@@ -38,26 +58,61 @@ assert_eq() {
 run_scenario() {
   local scenario=$1 expected_exit=$2 expected_result=$3 expected_image=$4
   local previous_image=${5:-$PREVIOUS_IMAGE}
+  local operation=deploy
+  local recover_failed=false
   local workspace bin artifacts status
+  [ "$scenario" = "recovery-failure" ] && recover_failed=true
+  case "$scenario" in
+    contract-success|contract-failure|backup-failure) operation=contract ;;
+    reconcile-success|reconcile-failure) operation=reconcile ;;
+  esac
   workspace=$(mktemp -d)
   bin="$workspace/bin"
   artifacts="$workspace/artifacts"
   mkdir -p "$bin" "$artifacts" "$workspace/scripts" "$workspace/src/database/migrations"
   : > "$workspace/src/database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php"
   : > "$workspace/src/database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php"
-  printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
-  printf '%s\n' "$previous_image" > "$workspace/current-image"
+  if [ "$operation" = "contract" ] || [ "$operation" = "reconcile" ]; then
+    printf '%s\n' "$CANDIDATE_COMMIT" > "$workspace/head"
+    printf '%s\n' "$CANDIDATE_IMAGE" > "$workspace/current-image"
+  else
+    printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
+    printf '%s\n' "$previous_image" > "$workspace/current-image"
+  fi
   printf '%s\n' "$scenario" > "$workspace/scenario"
   : > "$workspace/commands.log"
   : > "$workspace/.env"
+  if [ "$operation" = "reconcile" ]; then
+    printf '%s\n' "$PREVIOUS_COMMIT" > "$artifacts/previous-commit.txt"
+    printf '%s\n' "$PREVIOUS_IMAGE" > "$artifacts/previous-image.txt"
+    printf 'state=candidate-cutover-started\n' > "$artifacts/release-state.env"
+  fi
+
 
   cat > "$workspace/scripts/safe-compose-config.sh" <<'SCRIPT'
 #!/usr/bin/env bash
+if [ "$(cat "$MOCK_WORKSPACE/scenario")" = "compose-validation-failure" ]; then
+  exit 1
+fi
 exit 0
 SCRIPT
   chmod +x "$workspace/scripts/safe-compose-config.sh"
   cp "$ROOT_DIR/scripts/redact-release-diagnostics.sh" "$workspace/scripts/redact-release-diagnostics.sh"
   chmod +x "$workspace/scripts/redact-release-diagnostics.sh"
+  cat > "$workspace/scripts/backup-db.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$(cat "$MOCK_WORKSPACE/scenario")" = "backup-failure" ]; then
+  exit 1
+fi
+mkdir -p "$BACKUP_DIR"
+outfile="$BACKUP_DIR/telegram_bot_test.sql.gz.gpg"
+printf 'encrypted backup fixture\n' > "$outfile"
+printf 'Backup written to %s\n' "$outfile"
+printf 'Backup verification: encrypted-and-readable\n'
+SCRIPT
+  chmod +x "$workspace/scripts/backup-db.sh"
+
 
   cat > "$bin/git" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -113,17 +168,27 @@ case "$command" in
     ;;
   run)
     if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
+    if [ "$scenario" = "contract-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     ;;
   up)
     printf '%s\n' "${APP_IMAGE:?}" > "$MOCK_WORKSPACE/current-image"
     ;;
   exec)
     current_image=$(cat "$MOCK_WORKSPACE/current-image")
+    if printf '%s' "$*" | grep -q 'release-sha.txt'; then
+      printf '%s\n' "$(cat "$MOCK_WORKSPACE/head")" > "$MOCK_WORKSPACE/release-marker"
+      if printf '%s' "$*" | grep -q 'cat /var/www/html/public/release-sha.txt'; then
+        cat "$MOCK_WORKSPACE/release-marker"
+      fi
+    fi
     if [ "$scenario" = "queue-failure" ] && printf '%s' "$*" | grep -q 'ops:check-queue-depth'; then
       exit 1
     fi
+    if [ "$scenario" = "recovery-failure" ] && printf '%s' "$*" | grep -q 'recover-failed-updates'; then
+      exit 1
+    fi
     if printf '%s' "$*" | grep -q 'ops:health'; then
-      if [ "$scenario" = "application-health-failure" ] && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
+      if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "reconcile-failure" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
       if [ "$scenario" = "rollback-failure" ]; then exit 1; fi
     fi
     ;;
@@ -135,8 +200,9 @@ SCRIPT
   set +e
   PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" DEPLOY_BRANCH=main \
     DEPLOY_SHA="$CANDIDATE_COMMIT" COMPOSE_PROJECT_NAME=telegram-bot-prod APP_IMAGE="$CANDIDATE_IMAGE" \
+    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" \
     RELEASE_ARTIFACT_DIR="$artifacts" RELEASE_HEALTH_ATTEMPTS=1 RELEASE_HEALTH_INTERVAL=0 \
-    GHCR_USERNAME=ci-bot GHCR_TOKEN=ci-token \
+    GPG_RECIPIENT=backup@example.test \
     bash "$RELEASE_SCRIPT" > "$workspace/stdout" 2> "$workspace/stderr"
   status=$?
   set -e
@@ -151,11 +217,30 @@ SCRIPT
     set -e
   fi
 
+  if [ "$scenario" = "legacy-image-rejected" ]; then
+    [ "$status" -ne 0 ] || fail "legacy rollback image was accepted"
+    grep -q 'immutable GHCR digest reference' "$workspace/stderr" || fail "legacy rollback rejection was not explicit"
+    rm -rf "$workspace"
+    printf 'PASS: %s\n' "$scenario"
+    return
+  fi
+
+  if [ "$scenario" = "compose-validation-failure" ]; then
+    [ "$status" -ne 0 ] || fail "invalid Compose configuration was accepted"
+    ! grep -q '^docker ' "$workspace/commands.log" || fail "Compose action ran before safe validation"
+    grep -q 'compose-validation-failed' "$artifacts/compose-ps.json" || fail "diagnostics attempted Compose after validation failure"
+    rm -rf "$workspace"
+    printf 'PASS: %s\n' "$scenario"
+    return
+  fi
+
   assert_eq "$status" "$expected_exit"
   assert_eq "$(cat "$artifacts/release-result.txt")" "$expected_result"
   assert_eq "$(cat "$workspace/current-image")" "$expected_image"
-  assert_eq "$(cat "$artifacts/previous-commit.txt")" "$PREVIOUS_COMMIT"
-  assert_eq "$(cat "$artifacts/previous-image.txt")" "$previous_image"
+  if [ "$operation" = "deploy" ] || [ "$operation" = "reconcile" ]; then
+    assert_eq "$(cat "$artifacts/previous-commit.txt")" "$PREVIOUS_COMMIT"
+    assert_eq "$(cat "$artifacts/previous-image.txt")" "$previous_image"
+  fi
   [ -x "$artifacts/redact-release-diagnostics.sh" ] || fail "artifact-local redactor is missing or not executable"
   [ -f "$artifacts/compose.log" ] || fail "release diagnostics did not produce a redacted compose log"
 
@@ -183,16 +268,40 @@ SCRIPT
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "queue gate failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "queue gate failure did not report rollback"
       ;;
+    recovery-failure)
+      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "recovery gate failure did not restore previous image"
+      ;;
+    reconcile-success)
+      grep -q 'Remote release reconciliation proved the candidate is healthy' "$workspace/stdout" || fail "remote reconciliation did not prove the candidate"
+      ;;
+    reconcile-failure)
+      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "remote reconciliation failure did not restore previous image"
+      grep -q 'remote-state-reconcile' "$workspace/stderr" || fail "remote reconciliation rollback reason was not explicit"
+      ;;
+    contract-success)
+      [ -s "$artifacts/contract-backup-verified.txt" ] || fail "contract success did not record verified backup evidence"
+      grep -q 'contract-migration-started' "$artifacts/release-journal.log" || fail "contract journal did not record migration state"
+      ;;
+    contract-failure|backup-failure)
+      [ "$(cat "$artifacts/release-result.txt")" = "contract-failed-candidate-remains" ] || fail "contract failure result was not durable"
+      ;;
   esac
 
   rm -rf "$workspace"
   printf 'PASS: %s\n' "$scenario"
 }
+run_scenario compose-validation-failure 1 unused "$PREVIOUS_IMAGE"
 
 run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
-run_scenario legacy-image-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
+run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
+run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario legacy-image-rejected 1 unused "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario queue-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario recovery-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario contract-success 0 deploy-succeeded "$CANDIDATE_IMAGE"
+run_scenario contract-failure 1 contract-failed-candidate-remains "$CANDIDATE_IMAGE"
+run_scenario backup-failure 1 contract-failed-candidate-remains "$CANDIDATE_IMAGE"

@@ -372,11 +372,14 @@ class ProductionReleaseHardeningTest extends TestCase
         $script = base_path('../scripts/smoke-production.sh');
 
         $this->assertFileExists($script);
-
         $contents = file_get_contents($script);
+
         $this->assertStringContainsString('BASE_URL', $contents);
         $this->assertStringContainsString('/up', $contents);
-        $this->assertStringContainsString('curl --fail', $contents);
+        $this->assertStringContainsString('--write-out', $contents);
+        $this->assertStringContainsString('SMOKE_HEALTH_MARKER', $contents);
+        $this->assertStringContainsString('EXPECTED_APP_URL', $contents);
+        $this->assertStringContainsString('EXPECTED_RELEASE_SHA', $contents);
         $this->assertStringContainsString('TELEGRAM_MINI_APP_URL', $contents);
         $this->assertStringContainsString('$BASE_URL/admin', $contents);
         $this->assertStringContainsString('--location', $contents);
@@ -388,11 +391,15 @@ class ProductionReleaseHardeningTest extends TestCase
     public function test_external_smoke_failure_triggers_locked_rollback_and_explicit_failure(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
-
         $this->assertStringContainsString('id: external-smoke', $workflow);
         $this->assertStringContainsString("SMOKE_PUBLIC_ONLY: 'true'", $workflow);
         $this->assertStringContainsString('Roll back after external smoke failure', $workflow);
-        $this->assertStringContainsString("if: steps.external-smoke.outcome == 'failure'", $workflow);
+        $this->assertStringContainsString("if: steps.remote-reconcile.outcome == 'success' && steps.external-smoke.outcome == 'failure'", $workflow);
+        $this->assertStringContainsString('RELEASE_OPERATION=reconcile', $workflow);
+        $this->assertStringContainsString('continue-on-error: true', $workflow);
+        $this->assertStringContainsString('Capture rollback release identity', $workflow);
+        $this->assertStringContainsString('Re-run external public smoke after rollback', $workflow);
+        $this->assertStringContainsString('ROLLBACK_SMOKE_OUTCOME', $workflow);
         $this->assertStringContainsString('RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed', $workflow);
         $this->assertStringContainsString('Fail release after external smoke rollback', $workflow);
         $this->assertStringContainsString('exit 20', $workflow);
@@ -457,33 +464,61 @@ class ProductionReleaseHardeningTest extends TestCase
             $this->writeExecutable($fakeCurl, <<<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-url="${@: -1}"
+output=''
+url=''
+for argument in "$@"; do
+    case "$argument" in
+        --output)
+            shift
+            output="$1"
+            ;;
+        http://*|https://*)
+            url="$argument"
+            ;;
+    esac
+    shift || true
+done
 printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
 case "$url" in
-  */up)
-    exit 0
-    ;;
-  */telegram-mini-app)
-    exit 22
-    ;;
-  *)
-    exit 0
-    ;;
+    */up)
+        body='Application up'
+        meta='200'
+        ;;
+    */release-sha.txt)
+        body='2222222222222222222222222222222222222222'
+        meta='200'
+        ;;
+    */telegram-mini-app)
+        exit 22
+        ;;
+    *)
+        body='LHIE STORE'
+        meta='200|https://store.example/admin/login'
+        ;;
 esac
+[ -z "$output" ] || printf '%s' "$body" > "$output"
+printf '%s' "$meta"
 SH);
 
             $curlLog = $workspace.'/curl.log';
             $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
                 'BASE_URL' => 'https://store.example',
+                'EXPECTED_APP_URL' => 'https://store.example',
+                'EXPECTED_RELEASE_SHA' => '2222222222222222222222222222222222222222',
                 'FAKE_CURL_LOG' => $curlLog,
                 'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
+                'SMOKE_PUBLIC_ONLY' => 'true',
                 'TELEGRAM_MINI_APP_URL' => 'https://store.example/telegram-mini-app',
             ]);
 
             $this->assertNotSame(0, $result['exitCode']);
-            $this->assertStringContainsString('Smoke check passed: https://store.example/up', $result['stdout']);
-            $this->assertStringNotContainsString('Mini app dashboard smoke check passed', $result['stdout']);
-            $this->assertStringContainsString("https://store.example/up\nhttps://store.example/telegram-mini-app", file_get_contents($curlLog));
+            $this->assertStringContainsString('Smoke health check passed: https://store.example/up', $result['stdout']);
+            $this->assertStringContainsString('Release identity check passed', $result['stdout']);
+            $this->assertStringNotContainsString('Admin smoke check passed', $result['stdout']);
+            $this->assertStringContainsString(
+                "https://store.example/up\nhttps://store.example/release-sha.txt\nhttps://store.example/telegram-mini-app\n",
+                file_get_contents($curlLog),
+            );
         } finally {
             File::deleteDirectory($workspace);
         }
@@ -496,7 +531,37 @@ SH);
         try {
             $this->writeExecutable($workspace.'/curl', <<<'SH'
 #!/usr/bin/env bash
-exit 0
+set -euo pipefail
+output=''
+url=''
+for argument in "$@"; do
+    case "$argument" in
+        --output)
+            shift
+            output="$1"
+            ;;
+        http://*|https://*)
+            url="$argument"
+            ;;
+    esac
+    shift || true
+done
+case "$url" in
+    */up)
+        body='Application up'
+        meta='200'
+        ;;
+    */release-sha.txt)
+        body='2222222222222222222222222222222222222222'
+        meta='200'
+        ;;
+    *)
+        body='LHIE STORE'
+        meta='200|https://store.example/admin/login'
+        ;;
+esac
+[ -z "$output" ] || printf '%s' "$body" > "$output"
+printf '%s' "$meta"
 SH);
             $this->writeExecutable($workspace.'/docker', <<<'SH'
 #!/usr/bin/env bash
@@ -506,6 +571,8 @@ SH);
 
             $result = $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
                 'BASE_URL' => 'https://store.example',
+                'EXPECTED_APP_URL' => 'https://store.example',
+                'EXPECTED_RELEASE_SHA' => '2222222222222222222222222222222222222222',
                 'COMPOSE_PROJECT_NAME' => 'telegram-bot-prod',
                 'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
                 'SMOKE_PUBLIC_ONLY' => 'true',
@@ -557,6 +624,12 @@ SH);
 
         try {
             mkdir($backupDir, 0700);
+            $safeConfig = $workspace.'/safe-compose-config.sh';
+            $this->writeExecutable($safeConfig, <<<'SH'
+#!/usr/bin/env bash
+exit 0
+SH);
+
             $this->writeExecutable($fakeCompose, <<<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -566,20 +639,40 @@ SH);
             $this->writeExecutable($fakeGpg, <<<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+mode=encrypt
 out=''
+input_file=''
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = '--output' ]; then
-    shift
-    out="$1"
-  fi
+  case "$1" in
+    --list-packets)
+      exit 0
+      ;;
+    --decrypt)
+      mode=decrypt
+      ;;
+    --output)
+      shift
+      out="$1"
+      ;;
+    -*)
+      ;;
+    *)
+      input_file="$1"
+      ;;
+  esac
   shift || true
 done
-cat > "$out"
+if [ "$mode" = decrypt ]; then
+  cat "$input_file"
+else
+  cat > "$out"
+fi
 SH);
 
             $result = $this->runShellScript(['bash', base_path('../scripts/backup-db.sh')], [
                 'BACKUP_DIR' => $backupDir,
                 'COMPOSE' => $fakeCompose,
+                'COMPOSE_CONFIG_SCRIPT' => $safeConfig,
                 'DB_SERVICE' => 'safe-db',
                 'FAKE_COMPOSE_ARGS_FILE' => $argsFile,
                 'GPG_RECIPIENT' => 'backup@example.test',
@@ -648,9 +741,18 @@ SH);
         $this->assertStringContainsString('actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}', $contents);
         $this->assertStringContainsString('scripts/deploy-production-release.sh', $contents);
         $this->assertStringContainsString('git checkout --detach "$DEPLOY_SHA"', $release);
-        $this->assertStringContainsString('./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env', $release);
+        $this->assertStringContainsString('SAFE_COMPOSE_CONFIG', $release);
         $this->assertStringContainsString('commits/${TARGET_SHA}/statuses', $contents);
         $this->assertStringContainsString('.context == "production-image"', $contents);
+        $this->assertStringContainsString('ref: ${{ env.DEPLOY_SHA }}', $contents);
+        $this->assertStringContainsString('CI_RUN_URL', $contents);
+        $this->assertStringContainsString('.target_url == $target_url', $contents);
+        $this->assertStringContainsString('EXPECTED_RELEASE_SHA', $contents);
+        $this->assertStringContainsString('contract-backup-verified.txt', $release);
+        $this->assertStringContainsString('release-state.env', $release);
+        $this->assertStringContainsString('release-journal.log', $release);
+        $this->assertStringNotContainsString('GHCR_TOKEN', $contents);
+        $this->assertStringNotContainsString('docker login ghcr.io', $release);
         $this->assertStringContainsString('APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}', $contents);
         $this->assertStringContainsString('docker pull "$APP_IMAGE"', $release);
         $this->assertStringNotContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build', $contents);
@@ -676,6 +778,7 @@ SH);
             'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
             'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
             'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
+            'Telegram update recovery is non-interactive' => 'compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null',
             'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
             $this->assertStringContainsString($command, $release, $contract);

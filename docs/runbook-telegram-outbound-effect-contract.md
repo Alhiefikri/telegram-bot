@@ -40,12 +40,19 @@ claim columns are not rollback storage.
 
 The automatic release workflow applies the final contract only when the
 operator explicitly dispatches with `apply_telegram_outbound_contract=true`,
-after verifying an encrypted production backup, and only after the candidate is
-healthy and public smoke has passed. If the input remains false, the compatible
-candidate is released with the legacy columns intact. If recovery or the strict
-preflight remains blocked, the compatible candidate stays running with the
-legacy columns intact for investigation; do not roll application code back
-after the destructive contract migration starts.
+after `scripts/backup-db.sh` creates an encrypted backup and verifies its
+OpenPGP packet plus gzip readability. The release records the backup path,
+SHA-256 checksum, and `contract-backup-verified.txt` marker in the release
+artifact before any recovery or destructive migration. The backup encryption
+configuration remains on the VPS; no GitHub token or backup secret is sent
+through Actions.
+
+The contract phase starts only after the candidate is healthy and public smoke
+has passed. If the input remains false, the compatible candidate is released
+with the legacy columns intact. If recovery or the strict preflight remains
+blocked, the compatible candidate stays running with the legacy columns intact
+for investigation; do not roll application code back after the destructive
+contract migration starts.
 
 The restart is required because queue workers are long-lived processes and do
 not load the newly deployed application code until restarted.

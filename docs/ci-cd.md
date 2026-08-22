@@ -11,6 +11,19 @@ Project ini memakai satu branch utama untuk integrasi dan sumber rilis:
 
 Deploy production tidak otomatis dari push karena bot commerce ini punya database, queue, scheduler, Telegram webhook, dan payment flow. Release dilakukan manual dari `main` setelah CI hijau.
 
+## Self-hosted runner
+
+All workflow jobs target `[self-hosted, Linux, X64]`; no job uses a
+GitHub-hosted runner. The repository must remain private because pull request
+code executes on persistent runner infrastructure. Keep exactly one eligible
+runner online unless job-level isolation is introduced; with one runner, CI
+jobs queue and execute serially.
+
+The runner host must provide Docker and outbound HTTPS access. PHP test jobs run
+inside `ubuntu:24.04` job containers so `setup-php` has its supported Linux
+environment independent of the host distribution. The PostgreSQL service is
+reached through its `postgres` service-network alias from that job container.
+
 ## Workflows
 
 - `.github/workflows/ci.yml`
@@ -32,19 +45,24 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.
   - Pins the deployment to the dispatched revision (or an explicitly supplied full commit SHA), requires that SHA to be contained in `main`, and requires a successful `CI` workflow run for that exact SHA.
+  - Checks out `DEPLOY_SHA` before streaming `scripts/deploy-production-release.sh`, so delayed deploys use orchestration code from the same revision as the application and image.
   - Does not rerun Composer, NPM, PHPUnit, asset smoke, or a Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
-  - Uses `./scripts/safe-compose-config.sh` before any Compose action so resolved production secrets are not printed.
-  - Reads the image digest recorded on the deployment commit by the successful CI run and pulls that exact GHCR digest on the VPS. Production never rebuilds the application image.
-  - Records the previous Git commit and immutable running image before changing the checkout, then runs only expand migrations (excluding the deferred Telegram outbound contract migration) in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
-  - Cuts over the compatible candidate, verifies its internal gates, and runs the public smoke check. The destructive deferred Telegram outbound contract is opt-in through the manual `apply_telegram_outbound_contract=true` input only; when selected, it records a preflight report, recovers eligible effects, requires `telegram:outbound-contract --strict`, applies the final migration, restarts long-lived workers, and rechecks health.
-  - Aborts before cutover when an expand migration or internal gate fails, leaving the current containers available. If the public GitHub-runner smoke fails before the contract phase, restores the previous commit and immutable image automatically and verifies app and scheduler health. Once the destructive contract phase begins, a failure leaves the compatible candidate running for manual investigation rather than attempting an unsafe code rollback.
+  - Uses the VPS-local read-only Docker credential store for GHCR pulls; GitHub tokens are never sent to or persisted on the VPS.
+  - Uses `./scripts/safe-compose-config.sh` before every Compose action, including diagnostics, rollback, contract migration, and backup.
+  - Reads the image digest recorded on the deployment commit by the selected CI run. The `production-image` status must point to that exact CI run URL; production pulls only that immutable GHCR digest and never rebuilds the application image.
+  - Records the previous Git commit and immutable running image before changing the checkout. Mutable tags and local image names are rejected as rollback targets.
+  - Runs only expand migrations (excluding the deferred Telegram outbound contract migration) in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
+  - Cuts over the compatible candidate, verifies its internal gates and container `APP_URL` against `PRODUCTION_APP_URL`, writes a public `release-sha.txt` marker, and runs the public smoke check. Smoke requires HTTPS, canonical `APP_URL` equality, expected health/admin body markers, matching host after redirects, and the exact release marker.
+  - The destructive deferred Telegram outbound contract is opt-in through `apply_telegram_outbound_contract=true`. It first creates and cryptographically verifies an encrypted, readable backup, records its checksum and verification marker, then records preflight evidence, recovers eligible effects, requires `telegram:outbound-contract --strict`, applies the final migration, restarts long-lived workers, and rechecks health.
+  - Writes an atomic `release-state.env` plus append-only `release-journal.log`. SSH is allowed to return an ambiguous status; a mandatory remote reconciliation step proves the candidate or restores the immutable previous release before public smoke proceeds.
+  - Aborts before cutover when an expand migration or internal gate fails, leaving the current containers available. If public smoke fails before the contract phase, restores the previous commit and immutable image, updates the public release marker, reruns public smoke against the rollback identity, and fails the workflow even when recovery succeeds. Once the destructive contract phase begins, a failure leaves the compatible candidate running for manual investigation rather than attempting an unsafe code rollback.
   - Writes `release-result.txt` with `deploy-succeeded-compatible-contract-pending`, `deploy-succeeded`, `migration-failed-no-cutover`, `contract-failed-candidate-remains`, or a reason-specific `*-rollback-succeeded` / `*-rollback-failed` result, so operators can distinguish a contained deploy failure from a failed recovery.
   - Verifies that the running `app` and `scheduler` containers use the approved image ID and prints the commit tag and immutable digest in secret-free release logs.
   - Verifies app health, scheduler heartbeat, candidate-release failed jobs, traffic-tolerant queue health, Telegram webhook external registration, a public external smoke check, and absence of duplicate running Telegram Bot Compose projects after deploy.
   - Shares the `production-mutation` GitHub Actions concurrency group and a non-blocking VPS `flock` lock with failed-job recovery. A concurrent mutation fails safely rather than racing the release.
   - Uses SSH batch mode, a connection timeout, and server keepalives to make long VPS operations resilient to idle disconnects.
-  - Captures a bounded, redacted Compose log, Compose status, and secret-free JSON health summary as workflow artifacts, including when a release gate fails. Payload/body lines are dropped, while credentials in key/value, JSON, bearer-token, Telegram-token, and URL-query forms are redacted.
+  - Captures a bounded, redacted Compose log, Compose status, release journal, backup verification metadata, and secret-free JSON health summary as workflow artifacts, including when a release gate fails. Payload/body lines are dropped, while credentials in key/value, JSON, bearer-token, Telegram-token, and URL-query forms are redacted.
 
 - `.github/workflows/recover-failed-jobs.yml`
   - Runs manually in the `production` environment only after the operator types `RECOVER_TELEGRAM_UPDATES`.
@@ -63,6 +81,8 @@ Configure these in GitHub repository Settings → Secrets and variables → Acti
 - `PRODUCTION_PATH`: absolute path of the checked-out repo on the VPS, for example `/home/alhiefikri/github/telegram-bot`.
 
 Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and payment credentials must stay in the VPS `.env`, not in the workflow file. The deploy workflow validates Compose with `./scripts/safe-compose-config.sh`, which uses `docker compose config --quiet`; do not run or paste plain `docker compose ... config` output for production-like environments because resolved Compose output includes secret values.
+The destructive contract gate also reads `GPG_RECIPIENT` or `GPG_PASSPHRASE` from the VPS-local `.env` (exactly one must be configured). A recipient-encrypted backup requires the corresponding private key on the VPS so the gate can perform its readability check; neither value is sent from GitHub Actions.
+
 
 CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the image job receives `packages: write` and `statuses: write`, while all other workflow jobs remain read-only. If the GHCR package is private, authenticate Docker on the VPS once using a dedicated machine user or fine-grained token with read-only package access. Do not use a personal token with repository write access:
 
@@ -181,7 +201,7 @@ Every production migration must follow expand-and-contract compatibility because
 
 Do not include destructive renames, column/table drops, incompatible type changes, irreversible data rewrites, or long blocking DDL in the automatic release migration. Those changes require a verified database backup and explicit human approval before dispatching the workflow. If a change cannot preserve compatibility with the retained image, treat it as a planned maintenance release with a documented restore procedure rather than relying on automatic application rollback.
 
-The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, migration failure before cutover, application health failure with successful rollback, rollback health failure, and external-smoke rollback. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. `./scripts/test-check-migration-prefixes.sh` verifies that the migration prefix guard fails on a new duplicate, tolerates an allowlisted historical duplicate, and rejects a stale allowlist entry. CI runs these contracts through the PHP hardening suite and release harness.
+The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, explicit recovery stdin isolation, immutable rollback rejection, migration failure before cutover, application health failure with successful rollback, rollback health failure, external-smoke rollback, optional failed-job recovery failure, remote journal reconciliation, verified-backup contract success/failure, and backup-gate failure. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. `./scripts/test-check-migration-prefixes.sh` verifies that the migration prefix guard fails on a new duplicate, tolerates an allowlisted historical duplicate, and rejects a stale allowlist entry. CI runs these contracts through the PHP hardening suite and release harness.
 
 ## Image identity and retention
 
@@ -202,15 +222,11 @@ The first value is the configured immutable GHCR reference and the second is the
 
 The post-deploy release interface is intentionally cheap but deeper than liveness:
 
-- `php artisan ops:health --db --queue-schema --queue-depth --supervisor`
-- `php artisan ops:health --scheduler-heartbeat=180` in the scheduler container
-- `php artisan ops:check-failed-jobs --snapshot` before release mutation, followed by `php artisan ops:check-failed-jobs --max=0 --baseline-stdin` after cutover
-- `php artisan ops:check-queue-depth --max=50 --max-oldest-age=120`
 - `php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5`
-- An external GitHub runner runs `scripts/smoke-production.sh` against `PRODUCTION_SMOKE_BASE_URL`, which checks `/up` and the representative `/admin` route without SSHing into the VPS.
+- An external GitHub runner runs `scripts/smoke-production.sh` against `PRODUCTION_SMOKE_BASE_URL`. The check validates `/up`, the public `release-sha.txt` marker, and the representative `/admin` route without SSHing into the VPS; the rollback path runs the same public smoke against the restored commit.
 - Running Docker containers with Compose label `com.docker.compose.project` must not include another `telegram-bot*` project besides `telegram-bot-prod`.
 
-`PRODUCTION_SMOKE_BASE_URL` is a required non-secret GitHub Environment variable, for example `https://store.example.com`. It must be the public HTTPS base URL, not a private hostname or a webhook URL.
+`PRODUCTION_SMOKE_BASE_URL` and `PRODUCTION_APP_URL` are required non-secret GitHub Environment variables. Both must be the same canonical public HTTPS base URL, for example `https://store.example.com`; neither may be a private hostname or webhook URL. The deployed release writes the expected full commit SHA to `/release-sha.txt`, which prevents a healthy but unrelated host from passing the smoke gate.
 
 ### Traffic-tolerant release thresholds
 
@@ -233,10 +249,10 @@ git fetch --prune origin main
 git checkout --detach "$PREVIOUS_COMMIT"
 git reset --hard "$PREVIOUS_COMMIT"
 docker pull "$PREVIOUS_IMAGE"
+./scripts/safe-compose-config.sh --project telegram-bot-prod --env-file .env
 APP_IMAGE="$PREVIOUS_IMAGE" docker compose -p telegram-bot-prod --env-file .env up -d --no-build --remove-orphans
-docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor
-docker compose -p telegram-bot-prod --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180
-docker compose -p telegram-bot-prod --env-file .env ps
+docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null
+docker compose -p telegram-bot-prod --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null
 ```
 
 Do not run a down migration during application rollback. If the candidate migration was not expand-and-contract compatible, stop and follow the pre-approved database restore procedure instead of guessing at schema reversal.

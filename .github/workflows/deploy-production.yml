@@ -38,7 +38,7 @@ concurrency:
 jobs:
   release-gate:
     name: Release gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
     env:
       TARGET_SHA: ${{ inputs.commit || github.sha }}
@@ -76,20 +76,37 @@ jobs:
             exit 1
           fi
 
+          ci_run_sha="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}" --jq '.head_sha')"
+          ci_run_branch="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}" --jq '.head_branch')"
+          ci_run_url="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}" --jq '.html_url')"
+          [ "$ci_run_sha" = "$TARGET_SHA" ] || {
+            echo "Selected CI run $ci_run_id is for $ci_run_sha, not $TARGET_SHA." >&2
+            exit 1
+          }
+          [ "$ci_run_branch" = "$DEPLOY_BRANCH" ] || {
+            echo "Selected CI run $ci_run_id is not a ${DEPLOY_BRANCH} run." >&2
+            exit 1
+          }
+
           echo "Using successful CI run $ci_run_id for $TARGET_SHA."
           echo "run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
+          echo "run_url=$ci_run_url" >> "$GITHUB_OUTPUT"
 
       - name: Resolve the CI-approved immutable image
         id: production-image
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ steps.successful-ci.outputs.run_id }}
+          CI_RUN_URL: ${{ steps.successful-ci.outputs.run_url }}
         run: |
           set -euo pipefail
-          digest="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/statuses" \
-            --jq '[.[] | select(.context == "production-image" and .state == "success")][0].description // empty')"
+          statuses="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/statuses")"
+          digest="$(printf '%s' "$statuses" | jq -r --arg target_url "$CI_RUN_URL" '
+            [.[] | select(.context == "production-image" and .state == "success" and .target_url == $target_url)]
+            | .[0].description // empty
+          ')"
           if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
-            echo "CI did not record a valid approved production image digest for $TARGET_SHA." >&2
+            echo "CI run $CI_RUN_ID did not record a valid bound production image digest for $TARGET_SHA." >&2
             exit 1
           fi
 
@@ -108,7 +125,7 @@ jobs:
 
   deploy:
     name: Deploy to production VPS
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     needs: release-gate
     environment: production
@@ -117,6 +134,8 @@ jobs:
       APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Configure SSH
         env:
@@ -131,9 +150,9 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > ~/.ssh/production_key
           chmod 600 ~/.ssh/production_key
-          ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts
-
       - name: Deploy over SSH
+        id: remote-deploy
+        continue-on-error: true
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
@@ -142,48 +161,21 @@ jobs:
           RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
+          : "${EXPECTED_APP_URL:?Set the non-secret production environment variable PRODUCTION_APP_URL to the canonical APP_URL}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" GHCR_USERNAME="$GHCR_USERNAME" GHCR_TOKEN="$GHCR_TOKEN" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
             'bash -s' < scripts/deploy-production-release.sh
 
-      - name: Run external public smoke checks
-        id: external-smoke
+      - name: Reconcile remote release state
+        id: remote-reconcile
+        if: always()
         continue-on-error: true
-        env:
-          BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
-          SMOKE_TIMEOUT: '15'
-          SMOKE_PUBLIC_ONLY: 'true'
-        run: |
-          set -euo pipefail
-          : "${BASE_URL:?Set the non-secret production environment variable PRODUCTION_SMOKE_BASE_URL}"
-          ./scripts/smoke-production.sh
-
-      - name: Roll back after external smoke failure
-        id: external-smoke-rollback
-        if: steps.external-smoke.outcome == 'failure'
-        continue-on-error: true
-        env:
-          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
-          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
-          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
-          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
-          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
-        run: |
-          set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed \
-            'bash -s' < scripts/deploy-production-release.sh
-
-      - name: Apply deferred Telegram outbound contract
-        id: telegram-outbound-contract
-        if: steps.external-smoke.outcome == 'success' && inputs.apply_telegram_outbound_contract == true
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
@@ -191,26 +183,124 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=contract APP_IMAGE="$APP_IMAGE" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=reconcile APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
+            'bash -s' < scripts/deploy-production-release.sh
+      - name: Run external public smoke checks
+        id: external-smoke
+        if: steps.remote-reconcile.outcome == 'success'
+        continue-on-error: true
+        env:
+          BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_RELEASE_SHA: ${{ env.DEPLOY_SHA }}
+          SMOKE_HEALTH_MARKER: 'Application up'
+          SMOKE_ADMIN_MARKER: 'LHIE STORE'
+          SMOKE_TIMEOUT: '15'
+          SMOKE_PUBLIC_ONLY: 'true'
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Set the non-secret production environment variable PRODUCTION_SMOKE_BASE_URL}"
+          : "${EXPECTED_APP_URL:?Set the non-secret production environment variable PRODUCTION_APP_URL to the canonical APP_URL}"
+          ./scripts/smoke-production.sh
+
+      - name: Roll back after external smoke failure
+        id: external-smoke-rollback
+        if: steps.remote-reconcile.outcome == 'success' && steps.external-smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=rollback FAILURE_REASON=external-smoke-failed EXPECTED_APP_URL="$EXPECTED_APP_URL" \
+            'bash -s' < scripts/deploy-production-release.sh
+      - name: Capture rollback release identity
+        id: rollback-identity
+        if: always() && steps.external-smoke.outcome == 'failure' && steps.external-smoke-rollback.outcome == 'success'
+        continue-on-error: true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+        run: |
+          set -euo pipefail
+          rollback_sha="$(ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            "cat '$PRODUCTION_PATH/$RELEASE_ARTIFACT_DIR/previous-commit.txt'")"
+          [[ "$rollback_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Rollback release identity is invalid." >&2
+            exit 1
+          }
+          echo "sha=$rollback_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Re-run external public smoke after rollback
+        id: rollback-external-smoke
+        if: always() && steps.external-smoke.outcome == 'failure' && steps.external-smoke-rollback.outcome == 'success' && steps.rollback-identity.outcome == 'success'
+        continue-on-error: true
+        env:
+          BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_RELEASE_SHA: ${{ steps.rollback-identity.outputs.sha }}
+          SMOKE_HEALTH_MARKER: 'Application up'
+          SMOKE_ADMIN_MARKER: 'LHIE STORE'
+          SMOKE_TIMEOUT: '15'
+          SMOKE_PUBLIC_ONLY: 'true'
+        run: |
+          set -euo pipefail
+          ./scripts/smoke-production.sh
+
+
+      - name: Apply deferred Telegram outbound contract
+        id: telegram-outbound-contract
+        if: steps.remote-reconcile.outcome == 'success' && steps.external-smoke.outcome == 'success' && inputs.apply_telegram_outbound_contract == true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+          RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
+          APP_IMAGE: ${{ env.APP_IMAGE }}
+          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
+          : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
+
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=contract APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
             'bash -s' < scripts/deploy-production-release.sh
 
+
+      - name: Fail release after remote-state reconciliation failure
+        if: always() && steps.remote-reconcile.outcome == 'failure'
+        run: |
+          echo "Remote deployment state could not prove a healthy candidate release. Inspect release-state.env and release-result.txt in the diagnostics." >&2
+          exit 22
 
       - name: Fail release after external smoke rollback
         if: always() && steps.external-smoke.outcome == 'failure'
         env:
           ROLLBACK_OUTCOME: ${{ steps.external-smoke-rollback.outcome }}
+          ROLLBACK_SMOKE_OUTCOME: ${{ steps.rollback-external-smoke.outcome }}
         run: |
-          if [ "$ROLLBACK_OUTCOME" = "success" ]; then
-            echo "External public smoke failed; automatic rollback restored a healthy previous release." >&2
+          if [ "$ROLLBACK_OUTCOME" = "success" ] && [ "$ROLLBACK_SMOKE_OUTCOME" = "success" ]; then
+            echo "External public smoke failed; rollback restored a healthy previous release and passed public smoke." >&2
             exit 20
           fi
-          echo "External public smoke failed and automatic rollback also failed. Emergency manual recovery is required." >&2
+          echo "External public smoke or its rollback verification failed. Emergency manual recovery is required." >&2
           exit 21
 
       - name: Download release-gate diagnostics
@@ -242,10 +332,10 @@ jobs:
               contract-failed-candidate-remains)
                 echo "- Deferred Telegram outbound contract failed; the compatible candidate remains running and needs manual investigation."
                 ;;
-              deploy-failed-rollback-succeeded|external-smoke-failed-rollback-succeeded)
+              deploy-failed-rollback-succeeded|external-smoke-failed-rollback-succeeded|remote-state-reconcile-rollback-succeeded)
                 echo "- Deployment failed, but automatic rollback restored a healthy previous release."
                 ;;
-              deploy-failed-rollback-failed|external-smoke-failed-rollback-failed)
+              deploy-failed-rollback-failed|external-smoke-failed-rollback-failed|remote-state-reconcile-rollback-failed)
                 echo "- Deployment and automatic rollback both failed. Emergency manual recovery is required."
                 ;;
             esac
