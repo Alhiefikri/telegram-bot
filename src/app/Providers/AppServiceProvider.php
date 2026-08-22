@@ -18,6 +18,7 @@ use App\Services\KlikQris\KlikQrisClient;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderStateMachine;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\Pakasir\PakasirClient;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
@@ -58,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
+        $this->app->singleton(PaidInvoiceRenderer::class);
         $this->app->singleton(TelegramCallbackAckState::class);
         $this->app->bind(TelegramCheckoutPaymentIntentSelector::class, TelegramConfiguredCheckoutPaymentIntentSelector::class);
         $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([

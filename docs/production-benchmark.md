@@ -17,6 +17,24 @@ artifacts/production-benchmark/<timestamp>/report.json
 artifacts/production-benchmark/<timestamp>/report.md
 ```
 
+## Paid Invoice Renderer Budget
+
+Run the renderer-only production-equivalent benchmark:
+
+```bash
+./scripts/benchmark-paid-invoice.sh
+```
+
+It builds the PHP 8.4 app image, runs one CLI worker under the app service's 1 CPU / 768 MiB limits, and measures representative and pathological invoice inputs. Each report records wall-time samples, peak RSS delta, PNG bytes, dimensions, and pass/fail status for the 250 ms, 24 MiB, and 300 KB budgets.
+
+The redacted report is written to:
+
+```text
+docs/benchmarks/issue-327-paid-invoice.json
+```
+
+Override `PAID_INVOICE_BENCHMARK_RUNS`, `PAID_INVOICE_BENCHMARK_WARMUP`, `PAID_INVOICE_BENCHMARK_OUTPUT`, or `BENCHMARK_COMPOSE_PROJECT` when comparing runs.
+
 ## Default Runtime
 
 The command supplies safe dogfood defaults when the environment does not provide them:

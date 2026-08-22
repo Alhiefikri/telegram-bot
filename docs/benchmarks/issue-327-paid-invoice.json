@@ -1,0 +1,190 @@
+{
+    "schema_version": 1,
+    "benchmark": "paid-invoice-render",
+    "production_equivalent": {
+        "service": "app",
+        "cpu_limit": "1.00",
+        "memory_limit_mib": 768,
+        "worker_processes": 1,
+        "external_services": false
+    },
+    "budgets": {
+        "max_render_ms": 250,
+        "max_peak_rss_delta_mib": 24,
+        "max_png_bytes": 307200
+    },
+    "runs": 5,
+    "warmup_runs": 1,
+    "generated_at": "2026-08-22T00:22:54+00:00",
+    "scenarios": {
+        "representative": {
+            "scenario": "representative",
+            "input": {
+                "kind": "representative",
+                "rows": 1,
+                "unicode": true,
+                "newlines": false
+            },
+            "runtime": {
+                "php": "8.4.24",
+                "gd": true,
+                "freetype": true,
+                "sapi": "cli"
+            },
+            "runs": 5,
+            "warmup_runs": 1,
+            "wall_time_ms": {
+                "samples": [
+                    102.628,
+                    89.728,
+                    87.586,
+                    80.071,
+                    90.502
+                ],
+                "max": 102.628,
+                "p50": 89.728
+            },
+            "peak_rss_delta_bytes": 10977280,
+            "peak_rss_delta_mib": 10.469,
+            "png": {
+                "bytes": 67283,
+                "width": 720,
+                "height": 960,
+                "mime": "image/png"
+            },
+            "budgets": {
+                "max_render_ms": 250,
+                "max_peak_rss_delta_mib": 24,
+                "max_png_bytes": 307200
+            },
+            "passed": true
+        },
+        "worst-case-unicode": {
+            "scenario": "worst-case-unicode",
+            "input": {
+                "kind": "worst_case",
+                "rows": 1,
+                "unicode": true,
+                "newlines": false
+            },
+            "runtime": {
+                "php": "8.4.24",
+                "gd": true,
+                "freetype": true,
+                "sapi": "cli"
+            },
+            "runs": 5,
+            "warmup_runs": 1,
+            "wall_time_ms": {
+                "samples": [
+                    55.619,
+                    55.538,
+                    55.489,
+                    58.858,
+                    56.028
+                ],
+                "max": 58.858,
+                "p50": 55.619
+            },
+            "peak_rss_delta_bytes": 10526720,
+            "peak_rss_delta_mib": 10.039,
+            "png": {
+                "bytes": 68435,
+                "width": 720,
+                "height": 960,
+                "mime": "image/png"
+            },
+            "budgets": {
+                "max_render_ms": 250,
+                "max_peak_rss_delta_mib": 24,
+                "max_png_bytes": 307200
+            },
+            "passed": true
+        },
+        "worst-case-newlines": {
+            "scenario": "worst-case-newlines",
+            "input": {
+                "kind": "worst_case",
+                "rows": 1,
+                "unicode": false,
+                "newlines": true
+            },
+            "runtime": {
+                "php": "8.4.24",
+                "gd": true,
+                "freetype": true,
+                "sapi": "cli"
+            },
+            "runs": 5,
+            "warmup_runs": 1,
+            "wall_time_ms": {
+                "samples": [
+                    52.587,
+                    51.523,
+                    50.778,
+                    53.048,
+                    50.932
+                ],
+                "max": 53.048,
+                "p50": 51.523
+            },
+            "peak_rss_delta_bytes": 10690560,
+            "peak_rss_delta_mib": 10.195,
+            "png": {
+                "bytes": 65846,
+                "width": 720,
+                "height": 960,
+                "mime": "image/png"
+            },
+            "budgets": {
+                "max_render_ms": 250,
+                "max_peak_rss_delta_mib": 24,
+                "max_png_bytes": 307200
+            },
+            "passed": true
+        },
+        "worst-case-rows": {
+            "scenario": "worst-case-rows",
+            "input": {
+                "kind": "worst_case",
+                "rows": 3,
+                "unicode": false,
+                "newlines": false
+            },
+            "runtime": {
+                "php": "8.4.24",
+                "gd": true,
+                "freetype": true,
+                "sapi": "cli"
+            },
+            "runs": 5,
+            "warmup_runs": 1,
+            "wall_time_ms": {
+                "samples": [
+                    57.633,
+                    57.357,
+                    58.108,
+                    57.429,
+                    57.259
+                ],
+                "max": 58.108,
+                "p50": 57.429
+            },
+            "peak_rss_delta_bytes": 10682368,
+            "peak_rss_delta_mib": 10.188,
+            "png": {
+                "bytes": 72902,
+                "width": 720,
+                "height": 960,
+                "mime": "image/png"
+            },
+            "budgets": {
+                "max_render_ms": 250,
+                "max_peak_rss_delta_mib": 24,
+                "max_png_bytes": 307200
+            },
+            "passed": true
+        }
+    },
+    "passed": true
+}

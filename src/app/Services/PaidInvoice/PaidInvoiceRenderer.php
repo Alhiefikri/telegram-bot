@@ -71,6 +71,8 @@ final class PaidInvoiceRenderer
 
     private string $boldFont = '';
 
+    private ?\GdImage $logo = null;
+
     public function __construct(
         private readonly PaymentReceiptReport $receiptReport,
     ) {
@@ -133,25 +135,16 @@ final class PaidInvoiceRenderer
         $font = $this->font !== '' ? $this->font : $this->fontPath(false);
         $boldFont = $this->boldFont !== '' ? $this->boldFont : $this->fontPath(true);
         $this->scriptFonts = $this->scriptFonts !== [] ? $this->scriptFonts : $this->resolveScriptFonts($font);
-        $logoPath = $this->logoPath();
         $canvas = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
         if (! $canvas instanceof \GdImage) {
             throw new RuntimeException('Paid invoice canvas could not be created.');
         }
 
-        $logo = null;
         try {
             $colors = $this->colors($canvas);
             imagefilledrectangle($canvas, 0, 0, self::WIDTH - 1, self::HEIGHT - 1, $colors['background']);
             $this->drawPaper($canvas, $colors);
-
-            $logo = imagecreatefrompng($logoPath);
-            if (! $logo instanceof \GdImage) {
-                throw new RuntimeException('Paid invoice branding asset could not be loaded.');
-            }
-            imagesavealpha($logo, true);
-            imagealphablending($logo, true);
-            $this->drawLogo($canvas, $logo);
+            $this->drawLogo($canvas);
 
             $this->drawHeader($canvas, $colors, $font, $boldFont, $metadata);
             $layout = $this->productLayout($displayItems, $font);
@@ -185,9 +178,6 @@ final class PaidInvoiceRenderer
                 throw new RuntimeException('Paid invoice PNG encoding failed.');
             }
         } finally {
-            if ($logo instanceof \GdImage) {
-                imagedestroy($logo);
-            }
             imagedestroy($canvas);
         }
 
@@ -354,23 +344,61 @@ final class PaidInvoiceRenderer
         imagefilledrectangle($image, 88, 238, 624, 241, $colors['blue']);
     }
 
-    private function drawLogo(\GdImage $canvas, \GdImage $logo): void
+    private function drawLogo(\GdImage $canvas): void
     {
-        $sourceWidth = imagesx($logo);
-        $sourceHeight = imagesy($logo);
+        $logo = $this->logo();
+        $width = imagesx($logo);
+        $height = imagesy($logo);
+        $x = (self::WIDTH - $width) >> 1;
+
+        imagealphablending($canvas, true);
+        if (! imagecopy($canvas, $logo, $x, 48, 0, 0, $width, $height)) {
+            throw new RuntimeException('Paid invoice branding asset could not be drawn.');
+        }
+    }
+
+    private function logo(): \GdImage
+    {
+        if ($this->logo instanceof \GdImage) {
+            return $this->logo;
+        }
+
+        $source = imagecreatefrompng($this->logoPath());
+        if (! $source instanceof \GdImage) {
+            throw new RuntimeException('Paid invoice branding asset could not be loaded.');
+        }
+        imagesavealpha($source, true);
+        imagealphablending($source, true);
+
+        $sourceWidth = imagesx($source);
+        $sourceHeight = imagesy($source);
         if ($sourceWidth < 1 || $sourceHeight < 1) {
+            imagedestroy($source);
             throw new RuntimeException('Paid invoice branding asset has invalid dimensions.');
         }
 
         $scale = min(190 / $sourceWidth, 132 / $sourceHeight);
         $width = max(1, (int) round($sourceWidth * $scale));
         $height = max(1, (int) round($sourceHeight * $scale));
-        $x = (self::WIDTH - $width) >> 1;
+        $logo = imagecreatetruecolor($width, $height);
+        if (! $logo instanceof \GdImage) {
+            imagedestroy($source);
+            throw new RuntimeException('Paid invoice branding cache could not be created.');
+        }
 
-        imagealphablending($canvas, true);
-        if (! imagecopyresampled($canvas, $logo, $x, 48, 0, 0, $width, $height, $sourceWidth, $sourceHeight)) {
+        imagealphablending($logo, true);
+        $paper = imagecolorallocate($logo, 255, 255, 255);
+        imagefilledrectangle($logo, 0, 0, $width - 1, $height - 1, $paper);
+        if (! imagecopyresampled($logo, $source, 0, 0, 0, 0, $width, $height, $sourceWidth, $sourceHeight)) {
+            imagedestroy($source);
+            imagedestroy($logo);
             throw new RuntimeException('Paid invoice branding asset could not be drawn.');
         }
+
+        imagedestroy($source);
+        $this->logo = $logo;
+
+        return $logo;
     }
 
     /**
@@ -762,13 +790,50 @@ final class PaidInvoiceRenderer
             return $line.' '.$ellipsis;
         }
 
-        $characters = preg_split('//u', $line, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        while ($characters !== []
+        $parts = $this->characterWidths($line, $fontSize, $font);
+        $ellipsisWidth = $this->textWidthWithFallback($ellipsis, $fontSize, $font);
+        $prefix = '';
+        $prefixWidth = 0.0;
+        foreach ($parts as $part) {
+            if ($prefix !== '' && $prefixWidth + $part['width'] + $ellipsisWidth > $maxWidth) {
+                break;
+            }
+
+            if ($prefix === '' && $maxWidth < $part['width'] + $ellipsisWidth) {
+                break;
+            }
+
+            $prefix .= $part['character'];
+            $prefixWidth += $part['width'];
+        }
+
+        $characters = preg_split('//u', $prefix, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        while (count($characters) > 1
             && $this->textWidthWithFallback(implode('', $characters).$ellipsis, $fontSize, $font) > $maxWidth) {
             array_pop($characters);
         }
 
         return rtrim(implode('', $characters)).$ellipsis;
+    }
+
+    /**
+     * Precompute additive glyph widths once for long-token wrapping; each completed line is checked exactly.
+     *
+     * @return list<array{character: string, width: float}>
+     */
+    private function characterWidths(string $text, float $fontSize, string $font): array
+    {
+        $parts = [];
+        foreach ($this->textRuns($text, $font) as $run) {
+            foreach (preg_split('//u', $run['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [] as $character) {
+                $width = ($this->scriptFonts['cjk'] ?? null) === $run['font']
+                    ? $fontSize * 1.05
+                    : (float) $this->textWidth($character, $fontSize, $run['font']);
+                $parts[] = ['character' => $character, 'width' => $width];
+            }
+        }
+
+        return $parts;
     }
 
     /** @return list<string> */
@@ -779,22 +844,35 @@ final class PaidInvoiceRenderer
         }
 
         $lines = [];
-        $current = '';
-        $characters = preg_split('//u', $token, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        foreach ($characters as $character) {
-            $candidate = $current.$character;
-            if ($current !== '' && $this->textWidthWithFallback($candidate, $fontSize, $font) > $maxWidth) {
-                $lines[] = $current;
-                $current = '';
+        $line = '';
+        $lineWidth = 0.0;
+        foreach ($this->characterWidths($token, $fontSize, $font) as $part) {
+            if ($line !== '' && $lineWidth + $part['width'] > $maxWidth) {
+                $lines[] = $this->fitLineToWidth($line, $maxWidth, $fontSize, $font);
+                $line = '';
+                $lineWidth = 0.0;
             }
-            $current .= $character;
+
+            $line .= $part['character'];
+            $lineWidth += $part['width'];
         }
 
-        if ($current !== '') {
-            $lines[] = $current;
+        if ($line !== '') {
+            $lines[] = $this->fitLineToWidth($line, $maxWidth, $fontSize, $font);
         }
 
         return $lines === [] ? [''] : $lines;
+    }
+
+    private function fitLineToWidth(string $line, int $maxWidth, float $fontSize, string $font): string
+    {
+        $characters = preg_split('//u', $line, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        while (count($characters) > 1
+            && $this->textWidthWithFallback(implode('', $characters), $fontSize, $font) > $maxWidth) {
+            array_pop($characters);
+        }
+
+        return implode('', $characters);
     }
 
     private function money(int $amount, string $currency): string
