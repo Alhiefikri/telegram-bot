@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
@@ -15,6 +17,7 @@ use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
@@ -23,6 +26,7 @@ use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -106,6 +110,105 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
                 ->pluck('state')
                 ->all(),
         );
+    }
+
+    #[DataProvider('buyerCredentialPaths')]
+    public function test_successful_buyer_pipeline_sends_invoice_photo_then_product_detail_without_credential_persistence(
+        string $credentialPath,
+    ): void {
+        Queue::fake();
+        [$order, $sensitiveValues] = $this->paidBuyerReceiptOrder($credentialPath);
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 810101],
+            ]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 810102],
+            ]),
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        $deliveryRequests = Http::recorded()
+            ->filter(static function (array $record): bool {
+                $url = $record[0]->url();
+
+                return str_ends_with($url, '/sendPhoto')
+                    || str_ends_with($url, '/sendMessage');
+            })
+            ->values();
+
+        $this->assertGreaterThanOrEqual(2, $deliveryRequests->count());
+        $photoRequest = $deliveryRequests->get(0)[0];
+        $detailRequest = $deliveryRequests->get(1)[0];
+        $this->assertStringEndsWith('/sendPhoto', $photoRequest->url());
+        $this->assertStringEndsWith('/sendMessage', $detailRequest->url());
+        $this->assertStringContainsString(
+            '🔐 Detail Produk',
+            (string) $this->telegramRequestField($detailRequest, 'text'),
+        );
+
+        $photoBytes = $this->telegramRequestField($photoRequest, 'photo');
+        $this->assertIsString($photoBytes);
+        $this->assertNotSame('', $photoBytes);
+        $this->assertSame("\x89PNG\r\n\x1A\n", substr($photoBytes, 0, 8));
+
+        $imageInfo = getimagesizefromstring($photoBytes);
+        $this->assertIsArray($imageInfo);
+        $this->assertSame(PaidInvoiceRenderer::WIDTH, $imageInfo[0] ?? null);
+        $this->assertSame(PaidInvoiceRenderer::HEIGHT, $imageInfo[1] ?? null);
+        $this->assertSame(IMAGETYPE_PNG, $imageInfo[2] ?? null);
+        $this->assertSame('image/png', $imageInfo['mime'] ?? null);
+
+        $decodedImage = imagecreatefromstring($photoBytes);
+        $this->assertInstanceOf(\GdImage::class, $decodedImage);
+        if ($decodedImage instanceof \GdImage) {
+            $this->assertSame(PaidInvoiceRenderer::WIDTH, imagesx($decodedImage));
+            $this->assertSame(PaidInvoiceRenderer::HEIGHT, imagesy($decodedImage));
+            imagedestroy($decodedImage);
+        }
+
+        foreach ($sensitiveValues as $sensitiveValue) {
+            $this->assertStringNotContainsString(
+                $sensitiveValue,
+                $photoBytes,
+                $credentialPath.' invoice PNG contains credential-derived text.',
+            );
+        }
+
+        $effects = TelegramOutboundEffect::query()
+            ->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))
+            ->orderBy('sequence')
+            ->get();
+        $this->assertGreaterThanOrEqual(2, $effects->count());
+
+        foreach ($effects as $effect) {
+            $attributes = json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR);
+            foreach ($sensitiveValues as $sensitiveValue) {
+                $this->assertStringNotContainsString(
+                    $sensitiveValue,
+                    $attributes,
+                    $credentialPath.' receipt effect persisted credential text.',
+                );
+            }
+            $this->assertStringNotContainsString(
+                $photoBytes,
+                $attributes,
+                $credentialPath.' receipt effect persisted PNG bytes.',
+            );
+        }
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function buyerCredentialPaths(): iterable
+    {
+        yield 'structured account' => ['structured'];
+        yield 'legacy credential' => ['legacy'];
     }
 
     public function test_queued_receipt_delivery_dispatches_one_successor_effect(): void
@@ -507,6 +610,114 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
 
         return $order->fresh();
+    }
+
+    /** @return array{0: Order, 1: list<string>} */
+    private function paidBuyerReceiptOrder(string $credentialPath): array
+    {
+        if (! in_array($credentialPath, ['structured', 'legacy'], true)) {
+            throw new \InvalidArgumentException('Unsupported buyer credential path.');
+        }
+
+        $isStructured = $credentialPath === 'structured';
+        $telegramId = $isStructured ? 332001 : 332002;
+        $tutorial = 'Issue 332 '.ucfirst($credentialPath).' tutorial';
+        $recoveryKey = 'Recovery-Key-332-'.$credentialPath;
+        $quantity = $isStructured ? 2 : 1;
+        $total = $quantity * 10_000;
+        $customer = Customer::factory()->create([
+            'telegram_id' => $telegramId,
+            'locale' => 'id',
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'Issue 332 '.ucfirst($credentialPath).' Bundle',
+        ]);
+        $order = Order::factory()->for($customer)->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => $total,
+        ]);
+        $item = OrderItem::factory()->for($order)->create([
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'delivery_note' => $tutorial,
+            'delivery_note_snapshotted' => true,
+            'quantity' => $quantity,
+            'unit_price' => 10_000,
+            'subtotal' => $total,
+        ]);
+        Payment::factory()->for($order)->create([
+            'amount' => $total,
+            'provider_total_payment' => $total,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        $order->forceFill([
+            'credential_access_key_hash' => Hash::make($recoveryKey),
+        ])->save();
+
+        if ($isStructured) {
+            $otpEmail = 'issue332-otp@example.test';
+            $otpPassword = 'Issue332-otp-password';
+            $otpUrl = 'https://otp.issue332.example.test/mail?opaque=issue332-otp';
+            $authEmail = 'issue332-auth@example.test';
+            $authPassword = 'Issue332-auth-password';
+            $authToken = 'issue332-auth-token';
+
+            ProductStockItem::create([
+                'product_id' => $product->id,
+                'order_item_id' => $item->id,
+                'credential_format' => CredentialFormat::StructuredAccount,
+                'credential_payload' => StructuredCredentialPayload::fromValues(
+                    $otpEmail,
+                    $otpPassword,
+                    CredentialAccessMethod::OtpMailLink,
+                    $otpUrl,
+                )->toArray(),
+            ]);
+            ProductStockItem::create([
+                'product_id' => $product->id,
+                'order_item_id' => $item->id,
+                'credential_format' => CredentialFormat::StructuredAccount,
+                'credential_payload' => StructuredCredentialPayload::fromValues(
+                    $authEmail,
+                    $authPassword,
+                    CredentialAccessMethod::AuthToken,
+                    $authToken,
+                )->toArray(),
+            ]);
+
+            return [$order->fresh(), [
+                $otpEmail,
+                $otpPassword,
+                $otpUrl,
+                'otp.issue332.example.test',
+                $authEmail,
+                $authPassword,
+                $authToken,
+                $tutorial,
+                $recoveryKey,
+            ]];
+        }
+
+        $legacyEmail = 'issue332-legacy@example.test';
+        $legacyPassword = 'Issue332-legacy-password';
+        $legacyMfa = 'Issue332-legacy-mfa';
+        $legacySecret = implode('|', [$legacyEmail, $legacyPassword, $legacyMfa]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'secret' => $legacySecret,
+        ]);
+
+        return [$order->fresh(), [
+            $legacyEmail,
+            $legacyPassword,
+            $legacyMfa,
+            $legacySecret,
+            $tutorial,
+            $recoveryKey,
+        ]];
     }
 
     /** @return iterable<string, array{array<string, mixed>}> */
