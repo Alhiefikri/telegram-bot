@@ -201,28 +201,22 @@
                                                 <x-admin-dashboard.field-error x-show="accountInputError(index, 'access_value')" x-bind:id="'account-access-value-error-' + index" x-text="accountInputError(index, 'access_value')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
                                             </div>
 
-                                            <div class="mt-3">
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <label x-bind:for="`account-tutorial-override-${index}`" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Tutorial akun (opsional)</label>
-                                                    <span class="text-[10px] font-bold text-neo-ink/60">Default: Product</span>
-                                                </div>
-                                                <textarea
-                                                    x-bind:id="`account-tutorial-override-${index}`"
-                                                    x-bind:name="`accounts[${index}][tutorial_override]`"
-                                                    maxlength="2000"
-                                                    rows="2"
-                                                    placeholder="Kosongkan untuk memakai delivery note Product."
-                                                    x-model="account.tutorialOverride"
-                                                    x-on:input="accountInputChanged()"
-                                                    x-bind:class="accountInputErrorClass(index, 'tutorial_override')"
-                                                    x-bind:aria-invalid="accountInputError(index, 'tutorial_override') ? 'true' : 'false'"
-                                                    x-bind:aria-describedby="accountInputError(index, 'tutorial_override') ? 'account-tutorial-error-' + index : null"
-                                                    class="mt-1.5 min-h-20 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-3 text-sm font-bold text-neo-ink shadow-neo-md focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
-                                                ></textarea>
-                                                <x-admin-dashboard.field-error x-show="accountInputError(index, 'tutorial_override')" x-bind:id="'account-tutorial-error-' + index" x-text="accountInputError(index, 'tutorial_override')" role="alert" aria-live="polite"></x-admin-dashboard.field-error>
-                                            </div>
                                         </article>
                                     </template>
+
+                                    <div class="grid gap-2 sm:grid-cols-2">
+                                        <label class="text-[11px] font-black uppercase text-neo-ink">
+                                            Preview bahasa pembeli
+                                            <select x-model="accountInputBuyerLocale" x-on:change="accountInputChanged()" class="mt-1 block min-h-11 w-full rounded-[0.4rem] border-2 border-neo-ink bg-white px-2 text-xs font-bold">
+                                                <option value="id">Indonesia</option>
+                                                <option value="en">English</option>
+                                                <option value="ms">Bahasa Melayu</option>
+                                            </select>
+                                        </label>
+                                        <x-admin-dashboard.notice tone="neutral" class="mb-0 p-2 text-[11px]">
+                                            Panduan delivery dan usage guide memakai pengaturan Product, sekali per receipt.
+                                        </x-admin-dashboard.notice>
+                                    </div>
 
                                     <div class="grid gap-2 sm:grid-cols-2">
                                         <x-admin-dashboard.button type="button" variant="neutral" x-on:click="addAccountCard()" x-bind:disabled="accountCards.length >= 20" class="w-full">
@@ -241,48 +235,63 @@
                                     </x-admin-dashboard.notice>
 
                                     <div class="grid gap-2 sm:grid-cols-3">
-                                        <x-admin-dashboard.mini-stat label="Jumlah akun" value="" tone="cyan"><span x-text="accountCards.length">1</span></x-admin-dashboard.mini-stat>
+                                        <x-admin-dashboard.mini-stat label="Jumlah akun" value="" tone="cyan"><span x-text="accountInputReview?.account_count ?? accountCards.length">1</span></x-admin-dashboard.mini-stat>
                                         <x-admin-dashboard.mini-stat label="Status" value="" tone="emerald">
                                             <span x-text="accountInputReview?.status === 'ready' ? 'Server lulus' : 'Ada duplikat'">Server lulus</span>
                                         </x-admin-dashboard.mini-stat>
-                                        <x-admin-dashboard.mini-stat label="Tutorial" value="Per akun" tone="amber" />
+                                        <x-admin-dashboard.mini-stat label="Preview" value="" tone="amber"><span x-text="accountInputReview?.receipt_preview?.buyer_locale?.toUpperCase()">ID</span></x-admin-dashboard.mini-stat>
                                     </div>
 
                                     <x-admin-dashboard.notice tone="warning" x-show="accountInputReview?.status === 'duplicate'">
                                         Review server menemukan konflik identitas. Edit akun yang ditandai sebelum commit.
                                     </x-admin-dashboard.notice>
 
-                                    <div class="space-y-2" aria-label="Preview pengiriman pelanggan">
+                                    <section class="space-y-2" aria-label="Preview private buyer receipt">
+                                        <x-admin-dashboard.notice tone="neutral">
+                                            <p class="font-black uppercase">Preview private buyer photo-caption</p>
+                                            <p class="mt-1 text-xs font-bold">Placeholder Order/payment dan nilai akun dimasking. Ini bukan Sales Proof Store Channel.</p>
+                                        </x-admin-dashboard.notice>
+                                        <article class="max-w-xl overflow-hidden rounded-[0.5rem] border-2 border-neo-ink bg-white">
+                                            <div class="bg-neo-ink px-3 py-2 text-[10px] font-black uppercase text-white">Photo caption · private buyer</div>
+                                            <div class="space-y-1 p-3 text-xs font-bold leading-5 text-neo-ink">
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.title">✅ Pembayaran diterima</p>
+                                                <p>━━━━━━━━━━━━━━</p>
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.order_id">Order ID: [ORDER ID]</p>
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.payment_method">Metode pembayaran: [PAYMENT METHOD]</p>
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.paid_at">Waktu dibayar: [PAID DATE]</p>
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.amount_paid">Total dibayar: [TOTAL]</p>
+                                                <p x-text="accountInputReview?.receipt_preview?.preview?.product_detail">Detail produk</p>
+                                                <template x-for="account in accountInputReviewAccounts()" :key="`preview-${account.index}`">
+                                                    <div class="border-t border-dashed border-neo-ink pt-1">
+                                                        <p x-text="`Account #${account.account_number}`">Account #1</p>
+                                                        <p>Email: <code x-text="account.email_masked">a•••@example.test</code></p>
+                                                        <p>Password: <code>••••••••</code></p>
+                                                        <p x-show="account.access_method === 'auth_token'">Auth Token: <code>••••••••</code></p>
+                                                        <p x-show="account.access_method === 'otp_mail_link'">OTP Mail Link: domain <span x-text="account.otp_domain"></span></p>
+                                                    </div>
+                                                </template>
+                                                <p x-show="accountInputReview?.receipt_preview?.preview?.delivery_note_occurrences">Product note · sekali</p>
+                                                <p x-show="accountInputReview?.receipt_preview?.preview?.usage_guide_occurrences">Usage guide · sekali</p>
+                                            </div>
+                                        </article>
+                                        <div class="grid gap-2 sm:grid-cols-3">
+                                            <x-admin-dashboard.mini-stat label="Caption" value="" tone="cyan"><span x-text="`${accountInputReview?.receipt_preview?.photo_caption_estimate ?? 0} / ${accountInputReview?.receipt_preview?.photo_caption_limit ?? 1024}`">0 / 1024</span></x-admin-dashboard.mini-stat>
+                                            <x-admin-dashboard.mini-stat label="Lanjutan" value="" tone="amber"><span x-text="accountInputReview?.receipt_preview?.continuation_count_estimate ?? 0">0</span></x-admin-dashboard.mini-stat>
+                                            <x-admin-dashboard.mini-stat label="Guide / note" value="Sekali" tone="emerald" />
+                                        </div>
+                                        <x-admin-dashboard.notice tone="warning" x-show="(accountInputReview?.receipt_preview?.warning_codes ?? []).length > 0">
+                                            Caption melewati batas Telegram dan akan dipecah ke pesan lanjutan.
+                                        </x-admin-dashboard.notice>
+                                    </section>
+
+                                    <div class="space-y-2" aria-label="Review konflik identitas">
                                         <template x-for="account in accountInputReviewAccounts()" :key="`review-${account.index}`">
                                             <article class="rounded-[0.5rem] border-2 border-neo-ink bg-white p-3">
                                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                                     <p class="font-display text-xs font-black uppercase" x-text="`Account #${account.account_number}`">Account #1</p>
-                                                    <span class="rounded-full border-2 border-neo-ink bg-[#fff8d6] px-2 py-0.5 text-[9px] font-black uppercase" x-text="accountInputReviewTutorialSource(account)">Tutorial default Product</span>
+                                                    <span class="rounded-full border-2 border-neo-ink bg-[#fff8d6] px-2 py-0.5 text-[9px] font-black uppercase" x-text="account.duplicate_status === 'duplicate' ? 'Perlu edit' : 'Siap'">Siap</span>
                                                 </div>
-                                                <dl class="mt-2 grid gap-2 text-xs sm:grid-cols-2">
-                                                    <div>
-                                                        <dt class="font-black uppercase text-neo-ink/60">Email</dt>
-                                                        <dd class="break-all font-mono font-bold" x-text="account.email">account@example.test</dd>
-                                                    </div>
-                                                    <div>
-                                                        <dt class="font-black uppercase text-neo-ink/60">Password</dt>
-                                                        <dd class="font-bold">Siap dikirim sebagai field akun</dd>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <dt class="font-black uppercase text-neo-ink/60">Akses</dt>
-                                                        <dd class="font-bold">
-                                                            <span x-text="accountAccessLabel(account.access_method)">Tidak ada</span>
-                                                            <span x-show="account.access_method === 'otp_mail_link' && account.otp_domain"> · domain <span x-text="account.otp_domain"></span></span>
-                                                            <span x-show="account.access_method === 'auth_token'"> · token siap dikirim sebagai teks</span>
-                                                        </dd>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <dt class="font-black uppercase text-neo-ink/60">Status identitas</dt>
-                                                        <dd class="font-bold" x-bind:class="account.duplicate_status === 'duplicate' ? 'text-[#b91c1c]' : 'text-[#166534]'">
-                                                            <span x-text="account.duplicate_status === 'duplicate' ? accountInputReviewDuplicateSummary(account) : 'Tidak ada konflik identitas'">Tidak ada konflik identitas</span>
-                                                        </dd>
-                                                    </div>
-                                                </dl>
+                                                <p class="mt-2 text-xs font-bold" x-bind:class="account.duplicate_status === 'duplicate' ? 'text-[#b91c1c]' : 'text-[#166534]'" x-text="account.duplicate_status === 'duplicate' ? accountInputReviewDuplicateSummary(account) : 'Tidak ada konflik identitas'">Tidak ada konflik identitas</p>
                                             </article>
                                         </template>
                                     </div>
@@ -407,11 +416,6 @@
                                                             <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-access-value'">Nilai metode akses</x-admin-dashboard.field-label>
                                                             <input x-bind:id="'stock-item-' + item.id + '-access-value'" name="access_value" x-bind:type="item.credential_payload.access_method === 'otp_mail_link' ? 'url' : 'text'" x-bind:maxlength="item.credential_payload.access_method === 'otp_mail_link' ? 2048 : 3500" x-model="item.credential_payload.access_value" x-bind:aria-invalid="manageStockError('access_value') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('access_value') ? 'stock-item-' + item.id + '-access-value-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold">
                                                             <p x-show="manageStockError('access_value')" x-bind:id="'stock-item-' + item.id + '-access-value-error'" x-text="manageStockError('access_value')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
-                                                        </div>
-                                                        <div>
-                                                            <x-admin-dashboard.field-label x-bind:for="'stock-item-' + item.id + '-tutorial-override'">Tutorial override</x-admin-dashboard.field-label>
-                                                            <textarea x-bind:id="'stock-item-' + item.id + '-tutorial-override'" name="tutorial_override" rows="2" maxlength="2000" x-model="item.credential_payload.tutorial_override" x-bind:aria-invalid="manageStockError('tutorial_override') ? 'true' : 'false'" x-bind:aria-describedby="manageStockError('tutorial_override') ? 'stock-item-' + item.id + '-tutorial-override-error' : null" class="mt-1 w-full rounded-lg border-2 border-neo-ink px-2 py-2 text-xs font-bold"></textarea>
-                                                            <p x-show="manageStockError('tutorial_override')" x-bind:id="'stock-item-' + item.id + '-tutorial-override-error'" x-text="manageStockError('tutorial_override')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-2 sm:justify-end">
                                                             <x-admin-dashboard.button type="submit" variant="secondary" size="sm">Simpan</x-admin-dashboard.button>

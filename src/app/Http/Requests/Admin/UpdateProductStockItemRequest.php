@@ -43,7 +43,7 @@ class UpdateProductStockItemRequest extends FormRequest
             'password' => ['required_if:credential_format,structured_account', 'nullable', 'string', 'max:1024'],
             'access_method' => ['required_if:credential_format,structured_account', 'nullable', 'string', 'in:none,otp_mail_link,auth_token'],
             'access_value' => ['nullable', 'string', 'max:3500'],
-            'tutorial_override' => ['nullable', 'string', 'max:2000'],
+            'tutorial_override' => ['nullable', 'string'],
         ];
     }
 
@@ -61,7 +61,27 @@ class UpdateProductStockItemRequest extends FormRequest
             'password.max' => 'Password maksimal 1024 karakter.',
             'access_method.required_if' => 'Metode akses wajib dipilih.',
             'access_value.max' => 'Nilai metode akses terlalu panjang.',
-            'tutorial_override.max' => 'Tutorial tambahan maksimal 2000 karakter.',
+        ];
+    }
+
+    /**
+     * Legacy override values are preserved internally, never edited through
+     * this request.
+     *
+     * @return array<callable(Validator): void>
+     */
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                $override = $this->input('tutorial_override');
+                if (is_string($override) && trim($override) !== '') {
+                    $validator->errors()->add(
+                        'tutorial_override',
+                        'Tutorial akun sekarang mengikuti panduan Product.',
+                    );
+                }
+            },
         ];
     }
 

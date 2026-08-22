@@ -36,6 +36,7 @@ final class ProductStockIntake
         private readonly CredentialIdentityFingerprint $fingerprints,
         private readonly CredentialIdentityBackfillReadinessService $identityBackfillReadiness,
         private readonly LegacyCredentialIdentityParser $legacyIdentityParser,
+        private readonly AccountInputReceiptPreview $receiptPreview,
     ) {}
 
     /**
@@ -215,6 +216,7 @@ final class ProductStockIntake
         Product $product,
         ProductStockIntakeSubmission|array $submission,
         ?User $actor = null,
+        ?string $buyerLocale = null,
     ): ProductStockIntakeReview {
         $submission = is_array($submission)
             ? ProductStockIntakeSubmission::fromArray($submission)
@@ -260,12 +262,9 @@ final class ProductStockIntake
             $accounts[] = [
                 'index' => $index,
                 'account_number' => $position + 1,
-                'email' => $payload->email,
+                'email_masked' => $this->maskEmail($payload->email),
                 'access_method' => $payload->accessMethod->value,
                 'otp_domain' => $payload->otpMailDomain(),
-                'tutorial_source' => $payload->tutorialOverride !== null
-                    ? 'override'
-                    : 'product_default',
                 'duplicate_status' => $hasDuplicate ? 'duplicate' : 'clear',
                 'duplicate_fields' => $duplicateFields,
                 'duplicate_sources' => $duplicateSources,
@@ -278,6 +277,14 @@ final class ProductStockIntake
             accountCount: count($accounts),
             duplicateCount: $duplicateCount,
             accounts: $accounts,
+            receiptPreview: $this->receiptPreview->metadata(
+                $product,
+                array_map(
+                    static fn (array $item): StructuredCredentialPayload => $item['payload'],
+                    $normalized['items'],
+                ),
+                $buyerLocale,
+            ),
         );
     }
 
@@ -445,8 +452,8 @@ final class ProductStockIntake
             }
             if (! is_string($tutorialOverride) && $tutorialOverride !== null) {
                 $errors["{$fieldPrefix}.tutorial_override"][] = 'Tutorial tambahan tidak valid.';
-            } elseif (is_string($tutorialOverride) && mb_strlen($tutorialOverride) > 2000) {
-                $errors["{$fieldPrefix}.tutorial_override"][] = 'Tutorial tambahan maksimal 2000 karakter.';
+            } elseif (is_string($tutorialOverride) && trim($tutorialOverride) !== '') {
+                $errors["{$fieldPrefix}.tutorial_override"][] = 'Tutorial akun sekarang mengikuti panduan Product.';
             }
 
             if (isset($accessMethodValue) && is_string($accessMethodValue)) {
@@ -467,10 +474,10 @@ final class ProductStockIntake
                     $password,
                     $accessMethod instanceof CredentialAccessMethod ? $accessMethod : (string) $accessMethodValue,
                     $accessValue,
-                    $tutorialOverride,
+                    null,
                 );
             } catch (Throwable) {
-                $this->appendStructuredPayloadErrors($errors, $fieldPrefix, $email, $accessMethodValue, $accessValue, $tutorialOverride);
+                $this->appendStructuredPayloadErrors($errors, $fieldPrefix, $email, $accessMethodValue, $accessValue, null);
 
                 continue;
             }
@@ -545,11 +552,17 @@ final class ProductStockIntake
         } elseif ($accessMethod === 'auth_token' && (! is_string($accessValue) || trim($accessValue) === '')) {
             $errors["{$fieldPrefix}.access_value"][] = 'Auth Token wajib diisi.';
         }
-        if ($tutorialOverride !== null && ! is_string($tutorialOverride)) {
-            $errors["{$fieldPrefix}.tutorial_override"][] = 'Tutorial tambahan tidak valid.';
+        if ($tutorialOverride !== null && (! is_string($tutorialOverride) || trim($tutorialOverride) !== '')) {
+            $errors["{$fieldPrefix}.tutorial_override"][] = 'Tutorial akun sekarang mengikuti panduan Product.';
         }
     }
 
+    private function maskEmail(string $email): string
+    {
+        [$local, $domain] = explode('@', $email, 2);
+
+        return mb_substr($local, 0, 1).'•••@'.$domain;
+    }
     /**
      * @param  array<string, list<string>>  $errors
      * @param  array<int,array<string,bool>>  $duplicates

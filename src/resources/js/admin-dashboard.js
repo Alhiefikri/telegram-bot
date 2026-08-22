@@ -134,7 +134,6 @@ const emptyAccountCard = () => ({
   password: "",
   accessMethod: "none",
   accessValue: "",
-  tutorialOverride: "",
 });
 
 const emptyAccountInputState = () => ({
@@ -147,6 +146,7 @@ const emptyAccountInputState = () => ({
   accountInputSubmitting: false,
   accountInputOperationKey: "",
   accountInputMessage: "",
+  accountInputBuyerLocale: "id",
 });
 
 export function salesFilter() {
@@ -502,13 +502,9 @@ export default function adminDashboard(initialState = {}) {
         this.accountInputReviewed ||
         this.accountCards.some(
           (card) =>
-            [
-              card.email,
-              card.password,
-              card.accessValue,
-              card.tutorialOverride,
-            ].some((value) => String(value ?? "") !== "") ||
-            card.accessMethod !== "none"
+            [card.email, card.password, card.accessValue].some(
+              (value) => String(value ?? "") !== ""
+            ) || card.accessMethod !== "none"
         )
       );
     },
@@ -549,7 +545,7 @@ export default function adminDashboard(initialState = {}) {
     accountInputFirstError() {
       const key = Object.keys(this.accountInputErrors ?? {})[0] ?? "";
       const match = key.match(
-        /(?:accounts\.)?(\d+)\.(email|password|access_method|access_value|tutorial_override)/
+        /(?:accounts\.)?(\d+)\.(email|password|access_method|access_value)/
       );
 
       return match ? { index: Number(match[1]), field: match[2] } : null;
@@ -636,24 +632,6 @@ export default function adminDashboard(initialState = {}) {
       }
     },
 
-    accountTutorialSource(card) {
-      return String(card?.tutorialOverride ?? "").trim() === ""
-        ? "Tutorial default Product"
-        : "Override akun";
-    },
-
-    accountInputReviewAccounts() {
-      return Array.isArray(this.accountInputReview?.accounts)
-        ? this.accountInputReview.accounts
-        : [];
-    },
-
-    accountInputReviewTutorialSource(account) {
-      return account?.tutorial_source === "override"
-        ? "Override akun"
-        : "Tutorial default Product";
-    },
-
     accountInputReviewDuplicateSummary(account) {
       const fields = {
         email: "email",
@@ -707,8 +685,6 @@ export default function adminDashboard(initialState = {}) {
         const password = String(card.password ?? "");
         const method = String(card.accessMethod ?? "");
         const accessValue = String(card.accessValue ?? "");
-        const tutorial = String(card.tutorialOverride ?? "");
-
         if (email.trim() === "") {
           add(index, "email", "Email wajib diisi.");
         } else if (email.length > 254) {
@@ -762,14 +738,6 @@ export default function adminDashboard(initialState = {}) {
           }
         } else if (accessValue.length > 3500) {
           add(index, "access_value", "Auth Token maksimal 3500 karakter.");
-        }
-
-        if (tutorial.length > 2000) {
-          add(
-            index,
-            "tutorial_override",
-            "Tutorial tambahan maksimal 2000 karakter."
-          );
         }
       });
 
@@ -857,15 +825,12 @@ export default function adminDashboard(initialState = {}) {
     accountInputPayload() {
       return {
         operation_key: this.accountInputOperationKey || newOperationKey(),
+        buyer_locale: this.accountInputBuyerLocale,
         accounts: this.accountCards.map((card) => ({
           email: card.email,
           password: card.password,
           access_method: card.accessMethod,
           access_value: card.accessMethod === "none" ? null : card.accessValue,
-          tutorial_override:
-            String(card.tutorialOverride ?? "").trim() === ""
-              ? null
-              : card.tutorialOverride,
         })),
       };
     },

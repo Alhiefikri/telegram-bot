@@ -1594,10 +1594,14 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
 
   await dialog.getByRole("button", { name: /Review 1 akun/ }).click();
   await expect(dialog.getByText("Review wajib sebelum commit")).toBeVisible();
-  await expect(dialog.getByText("Account #1")).toBeVisible();
   await expect(
-    dialog.getByText("Tutorial default Product").first()
+    dialog.getByText("Preview private buyer photo-caption")
   ).toBeVisible();
+  await expectNoDocumentOverflow(page);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await expectNoDocumentOverflow(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expectNoDocumentOverflow(page);
 
   const secret = "multi\nline-fake-password";
   const leakedAttribute = await dialog.evaluate(

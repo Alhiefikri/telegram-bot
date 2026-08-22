@@ -51,7 +51,6 @@ class ProductStockIntakeTest extends TestCase
                     'password' => "multi\nline-password",
                     'access_method' => 'otp_mail_link',
                     'access_value' => 'https://mail.example.test/otp?opaque=fake-otp-value',
-                    'tutorial_override' => 'Open the mailbox before signing in.',
                 ],
             ], $operationKey),
             $admin,
@@ -85,7 +84,13 @@ class ProductStockIntakeTest extends TestCase
     public function test_account_review_returns_server_normalized_safe_metadata_without_writing_stock(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
-        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $product = Product::factory()->create([
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'delivery_note' => 'Product guidance must not be echoed.',
+            'usage_guide_title' => 'Safe product guide',
+            'usage_guide_url' => 'https://guide.example.test/login',
+        ]);
         $otpUrl = 'HTTPS://Mail.Example.TEST/otp?opaque=review-otp-canary';
         $password = 'review-password-canary';
 
@@ -96,9 +101,9 @@ class ProductStockIntakeTest extends TestCase
                 'password' => $password,
                 'access_method' => 'otp_mail_link',
                 'access_value' => $otpUrl,
-                'tutorial_override' => 'Use the review tutorial.',
             ]]),
             $admin,
+            'id',
         );
 
         $payload = $review->toArray();
@@ -107,13 +112,18 @@ class ProductStockIntakeTest extends TestCase
 
         $this->assertSame('ready', $payload['status']);
         $this->assertSame(1, $payload['account_count']);
-        $this->assertSame('review.account@example.test', $account['email']);
+        $this->assertSame('r•••@example.test', $account['email_masked']);
         $this->assertSame('mail.example.test', $account['otp_domain']);
-        $this->assertSame('override', $account['tutorial_source']);
         $this->assertSame('clear', $account['duplicate_status']);
         $this->assertSame([], $account['duplicate_sources']);
+        $this->assertSame(1024, $payload['receipt_preview']['photo_caption_limit']);
+        $this->assertSame(4096, $payload['receipt_preview']['continuation_text_limit']);
+        $this->assertSame('id', $payload['receipt_preview']['buyer_locale']);
+        $this->assertSame(1, $payload['receipt_preview']['preview']['delivery_note_occurrences']);
+        $this->assertSame(1, $payload['receipt_preview']['preview']['usage_guide_occurrences']);
         $this->assertStringNotContainsString($password, $encoded);
         $this->assertStringNotContainsString($otpUrl, $encoded);
+        $this->assertStringNotContainsString('Product guidance must not be echoed.', $encoded);
         $this->assertSame(0, ProductStockItem::query()->count());
         $this->assertSame(0, CredentialIdentity::query()->count());
         $this->assertSame(0, InventoryMovement::query()->count());
@@ -183,6 +193,7 @@ class ProductStockIntakeTest extends TestCase
         $response = $this->actingAs($admin)
             ->postJson(route('admin.products.stock.accounts.review', $product), [
                 'operation_key' => (string) Str::uuid(),
+                'buyer_locale' => 'ms',
                 'accounts' => [[
                     'email' => 'route-review@example.test',
                     'password' => 'route-review-password',
@@ -192,13 +203,74 @@ class ProductStockIntakeTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonPath('review.status', 'ready')
-            ->assertJsonPath('review.accounts.0.email', 'route-review@example.test')
-            ->assertJsonPath('review.accounts.0.otp_domain', 'mail.example.test');
+            ->assertJsonPath('review.accounts.0.email_masked', 'r•••@example.test')
+            ->assertJsonPath('review.accounts.0.otp_domain', 'mail.example.test')
+            ->assertJsonPath('review.receipt_preview.buyer_locale', 'ms');
 
         $this->assertStringNotContainsString('route-review-password', $response->getContent());
         $this->assertStringNotContainsString('route-review-canary', $response->getContent());
+        $this->assertStringNotContainsString('route-review@example.test', $response->getContent());
         $this->assertSame(0, ProductStockItem::query()->count());
         $this->assertSame(0, CredentialIdentity::query()->count());
+    }
+
+    public function test_account_input_rejects_new_legacy_tutorial_override_without_writing_stock(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $this->actingAs($admin)
+            ->postJson(route('admin.products.stock.accounts.store', $product), [
+                'operation_key' => (string) Str::uuid(),
+                'accounts' => [[
+                    'email' => 'override@example.test',
+                    'password' => 'password',
+                    'access_method' => 'none',
+                    'tutorial_override' => 'new legacy override',
+                ]],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['accounts.0.tutorial_override']);
+
+        $this->assertSame(0, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+    }
+
+    public function test_intake_authoritatively_rejects_new_tutorial_override_and_normalizes_blank_stale_input(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        try {
+            app(ProductStockIntake::class)->submit(
+                $product,
+                ProductStockIntakeSubmission::structured([[
+                    'email' => 'direct-override@example.test',
+                    'password' => 'password',
+                    'access_method' => 'none',
+                    'tutorial_override' => 'must not persist',
+                ]]),
+                $admin,
+                dispatchNotifications: false,
+            );
+            $this->fail('Expected direct intake to reject a new tutorial override.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('accounts.0.tutorial_override', $exception->errors());
+        }
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => 'blank-override@example.test',
+                'password' => 'password',
+                'access_method' => 'none',
+                'tutorial_override' => '   ',
+            ]]),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $this->assertNull(ProductStockItem::query()->sole()->credential_payload['tutorial_override']);
     }
 
     public function test_structured_twenty_item_intake_creates_one_movement_and_one_audit(): void

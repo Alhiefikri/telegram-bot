@@ -68,11 +68,12 @@ class ProductStockItemManager
      */
     public function updateAvailableStructured(Product $product, ProductStockItem $stockItem, array $input, User $user, ?string $ip = null): ProductStockItem
     {
-        $payload = $this->structuredPayload($input);
+        $this->assertNoNewTutorialOverride($input);
         $this->fingerprints->assertReady();
+        $payload = null;
 
         try {
-            return DB::transaction(function () use ($product, $stockItem, $payload, $user, $ip): ProductStockItem {
+            return DB::transaction(function () use ($product, $stockItem, $input, $user, $ip, &$payload): ProductStockItem {
                 /** @var Product $lockedProduct */
                 $lockedProduct = Product::query()
                     ->whereKey($product->getKey())
@@ -93,6 +94,11 @@ class ProductStockItemManager
                         'credential_format' => 'Format stok tidak cocok dengan editor akun.',
                     ]);
                 }
+
+                $payload = $this->structuredPayload(
+                    $input,
+                    $this->existingTutorialOverride($lockedItem),
+                );
 
                 $this->claimStructuredIdentities($lockedProduct, $lockedItem, $payload);
 
@@ -116,7 +122,7 @@ class ProductStockItemManager
                         'stock_item_id' => $lockedItem->id,
                         'credential_format' => CredentialFormat::StructuredAccount->value,
                         'secret_changed' => true,
-                        'changed_fields' => ['email', 'password', 'access_method', 'access_value', 'tutorial_override'],
+                        'changed_fields' => ['email', 'password', 'access_method', 'access_value'],
                         'identity_kinds' => array_values(array_unique(array_map(
                             fn (array $identity): string => $identity['kind'],
                             $payload->identityValues(),
@@ -129,7 +135,8 @@ class ProductStockItemManager
                 return $lockedItem->refresh();
             }, attempts: 5);
         } catch (QueryException $exception) {
-            if (str_contains(strtolower($exception->getMessage()), 'credential_identities')) {
+            if ($payload instanceof StructuredCredentialPayload
+                && str_contains(strtolower($exception->getMessage()), 'credential_identities')) {
                 throw $this->identityConflictValidation($payload, $this->registeredIdentityKind($payload));
             }
 
@@ -192,13 +199,12 @@ class ProductStockItemManager
     /**
      * @param  array<string, mixed>  $input
      */
-    private function structuredPayload(array $input): StructuredCredentialPayload
+    private function structuredPayload(array $input, ?string $tutorialOverride): StructuredCredentialPayload
     {
         $email = $input['email'] ?? null;
         $password = $input['password'] ?? null;
         $accessMethod = $input['access_method'] ?? null;
         $accessValue = $input['access_value'] ?? null;
-        $tutorialOverride = $input['tutorial_override'] ?? null;
         $methodValue = $accessMethod instanceof CredentialAccessMethod ? $accessMethod->value : $accessMethod;
         $errors = [];
 
@@ -239,6 +245,40 @@ class ProductStockItemManager
 
             throw ValidationException::withMessages([
                 $field => [$field === 'access_value' ? 'Nilai metode akses tidak valid.' : 'Email tidak valid.'],
+            ]);
+        }
+    }
+
+    /**
+     * Existing encrypted legacy overrides are retained until their stock item
+     * is retired. Account Input and this editor cannot create or replace one.
+     *
+     * @param array<string, mixed> $input
+     */
+    private function assertNoNewTutorialOverride(array $input): void
+    {
+        $tutorialOverride = $input['tutorial_override'] ?? null;
+        if ($tutorialOverride !== null && (! is_string($tutorialOverride) || trim($tutorialOverride) !== '')) {
+            throw ValidationException::withMessages([
+                'tutorial_override' => ['Tutorial akun sekarang mengikuti panduan Product.'],
+            ]);
+        }
+    }
+
+    private function existingTutorialOverride(ProductStockItem $stockItem): ?string
+    {
+        $payload = $stockItem->credential_payload;
+        if (! is_array($payload)) {
+            throw ValidationException::withMessages([
+                'stock_item' => ['Payload akun tidak dapat dibaca.'],
+            ]);
+        }
+
+        try {
+            return StructuredCredentialPayload::fromArray($payload)->tutorialOverride;
+        } catch (Throwable) {
+            throw ValidationException::withMessages([
+                'stock_item' => ['Payload akun tidak dapat dibaca.'],
             ]);
         }
     }

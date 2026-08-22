@@ -58,7 +58,6 @@ class AdminDashboardStockFlowsTest extends TestCase
                 'password' => "multi\nline-password",
                 'access_method' => CredentialAccessMethod::AuthToken->value,
                 'access_value' => 'fake-auth-token-for-admin-test',
-                'tutorial_override' => "Open the mailbox first.\nThen sign in.",
             ]]),
             $admin,
             '203.0.113.20',
@@ -143,7 +142,6 @@ class AdminDashboardStockFlowsTest extends TestCase
                 'password' => "after\npassword",
                 'access_method' => CredentialAccessMethod::AuthToken->value,
                 'access_value' => 'fake-auth-token-after',
-                'tutorial_override' => 'Use the updated tutorial.',
             ])
             ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
@@ -215,6 +213,42 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame([false, false, false], array_column($payload['stockItems'], 'editable'));
         $this->assertSame([null, null, null], array_column($payload['stockItems'], 'update_url'));
         $this->assertSame([null, null, null], array_column($payload['stockItems'], 'delete_url'));
+    }
+    public function test_structured_edit_preserves_a_retained_legacy_tutorial_override(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([[
+                'email' => 'legacy-override@example.test',
+                'password' => 'before-password',
+                'access_method' => 'none',
+            ]]),
+            $admin,
+            dispatchNotifications: false,
+        );
+        $stockItem = ProductStockItem::query()->sole();
+        $legacyOverride = 'Legacy retained guidance.';
+        $stockItem->forceFill([
+            'credential_payload' => [
+                ...$stockItem->credential_payload,
+                'tutorial_override' => $legacyOverride,
+            ],
+        ])->save();
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.stock-items.update', [$product, $stockItem]), [
+                'credential_format' => CredentialFormat::StructuredAccount->value,
+                'email' => 'updated-legacy@example.test',
+                'password' => 'after-password',
+                'access_method' => 'none',
+                'tutorial_override' => '',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->assertSame($legacyOverride, $stockItem->fresh()->credential_payload['tutorial_override']);
     }
 
     public function test_structured_edit_rejects_a_registered_email_without_writing_the_new_payload(): void

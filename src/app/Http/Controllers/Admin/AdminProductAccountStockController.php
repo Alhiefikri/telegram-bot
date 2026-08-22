@@ -28,6 +28,7 @@ class AdminProductAccountStockController extends Controller
                     (string) $request->validated('operation_key'),
                 ),
                 $request->attributes->get('adminUser'),
+                $request->validated('buyer_locale'),
             );
         } catch (StructuredStockInputDisabled) {
             return $this->structuredInputDisabledResponse();

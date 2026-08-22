@@ -14,14 +14,14 @@ final readonly class ProductStockIntakeReview
      * @param  list<array{
      *     index:int,
      *     account_number:int,
-     *     email:string,
+     *     email_masked:string,
      *     access_method:string,
      *     otp_domain:?string,
-     *     tutorial_source:string,
      *     duplicate_status:string,
      *     duplicate_fields:list<string>,
      *     duplicate_sources:list<string>
      * }>  $accounts
+     * @param  array<string, mixed>  $receiptPreview
      */
     public function __construct(
         public string $operationKey,
@@ -29,6 +29,7 @@ final readonly class ProductStockIntakeReview
         public int $accountCount,
         public int $duplicateCount,
         public array $accounts,
+        public array $receiptPreview,
     ) {}
 
     /**
@@ -37,7 +38,8 @@ final readonly class ProductStockIntakeReview
      *     status:string,
      *     account_count:int,
      *     duplicate_count:int,
-     *     accounts:list<array<string,mixed>>
+     *     accounts:list<array<string,mixed>>,
+     *     receipt_preview:array<string,mixed>
      * }
      */
     public function toArray(): array
@@ -48,6 +50,7 @@ final readonly class ProductStockIntakeReview
             'account_count' => $this->accountCount,
             'duplicate_count' => $this->duplicateCount,
             'accounts' => $this->accounts,
+            'receipt_preview' => $this->receiptPreview,
         ];
     }
 }
