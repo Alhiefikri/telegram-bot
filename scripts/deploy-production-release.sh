@@ -256,6 +256,14 @@ run_expand_migrations() {
     app php artisan migrate --force --isolated "${migration_args[@]}" </dev/null
 }
 
+run_credential_identity_backfill() {
+  echo "Preparing the credential identity registry for Account Input."
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+    -e APP_AUTO_MIGRATE=false \
+    -e APP_OPTIMIZE=false \
+    app php artisan credentials:backfill-identity-registry --chunk=100 </dev/null
+}
+
 run_deferred_telegram_contract() {
   local attempt
   local current_commit current_app_container running_image
@@ -649,6 +657,16 @@ if ! run_expand_migrations; then
   write_release_state "migration-failed-no-cutover"
   record_result "migration-failed-no-cutover"
   echo "DEPLOY FAILED: migration failed before cutover. The previous release remains running." >&2
+  exit 1
+fi
+if ! run_credential_identity_backfill; then
+  git checkout --detach "$PREVIOUS_COMMIT"
+  git reset --hard "$PREVIOUS_COMMIT"
+  COMPOSE_CONFIG_STATUS=unvalidated
+  export RELEASE_SHA="$PREVIOUS_COMMIT"
+  write_release_state "credential-identity-backfill-failed-no-cutover"
+  record_result "credential-identity-backfill-failed-no-cutover"
+  echo "DEPLOY FAILED: credential identity backfill failed before application cutover. The previous release remains running." >&2
   exit 1
 fi
 write_release_state "migration-succeeded"

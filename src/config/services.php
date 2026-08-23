@@ -2,9 +2,10 @@
 
 return [
     'credentials' => [
-        // Separate from APP_KEY so its lifecycle is explicit; keep it stable
-        // after registry rows are created without rotating encrypted payloads.
+        // Optional override. When omitted, CredentialIdentityFingerprint
+        // creates a stable key in persistent application storage.
         'identity_fingerprint_key' => env('CREDENTIAL_IDENTITY_FINGERPRINT_KEY'),
+        'identity_fingerprint_key_path' => storage_path('app/private/credential-identity-fingerprint.key'),
     ],
 
     'binance' => [

@@ -164,7 +164,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                         ? $this->locale->translate($context->customer, 'catalog.quantity.stock_changed')
                         : null,
                 );
-                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock, $context->messageId);
 
                 return;
             }
@@ -189,7 +189,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                     $context->callbackQueryId,
                     $this->locale->translate($context->customer, 'catalog.quantity.stock_changed'),
                 );
-                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock, $context->messageId);
 
                 return;
             }
@@ -213,7 +213,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 $this->locale->code($context->customer),
             );
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock);
+            $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock, $context->messageId);
         });
     }
 

@@ -195,31 +195,46 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
         $this->assertFalse(app(ProductStockIntake::class)->structuredInputEnabled());
     }
 
-    public function test_missing_fingerprint_key_rejects_structured_input_without_partial_writes(): void
+    public function test_account_input_is_available_without_fingerprint_environment_variable(): void
     {
+        $keyPath = storage_path('framework/testing/credential-identity-'.Str::uuid().'.key');
+        File::delete($keyPath);
         config()->set('services.credentials.identity_fingerprint_key', null);
-        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
-        $password = 'missing-key-'.Str::random(16);
+        config()->set('services.credentials.identity_fingerprint_key_path', $keyPath);
+        $this->resetBackfillReadiness();
 
         try {
-            app(ProductStockIntake::class)->submit(
-                $product,
-                ProductStockIntakeSubmission::structured([[
-                    'email' => 'missing-key@example.test',
-                    'password' => $password,
-                    'access_method' => CredentialAccessMethod::None->value,
-                ]]),
-                User::factory()->create(['role' => UserRole::Admin]),
-                dispatchNotifications: false,
-            );
-            $this->fail('Structured input succeeded without its identity key.');
-        } catch (StructuredStockInputDisabled $exception) {
-            $this->assertStringNotContainsString($password, $exception->getMessage());
-        }
+            $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
 
-        $this->assertSame(0, ProductStockItem::query()->count());
-        $this->assertSame(0, DB::table('credential_identities')->count());
-        $this->assertSame(0, DB::table('inventory_movements')->count());
+            $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+            $admin = User::factory()->create(['role' => UserRole::Admin]);
+            $this->actingAs($admin)
+                ->get('/admin?tab=produk')
+                ->assertOk()
+                ->assertSee('Input Akun')
+                ->assertSee('id="stock-input-account-panel"', false);
+            $response = $this->actingAs($admin)->postJson(
+                route('admin.products.stock.accounts.store', $product),
+                [
+                    'operation_key' => (string) Str::uuid(),
+                    'accounts' => [[
+                        'email' => 'without-env@example.test',
+                        'password' => 'without-env-password',
+                        'access_method' => CredentialAccessMethod::AuthToken->value,
+                        'access_value' => 'without-env-access-token',
+                    ]],
+                ],
+            );
+
+            $response
+                ->assertCreated()
+                ->assertJsonPath('item_count', 1);
+            $this->assertTrue(File::exists($keyPath));
+            $this->assertSame('without-env@example.test', ProductStockItem::query()->sole()->credential_payload['email']);
+            $this->assertSame('without-env-access-token', ProductStockItem::query()->sole()->credential_payload['access_value']);
+        } finally {
+            File::delete($keyPath);
+        }
     }
 
     public function test_unsafe_otp_link_is_rejected_without_server_fetch_or_persistence(): void

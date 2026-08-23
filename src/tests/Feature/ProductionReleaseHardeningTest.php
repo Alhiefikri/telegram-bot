@@ -1014,6 +1014,7 @@ SH);
         $this->assertStringContainsString('ENTRYPOINT ["/usr/local/bin/docker-entrypoint-laravel"]', $dockerfile);
         $this->assertStringNotContainsString('php artisan optimize', $dockerfile);
         $this->assertStringContainsString('artisan migrate --force', $entrypoint);
+        $this->assertStringContainsString('artisan credentials:backfill-identity-registry --chunk=100', $entrypoint);
         $this->assertStringContainsString('artisan optimize', $entrypoint);
         $this->assertStringContainsString('exec "$@"', $entrypoint);
         $this->assertLessThan(
@@ -1025,6 +1026,8 @@ SH);
             strpos($entrypoint, 'artisan optimize')
         );
         $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
+        $this->assertStringContainsString('CREDENTIAL_IDENTITY_FINGERPRINT_KEY: ${CREDENTIAL_IDENTITY_FINGERPRINT_KEY:-}', $compose);
+        $this->assertStringNotContainsString('CREDENTIAL_IDENTITY_FINGERPRINT_KEY is required', $compose);
         $this->assertStringContainsString('APP_OPTIMIZE: ${APP_OPTIMIZE:-true}', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('APP_AUTO_MIGRATE=false', $envExample);

@@ -73,7 +73,7 @@ RUN rm -rf public/storage \
     && rm -rf database/seeders database/factories tests resources/css resources/js \
     && rm -f .env.example README.md package.json package-lock.json phpunit.xml phpunit.concurrency.xml vite.config.js \
     && ln -s /var/www/html/storage/app/public public/storage \
-    && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache \
+    && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/private storage/app/public bootstrap/cache \
     && chmod +x /usr/local/bin/docker-entrypoint-laravel \
     && chmod +x /usr/local/bin/docker-scheduler-laravel \
     && chown -R laravel:laravel /var/www/html \

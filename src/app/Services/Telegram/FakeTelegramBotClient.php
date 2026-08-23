@@ -36,6 +36,22 @@ class FakeTelegramBotClient extends TelegramBotClient
         ];
     }
 
+    public function editMessageText(int|string $chatId, int $messageId, string $text, array $replyMarkup = [], array $options = []): array
+    {
+        $this->record('editMessageText');
+
+        return [
+            'ok' => true,
+            'result' => [
+                'message_id' => $messageId,
+                'chat' => ['id' => $chatId],
+                'text' => $text,
+                'reply_markup' => $replyMarkup,
+                ...$options,
+            ],
+        ];
+    }
+
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $this->record('sendPhoto');

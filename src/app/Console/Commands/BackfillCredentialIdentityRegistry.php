@@ -49,9 +49,10 @@ final class BackfillCredentialIdentityRegistry extends Command
         }
 
         try {
+            $fingerprints->ensureKey();
             $fingerprints->assertReady();
         } catch (Throwable) {
-            $this->error('Credential identity backfill failed: fingerprint readiness is not configured.');
+            $this->error('Credential identity backfill failed: fingerprint key could not be prepared.');
 
             return self::FAILURE;
         }

@@ -3,7 +3,7 @@ set -eu
 
 cd /var/www/html
 
-mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache public/storefront
+mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/private storage/app/public bootstrap/cache public/storefront
 
 artisan() {
     if [ "$(id -u)" = "0" ]; then
@@ -87,7 +87,7 @@ if [ "${APP_ENV:-production}" = "production" ]; then
 fi
 
 if [ "$(id -u)" = "0" ]; then
-    install -d -o laravel -g laravel -m 0775 storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/public bootstrap/cache public/storefront
+    install -d -o laravel -g laravel -m 0775 storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/private storage/app/public bootstrap/cache public/storefront
     chown -R laravel:laravel storage/logs
     chmod -R ug+rwX storage/logs
     chmod 2775 storage/logs
@@ -114,6 +114,8 @@ fi
 
 if [ "${APP_AUTO_MIGRATE:-false}" = "true" ]; then
     artisan migrate --force
+    artisan credentials:backfill-identity-registry --chunk=100 \
+        || echo "WARNING: Credential identity backfill did not complete; Account Input remains disabled." >&2
 fi
 
 if [ "${APP_OPTIMIZE:-true}" = "true" ]; then

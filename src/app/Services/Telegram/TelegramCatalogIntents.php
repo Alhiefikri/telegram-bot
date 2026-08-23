@@ -72,7 +72,7 @@ class TelegramCatalogIntents
     /**
      * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string}  $selection
      */
-    public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null): void
+    public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null, ?int $messageId = null): void
     {
         $availableStock ??= max(0, $product->availableStock());
         $quantity = $selection['quantity'] ?? null;
@@ -200,7 +200,14 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->qrisCrossBorderSupport($customer);
         }
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $text = implode("\n", $lines);
+        if ($messageId !== null) {
+            $this->bot->editMessageText($chatId, $messageId, $text, ['inline_keyboard' => $keyboard]);
+
+            return;
+        }
+
+        $this->bot->sendMessage($chatId, $text, ['inline_keyboard' => $keyboard]);
     }
 
     /**
@@ -491,6 +498,12 @@ class TelegramCatalogIntents
         return [
             'text' => $this->locale->translate($customer, 'catalog.product_button', [
                 'name' => $this->buttonProductName($product),
+                'status' => $this->locale->translate(
+                    $customer,
+                    $availableStock > 0
+                        ? 'catalog.product_button.in_stock'
+                        : 'catalog.product_button.out_of_stock',
+                ),
                 'stock' => $availableStock,
             ]),
             'callback_data' => 'product:'.$product->id,

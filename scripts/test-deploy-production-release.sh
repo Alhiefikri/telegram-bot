@@ -260,6 +260,7 @@ SCRIPT
   case "$scenario" in
     success)
       grep -q 'compose .* run --rm --no-deps .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration"
+      grep -q 'credentials:backfill-identity-registry --chunk=100' "$workspace/commands.log" || fail "success did not prepare the credential identity registry"
       grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
       ! grep -q 'database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php' "$workspace/commands.log" || fail "success ran the deferred contract migration before cutover"
       ;;

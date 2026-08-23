@@ -81,6 +81,60 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
 
+    public function test_quantity_buttons_edit_the_existing_product_detail_message(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318004, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Inline Quantity Product',
+            'price_amount' => 30000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $detailMessageId = 88004;
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180041,
+            'inline-increase',
+            'detail:qty:+:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318004,
+            'private',
+            $detailMessageId,
+        ))->assertOk();
+
+        $state = $this->selection($customer);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180042,
+            'inline-decrease',
+            'detail:qty:-:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318004,
+            'private',
+            $detailMessageId,
+        ))->assertOk();
+
+        $this->assertSame(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Inline Quantity Product'))->count());
+        $edits = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(2, $edits);
+        $increaseEdit = $edits->first()[0]->data();
+        $decreaseEdit = $edits->last()[0]->data();
+        $this->assertSame('318004', (string) $increaseEdit['chat_id']);
+        $this->assertSame($detailMessageId, (int) $increaseEdit['message_id']);
+        $this->assertSame($detailMessageId, (int) $decreaseEdit['message_id']);
+        $this->assertStringContainsString('Quantity: 2', (string) $increaseEdit['text']);
+        $this->assertStringContainsString('Subtotal: Rp60.000', (string) $increaseEdit['text']);
+        $this->assertSame('💳 Pay with QRIS · Rp60.000', $increaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
+        $this->assertStringContainsString('Quantity: 1', (string) $decreaseEdit['text']);
+        $this->assertStringContainsString('Subtotal: Rp30.000', (string) $decreaseEdit['text']);
+        $this->assertSame('💳 Pay with QRIS · Rp30.000', $decreaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
+    }
+
     public function test_current_quantity_callback_revalidates_live_stock_without_side_effects(): void
     {
         $this->fakeTelegramHttp();
@@ -970,7 +1024,8 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
     /** @return array<string, mixed> */
     private function lastDetailMessage(string $productName): array
     {
-        $record = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+        $record = Http::recorded(fn ($request): bool => (str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/editMessageText'))
             && str_contains((string) ($request['text'] ?? ''), $productName))->last();
 
         $this->assertNotNull($record);
@@ -980,7 +1035,8 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
     private function detailMessageCount(string $productName): int
     {
-        return Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+        return Http::recorded(fn ($request): bool => (str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/editMessageText'))
             && str_contains((string) ($request['text'] ?? ''), $productName))->count();
     }
 

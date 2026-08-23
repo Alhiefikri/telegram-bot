@@ -251,12 +251,12 @@ container's immutable local `.Image` ID (`sha256:...`) as the immediate rollback
 target; it never treats the mutable tag itself as safe. Leave the input false
 after the first successful GHCR-digest deployment.
 
-`initialize_credential_fingerprint_key=true` is also one-time. When the VPS
-`.env` lacks `CREDENTIAL_IDENTITY_FINGERPRINT_KEY`, the release script generates
-a 256-bit key directly on the VPS and atomically updates `.env`; the value never
-enters GitHub logs, secrets, artifacts, or process arguments. Leave the input
-false after initialization. A local rollback image ID is verified from the
-Docker image store and is never sent to `docker pull`.
+The credential identity fingerprint ENV override is optional. The release
+creates a random 256-bit key in the persistent application storage volume when
+the override is absent, then runs the identity backfill before cutover. The key
+never enters GitHub logs, secrets, artifacts, or process arguments. Keep the
+persistent key stable after registry rows exist. A local rollback image ID is
+verified from the Docker image store and is never sent to `docker pull`.
 
 The post-deploy release interface is intentionally cheap but deeper than liveness:
 

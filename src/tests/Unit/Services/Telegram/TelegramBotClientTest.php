@@ -43,6 +43,7 @@ class TelegramBotClientTest extends TestCase
         $client->getChat(12345);
         $client->getChatMember(12345, 67890);
         $client->sendMessage(12345, 'Timeout regression coverage');
+        $client->editMessageText(12345, 777, 'Edited message', ['inline_keyboard' => [[['text' => 'Next', 'callback_data' => 'next']]]]);
         $client->sendPhoto(12345, 'binary-photo', 'receipt.png', 'Receipt');
         $client->sendPhotoReference(12345, 'telegram-file-id', 'Receipt reference');
         $client->answerCallbackQuery('callback-query-id', 'Done');
@@ -52,12 +53,13 @@ class TelegramBotClientTest extends TestCase
             'getChat',
             'getChatMember',
             'sendMessage',
+            'editMessageText',
             'sendPhoto',
             'sendPhotoReference',
             'answerCallbackQuery',
             'deleteMessage',
         ], array_keys($optionsByOperation));
-        Http::assertSentCount(7);
+        Http::assertSentCount(8);
 
         foreach ($optionsByOperation as $operation => $options) {
             $this->assertArrayHasKey('timeout', $options, "{$operation} did not configure an HTTP timeout.");
@@ -68,6 +70,9 @@ class TelegramBotClientTest extends TestCase
 
         $this->assertTrue($requests['sendMessage']->isJson(), 'sendMessage should use the JSON post request path.');
         $this->assertSame('Timeout regression coverage', $requests['sendMessage']['text']);
+        $this->assertTrue($requests['editMessageText']->isJson(), 'editMessageText should use the JSON post request path.');
+        $this->assertSame(777, $requests['editMessageText']['message_id']);
+        $this->assertSame('Edited message', $requests['editMessageText']['text']);
         $this->assertTrue($requests['sendPhoto']->isMultipart(), 'sendPhoto should use the multipart attach request path.');
         $this->assertTrue($requests['sendPhoto']->hasFile('photo', 'binary-photo', 'receipt.png'));
     }
