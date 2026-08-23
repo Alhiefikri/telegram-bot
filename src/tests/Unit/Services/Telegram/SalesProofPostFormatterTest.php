@@ -9,11 +9,11 @@ use Tests\TestCase;
 
 class SalesProofPostFormatterTest extends TestCase
 {
-    public function test_photo_caption_is_bounded_and_truthful_for_a_synthetic_presentation(): void
+    public function test_photo_caption_is_bounded_and_uses_the_public_paid_order_shape(): void
     {
         $presentation = new PaidInvoicePresentation(
-            invoiceId: 'FAKE-TEST-ORDER-001',
-            buyerIdentifier: 'FAKE***',
+            invoiceId: 'INV-20260822-01K3B8Q7T3P6M4R2N9X5C1V0Z8',
+            buyerIdentifier: '284*****24',
             paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
             paymentMethod: 'QRIS',
             currency: 'IDR',
@@ -25,14 +25,16 @@ class SalesProofPostFormatterTest extends TestCase
             ]],
             providerFee: 0,
             totalPaid: 123456,
+            buyerName: 'And***',
         );
 
         $caption = app(SalesProofPostFormatter::class)->format($presentation, 17);
 
         $this->assertLessThanOrEqual(SalesProofPostFormatter::MAX_CAPTION_LENGTH, mb_strlen($caption, 'UTF-8'));
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $caption);
-        $this->assertStringContainsString('Buyer ID: FAKE***', $caption);
-        $this->assertStringContainsString('Order ID: FAKE-TEST-ORDER-001', $caption);
+        $this->assertStringContainsString('Buyer: And***', $caption);
+        $this->assertStringNotContainsString('Buyer ID:', $caption);
+        $this->assertStringContainsString('Order ID: INV-20260822-01K3B8Q7T3P6M4R2N9X5C1V0Z8', $caption);
         $this->assertStringContainsString('Item: Long Unicode Product', $caption);
         $this->assertStringContainsString('× 1', $caption);
         $this->assertStringContainsString('Paid via: QRIS', $caption);
@@ -42,5 +44,6 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringContainsString('Successful orders: #17', $caption);
         $this->assertStringContainsString('Thank you for choosing Lhie Store.', $caption);
         $this->assertStringContainsString('…', $caption);
+        $this->assertStringNotContainsStringIgnoringCase('fake', $caption);
     }
 }

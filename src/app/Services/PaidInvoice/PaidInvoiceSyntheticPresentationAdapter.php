@@ -4,7 +4,7 @@ namespace App\Services\PaidInvoice;
 
 use App\Models\Product;
 use Carbon\CarbonImmutable;
-use RuntimeException;
+use Illuminate\Support\Str;
 
 /**
  * Builds an in-memory public-safe invoice for Fake Sales Proof only.
@@ -16,6 +16,26 @@ final class PaidInvoiceSyntheticPresentationAdapter
 {
     private const TIMEZONE = 'Asia/Jakarta';
 
+    /** @var list<string> */
+    private const BUYER_NAMES = [
+        'Andi Saputra',
+        'Budi Santoso',
+        'Citra Lestari',
+        'Dimas Pratama',
+        'Eka Putri',
+        'Fajar Ramadhan',
+        'Gilang Maulana',
+        'Hana Salsabila',
+        'Intan Permata',
+        'Joko Susilo',
+        'Kevin Wijaya',
+        'Larasati Putri',
+        'Maya Anggraini',
+        'Nadia Aulia',
+        'Rizky Kurniawan',
+        'Siti Rahma',
+    ];
+
     public function present(Product $product, ?CarbonImmutable $paidAt = null): PaidInvoicePresentation
     {
         $paidAt ??= CarbonImmutable::now(self::TIMEZONE);
@@ -25,10 +45,11 @@ final class PaidInvoiceSyntheticPresentationAdapter
             ? (int) ($product->usdt_price_amount ?? $product->price_amount)
             : (int) $product->price_amount;
         $amount = max(0, $amount);
+        $invoiceId = $this->invoiceIdentifier($paidAt);
 
         return new PaidInvoicePresentation(
-            invoiceId: $this->syntheticInvoiceIdentifier($product, $paidAt),
-            buyerIdentifier: 'FAKE***',
+            invoiceId: $invoiceId,
+            buyerIdentifier: $this->buyerIdentifier($product, $paidAt),
             paidAt: $paidAt,
             paymentMethod: 'QRIS',
             currency: $currency,
@@ -40,22 +61,36 @@ final class PaidInvoiceSyntheticPresentationAdapter
             ]],
             providerFee: 0,
             totalPaid: $amount,
+            buyerName: $this->buyerName($product, $invoiceId),
         );
     }
 
-    private function syntheticInvoiceIdentifier(Product $product, CarbonImmutable $paidAt): string
+    private function invoiceIdentifier(CarbonImmutable $paidAt): string
     {
-        try {
-            $suffix = strtoupper(bin2hex(random_bytes(3)));
-        } catch (\Throwable $exception) {
-            throw new RuntimeException('Synthetic paid invoice identifier could not be generated.', previous: $exception);
-        }
+        return 'INV-'.$paidAt->format('Ymd').'-'.(string) Str::ulid();
+    }
 
-        $timestamp = strtoupper(base_convert((string) $paidAt->getTimestamp(), 10, 36));
-        $productId = trim((string) $product->getKey());
-        $productId = preg_replace('/[^A-Za-z0-9_-]+/', '-', $productId) ?: 'PRODUCT';
-        $productId = trim($productId, '-_') ?: 'PRODUCT';
+    private function buyerIdentifier(Product $product, CarbonImmutable $paidAt): string
+    {
+        $seed = implode('|', [
+            'sales-proof-buyer',
+            (string) $product->getKey(),
+            $paidAt->toIso8601String(),
+        ]);
+        $number = (string) (hexdec(substr(hash('sha256', $seed), 0, 12)) % 9_000_000_000 + 1_000_000_000);
 
-        return 'FAKE-'.$timestamp.'-'.mb_substr($productId, 0, 12).'-'.$suffix;
+        return substr($number, 0, 3).'*****'.substr($number, -2);
+    }
+
+    private function buyerName(Product $product, string $invoiceId): string
+    {
+        $seed = hash('sha256', implode('|', [
+            'sales-proof-buyer-name',
+            (string) $product->getKey(),
+            $invoiceId,
+        ]));
+        $name = self::BUYER_NAMES[hexdec(substr($seed, 0, 8)) % count(self::BUYER_NAMES)];
+
+        return mb_substr($name, 0, 3, 'UTF-8').'***';
     }
 }

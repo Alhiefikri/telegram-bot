@@ -338,7 +338,7 @@ final class PaidInvoiceRenderer
         array $metadata,
     ): int {
         $this->drawText($image, 'BUYER', 48, $top + 11, 9, $colors['muted'], $boldFont);
-        $buyer = (string) $metadata['buyer_telegram_id'];
+        $buyer = (string) ($metadata['buyer_display'] ?? $metadata['buyer_telegram_id']);
         $buyerSize = $this->fitFontSize($buyer, 270, 12, 9, $boldFont);
         $this->drawText($image, $buyer, 48, $top + 36, $buyerSize, $colors['ink'], $boldFont);
 

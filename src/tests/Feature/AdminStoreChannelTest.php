@@ -304,8 +304,10 @@ class AdminStoreChannelTest extends TestCase
                 && ($dimensions[0] ?? null) === 720
                 && ($dimensions[1] ?? null) === 720
                 && str_contains($caption, 'ORDER PAYMENT CONFIRMED')
-                && str_contains($caption, 'Buyer ID: FAKE***')
-                && preg_match('/Order ID: FAKE-[A-Z0-9_-]+/', $caption) === 1
+                && preg_match('/Buyer: [A-Z][a-z]{2}\*{3}/', $caption) === 1
+                && ! str_contains($caption, 'Buyer ID:')
+                && preg_match('/Order ID: INV-\d{8}-[A-Z0-9]{26}/', $caption) === 1
+                && ! str_contains(strtolower($caption), 'fake')
                 && str_contains($caption, $selectedProduct->name.' × 1')
                 && ! str_contains($caption, $otherActiveProduct->name)
                 && str_contains($caption, 'Paid via: QRIS')

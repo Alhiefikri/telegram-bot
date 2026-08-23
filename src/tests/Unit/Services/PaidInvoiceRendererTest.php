@@ -96,11 +96,16 @@ class PaidInvoiceRendererTest extends TestCase
             CarbonImmutable::parse('2026-08-22 04:00:00 UTC'),
         );
 
-        $this->assertStringStartsWith('FAKE-', $presentation->invoiceId);
+        $this->assertMatchesRegularExpression('/^INV-20260822-[0-9A-Z]{26}$/', $presentation->invoiceId);
         $this->assertLessThanOrEqual(64, mb_strlen($presentation->invoiceId));
-        $this->assertSame('FAKE***', $presentation->buyerIdentifier);
+        $this->assertMatchesRegularExpression('/^\d{3}\*{5}\d{2}$/', $presentation->buyerIdentifier);
+        $this->assertMatchesRegularExpression('/^[A-Z][a-z]{2}\*{3}$/', $presentation->buyerName ?? '');
+        $this->assertStringNotContainsStringIgnoringCase('fake', $presentation->invoiceId);
+        $this->assertStringNotContainsStringIgnoringCase('fake', $presentation->buyerIdentifier);
+        $this->assertStringNotContainsStringIgnoringCase('fake', $presentation->buyerName ?? '');
         $this->assertSame('QRIS', $presentation->paymentMethod);
         $this->assertSame('USDT', $presentation->currency);
+        $this->assertSame($presentation->buyerName, $presentation->metadata()['buyer_display']);
         $this->assertSame(1, $presentation->items[0]['quantity']);
         $this->assertSame(1_250_000, $presentation->items[0]['subtotal']);
         $this->assertSame(0, $presentation->providerFee);

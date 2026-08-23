@@ -31,7 +31,7 @@ class SalesProofPostFormatter
         $lines = [
             'ORDER PAYMENT CONFIRMED',
             '',
-            'Buyer ID: '.$presentation->buyerIdentifier,
+            ($presentation->buyerName !== null ? 'Buyer: ' : 'Buyer ID: ').($presentation->buyerName ?? $presentation->buyerIdentifier),
             'Order ID: '.$presentation->invoiceId,
             ...$this->itemSummaryLines($items),
             'Paid via: '.$presentation->paymentMethod,
