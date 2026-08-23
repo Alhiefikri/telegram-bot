@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      expected_app_url:
+        description: Optional canonical APP_URL override for this deploy; defaults to PRODUCTION_APP_URL variable.
+        required: false
+        default: ''
+        type: string
 
 
 env:
@@ -186,7 +191,7 @@ jobs:
           INITIALIZE_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.initialize_credential_fingerprint_key }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
@@ -208,7 +213,7 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
@@ -223,7 +228,7 @@ jobs:
         continue-on-error: true
         env:
           BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
           EXPECTED_RELEASE_SHA: ${{ env.DEPLOY_SHA }}
           SMOKE_HEALTH_MARKER: 'Application up'
           SMOKE_ADMIN_MARKER: 'LHIE STORE'
@@ -245,7 +250,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
@@ -277,7 +282,7 @@ jobs:
         continue-on-error: true
         env:
           BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
           EXPECTED_RELEASE_SHA: ${{ steps.rollback-identity.outputs.sha }}
           SMOKE_HEALTH_MARKER: 'Application up'
           SMOKE_ADMIN_MARKER: 'LHIE STORE'
@@ -298,7 +303,7 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
-          EXPECTED_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
         run: |
           set -euo pipefail
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"

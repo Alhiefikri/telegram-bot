@@ -743,6 +743,8 @@ SH);
         $this->assertStringContainsString('is_content_addressed_local_image', $release);
         $this->assertStringContainsString('BOOTSTRAP_LOCAL_ROLLBACK_IMAGE:-false', $release);
         $this->assertStringContainsString('initialize_credential_fingerprint_key:', $contents);
+        $this->assertStringContainsString('expected_app_url:', $contents);
+        $this->assertStringContainsString('EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}', $contents);
         $this->assertStringContainsString('INITIALIZE_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.initialize_credential_fingerprint_key }}', $contents);
         $this->assertStringContainsString('initialize_credential_identity_fingerprint_key', $release);
         $this->assertStringContainsString('docker image inspect "$PREVIOUS_IMAGE"', $release);

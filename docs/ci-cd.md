@@ -264,7 +264,7 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 - An external GitHub runner runs `scripts/smoke-production.sh` against `PRODUCTION_SMOKE_BASE_URL`. The check validates `/up`, the public `release-sha.txt` marker, and the representative `/admin` route without SSHing into the VPS; the rollback path runs the same public smoke against the restored commit.
 - Running Docker containers with Compose label `com.docker.compose.project` must not include another `telegram-bot*` project besides `telegram-bot-prod`.
 
-`PRODUCTION_SMOKE_BASE_URL` and `PRODUCTION_APP_URL` are required non-secret GitHub Environment variables. Both must be the same canonical public HTTPS base URL, for example `https://store.example.com`; neither may be a private hostname or webhook URL. The deployed release writes the expected full commit SHA to `/release-sha.txt`, which prevents a healthy but unrelated host from passing the smoke gate.
+`PRODUCTION_SMOKE_BASE_URL` and `PRODUCTION_APP_URL` are required non-secret GitHub Environment variables. `PRODUCTION_APP_URL` may also be overridden per manual deploy with the `expected_app_url` workflow input when GitHub variable precedence is stale or ambiguous. The expected APP URL must match the deployed container's canonical `APP_URL`; the smoke base URL may be a public alias only if redirects preserve the canonical host check. Neither may be a private hostname or webhook URL. The deployed release writes the expected full commit SHA to `/release-sha.txt`, which prevents a healthy but unrelated host from passing the smoke gate.
 
 ### Traffic-tolerant release thresholds
 
