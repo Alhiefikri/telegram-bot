@@ -384,6 +384,9 @@ jobs:
           name: telegram-bot-production
           keep-state: true
           cache-binary: false
+          buildkitd-config-inline: |
+            [dns]
+              nameservers = ["1.1.1.1", "8.8.8.8"]
 
       - name: Build production image once with BuildKit
         id: production-build

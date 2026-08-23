@@ -851,6 +851,8 @@ SH);
         $this->assertStringContainsString('name: telegram-bot-production', $ci);
         $this->assertStringContainsString('keep-state: true', $ci);
         $this->assertStringContainsString('cache-binary: false', $ci);
+        $this->assertStringContainsString('buildkitd-config-inline:', $ci);
+        $this->assertStringContainsString('nameservers = ["1.1.1.1", "8.8.8.8"]', $ci);
 
         $dependabot = file_get_contents(base_path('../.github/dependabot.yml'));
         foreach (['github-actions', 'composer', 'npm'] as $ecosystem) {

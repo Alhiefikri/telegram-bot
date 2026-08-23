@@ -37,6 +37,9 @@ Uploading the local npm cache over the runner's slower uplink costs more time
 than `npm ci` saves. The production image uses the fixed Buildx builder
 `telegram-bot-production` with `keep-state: true`, retaining BuildKit state
 locally instead of uploading a `mode=max` cache after every build.
+BuildKit uses explicit public resolvers (`1.1.1.1`, then `8.8.8.8`) because
+parallel Composer downloads exhausted the workstation router's DNS resolver and
+produced repeated `curl error 6` failures for `api.github.com`.
 
 ## Workflows
 
