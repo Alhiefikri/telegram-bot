@@ -61,6 +61,7 @@
   "catalog.details": "📝 Detail produk",
   "catalog.qris_support": "🌏 QRIS Antarnegara:\n🇮🇩 Indonesia · 🇹🇭 Thailand · 🇲🇾 Malaysia\n🇸🇬 Singapura · 🇯🇵 Jepang · 🇰🇷 Korea Selatan · 🇨🇳 Tiongkok\n📱 Ketersediaan bergantung pada aplikasi pembayaran dan merchant yang mendukung.",
   "catalog.category.back": "⬅️ Pilih Kategori",
+  "catalog.product_button": ":name — Stok: :stock",
   "catalog.payment.binance_total": "Binance: :amount USDT",
   "catalog.payment.price_compact": "Rp:amount",
   "catalog.sold_out_guidance": "Stoknya lagi habis. Cek produk lain atau tunggu restock berikutnya.",

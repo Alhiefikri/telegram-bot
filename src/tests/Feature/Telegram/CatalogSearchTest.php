@@ -275,21 +275,20 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Games')
             && str_contains($r['text'], 'Daftar Produk')
-            && str_contains($r['text'], '1. ✅ Diamond')
-            && str_contains($r['text'], '2. ❌ Diamond Habis')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '1'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['text'] ?? null) === '2'
+            && ! str_contains($r['text'], 'Rp15.000')
+            && ! str_contains($r['text'], '✅')
+            && ! str_contains($r['text'], '❌')
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === 'Diamond — Stok: 3'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === 'Diamond Habis — Stok: 0'
             && ($r['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'success'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['style'] ?? null) === 'danger'
-            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 2
+            && ($r['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'danger'
+            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 1
             && count($r['reply_markup']['inline_keyboard'][1] ?? []) === 1
-            && ($r['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null) === 'back:categories'
+            && count($r['reply_markup']['inline_keyboard'][2] ?? []) === 1
+            && ($r['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'back:categories'
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
             && str_contains(json_encode($r->data()), 'back:categories')
-            && str_contains($r['text'], 'Rp15.000 · Binance: 1.25 USDT')
-            && ! str_contains($r['text'], '💰 Harga:')
-            && ! str_contains($r['text'], '💎 Binance Pay:')
             && ! str_contains($r['text'], 'Stok 0')
             && ! str_contains($r['text'], 'Voucher MLBB instant.')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
@@ -335,17 +334,17 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
             $this->assertNotNull($request);
             $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
-            $this->assertCount((int) ceil($count / 3) + 1, $keyboard);
+            $this->assertCount($count + 1, $keyboard);
 
-            $numericRows = array_slice($keyboard, 0, -1);
-            foreach ($numericRows as $row) {
-                $this->assertLessThanOrEqual(3, count($row));
+            $productRows = array_slice($keyboard, 0, -1);
+            foreach ($productRows as $row) {
+                $this->assertCount(1, $row);
             }
 
-            $numericButtons = array_merge(...$numericRows);
+            $productButtons = array_merge(...$productRows);
             $this->assertSame(
-                array_map(static fn (int $number): string => (string) $number, range(1, $count)),
-                array_column($numericButtons, 'text'),
+                $products->sortBy('name')->values()->map(fn (Product $product): string => $product->name.' — Stok: '.max(0, $product->availableStock()))->all(),
+                array_column($productButtons, 'text'),
             );
 
             $orderedProducts = Product::query()
@@ -354,10 +353,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 ->get();
             $this->assertSame(
                 $orderedProducts->map(fn (Product $product): string => 'product:'.$product->id)->all(),
-                array_column($numericButtons, 'callback_data'),
+                array_column($productButtons, 'callback_data'),
             );
 
-            foreach ($numericButtons as $button) {
+            foreach ($productButtons as $button) {
                 $productId = (int) str_replace('product:', '', (string) $button['callback_data']);
                 $product = $orderedProducts->first(fn (Product $candidate): bool => $candidate->id === $productId);
 
@@ -395,17 +394,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Page 1 of 2'));
         $this->assertNotNull($firstPage);
         $firstKeyboard = $firstPage['reply_markup']['inline_keyboard'] ?? [];
-        $firstNumericRows = array_slice($firstKeyboard, 0, 4);
+        $firstProductRows = array_slice($firstKeyboard, 0, 12);
         $this->assertSame(
-            array_map(static fn (int $number): string => (string) $number, range(1, 12)),
-            array_column(array_merge(...$firstNumericRows), 'text'),
+            array_map(static fn (int $number): string => sprintf('Paged Product %02d — Stock: 2', $number), range(1, 12)),
+            array_column(array_merge(...$firstProductRows), 'text'),
         );
-        foreach ($firstNumericRows as $row) {
-            $this->assertLessThanOrEqual(3, count($row));
+        foreach ($firstProductRows as $row) {
+            $this->assertCount(1, $row);
         }
-        $this->assertCount(1, $firstKeyboard[4]);
-        $this->assertSame('Next ➡️', $firstKeyboard[4][0]['text']);
-        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[4][0]['callback_data']);
+        $this->assertCount(13, $firstKeyboard);
+        $this->assertCount(1, $firstKeyboard[12]);
+        $this->assertSame('Next ➡️', $firstKeyboard[12][0]['text']);
+        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[12][0]['callback_data']);
 
         $this->postTelegramWebhook($this->callbackUpdate(138, 'paged-second', sprintf('category:%d:page:2', $category->id)))->assertOk();
 
@@ -416,7 +416,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Page 2 of 2'));
         $this->assertNotNull($secondPage);
         $secondKeyboard = $secondPage['reply_markup']['inline_keyboard'] ?? [];
-        $this->assertSame(['1'], array_column($secondKeyboard[0], 'text'));
+        $this->assertSame(['Paged Product 13 — Stock: 2'], array_column($secondKeyboard[0], 'text'));
         $this->assertCount(1, $secondKeyboard[1]);
         $this->assertSame('⬅️ Previous', $secondKeyboard[1][0]['text']);
         $this->assertSame(sprintf('category:%d:page:1', $category->id), $secondKeyboard[1][0]['callback_data']);
@@ -440,7 +440,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], '━━━━━━━━━━━━━━'));
     }
 
-    public function test_search_product_button_uses_short_mobile_safe_label_and_keeps_usdt_in_message(): void
+    public function test_search_product_button_shows_name_and_stock_without_price_in_message(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
@@ -463,11 +463,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Hasil pencarian: premium'));
         $buttonText = $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? '';
 
-        $this->assertSame('1', $buttonText);
+        $buttonName = preg_replace('/\s+/', ' ', trim($product->name)) ?? '';
+        $this->assertSame($buttonName.' — Stok: 1', $buttonText);
         $this->assertSame('success', $request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null);
-        $this->assertLessThanOrEqual(20, mb_strlen($buttonText));
-        $this->assertStringContainsString($product->name, (string) $request['text']);
-        $this->assertStringContainsString('1.5 USDT', (string) $request['text']);
+        $this->assertStringNotContainsString('Rp35.000', (string) $request['text']);
+        $this->assertStringNotContainsString('1.5 USDT', (string) $request['text']);
         $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
         $this->assertCount(1, $request['reply_markup']['inline_keyboard'][1] ?? []);
         $this->assertSame('katalog', $request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null);
@@ -497,13 +497,19 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->assertNotNull($request);
         $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
-        $this->assertCount(3, $keyboard);
-        $this->assertSame(['1', '2', '3'], array_column($keyboard[0], 'text'));
-        $this->assertSame(['4', '5'], array_column($keyboard[1], 'text'));
-        $this->assertSame('katalog', $keyboard[2][0]['callback_data'] ?? null);
-        $this->assertCount(1, $keyboard[2]);
+        $this->assertCount(6, $keyboard);
+        $productRows = array_slice($keyboard, 0, -1);
+        foreach ($productRows as $row) {
+            $this->assertCount(1, $row);
+        }
+        $this->assertSame(
+            $products->sortBy('name')->values()->map(fn (Product $product): string => $product->name.' — Stok: 2')->all(),
+            array_column(array_merge(...$productRows), 'text'),
+        );
+        $this->assertSame('katalog', $keyboard[5][0]['callback_data'] ?? null);
+        $this->assertCount(1, $keyboard[5]);
 
-        $buttons = array_merge($keyboard[0], $keyboard[1]);
+        $buttons = array_merge(...$productRows);
         $this->assertSame(
             $products->sortBy('name')->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
             array_column($buttons, 'callback_data'),
@@ -558,24 +564,26 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Hasil pencarian: netflix')
-            && str_contains($r['text'], '✅ Netflix Premium')
-            && str_contains($r['text'], '❌ Netflix Habis')
-            && str_contains($r['text'], 'Rp25.000')
-            && ! str_contains($r['text'], '💰 Harga:')
-            && ! str_contains($r['text'], 'stok 0')
-            && str_contains($r['text'], 'Akun streaming')
+            && ! str_contains($r['text'], 'Rp25.000')
+            && ! str_contains($r['text'], '✅')
+            && ! str_contains($r['text'], '❌')
+            && ! str_contains($r['text'], 'Akun streaming')
             && ! str_contains($r['text'], 'Netflix Inactive')
             && ! str_contains($r['text'], 'Spotify Premium')
             && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
             && ! str_contains($r['text'], '[BANNER:')
             && ! str_contains($r['text'], 'netflix@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '1'
+            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === 'Netflix Habis — Stok: 0'
             && ($r['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'danger'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['style'] ?? null) === 'success'
-            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 2
-            && ($r['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null) === 'katalog'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === 'Netflix Premium — Stok: 1'
+            && ($r['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'success'
+            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 1
+            && count($r['reply_markup']['inline_keyboard'][1] ?? []) === 1
+            && ($r['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'katalog'
             && str_contains(json_encode($r->data()), 'product:'.$matching->id)
-            && str_contains(json_encode($r->data()), 'product:'.$empty->id));
+            && str_contains(json_encode($r->data()), 'product:'.$empty->id)
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Habis — Stok: 0')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — Stok: 1'));
     }
 
     public function test_cari_result_can_be_selected_and_continues_existing_product_flow(): void
@@ -650,7 +658,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(129, '/cari NETFLIX'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Netflix Premium')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — Stock: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -676,7 +684,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(131, '/cari netflix'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], '❌ Netflix Premium')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — Stock: 0')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -878,7 +886,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(132, '/cari streaming'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Netflix Premium')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — Stock: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -926,12 +934,13 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && (string) ($request['chat_id'] ?? '') === (string) $locale['chat_id'])
                 ->map(fn (array $record): array => $record[0]->data());
             $copy = $payloads->map(fn (array $payload): string => (string) ($payload['text'] ?? '')."\n".json_encode($payload['reply_markup'] ?? []))->implode("\n");
+            $productButtonText = $product->name.' — '.($index === 'en' ? 'Stock' : 'Stok').': 3';
             $selectorButtons = [];
             foreach ($payloads as $payload) {
                 foreach (($payload['reply_markup']['inline_keyboard'] ?? []) as $row) {
                     foreach ($row as $button) {
                         if (($button['callback_data'] ?? null) === 'product:'.$product->id
-                            && ($button['text'] ?? null) === '1') {
+                            && ($button['text'] ?? null) === $productButtonText) {
                             $selectorButtons[] = $button;
                         }
                     }
@@ -940,7 +949,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
             $this->assertCount(2, $selectorButtons);
             foreach ($selectorButtons as $selectorButton) {
-                $this->assertSame('1', $selectorButton['text'] ?? null);
+                $this->assertSame($productButtonText, $selectorButton['text'] ?? null);
                 $this->assertSame('product:'.$product->id, $selectorButton['callback_data'] ?? null);
                 $this->assertSame('success', $selectorButton['style'] ?? null);
                 $this->assertArrayNotHasKey('icon_custom_emoji_id', $selectorButton);
@@ -977,7 +986,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('productGridCounts')]
-    public function test_product_selector_keeps_numeric_rows_and_navigation_isolated(int $count): void
+    public function test_product_selector_uses_full_width_name_stock_rows_and_navigation_isolated(int $count): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 319000 + $count, 'locale' => 'en']);
@@ -1017,18 +1026,24 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Grid Category '.$count))->last();
         $this->assertNotNull($message);
         $keyboard = $message[0]->data()['reply_markup']['inline_keyboard'] ?? [];
-        $productRows = array_chunk(range(1, $count), 3);
-        $this->assertCount(count($productRows) + 1, $keyboard);
-        foreach ($productRows as $rowIndex => $expectedNumbers) {
-            $row = $keyboard[$rowIndex];
-            $this->assertCount(count($expectedNumbers), $row);
-            foreach ($row as $buttonIndex => $button) {
-                $this->assertSame((string) $expectedNumbers[$buttonIndex], $button['text']);
-                $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $button['callback_data']);
-            }
+        $orderedProducts = Product::query()
+            ->where('category_id', $category->id)
+            ->storefrontOrder()
+            ->withAvailability()
+            ->get();
+        $productRows = array_slice($keyboard, 0, $count);
+        $this->assertCount($count + 1, $keyboard);
+        $this->assertSame(
+            $orderedProducts->map(fn (Product $product): string => $product->name.' — Stock: '.max(0, $product->availableStock()))->all(),
+            array_column(array_merge(...$productRows), 'text'),
+        );
+        foreach ($productRows as $row) {
+            $this->assertCount(1, $row);
+            $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $row[0]['callback_data']);
+            $this->assertArrayNotHasKey('icon_custom_emoji_id', $row[0]);
         }
-        $this->assertCount(1, $keyboard[count($productRows)]);
-        $this->assertSame('back:categories', $keyboard[count($productRows)][0]['callback_data']);
+        $this->assertCount(1, $keyboard[$count]);
+        $this->assertSame('back:categories', $keyboard[$count][0]['callback_data']);
     }
 
     public static function productGridCounts(): iterable

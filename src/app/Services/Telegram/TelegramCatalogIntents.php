@@ -357,9 +357,6 @@ class TelegramCatalogIntents
             $lines[] = '';
             $lines[] = $category->description;
         }
-        foreach ($products as $index => $product) {
-            $this->appendProductSummary($lines, $customer, $product, $index + 1);
-        }
         if ($maintenance->active) {
             $lines[] = '';
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
@@ -367,7 +364,7 @@ class TelegramCatalogIntents
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
-        $keyboard = $this->productKeyboard($products);
+        $keyboard = $this->productKeyboard($customer, $products);
         if ($lastPage > 1) {
             $pageButtons = [];
             if ($page > 1) {
@@ -434,17 +431,14 @@ class TelegramCatalogIntents
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
             $lines[] = '';
         }
-        foreach ($products as $i => $product) {
-            $lines[] = ($i + 1).'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-            $lines[] = '   '.$this->compactProductPrice($customer, $product);
-            $lines[] = '   📝 '.$this->descriptionExcerpt($customer, $product);
-        }
         if ($hasMore) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'search.more');
         }
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
-        $keyboard = $this->productKeyboard($products);
+        $keyboard = $this->productKeyboard($customer, $products);
         $keyboard[] = [['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
@@ -474,76 +468,40 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @param  list<string>  $lines
-     */
-    private function appendProductSummary(array &$lines, Customer $customer, Product $product, int $number): void
-    {
-        $lines[] = $number.'. '.($product->isAvailable() ? '✅' : '❌').' '.$product->name;
-        $lines[] = '   '.$this->compactProductPrice($customer, $product);
-    }
-
-    private function compactProductPrice(Customer $customer, Product $product): string
-    {
-        $parts = [
-            $this->locale->translate($customer, 'catalog.payment.price_compact', [
-                'amount' => number_format($product->price_amount, 0, ',', '.'),
-            ]),
-        ];
-        if ($this->hasBinancePrice($product)) {
-            $parts[] = $this->locale->translate($customer, 'catalog.payment.binance_total', [
-                'amount' => $this->checkout->formatUsdt($product->usdt_price_amount),
-            ]);
-        }
-
-        return implode(' · ', $parts);
-    }
-
-    private function productPrice(Customer $customer, Product $product): string
-    {
-        return $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.');
-    }
-
-    private function hasBinancePrice(Product $product): bool
-    {
-        return $product->isAvailable()
-            && $product->usdt_price_amount !== null
-            && $this->checkout->binancePayEnabled();
-    }
-
-    private function descriptionExcerpt(Customer $customer, Product $product): string
-    {
-        $description = preg_replace('/\s+/', ' ', $this->descriptionText($customer, $product)) ?? '';
-
-        return strlen($description) > 90 ? substr($description, 0, 87).'...' : $description;
-    }
-
-    /**
      * @param  iterable<int, Product>  $products
      * @return list<list<array{text: string, callback_data: string, style: string}>>
      */
-    private function productKeyboard(iterable $products): array
+    private function productKeyboard(Customer $customer, iterable $products): array
     {
-        $buttons = [];
-        $number = 1;
+        $keyboard = [];
         foreach ($products as $product) {
-            $buttons[] = $this->productButton($product, $number);
-            $number++;
+            $keyboard[] = [$this->productButton($customer, $product)];
         }
 
-        return array_chunk($buttons, 3);
+        return $keyboard;
     }
 
     /**
      * @return array{text: string, callback_data: string, style: string}
      */
-    private function productButton(Product $product, int $number): array
+    private function productButton(Customer $customer, Product $product): array
     {
         $availableStock = max(0, $product->availableStock());
 
         return [
-            'text' => (string) $number,
+            'text' => $this->locale->translate($customer, 'catalog.product_button', [
+                'name' => $this->buttonProductName($product),
+                'stock' => $availableStock,
+            ]),
             'callback_data' => 'product:'.$product->id,
             'style' => $availableStock > 0 ? 'success' : 'danger',
         ];
+    }
+
+    private function buttonProductName(Product $product): string
+    {
+        $name = preg_replace('/\s+/', ' ', trim((string) $product->name)) ?? '';
+
+        return $name !== '' ? $name : '-';
     }
 }

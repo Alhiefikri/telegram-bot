@@ -53,11 +53,11 @@ class TelegramMenuIntents
             return;
         }
 
-        $bannerPath = resource_path('images/banner-welcome.jpg');
+        $bannerPath = resource_path('images/banner-welcome.png');
         if (is_file($bannerPath) && is_readable($bannerPath)) {
             $contents = file_get_contents($bannerPath);
             if ($contents !== false) {
-                $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.jpg', $caption, $replyMarkup);
+                $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.png', $caption, $replyMarkup);
 
                 return;
             }

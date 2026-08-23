@@ -553,7 +553,17 @@ class WebhookIngressTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(211, '/start', from: ['first_name' => 'Fikri']))->assertOk();
 
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
+        $photoPart = collect($request->data())->first(
+            fn (mixed $part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
+        );
+
+        $this->assertIsArray($photoPart);
+        $this->assertSame('banner-welcome.png', $photoPart['filename'] ?? null);
+        $this->assertSame(
+            hash_file('sha256', resource_path('images/banner-welcome.png')),
+            hash('sha256', (string) ($photoPart['contents'] ?? '')),
+        );
     }
 
     private function assertMalformedTelegramPayloadRejected(array $payload, string $case): void

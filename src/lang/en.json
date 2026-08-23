@@ -61,6 +61,7 @@
   "catalog.details": "📝 Product details",
   "catalog.qris_support": "🌏 QRIS Cross-Border:\n🇮🇩 Indonesia · 🇹🇭 Thailand · 🇲🇾 Malaysia\n🇸🇬 Singapore · 🇯🇵 Japan · 🇰🇷 South Korea · 🇨🇳 China\n📱 Availability depends on the payment app and participating merchant.",
   "catalog.category.back": "⬅️ Choose Category",
+  "catalog.product_button": ":name — Stock: :stock",
   "catalog.payment.binance_total": "Binance: :amount USDT",
   "catalog.payment.price_compact": "Rp:amount",
   "catalog.sold_out_guidance": "This product is sold out. Check another product or wait for a restock.",

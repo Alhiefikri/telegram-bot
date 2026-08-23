@@ -61,6 +61,7 @@
   "catalog.details": "📝 Butiran produk",
   "catalog.qris_support": "🌏 QRIS Rentas Sempadan:\n🇮🇩 Indonesia · 🇹🇭 Thailand · 🇲🇾 Malaysia\n🇸🇬 Singapura · 🇯🇵 Jepun · 🇰🇷 Korea Selatan · 🇨🇳 China\n📱 Ketersediaan bergantung pada aplikasi pembayaran dan peniaga yang mengambil bahagian.",
   "catalog.category.back": "⬅️ Pilih Kategori",
+  "catalog.product_button": ":name — Stok: :stock",
   "catalog.payment.binance_total": "Binance: :amount USDT",
   "catalog.payment.price_compact": "Rp:amount",
   "catalog.sold_out_guidance": "Stok produk ini habis. Lihat produk lain atau tunggu stok baharu.",
