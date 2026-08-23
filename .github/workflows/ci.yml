@@ -356,7 +356,23 @@ jobs:
         run: |
           set -euo pipefail
           docker tag "$LOCAL_IMAGE_TAG" "$IMAGE_TAG"
-          docker push "$IMAGE_TAG"
+
+          push_succeeded=false
+          for push_attempt in 1 2 3; do
+            if docker push "$IMAGE_TAG"; then
+              push_succeeded=true
+              break
+            fi
+
+            if [ "$push_attempt" -lt 3 ]; then
+              retry_delay=$((push_attempt * 15))
+              echo "GHCR push attempt ${push_attempt}/3 failed; retrying in ${retry_delay}s." >&2
+              sleep "$retry_delay"
+            fi
+          done
+          [ "$push_succeeded" = true ] \
+            || { echo "GHCR push failed after 3 bounded attempts." >&2; exit 1; }
+
           docker pull "$IMAGE_TAG"
 
           repository_digest="$(docker image inspect "$IMAGE_TAG" --format '{{index .RepoDigests 0}}')"

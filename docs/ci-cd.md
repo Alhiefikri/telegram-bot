@@ -64,6 +64,7 @@ production image job elevate only their own job to `packages: write`.
   - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
   - Builds the production image only after dependency audits and every application test lane pass, using a persistent named BuildKit builder that retains cache locally without changing the resulting content-addressed image.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
+  - Retries an interrupted GHCR push at most three times with short backoff. Docker skips content-addressed layers already present in the registry, while the job-level timeout remains the hard upper bound; this is a bounded network recovery, not an automatic workflow rerun loop.
   - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
   - Every job has a bounded timeout. Failed PHPUnit, Playwright, and Docker jobs upload diagnostic artifacts retained for 14 days.
 

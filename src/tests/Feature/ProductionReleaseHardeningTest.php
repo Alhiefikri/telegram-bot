@@ -873,6 +873,8 @@ SH);
         $this->assertStringContainsString('credentials:', $ci);
         $this->assertStringContainsString('needs: [ci-base-images, workflow-security]', $ci);
         $this->assertStringContainsString('needs: application-tests', $ci);
+        $this->assertStringContainsString('for push_attempt in 1 2 3', $ci);
+        $this->assertStringContainsString('GHCR push failed after 3 bounded attempts.', $ci);
         $this->assertStringContainsString("permissions:\n  contents: read\n  packages: read", $ci);
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
         $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:composer-2 AS vendor', $dockerfile);
