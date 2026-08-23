@@ -181,6 +181,15 @@ case "$command" in
     ;;
   run)
     if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
+    if [ "$scenario" = "identity-backfill-failure" ] && printf '%s' "$*" | grep -q 'credentials:backfill-identity-registry'; then
+      printf 'SUMMARY mode=commit scanned=4 registered=1 already_registered=0 skipped_unrecognized=1 conflicts=1 unresolved=1 last_id=4 ready=false\n'
+      printf 'UNRESOLVED_STOCK_ITEM_IDS 2\n'
+      printf 'CONFLICT_STOCK_ITEM_IDS 1,2\n'
+      exit 1
+    fi
+    if [ "$scenario" = "identity-backfill-failure" ] && printf '%s' "$*" | grep -q 'credentials:diagnose-identity-conflicts'; then
+      printf '{"requested_stock_item_ids":[1,2],"summary":{"conflict_identity_count":2},"items":[]}\n'
+    fi
     if [ "$scenario" = "contract-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     ;;
   up)
@@ -274,6 +283,13 @@ SCRIPT
     migration-failure)
       ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
       ;;
+    identity-backfill-failure)
+      grep -q '^SUMMARY mode=commit scanned=4 registered=1 already_registered=0 skipped_unrecognized=1 conflicts=1 unresolved=1 last_id=4 ready=false$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill summary artifact is not sanitized"
+      grep -q '^CONFLICT_STOCK_ITEM_IDS 1,2$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill conflict IDs were not retained safely"
+      grep -q 'credentials:diagnose-identity-conflicts 1,2 --json' "$workspace/commands.log" || fail "read-only conflict diagnostic was not invoked"
+      grep -q 'requested_stock_item_ids' "$artifacts/credential-identity-conflicts.json" || fail "sanitized conflict diagnostic artifact is missing"
+      ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "identity backfill failure cut over application services"
+      ;;
     application-health-failure|legacy-bootstrap-health-failure)
       grep -q "APP_IMAGE=$recorded_previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "successful rollback outcome was not explicit"
@@ -321,6 +337,7 @@ run_scenario legacy-image-bootstrap 0 deploy-succeeded-compatible-contract-pendi
 run_scenario legacy-bootstrap-health-failure 20 deploy-failed-rollback-succeeded "$LOCAL_PREVIOUS_IMAGE_ID" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario initialize-fingerprint-key 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
+run_scenario identity-backfill-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"

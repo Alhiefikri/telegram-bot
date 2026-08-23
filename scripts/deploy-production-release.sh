@@ -58,6 +58,8 @@ chmod 0700 "$SAFE_COMPOSE_CONFIG"
 
 COMPOSE_CONFIG_STATUS=unvalidated
 RELEASE_STATE_FILE="$RELEASE_ARTIFACT_DIR/release-state.env"
+CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE="$RELEASE_ARTIFACT_DIR/credential-identity-backfill-summary.txt"
+CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE="$RELEASE_ARTIFACT_DIR/credential-identity-conflicts.json"
 
 validate_compose_config() {
   [ "$COMPOSE_CONFIG_STATUS" = validated ] && return 0
@@ -257,11 +259,69 @@ run_expand_migrations() {
 }
 
 run_credential_identity_backfill() {
+  local raw_output status
+  raw_output="$RELEASE_ARTIFACT_DIR/credential-identity-backfill.raw"
+
   echo "Preparing the credential identity registry for Account Input."
+  status=0
   APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan credentials:backfill-identity-registry --chunk=100 </dev/null
+    app php artisan credentials:backfill-identity-registry --chunk=100 </dev/null > "$raw_output" 2>&1 || status=$?
+
+  # The backfill command has a safe output contract. Persist only the three
+  # machine-readable lines that contain counts and row IDs; never retain raw
+  # command stderr in release artifacts.
+  sed -n -E \
+    -e '/^SUMMARY mode=(dry_run|commit) scanned=[0-9]+ registered=[0-9]+ already_registered=[0-9]+ skipped_unrecognized=[0-9]+ conflicts=[0-9]+ unresolved=[0-9]+ last_id=[0-9]+ ready=(true|false)$/p' \
+    -e '/^UNRESOLVED_STOCK_ITEM_IDS (none|[0-9]+(,[0-9]+)*)$/p' \
+    -e '/^CONFLICT_STOCK_ITEM_IDS (none|[0-9]+(,[0-9]+)*)$/p' \
+    "$raw_output" > "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
+  if [ ! -s "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE" ]; then
+    printf 'status=unavailable reason=backfill-summary-not-available\n' > "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
+  fi
+  chmod 0600 "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
+  cat "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
+  rm -f "$raw_output"
+
+  return "$status"
+}
+
+run_credential_identity_conflict_diagnostic() {
+  local ids diagnostic_output diagnostic_error status
+  diagnostic_output="$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE.tmp"
+  diagnostic_error="$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE.stderr"
+  ids="$({
+    sed -n -E 's/^(UNRESOLVED|CONFLICT)_STOCK_ITEM_IDS (.+)$/\2/p' "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE" \
+      | tr ',' '\n'
+  } | awk '/^[1-9][0-9]*$/ { print }' | sort -n -u | paste -sd, -)"
+
+  if [ -z "$ids" ]; then
+    printf '{"status":"unavailable","reason":"no-safe-conflict-ids"}\n' > "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+    chmod 0600 "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+
+    return 0
+  fi
+
+  echo "Running the read-only credential identity conflict diagnostic for stock item IDs: $ids"
+  status=0
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+    -e APP_AUTO_MIGRATE=false \
+    -e APP_OPTIMIZE=false \
+    app php artisan credentials:diagnose-identity-conflicts "$ids" --json </dev/null \
+    > "$diagnostic_output" 2> "$diagnostic_error" || status=$?
+
+  if [ "$status" -eq 0 ] && grep -q '^{' "$diagnostic_output"; then
+    mv -f "$diagnostic_output" "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+  else
+    printf '{"status":"unavailable","reason":"diagnostic-command-failed"}\n' > "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+    rm -f "$diagnostic_output"
+  fi
+  rm -f "$diagnostic_error"
+  chmod 0600 "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+  cat "$CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE"
+
+  return 0
 }
 
 run_deferred_telegram_contract() {
@@ -660,6 +720,7 @@ if ! run_expand_migrations; then
   exit 1
 fi
 if ! run_credential_identity_backfill; then
+  run_credential_identity_conflict_diagnostic || true
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   COMPOSE_CONFIG_STATUS=unvalidated

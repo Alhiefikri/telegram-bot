@@ -41,6 +41,13 @@ php artisan credentials:backfill-identity-registry --chunk=100
 
 The commit run must exit `0` with `ready=true`. Re-running from the beginning is safe and idempotent; `--after-id=<last_id>` may be used for an interrupted bounded run. Availability is blocked while any retained duplicate or malformed structured row remains unresolved.
 
+When the official production deploy stops at `credential-identity-backfill-failed-no-cutover`, the release script runs the candidate image's read-only diagnostic against only the IDs reported by the failed backfill. It stores two bounded artifacts in the release-gate directory:
+
+- `credential-identity-backfill-summary.txt` — validated counts and Product Stock Item IDs only;
+- `credential-identity-conflicts.json` — sanitized format, retired/order/availability status, identity kind, registry owner, and exact conflicting Product Stock Item IDs.
+
+The diagnostic does not write registry rows, change readiness, select a canonical item, or cut over application services. If either artifact is unavailable, inspect the failure through the workflow logs; do not replace it with direct SQL, `docker exec`, or a manual backfill.
+
 Verify the durable deployment gate, which reports only safe counts and IDs:
 
 ```bash

@@ -140,6 +140,23 @@ class CredentialIdentityFoundationTest extends TestCase
         ], $token->identityValues());
     }
 
+    public function test_legacy_third_field_is_not_claimed_as_an_auth_token(): void
+    {
+        $product = Product::factory()->create();
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'legacy-token@example.test|legacy-password|looks-like-an-auth-token',
+        ]);
+
+        $exitCode = Artisan::call('credentials:backfill-identity-registry');
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exitCode);
+        $this->assertSame(1, CredentialIdentity::where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, CredentialIdentity::where('identity_kind', CredentialIdentity::AUTH_TOKEN)->count());
+        $this->assertStringNotContainsString('looks-like-an-auth-token', $output);
+    }
+
     public function test_backfill_is_idempotent_and_reports_conflicting_row_ids_without_plaintext(): void
     {
         $product = Product::factory()->create();

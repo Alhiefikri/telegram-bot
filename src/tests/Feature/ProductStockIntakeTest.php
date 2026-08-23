@@ -160,6 +160,7 @@ class ProductStockIntakeTest extends TestCase
             ])->all(),
         );
         $this->assertSame(4, CredentialIdentity::query()->count());
+        $this->assertSame(2, CredentialIdentity::where('identity_kind', CredentialIdentity::AUTH_TOKEN)->count());
         $this->assertStringNotContainsString(
             'ACCESS-TOKEN-ONE',
             (string) InventoryMovement::query()->sole()->notes,
