@@ -24,6 +24,7 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\ProductStockItem;
+use App\Models\StockNotificationEvent;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramUpdate;
@@ -875,6 +876,20 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, $product->reserved_stock);
         $this->assertSame(4, ProductStockItem::where('product_id', $product->id)->whereNull('order_item_id')->count());
         $this->assertSame(4, InventoryMovement::where('product_id', $product->id)->where('type', InventoryMovementType::Adjustment)->sum('quantity'));
+        $this->assertSame(
+            [2, 4],
+            InventoryMovement::where('product_id', $product->id)
+                ->where('type', InventoryMovementType::Adjustment)
+                ->orderBy('id')
+                ->pluck('available_after')
+                ->all(),
+        );
+        $this->assertSame(2, StockNotificationEvent::whereIn(
+            'inventory_movement_id',
+            InventoryMovement::where('product_id', $product->id)
+                ->where('type', InventoryMovementType::Adjustment)
+                ->pluck('id'),
+        )->count());
         $this->assertManagedInventoryInvariants($product);
     }
 

@@ -173,7 +173,12 @@ class StockNotificationDeliveryPipeline
             ], ['kind' => $movement->type->value]);
             if ($event->recipients_snapshotted_at === null) {
                 $deliveries = $movement->type === InventoryMovementType::Adjustment
-                    ? $this->notifications->stockAddedDeliveries($movement->product, $movement->quantity, $movement->available_before)
+                    ? $this->notifications->stockAddedDeliveries(
+                        $movement->product,
+                        $movement->quantity,
+                        $movement->available_before,
+                        $movement->available_after,
+                    )
                     : $this->notifications->productSoldOutDeliveries($movement->product);
                 $now = now();
                 $rows = array_map(fn (array $delivery): array => [
@@ -487,7 +492,7 @@ class StockNotificationDeliveryPipeline
     private function isNotifiable(InventoryMovement $movement): bool
     {
         return $movement->type === InventoryMovementType::Adjustment
-            ? $movement->quantity > 0 && $movement->available_before === 0 && $movement->product !== null
+            ? $movement->quantity > 0 && $movement->product !== null
             : $movement->type === InventoryMovementType::Sale && $movement->quantity < 0 && $movement->became_unavailable && $movement->product !== null;
     }
 }

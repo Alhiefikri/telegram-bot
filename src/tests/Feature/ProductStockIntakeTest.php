@@ -388,7 +388,7 @@ class ProductStockIntakeTest extends TestCase
         $this->assertNull(ProductStockItem::query()->sole()->credential_payload['tutorial_override']);
     }
 
-    public function test_structured_twenty_item_intake_creates_one_movement_and_one_audit(): void
+    public function test_structured_twenty_item_intake_creates_one_movement_audit_and_restock_event(): void
     {
         $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 1]);
         $accounts = [];
@@ -415,8 +415,9 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(20, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
         $this->assertSame(1, InventoryMovement::query()->count());
         $this->assertSame(20, InventoryMovement::query()->sole()->quantity);
+        $this->assertSame(20, InventoryMovement::query()->sole()->available_after);
         $this->assertSame(1, AuditLog::query()->count());
-        $this->assertSame(0, StockNotificationEvent::query()->count());
+        $this->assertSame(1, StockNotificationEvent::query()->count());
     }
 
     public function test_invalid_structured_submission_writes_nothing_and_returns_item_indexed_safe_errors(): void

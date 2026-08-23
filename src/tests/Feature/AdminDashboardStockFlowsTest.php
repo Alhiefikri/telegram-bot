@@ -638,7 +638,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_stock_ready_broadcast_only_when_add_stock_transitions_from_zero_to_available(): void
+    public function test_stock_add_broadcast_is_sent_for_each_positive_intake(): void
     {
         config()->set('services.telegram.token', 'bot-token');
         config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
@@ -670,12 +670,17 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame(2, $product->stock);
         $this->assertSame(0, $product->reserved_stock);
         $this->assertSame(2, $product->availableStock());
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
             && (string) $request['chat_id'] === '333'
             && str_contains((string) $request['text'], '✅ Stok Tersedia')
             && str_contains((string) $request['text'], $product->name)
             && str_contains((string) $request['text'], '📦 Stok: 1'));
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.telegram.org/botbot-token/sendMessage'
+            && (string) $request['chat_id'] === '333'
+            && str_contains((string) $request['text'], '✅ Stok Tersedia')
+            && str_contains((string) $request['text'], $product->name)
+            && str_contains((string) $request['text'], '📦 Stok: 2'));
     }
 
     public function test_stock_modal_submission_requires_at_least_one_non_empty_row(): void

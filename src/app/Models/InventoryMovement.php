@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['product_id', 'order_id', 'type', 'quantity', 'stock_before', 'became_unavailable', 'available_before', 'notes', 'stock_notification_sent_at', 'created_at'])]
+#[Fillable(['product_id', 'order_id', 'type', 'quantity', 'stock_before', 'became_unavailable', 'available_before', 'available_after', 'notes', 'stock_notification_sent_at', 'created_at'])]
 class InventoryMovement extends Model
 {
     /** @use HasFactory<InventoryMovementFactory> */
@@ -18,7 +18,7 @@ class InventoryMovement extends Model
 
     protected function casts(): array
     {
-        return ['type' => InventoryMovementType::class, 'quantity' => 'integer', 'stock_before' => 'integer', 'became_unavailable' => 'boolean', 'available_before' => 'integer', 'stock_notification_sent_at' => 'datetime', 'created_at' => 'datetime'];
+        return ['type' => InventoryMovementType::class, 'quantity' => 'integer', 'stock_before' => 'integer', 'became_unavailable' => 'boolean', 'available_before' => 'integer', 'available_after' => 'integer', 'stock_notification_sent_at' => 'datetime', 'created_at' => 'datetime'];
     }
 
     public function product()

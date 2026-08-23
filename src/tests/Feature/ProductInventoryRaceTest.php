@@ -407,11 +407,15 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         $channelRecipient = StockNotificationRecipient::query()->where('recipient_type', 'store_channel')->sole();
         $this->assertNull($channelRecipient->locale);
-        $this->assertStringContainsString('RESTOCK', (string) $channelRecipient->text);
+        $this->assertStringContainsString('☁️ ', (string) $channelRecipient->text);
+        $this->assertStringContainsString('➕ Added: 1', (string) $channelRecipient->text);
+        $this->assertStringContainsString('📦 Current stock: 1', (string) $channelRecipient->text);
+        $this->assertStringContainsString('💵 Unit price: Rp. 15.000', (string) $channelRecipient->text);
         $this->assertStringNotContainsString('Stok masuk', (string) $channelRecipient->text);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '-100123'
-            && str_contains((string) ($request['text'] ?? ''), 'RESTOCK')
+            && str_contains((string) ($request['text'] ?? ''), '➕ Added: 1')
+            && str_contains((string) ($request['text'] ?? ''), '📦 Current stock: 1')
             && ! str_contains((string) ($request['text'] ?? ''), 'Stok masuk'));
     }
 
@@ -532,18 +536,36 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
             && str_contains((string) $request['text'], 'ChatGPT Plus Private')
-            && str_contains((string) $request['text'], 'RESTOCK')
-            && str_contains((string) $request['text'], 'New stock has arrived')
-            && str_contains((string) $request['text'], 'Stock added: +3 items')
-            && str_contains((string) $request['text'], 'Available stock now: 3 items')
-            && str_contains((string) $request['text'], 'QRIS price: Rp35.000')
-            && str_contains((string) $request['text'], 'Binance Pay: 1.25 USDT')
-            && str_contains((string) $request['text'], "Don't miss it again")
+            && str_contains((string) $request['text'], '☁️ ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '➕ Added: 3')
+            && str_contains((string) $request['text'], '📦 Current stock: 3')
+            && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25')
             && str_contains((string) json_encode($request->data()), 'View Product')
-            && ! str_contains((string) $request['text'], 'Stok masuk')
-            && ! str_contains((string) $request['text'], 'Stok tersedia sekarang')
-            && ! str_contains((string) $request['text'], 'Harga QRIS')
-            && ! str_contains((string) $request['text'], 'Jangan sampai kehabisan lagi'));
+            && ! str_contains((string) $request['text'], 'Stok masuk'));
+
+        $secondAdjustment = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product->fresh(),
+            2,
+            'second channel restock notification',
+            $admin,
+            '127.0.0.1',
+            ['restock-4', 'restock-5'],
+        );
+
+        (new SendProductStockNotifications($secondAdjustment['movement_id']))->handle(app(TelegramProductNotificationService::class));
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains((string) $request['text'], '☁️ ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '➕ Added: 2')
+            && str_contains((string) $request['text'], '📦 Current stock: 5')
+            && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25'));
+
+        $customerMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage')
+                && (string) ($request[0]['chat_id'] ?? '') === '399007');
+        $this->assertCount(1, $customerMessages);
+        $this->assertSame(2, StockNotificationEvent::query()->count());
     }
 
     public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void

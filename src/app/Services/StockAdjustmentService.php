@@ -91,11 +91,12 @@ class StockAdjustmentService
                 'type' => InventoryMovementType::Adjustment,
                 'quantity' => $delta,
                 'available_before' => $availableBefore,
+                'available_after' => $locked->availableStock(),
                 'notes' => $notes,
                 'created_at' => now(),
             ]);
 
-            if ($delta > 0 && $availableBefore === 0) {
+            if ($delta > 0) {
                 $this->stockNotifications->materialize($movement->id);
             }
 

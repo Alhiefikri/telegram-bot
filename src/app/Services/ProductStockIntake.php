@@ -126,6 +126,7 @@ final class ProductStockIntake
                     'quantity' => $itemCount,
                     'stock_before' => $stockBefore,
                     'available_before' => $availableBefore,
+                    'available_after' => $availableAfter,
                     'notes' => $this->movementNotes($submission, $itemCount),
                     'created_at' => now(),
                 ]);
@@ -155,7 +156,7 @@ final class ProductStockIntake
                     'available_after' => $availableAfter,
                 ])->save();
 
-                if ($itemCount > 0 && $availableBefore === 0) {
+                if ($itemCount > 0) {
                     $this->stockNotifications->materialize($movement->id);
                     if ($dispatchNotifications) {
                         DB::afterCommit(fn (): mixed => SendProductStockNotifications::dispatch($movement->id)

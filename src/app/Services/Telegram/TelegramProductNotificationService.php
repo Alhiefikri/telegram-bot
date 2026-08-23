@@ -54,40 +54,47 @@ class TelegramProductNotificationService
         }
 
         $availableStock = $product->availableStock();
-        if (($availableBefore !== null && $availableBefore > 0) || $availableStock < 1) {
+        if ($availableStock < 1) {
             return $this->skippedResult();
         }
 
+        $channelChatId = $this->storeChannelChatId();
         $this->sendStoreChannel(
             $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
             $this->storeChannelProductReplyMarkup($product),
         );
 
-        return $this->broadcast->sendToActiveUsers(
-            fn (Customer $customer) => implode("\n", [
-                $this->locale->translate($customer, 'notification.product.restock.lead'),
-                '📦 '.$product->name,
-                $this->locale->translate($customer, 'notification.product.price', [
-                    'amount' => number_format($product->price_amount, 0, ',', '.'),
+        return $this->shouldNotifyCustomers($availableBefore, $channelChatId)
+            ? $this->broadcast->sendToActiveUsers(
+                fn (Customer $customer) => implode("\n", [
+                    $this->locale->translate($customer, 'notification.product.restock.lead'),
+                    '📦 '.$product->name,
+                    $this->locale->translate($customer, 'notification.product.price', [
+                        'amount' => number_format($product->price_amount, 0, ',', '.'),
+                    ]),
+                    $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                    '',
+                    $this->locale->translate($customer, 'notification.product.description'),
+                    $this->descriptionText($product, $this->locale->code($customer)),
                 ]),
-                $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
-                '',
-                $this->locale->translate($customer, 'notification.product.description'),
-                $this->descriptionText($product, $this->locale->code($customer)),
-            ]),
-            fn (Customer $customer) => $this->locale->translate($customer, 'notification.product.restock.title'),
-            fn (Customer $customer) => $this->productReplyMarkup($product, $availableStock, $this->locale->code($customer)),
-        );
+                fn (Customer $customer) => $this->locale->translate($customer, 'notification.product.restock.title'),
+                fn (Customer $customer) => $this->productReplyMarkup($product, $availableStock, $this->locale->code($customer)),
+            )
+            : $this->skippedResult();
     }
 
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array}> */
-    public function stockAddedDeliveries(Product $product, int $addedQuantity, ?int $availableBefore): array
-    {
+    public function stockAddedDeliveries(
+        Product $product,
+        int $addedQuantity,
+        ?int $availableBefore,
+        ?int $availableAfter = null,
+    ): array {
         $product = $product->fresh();
-        if (! $product || ! $product->is_active || $addedQuantity < 1 || ($availableBefore !== null && $availableBefore > 0)) {
+        if (! $product || ! $product->is_active || $addedQuantity < 1) {
             return [];
         }
-        $availableStock = $product->availableStock();
+        $availableStock = $availableAfter ?? $product->availableStock();
         if ($availableStock < 1) {
             return [];
         }
@@ -104,7 +111,11 @@ class TelegramProductNotificationService
             ];
         }
 
-        return [...$deliveries, ...$this->customerDeliveries($product, $availableStock, false)];
+        if ($this->shouldNotifyCustomers($availableBefore, $channelChatId)) {
+            $deliveries = [...$deliveries, ...$this->customerDeliveries($product, $availableStock, false)];
+        }
+
+        return $deliveries;
     }
 
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array}> */
@@ -258,30 +269,24 @@ class TelegramProductNotificationService
     private function storeChannelRestockMessage(Product $product, int $addedQuantity, int $availableStock): string
     {
         $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
+        $unitPrice = $this->locale->translateLocale($locale, 'notification.store_channel.restock.price', [
+            'amount' => number_format($product->price_amount, 0, ',', '.'),
+        ]);
+        if ($product->usdt_price_amount !== null) {
+            $unitPrice .= ' / '.$this->locale->translateLocale($locale, 'notification.store_channel.restock.binance', [
+                'amount' => $this->formatUsdt($product->usdt_price_amount),
+            ]);
+        }
 
         return implode("\n", [
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $product->name]),
-            '━━━━━━━━━━━━━━',
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.explanation'),
-            '',
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
-                'unit' => $this->stockUnit($addedQuantity),
             ]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.available', [
                 'stock' => $availableStock,
-                'unit' => $this->stockUnit($availableStock),
             ]),
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.price', [
-                'amount' => number_format($product->price_amount, 0, ',', '.'),
-            ]),
-            ...($product->usdt_price_amount !== null
-                ? [$this->locale->translateLocale($locale, 'notification.store_channel.restock.binance', [
-                    'amount' => $this->formatUsdt($product->usdt_price_amount),
-                ])]
-                : []),
-            '',
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.follow_up'),
+            $unitPrice,
         ]);
     }
 
@@ -315,11 +320,6 @@ class TelegramProductNotificationService
         ];
     }
 
-    private function stockUnit(int $quantity): string
-    {
-        return $quantity === 1 ? 'item' : 'items';
-    }
-
     private function storeChannelChatId(): ?string
     {
         $setting = StoreChannelSetting::current();
@@ -330,6 +330,14 @@ class TelegramProductNotificationService
         $chatId = trim((string) $setting->telegram_chat_id);
 
         return $chatId === '' ? null : $chatId;
+    }
+
+    private function shouldNotifyCustomers(?int $availableBefore, ?string $channelChatId): bool
+    {
+        // The Store Channel is the canonical high-frequency stock feed. DM
+        // customers only when availability is restored, unless the channel is
+        // unavailable and must be used as a fallback.
+        return $channelChatId === null || $availableBefore === null || $availableBefore <= 0;
     }
 
     private function formatUsdt(int $amount): string
