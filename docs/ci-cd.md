@@ -47,6 +47,8 @@ present in the runner cache to the private
 `GITHUB_TOKEN` credentials, and the production Dockerfile uses the same GHCR
 mirrors. Base upgrades are intentional tag changes; the mirror job never
 overwrites an existing tag.
+The workflow-level token must retain `packages: read`; the mirror publisher and
+production image job elevate only their own job to `packages: write`.
 
 ## Workflows
 

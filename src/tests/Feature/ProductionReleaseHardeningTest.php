@@ -865,6 +865,7 @@ SH);
         $this->assertStringContainsString('ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04', $ci);
         $this->assertStringContainsString('credentials:', $ci);
         $this->assertStringContainsString('needs: ci-base-images', $ci);
+        $this->assertStringContainsString("permissions:\n  contents: read\n  packages: read", $ci);
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
         $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:composer-2 AS vendor', $dockerfile);
         $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:node-24-slim AS assets', $dockerfile);
