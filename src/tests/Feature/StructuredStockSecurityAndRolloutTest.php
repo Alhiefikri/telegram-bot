@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
@@ -17,6 +18,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use App\Services\Credentials\CredentialDeliveryPresentation;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\ProductStockIntake;
 use App\Services\ProductStockIntakeSubmission;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -147,7 +149,7 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
         $this->assertFalse(app(ProductStockIntake::class)->structuredInputEnabled());
     }
 
-    public function test_unresolved_commit_persists_failed_readiness_and_keeps_input_disabled(): void
+    public function test_duplicate_legacy_emails_do_not_block_readiness(): void
     {
         $this->resetBackfillReadiness();
         $product = Product::factory()->create();
@@ -155,13 +157,13 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'failed-readiness@example.test|password-b|mfa-b']);
 
         $this->artisan('credentials:backfill-identity-registry')
-            ->assertFailed()
-            ->expectsOutputToContain('ready=false');
+            ->assertSuccessful()
+            ->expectsOutputToContain('ready=true');
 
         $state = CredentialIdentityBackfillReadiness::query()->sole();
-        $this->assertSame(CredentialIdentityBackfillReadiness::STATUS_FAILED, $state->status);
-        $this->assertSame(1, $state->unresolved_count);
-        $this->assertFalse(app(ProductStockIntake::class)->structuredInputEnabled());
+        $this->assertSame(CredentialIdentityBackfillReadiness::STATUS_READY, $state->status);
+        $this->assertSame(0, $state->unresolved_count);
+        $this->assertTrue(app(ProductStockIntake::class)->structuredInputEnabled());
     }
 
     public function test_changing_the_fingerprint_key_invalidates_persisted_readiness(): void
@@ -176,12 +178,18 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
             ->expectsOutputToContain('ready=false');
     }
 
-    public function test_backfill_refuses_key_rotation_while_registry_rows_exist(): void
+    public function test_backfill_refuses_key_rotation_while_auth_token_registry_rows_exist(): void
     {
         $product = Product::factory()->create();
         ProductStockItem::create([
             'product_id' => $product->id,
-            'secret' => 'stable-key@example.test|password|mfa',
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'stable-key@example.test',
+                'password',
+                CredentialAccessMethod::AuthToken,
+                'stable-auth-token',
+            )->toArray(),
         ]);
 
         $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
@@ -364,7 +372,7 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
         }
     }
 
-    public function test_legacy_identity_backfill_reports_only_safe_ids_and_blocks_unresolved_rows(): void
+    public function test_legacy_duplicate_email_backfill_reports_no_identity_conflict(): void
     {
         $product = Product::factory()->create();
         $suffix = $this->suffix();
@@ -373,7 +381,7 @@ final class StructuredStockSecurityAndRolloutTest extends TestCase
 
         $command = $this->artisan('credentials:backfill-identity-registry', ['--dry-run' => true]);
 
-        $command->assertExitCode(1);
+        $command->assertExitCode(0);
         $this->assertSame(0, DB::table('credential_identities')->count());
         $this->assertNotSame($first->id, $second->id);
     }

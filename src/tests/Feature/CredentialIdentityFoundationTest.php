@@ -89,7 +89,7 @@ class CredentialIdentityFoundationTest extends TestCase
         $this->assertSame('mixed.case+tag@example.test', $normalizer->normalizeEmail('  MIXED.Case+Tag@Example.test  '));
     }
 
-    public function test_registry_is_globally_unique_and_survives_stock_item_deletion(): void
+    public function test_auth_token_registry_is_globally_unique_and_survives_stock_item_deletion(): void
     {
         $product = Product::factory()->create();
         $stockItem = ProductStockItem::create([
@@ -97,8 +97,8 @@ class CredentialIdentityFoundationTest extends TestCase
             'secret' => 'retained@example.test|password|mfa',
         ]);
         $identity = CredentialIdentity::create([
-            'identity_kind' => CredentialIdentity::EMAIL,
-            'fingerprint' => hash_hmac('sha256', 'retained@example.test', 'credential-test-fingerprint-key'),
+            'identity_kind' => CredentialIdentity::AUTH_TOKEN,
+            'fingerprint' => hash_hmac('sha256', 'retained-auth-token', 'credential-test-fingerprint-key'),
             'product_id' => $product->id,
             'product_stock_item_id' => $stockItem->id,
             'first_seen_at' => now(),
@@ -111,12 +111,12 @@ class CredentialIdentityFoundationTest extends TestCase
 
         $this->expectException(QueryException::class);
         CredentialIdentity::create([
-            'identity_kind' => CredentialIdentity::EMAIL,
+            'identity_kind' => CredentialIdentity::AUTH_TOKEN,
             'fingerprint' => $identity->fingerprint,
         ]);
     }
 
-    public function test_only_email_and_exact_auth_token_are_identity_values(): void
+    public function test_only_explicit_auth_token_is_a_registry_identity_value(): void
     {
         $otp = StructuredCredentialPayload::fromValues(
             'otp@example.test',
@@ -131,11 +131,8 @@ class CredentialIdentityFoundationTest extends TestCase
             'auth-token-is-an-identity',
         );
 
+        $this->assertSame([], $otp->identityValues());
         $this->assertSame([
-            ['kind' => CredentialIdentity::EMAIL, 'value' => 'otp@example.test'],
-        ], $otp->identityValues());
-        $this->assertSame([
-            ['kind' => CredentialIdentity::EMAIL, 'value' => 'token@example.test'],
             ['kind' => CredentialIdentity::AUTH_TOKEN, 'value' => 'auth-token-is-an-identity'],
         ], $token->identityValues());
     }
@@ -152,35 +149,43 @@ class CredentialIdentityFoundationTest extends TestCase
         $output = Artisan::output();
 
         $this->assertSame(0, $exitCode);
-        $this->assertSame(1, CredentialIdentity::where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, CredentialIdentity::where('identity_kind', CredentialIdentity::EMAIL)->count());
         $this->assertSame(0, CredentialIdentity::where('identity_kind', CredentialIdentity::AUTH_TOKEN)->count());
         $this->assertStringNotContainsString('looks-like-an-auth-token', $output);
     }
 
-    public function test_backfill_is_idempotent_and_reports_conflicting_row_ids_without_plaintext(): void
+    public function test_backfill_allows_duplicate_legacy_emails_without_registering_them(): void
     {
         $product = Product::factory()->create();
         $first = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'duplicate@example.test|password-a|mfa-a']);
         $second = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'duplicate@example.test|password-b|mfa-b']);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'not-a-confident-legacy-identity']);
+        CredentialIdentity::create([
+            'identity_kind' => CredentialIdentity::EMAIL,
+            'fingerprint' => hash_hmac('sha256', 'duplicate@example.test', 'credential-test-fingerprint-key'),
+            'product_id' => $product->id,
+            'product_stock_item_id' => $first->id,
+            'first_seen_at' => now(),
+        ]);
 
         $exitCode = Artisan::call('credentials:backfill-identity-registry');
         $output = Artisan::output();
 
-        $this->assertSame(1, $exitCode);
-        $this->assertStringContainsString('CONFLICT_STOCK_ITEM_IDS '.$first->id.','.$second->id, $output);
-        $this->assertStringContainsString('UNRESOLVED_STOCK_ITEM_IDS '.$second->id, $output);
+        $this->assertSame(0, $exitCode);
+        $this->assertStringContainsString('CONFLICT_STOCK_ITEM_IDS none', $output);
+        $this->assertStringContainsString('UNRESOLVED_STOCK_ITEM_IDS none', $output);
+        $this->assertStringContainsString('ready=true', $output);
         $this->assertStringNotContainsString('duplicate@example.test', $output);
         $this->assertStringNotContainsString('password-a', $output);
         $this->assertStringNotContainsString('password-b', $output);
-        $this->assertSame(1, CredentialIdentity::where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(1, CredentialIdentity::count());
 
         $firstRerun = Artisan::call('credentials:backfill-identity-registry', ['--after-id' => $first->id - 1]);
         $rerunOutput = Artisan::output();
 
-        $this->assertSame(1, $firstRerun);
-        $this->assertStringContainsString('already_registered=1', $rerunOutput);
-        $this->assertSame(1, CredentialIdentity::where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, $firstRerun);
+        $this->assertStringContainsString('already_registered=0', $rerunOutput);
+        $this->assertSame(1, CredentialIdentity::count());
     }
 
     public function test_backfill_dry_run_writes_no_registry_rows(): void
@@ -193,7 +198,7 @@ class CredentialIdentityFoundationTest extends TestCase
 
         $this->assertSame(0, $exitCode);
         $this->assertStringContainsString('mode=dry_run', $output);
-        $this->assertStringContainsString('registered=1', $output);
+        $this->assertStringContainsString('registered=0', $output);
         $this->assertSame(0, CredentialIdentity::count());
     }
 }

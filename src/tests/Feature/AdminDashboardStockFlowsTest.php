@@ -118,7 +118,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertFalse($item['editable']);
     }
 
-    public function test_available_structured_stock_item_can_be_updated_without_changing_stock_and_old_identity_is_retained(): void
+    public function test_available_structured_stock_item_can_be_updated_without_changing_stock_and_new_auth_token_is_claimed(): void
     {
         config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -153,7 +153,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame(CredentialAccessMethod::AuthToken, CredentialAccessMethod::from($updated->credential_payload['access_method']));
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->assertSame(2, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(1, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::AUTH_TOKEN)->count());
         $this->assertDatabaseCount('inventory_movements', 1);
 
         $audit = AuditLog::query()->where('action', 'product_stock_item.updated')->sole();
@@ -254,7 +254,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame($legacyOverride, $stockItem->fresh()->credential_payload['tutorial_override']);
     }
 
-    public function test_structured_edit_rejects_a_registered_email_without_writing_the_new_payload(): void
+    public function test_structured_edit_allows_reusing_a_registered_email_without_rejecting_the_new_payload(): void
     {
         config()->set('services.credentials.identity_fingerprint_key', 'admin-stock-test-fingerprint-key');
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -283,15 +283,14 @@ class AdminDashboardStockFlowsTest extends TestCase
                 'password' => 'replacement-password',
                 'access_method' => 'none',
             ])
-            ->assertRedirect('/admin?tab=produk')
-            ->assertSessionHasErrors(['email'], null, 'stockItemUpdate');
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
-        $this->assertSame('first@example.test', $first->fresh()->credential_payload['email']);
+        $this->assertSame('second@example.test', $first->fresh()->credential_payload['email']);
         $this->assertSame(2, $product->fresh()->stock);
-        $this->assertSame(2, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
         $this->assertSame(2, InventoryMovement::query()->count());
         $this->assertSame(2, AuditLog::query()->where('action', 'product.stock_adjusted')->count());
-        $this->assertDatabaseMissing('audit_logs', ['action' => 'product_stock_item.updated']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product_stock_item.updated']);
     }
 
     public function test_structured_edit_validation_reopens_manage_stock_with_a_safe_error(): void
@@ -320,7 +319,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->followingRedirects()
             ->patch(route('admin.products.stock-items.update', [$product, $first]), [
                 'credential_format' => CredentialFormat::StructuredAccount->value,
-                'email' => 'second@example.test',
+                'email' => 'not-an-email',
                 'password' => 'replacement-password',
                 'access_method' => 'none',
             ])
@@ -329,7 +328,7 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $followUp
             ->assertSee('Data stok belum disimpan.', false)
-            ->assertSee('Identitas kredensial sudah terdaftar dan tidak dapat digunakan ulang.', false);
+            ->assertSee('Email tidak valid.', false);
         $this->assertTrue($state['manageStockModalOpen']);
         $this->assertSame($product->id, $state['manageStockPayload']['id']);
         $this->assertSame($first->id, $state['manageStockEditingItemId']);

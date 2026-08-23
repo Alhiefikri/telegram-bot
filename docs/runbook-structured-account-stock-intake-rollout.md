@@ -6,6 +6,7 @@ This runbook enables **Input Akun** additively while preserving Input Cepat, exi
 
 - `CREDENTIAL_IDENTITY_FINGERPRINT_KEY` is optional. When it is absent, the application creates a random 256-bit key at `storage/app/private/credential-identity-fingerprint.key` on the persistent storage volume. Keep that file stable after the registry has rows; it is a keyed fingerprint secret, not a value to print or copy into evidence.
 - The backfill command persists a singleton readiness record keyed to a digest of the active fingerprint key. Account Input is available only when that persisted readiness is `ready`.
+- Email is not a globally unique credential identity. Only an explicit Auth Token participates in the no-reuse registry; historical email fingerprint rows remain retained but are no longer claimed by new backfills or intake.
 - Never select decrypted `secret` or `credential_payload` values into command output, logs, screenshots, issue comments, or CI artifacts.
 - Do not delete `credential_identities` during rollback. Its retained fingerprints are the no-reuse history.
 

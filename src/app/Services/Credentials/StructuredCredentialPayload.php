@@ -131,11 +131,16 @@ final readonly class StructuredCredentialPayload
     }
 
     /**
+     * Email is account data, not a globally unique credential identity.
+     * Only an explicitly supplied Auth Token participates in the no-reuse
+     * registry. This keeps historical email reuse compatible while retaining
+     * the stronger guarantee for copyable Auth Token credentials.
+     *
      * @return list<array{kind: string, value: string}>
      */
     public function identityValues(): array
     {
-        $identities = [['kind' => CredentialIdentityKind::Email, 'value' => $this->email]];
+        $identities = [];
 
         if ($this->accessMethod === CredentialAccessMethod::AuthToken && $this->accessValue !== null) {
             $identities[] = ['kind' => CredentialIdentityKind::AuthToken, 'value' => $this->accessValue];

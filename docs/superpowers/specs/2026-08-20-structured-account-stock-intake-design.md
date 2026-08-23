@@ -108,7 +108,7 @@ Payload validation is owned by the Stock Intake module, not Eloquent casts, cont
 
 Create a persistent credential identity registry containing only keyed fingerprints and safe references/metadata. It never contains plaintext credentials. At minimum it stores:
 
-- identity kind (`email`, and `auth_token` when present);
+- identity kind (`auth_token` when present); email remains account data and is not a globally unique registry identity;
 - HMAC fingerprint using a dedicated application key;
 - first-seen Product/stock-item references where safe;
 - timestamps;
@@ -139,7 +139,7 @@ The module owns:
 
 - mode-specific normalization and validation;
 - batch limits;
-- email/token fingerprinting;
+- explicit Auth Token fingerprinting;
 - duplicate checks and unique-conflict mapping;
 - idempotency;
 - Product row locking;
@@ -251,7 +251,7 @@ The existing stock-management view supports both formats:
 - no bulk reveal/export action is added;
 - audit records indicate a safe structured-field change without old/new credential values.
 
-Editing an Available structured email/token updates the identity registry atomically. The old fingerprint remains as historical no-reuse evidence; the new fingerprint must be globally unclaimed. Editing password/tutorial alone does not change identity rows.
+Editing an Available structured Auth Token updates the identity registry atomically. The old Auth Token fingerprint remains as historical no-reuse evidence; the new token fingerprint must be globally unclaimed. Email may be reused across Product Stock Items. Editing password/tutorial alone does not change identity rows.
 
 ## URL and Input Safety
 

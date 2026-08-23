@@ -70,7 +70,7 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(CredentialFormat::StructuredAccount, $stockItem->credential_format);
         $this->assertSame('account.one@example.test', $stockItem->credential_payload['email']);
         $this->assertSame(CredentialAccessMethod::OtpMailLink, CredentialAccessMethod::from($stockItem->credential_payload['access_method']));
-        $this->assertSame(1, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
         $this->assertSame(InventoryMovementType::Adjustment, $movement->type);
         $this->assertSame(1, $movement->quantity);
         $this->assertSame(0, $movement->available_before);
@@ -159,7 +159,7 @@ class ProductStockIntakeTest extends TestCase
                 'access_value' => $item->credential_payload['access_value'],
             ])->all(),
         );
-        $this->assertSame(4, CredentialIdentity::query()->count());
+        $this->assertSame(2, CredentialIdentity::query()->count());
         $this->assertSame(2, CredentialIdentity::where('identity_kind', CredentialIdentity::AUTH_TOKEN)->count());
         $this->assertStringNotContainsString(
             'ACCESS-TOKEN-ONE',
@@ -256,7 +256,8 @@ class ProductStockIntakeTest extends TestCase
             ProductStockIntakeSubmission::structured([[
                 'email' => 'registered-review@example.test',
                 'password' => 'registered-review-password',
-                'access_method' => 'none',
+                'access_method' => 'auth_token',
+                'access_value' => 'shared-review-token',
             ]]),
             $admin,
             dispatchNotifications: false,
@@ -289,10 +290,10 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame('duplicate', $payload['status']);
         $this->assertSame(2, $payload['duplicate_count']);
         $this->assertSame('duplicate', $first['duplicate_status']);
-        $this->assertContains('email', $first['duplicate_fields']);
+        $this->assertNotContains('email', $first['duplicate_fields']);
         $this->assertContains('access_value', $first['duplicate_fields']);
         $this->assertSame(['submission', 'registry'], $first['duplicate_sources']);
-        $this->assertSame(['submission'], $second['duplicate_sources']);
+        $this->assertSame(['submission', 'registry'], $second['duplicate_sources']);
         $this->assertStringNotContainsString('new-review-password-a', $encoded);
         $this->assertStringNotContainsString('shared-review-token', $encoded);
         $this->assertSame(1, ProductStockItem::query()->count());
@@ -413,7 +414,7 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(20, $result->itemCount);
         $this->assertSame(23, $product->fresh()->stock);
         $this->assertSame(20, ProductStockItem::query()->count());
-        $this->assertSame(20, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
+        $this->assertSame(0, CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count());
         $this->assertSame(1, InventoryMovement::query()->count());
         $this->assertSame(20, InventoryMovement::query()->sole()->quantity);
         $this->assertSame(20, InventoryMovement::query()->sole()->available_after);
@@ -468,7 +469,7 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(0, ProductStockIntakeOperation::query()->count());
     }
 
-    public function test_duplicate_email_and_auth_token_are_rejected_without_echoing_identity_values(): void
+    public function test_duplicate_auth_token_is_rejected_even_when_emails_match(): void
     {
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
         $accounts = [
@@ -493,8 +494,6 @@ class ProductStockIntakeTest extends TestCase
             $errors = $exception->errors();
             $encoded = json_encode($errors);
 
-            $this->assertArrayHasKey('accounts.0.email', $errors);
-            $this->assertArrayHasKey('accounts.1.email', $errors);
             $this->assertArrayHasKey('accounts.0.access_value', $errors);
             $this->assertArrayHasKey('accounts.1.access_value', $errors);
             $this->assertStringNotContainsString('duplicate@example.test', $encoded);
@@ -505,15 +504,45 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(0, CredentialIdentity::query()->count());
     }
 
-    public function test_registry_conflict_survives_stock_item_deletion_and_rejects_reuse(): void
+    public function test_duplicate_emails_are_allowed_when_no_auth_token_is_supplied(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $result = app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([
+                [
+                    'email' => 'shared@example.test',
+                    'password' => 'password-a',
+                    'access_method' => 'none',
+                ],
+                [
+                    'email' => 'SHARED@example.test',
+                    'password' => 'password-b',
+                    'access_method' => 'none',
+                ],
+            ]),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $this->assertSame(2, $result->itemCount);
+        $this->assertSame(2, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+        $this->assertSame(2, $product->fresh()->stock);
+    }
+
+    public function test_auth_token_registry_conflict_survives_stock_item_deletion_and_rejects_reuse(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
         $submission = ProductStockIntakeSubmission::structured([
             [
-                'email' => 'retained@example.test',
+                'email' => 'retained-first@example.test',
                 'password' => 'first-password',
-                'access_method' => 'none',
+                'access_method' => 'auth_token',
+                'access_value' => 'retained-auth-token',
             ],
         ]);
 
@@ -527,9 +556,10 @@ class ProductStockIntakeTest extends TestCase
                 $product,
                 ProductStockIntakeSubmission::structured([
                     [
-                        'email' => 'retained@example.test',
+                        'email' => 'retained-second@example.test',
                         'password' => 'changed-password',
-                        'access_method' => 'none',
+                        'access_method' => 'auth_token',
+                        'access_value' => 'retained-auth-token',
                     ],
                 ]),
                 $admin,
@@ -537,8 +567,8 @@ class ProductStockIntakeTest extends TestCase
             );
             $this->fail('Expected registry conflict after stock item deletion.');
         } catch (ValidationException $exception) {
-            $this->assertArrayHasKey('accounts.0.email', $exception->errors());
-            $this->assertStringNotContainsString('retained@example.test', json_encode($exception->errors()));
+            $this->assertArrayHasKey('accounts.0.access_value', $exception->errors());
+            $this->assertStringNotContainsString('retained-auth-token', json_encode($exception->errors()));
         }
 
         $this->assertSame(0, ProductStockItem::query()->count());

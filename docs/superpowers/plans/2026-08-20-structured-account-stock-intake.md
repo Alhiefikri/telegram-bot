@@ -321,7 +321,7 @@ SA-2 + SA-3 + SA-5 + SA-6
 ### Concurrency proof
 
 - [ ] Same idempotency key racing in two processes commits one result.
-- [ ] Different keys with duplicate email/token commit at most one intake; loser has zero partial side effects.
+- [ ] Different keys with duplicate explicit Auth Token commit at most one intake; duplicate email may commit independently; the Auth Token loser has zero partial side effects.
 - [ ] Intake racing checkout obeys Product/stock-item locks and ends with matching numeric/credential availability.
 - [ ] Structured Available edit racing checkout either commits before allocation or fails after allocation; no reserved item changes.
 - [ ] Delete racing checkout preserves stock/reservation invariants and identity registry history.

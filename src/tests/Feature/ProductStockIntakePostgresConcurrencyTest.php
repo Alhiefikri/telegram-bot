@@ -63,13 +63,13 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
 
         $this->assertSame(['created', 'replayed'], $outcomes, $this->safeResultsJson($results));
         $this->assertSame(1, ProductStockItem::query()->count());
-        $this->assertSame(1, CredentialIdentity::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Adjustment)->count());
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(1, DB::table('product_stock_intake_operations')->count());
     }
 
-    public function test_duplicate_email_race_commits_one_intake_and_rolls_back_the_loser(): void
+    public function test_duplicate_email_race_commits_both_intakes(): void
     {
         $this->requireConcurrencyLane();
         $this->freshConcurrencySchema();
@@ -90,12 +90,12 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
         $outcomes = array_column($successful, 'outcome');
         sort($outcomes);
 
-        $this->assertSame(['created', 'duplicate'], $outcomes, $this->safeResultsJson($results));
-        $this->assertSame(1, ProductStockItem::query()->count());
-        $this->assertSame(1, CredentialIdentity::query()->count());
-        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Adjustment)->count());
-        $this->assertSame(1, DB::table('product_stock_intake_operations')->count());
-        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(['created', 'created'], $outcomes, $this->safeResultsJson($results));
+        $this->assertSame(2, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+        $this->assertSame(2, InventoryMovement::query()->where('type', InventoryMovementType::Adjustment)->count());
+        $this->assertSame(2, DB::table('product_stock_intake_operations')->count());
+        $this->assertSame(2, $product->fresh()->stock);
     }
 
     public function test_intake_racing_checkout_preserves_numeric_and_credential_availability(): void
@@ -124,7 +124,7 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, $storedProduct->reserved_stock);
         $this->assertSame(1, ProductStockItem::query()->whereNull('order_item_id')->whereNull('retired_at')->count());
         $this->assertSame(1, ProductStockItem::query()->whereNotNull('order_item_id')->count());
-        $this->assertSame(1, CredentialIdentity::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
         $this->assertSame(1, Order::query()->count());
     }
 
@@ -159,18 +159,9 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
         $this->assertContains($payload['email'], ['edit-before@example.test', 'edit-after@example.test']);
         $this->assertNotNull($storedItem->order_item_id);
         $this->assertSame(1, $product->fresh()->reserved_stock);
-        $this->assertContains(
-            CredentialIdentity::query()->where('identity_kind', CredentialIdentity::EMAIL)->count(),
-            [1, 2],
-        );
+        $this->assertSame(0, CredentialIdentity::query()->count());
         $this->assertSame(1, Order::query()->count());
 
-        if ($payload['email'] === 'edit-after@example.test') {
-            $this->assertSame(1, CredentialIdentity::query()->where('fingerprint', hash_hmac('sha256', 'edit-after@example.test', self::FINGERPRINT_KEY))->count());
-            $this->assertSame(1, CredentialIdentity::query()->where('fingerprint', hash_hmac('sha256', 'edit-before@example.test', self::FINGERPRINT_KEY))->count());
-        } else {
-            $this->assertSame(0, CredentialIdentity::query()->where('fingerprint', hash_hmac('sha256', 'edit-after@example.test', self::FINGERPRINT_KEY))->count());
-        }
     }
 
     public function test_structured_delete_racing_checkout_preserves_registry_and_stock_invariants(): void
@@ -203,20 +194,18 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
             $this->safeResultsJson($results),
         );
 
-        $identity = CredentialIdentity::query()->sole();
+        $this->assertSame(0, CredentialIdentity::query()->count());
         $storedItem = ProductStockItem::query()->first();
         if (in_array('deleted', $outcomes, true)) {
             $this->assertNull($storedItem);
             $this->assertSame(0, $product->fresh()->stock);
             $this->assertSame(0, $product->fresh()->reserved_stock);
-            $this->assertNull($identity->product_stock_item_id);
             $this->assertSame(0, Order::query()->count());
         } else {
             $this->assertNotNull($storedItem);
             $this->assertNotNull($storedItem->order_item_id);
             $this->assertSame(1, $product->fresh()->stock);
             $this->assertSame(1, $product->fresh()->reserved_stock);
-            $this->assertSame($storedItem->id, $identity->product_stock_item_id);
             $this->assertSame(1, Order::query()->count());
         }
     }
