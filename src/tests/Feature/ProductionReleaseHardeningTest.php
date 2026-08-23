@@ -861,6 +861,14 @@ SH);
         $this->assertStringContainsString('cache-binary: false', $ci);
         $this->assertStringContainsString('buildkitd-config-inline:', $ci);
         $this->assertStringContainsString('nameservers = ["1.1.1.1", "8.8.8.8"]', $ci);
+        $this->assertStringContainsString('name: Ensure self-hosted CI base images', $ci);
+        $this->assertStringContainsString('ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04', $ci);
+        $this->assertStringContainsString('credentials:', $ci);
+        $this->assertStringContainsString('needs: ci-base-images', $ci);
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:composer-2 AS vendor', $dockerfile);
+        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:node-24-slim AS assets', $dockerfile);
+        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:php-8.4-fpm AS runtime', $dockerfile);
 
         $dependabot = file_get_contents(base_path('../.github/dependabot.yml'));
         foreach (['github-actions', 'composer', 'npm'] as $ecosystem) {
@@ -875,7 +883,7 @@ SH);
         $concurrencyGate = file_get_contents(base_path('../scripts/concurrency-deploy-gate.sh'));
 
         $this->assertStringContainsString('name: PostgreSQL migration and concurrency release gate', $workflow);
-        $this->assertStringContainsString('image: postgres:16-alpine', $workflow);
+        $this->assertStringContainsString('image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine', $workflow);
         $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"', $workflow);
         $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
         $this->assertStringContainsString('POSTGRES_PASSWORD: ci-only-not-production', $workflow);
@@ -979,7 +987,7 @@ SH);
     {
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
 
-        $this->assertStringContainsString('FROM node:', $dockerfile);
+        $this->assertStringContainsString(' AS assets', $dockerfile);
         $this->assertStringContainsString('npm ci', $dockerfile);
         $this->assertStringContainsString('npm run build', $dockerfile);
         $this->assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);

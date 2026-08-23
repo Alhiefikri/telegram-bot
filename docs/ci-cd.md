@@ -40,6 +40,13 @@ locally instead of uploading a `mode=max` cache after every build.
 BuildKit uses explicit public resolvers (`1.1.1.1`, then `8.8.8.8`) because
 parallel Composer downloads exhausted the workstation router's DNS resolver and
 produced repeated `curl error 6` failures for `api.github.com`.
+CI does not pull runtime bases directly from Docker Hub. The
+`Ensure self-hosted CI base images` job publishes missing trusted images already
+present in the runner cache to the private
+`ghcr.io/alhiefikri/telegram-bot-ci-base` package. Job/service containers use
+`GITHUB_TOKEN` credentials, and the production Dockerfile uses the same GHCR
+mirrors. Base upgrades are intentional tag changes; the mirror job never
+overwrites an existing tag.
 
 ## Workflows
 

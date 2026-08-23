@@ -1,10 +1,10 @@
-FROM composer:2 AS vendor
+FROM ghcr.io/alhiefikri/telegram-bot-ci-base:composer-2 AS vendor
 
 WORKDIR /app
 COPY src/composer.json src/composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --no-scripts --optimize-autoloader --ignore-platform-req=ext-intl
 
-FROM node:24-slim AS assets
+FROM ghcr.io/alhiefikri/telegram-bot-ci-base:node-24-slim AS assets
 
 WORKDIR /app
 COPY src/package.json src/package-lock.json ./
@@ -13,7 +13,7 @@ COPY src/resources ./resources
 COPY src/vite.config.js ./
 RUN npm run build
 
-FROM php:8.4-fpm AS runtime
+FROM ghcr.io/alhiefikri/telegram-bot-ci-base:php-8.4-fpm AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
