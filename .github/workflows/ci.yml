@@ -19,7 +19,7 @@ concurrency:
 jobs:
   ci-base-images:
     name: Ensure self-hosted CI base images
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, ci]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -55,7 +55,7 @@ jobs:
           IMAGES
   workflow-security:
     name: Workflow validation and dependency audit
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, ci]
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -78,19 +78,46 @@ jobs:
         working-directory: src
         run: npm audit --audit-level=high
 
-  php-tests:
-    name: PHP tests
-    runs-on: [self-hosted, Linux, X64]
-    needs: ci-base-images
+  application-tests:
+    name: Application, browser, and PostgreSQL tests
+    runs-on: [self-hosted, Linux, X64, ci]
+    needs: [ci-base-images, workflow-security]
     container:
       image: ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 25
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_DB: telegram_bot_ci
+          POSTGRES_USER: telegram_bot_ci
+          POSTGRES_PASSWORD: ci-only-not-production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       APP_ENV: testing
       APP_FORCE_HTTPS: false
+      POSTGRES_DB: telegram_bot_ci
+      POSTGRES_USER: telegram_bot_ci
+      POSTGRES_PASSWORD: ci-only-not-production
+      CONCURRENCY_DB_HOST: postgres
+      CONCURRENCY_DB_PORT: 5432
+      CONCURRENCY_DB_ADMIN_DATABASE: telegram_bot_ci
+      CONCURRENCY_DB_ADMIN_USERNAME: telegram_bot_ci
+      CONCURRENCY_DB_ADMIN_PASSWORD: ci-only-not-production
+      CONCURRENCY_DB_APP_USERNAME: telegram_bot_ci
+      CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
     defaults:
       run:
         shell: bash
@@ -99,13 +126,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up PHP
+      - name: Set up PHP once for all test lanes
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         env:
           runner: self-hosted
         with:
           php-version: '8.4'
-          extensions: bcmath, gd, intl, pdo_sqlite, sqlite3, zip
+          extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pdo_sqlite, pgsql, posix, sqlite3, zip
           coverage: none
           tools: composer:v2
 
@@ -134,29 +161,19 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build admin assets for feature tests
-        run: npm run build
+      - name: Build and verify admin assets
+        working-directory: .
+        run: ./scripts/smoke-admin-assets.sh
 
       - name: Prepare Laravel test environment
         run: |
+          set -euo pipefail
           cp .env.example .env
           php artisan key:generate --ansi
           mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
 
-      - name: Run PHPUnit suite
+      - name: Run parallel SQLite PHPUnit suite
         run: composer test -- --parallel --log-junit junit.xml
-
-      - name: Upload PHPUnit report on failure
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: phpunit-failure-${{ github.run_attempt }}
-          path: |
-            src/junit.xml
-            src/storage/logs/*.log
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Exercise production release and rollback paths
         working-directory: .
@@ -166,108 +183,35 @@ jobs:
           ./scripts/test-check-migration-prefixes.sh
           ./scripts/test-concurrency-deploy-gate.sh
 
-      - name: Restore self-hosted workspace ownership
-        if: always()
-        working-directory: .
-        run: |
-          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
-          chown -R "$host_owner" "$GITHUB_WORKSPACE"
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
 
-  postgres-release-gate:
-    name: PostgreSQL migration and concurrency release gate
-    runs-on: [self-hosted, Linux, X64]
-    needs: ci-base-images
-    container:
-      image: ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 40
-    services:
-      postgres:
-        image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        env:
-          POSTGRES_DB: telegram_bot_ci
-          POSTGRES_USER: telegram_bot_ci
-          POSTGRES_PASSWORD: ci-only-not-production
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      APP_ENV: testing
-      APP_FORCE_HTTPS: false
-      DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: telegram_bot_ci
-      DB_USERNAME: telegram_bot_ci
-      DB_PASSWORD: ci-only-not-production
-      DB_URL: ''
-      POSTGRES_DB: telegram_bot_ci
-      POSTGRES_USER: telegram_bot_ci
-      POSTGRES_PASSWORD: ci-only-not-production
-      CONCURRENCY_DB_HOST: postgres
-      CONCURRENCY_DB_PORT: 5432
-      CONCURRENCY_DB_ADMIN_DATABASE: telegram_bot_ci
-      CONCURRENCY_DB_ADMIN_USERNAME: telegram_bot_ci
-      CONCURRENCY_DB_ADMIN_PASSWORD: ci-only-not-production
-      CONCURRENCY_DB_APP_USERNAME: telegram_bot_ci
-      CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
-    defaults:
-      run:
-        shell: bash
-        working-directory: src
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up PHP with PostgreSQL and process extensions
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        env:
-          runner: self-hosted
-        with:
-          php-version: '8.4'
-          extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pgsql, posix, zip
-          coverage: none
-          tools: composer:v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Install PHP dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build frontend assets for PostgreSQL integration tests
-        run: npm run build
-
-      - name: Prepare Laravel PostgreSQL test environment
-        run: |
-          set -euo pipefail
-          cp .env.example .env
-          php artisan key:generate --ansi
-          mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
-          php artisan config:clear --ansi
+      - name: Run customer browser smoke without rebuilding assets
+        run: npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g "customer checkout"
 
       - name: Migrate empty PostgreSQL database
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: postgres
+          DB_PORT: 5432
+          DB_DATABASE: telegram_bot_ci
+          DB_USERNAME: telegram_bot_ci
+          DB_PASSWORD: ci-only-not-production
+          DB_URL: ''
         run: |
           set -euo pipefail
+          php artisan config:clear --ansi
           mkdir -p ../artifacts/postgres-release
           php artisan migrate:fresh --force --ansi 2>&1 | tee ../artifacts/postgres-release/migrations.log
           php artisan migrate:status --ansi 2>&1 | tee ../artifacts/postgres-release/migration-status.log
 
       - name: Run production-critical PostgreSQL integration tests
+        env:
+          DB_HOST: postgres
+          DB_PORT: 5432
+          DB_DATABASE: telegram_bot_ci
+          DB_USERNAME: telegram_bot_ci
+          DB_PASSWORD: ci-only-not-production
         run: |
           set -euo pipefail
           artifact_dir=../artifacts/postgres-release
@@ -310,95 +254,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Restore self-hosted workspace ownership
-        if: always()
-        working-directory: .
-        run: |
-          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
-          chown -R "$host_owner" "$GITHUB_WORKSPACE"
-
-  frontend-build:
-    name: Frontend build and asset smoke
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Install frontend dependencies
-        working-directory: src
-        run: npm ci
-
-      - name: Build and verify admin Vite manifest
-        working-directory: src
-        run: ../scripts/smoke-admin-assets.sh
-
-  customer-browser-smoke:
-    name: Customer browser smoke
-    runs-on: [self-hosted, Linux, X64]
-    needs: ci-base-images
-    container:
-      image: ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 25
-    env:
-      APP_ENV: testing
-      APP_FORCE_HTTPS: false
-    defaults:
-      run:
-        shell: bash
-        working-directory: src
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        env:
-          runner: self-hosted
-        with:
-          php-version: '8.4'
-          extensions: bcmath, gd, intl, pdo_sqlite, sqlite3, zip
-          coverage: none
-          tools: composer:v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Install PHP dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      - name: Prepare Laravel browser environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate --ansi
-          mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
-
-      - name: Run customer browser smoke
-        run: npm run test:browser:customer
-
-      - name: Upload Playwright diagnostics on failure
+      - name: Upload application diagnostics on failure
         if: failure()
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-failure-${{ github.run_attempt }}
+          name: application-test-failure-${{ github.run_attempt }}
           path: |
+            src/junit.xml
             src/test-results/
             src/playwright-report/
             src/storage/logs/*.log
@@ -414,8 +277,8 @@ jobs:
 
   docker-build:
     name: Build, verify, and publish production image
-    runs-on: [self-hosted, Linux, X64]
-    needs: ci-base-images
+    runs-on: [self-hosted, Linux, X64, ci]
+    needs: application-tests
     timeout-minutes: 35
     permissions:
       contents: read

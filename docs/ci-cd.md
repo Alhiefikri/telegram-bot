@@ -13,11 +13,12 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 
 ## Self-hosted runner
 
-All workflow jobs target `[self-hosted, Linux, X64]`; no job uses a
+CI jobs target `[self-hosted, Linux, X64, ci]`, while production deploy and
+recovery jobs target `[self-hosted, Linux, X64, deploy]`; no job uses a
 GitHub-hosted runner. The repository must remain private because pull request
 code executes on persistent runner infrastructure. Keep exactly one eligible
-runner online unless job-level isolation is introduced; with one runner, CI
-jobs queue and execute serially.
+runner per label unless job-level isolation is introduced. Extra labels prevent
+CI jobs from falling back to the deploy runner when one machine is offline.
 
 The runner host must provide Docker and outbound HTTPS access. PHP test jobs run
 inside `ubuntu:24.04` job containers so `setup-php` has its supported Linux
@@ -55,15 +56,13 @@ production image job elevate only their own job to `packages: write`.
 - `.github/workflows/ci.yml`
   - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
   - Rejects duplicate migration filename prefixes via `./scripts/check-migration-prefixes.sh`, so migration order stays deterministic. Prefixes that already shipped with a duplicate are allowlisted in `scripts/migration-prefix-allowlist.txt` and are never renamed, because Laravel keys the `migrations` table by filename.
-  - PHP 8.4 + Composer validate/install.
-  - Enforces the Laravel Pint code style with `./vendor/bin/pint --test`.
-  - Laravel test suite via `composer test`.
-  - Keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`), then runs an authoritative PostgreSQL release lane against an isolated PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
+  - Prepares PHP 8.4, Node 24, Composer dependencies, npm dependencies, and admin assets once for all application test lanes. This avoids repeating toolchain setup on a single serial runner.
+  - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
+  - Runs the customer Playwright smoke against the already-built assets instead of rebuilding them in a separate job.
+  - Runs the authoritative PostgreSQL release lane in the same isolated job against a PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
   - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.
   - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
-  - Node 24 + `npm ci`.
-  - Vite/admin asset smoke via `../scripts/smoke-admin-assets.sh`.
-  - Builds the production image once with a persistent named BuildKit builder, retaining cache locally without changing the resulting content-addressed image.
+  - Builds the production image only after dependency audits and every application test lane pass, using a persistent named BuildKit builder that retains cache locally without changing the resulting content-addressed image.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
   - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
   - Every job has a bounded timeout. Failed PHPUnit, Playwright, and Docker jobs upload diagnostic artifacts retained for 14 days.
@@ -154,7 +153,7 @@ Expected values include `allowed_actions: selected`, `sha_pinning_required: true
 Protect `main` with these settings:
 
 - Require a pull request before merging, with at least one approval.
-- Require the current successful CI check names, including `Workflow validation and dependency audit`, `PHP tests`, `PostgreSQL migration and concurrency release gate`, `Frontend build and asset smoke`, `Customer browser smoke`, and `Build, verify, and publish production image`.
+- Require the current successful CI check names: `Ensure self-hosted CI base images`, `Workflow validation and dependency audit`, `Application, browser, and PostgreSQL tests`, and `Build, verify, and publish production image`.
 - Require branches to be up to date before merging.
 - Require all review conversations to be resolved.
 - Do not allow force pushes or branch deletion.
