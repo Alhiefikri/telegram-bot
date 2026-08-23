@@ -62,13 +62,15 @@ run_scenario() {
   local operation=deploy
   local recover_failed=false
   local bootstrap_local_rollback=false
+  local initialize_fingerprint_key=false
   local recorded_previous_image="$previous_image"
   local workspace bin artifacts status
   [ "$scenario" = "recovery-failure" ] && recover_failed=true
-  if [ "$scenario" = "legacy-image-bootstrap" ]; then
+  if [ "$scenario" = "legacy-image-bootstrap" ] || [ "$scenario" = "legacy-bootstrap-health-failure" ]; then
     bootstrap_local_rollback=true
     recorded_previous_image="$LOCAL_PREVIOUS_IMAGE_ID"
   fi
+  [ "$scenario" = "initialize-fingerprint-key" ] && initialize_fingerprint_key=true
   case "$scenario" in
     contract-success|contract-failure|backup-failure) operation=contract ;;
     reconcile-success|reconcile-failure) operation=reconcile ;;
@@ -197,7 +199,7 @@ case "$command" in
       exit 1
     fi
     if printf '%s' "$*" | grep -q 'ops:health'; then
-      if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "reconcile-failure" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
+      if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "legacy-bootstrap-health-failure" ] || [ "$scenario" = "reconcile-failure" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
       if [ "$scenario" = "rollback-failure" ]; then exit 1; fi
     fi
     ;;
@@ -209,7 +211,7 @@ SCRIPT
   set +e
   PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" DEPLOY_BRANCH=main \
     DEPLOY_SHA="$CANDIDATE_COMMIT" COMPOSE_PROJECT_NAME=telegram-bot-prod APP_IMAGE="$CANDIDATE_IMAGE" \
-    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$bootstrap_local_rollback" \
+    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$bootstrap_local_rollback" INITIALIZE_CREDENTIAL_FINGERPRINT_KEY="$initialize_fingerprint_key" \
     RELEASE_ARTIFACT_DIR="$artifacts" RELEASE_HEALTH_ATTEMPTS=1 RELEASE_HEALTH_INTERVAL=0 \
     GPG_RECIPIENT=backup@example.test \
     bash "$RELEASE_SCRIPT" > "$workspace/stdout" 2> "$workspace/stderr"
@@ -262,11 +264,15 @@ SCRIPT
     legacy-image-bootstrap)
       grep -q 'content-addressed local rollback image' "$workspace/stdout" || fail "legacy rollback bootstrap was not explicit"
       ;;
+    initialize-fingerprint-key)
+      grep -Eq '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=[0-9a-f]{64}$' "$workspace/.env" || fail "fingerprint key was not initialized safely"
+      grep -q 'Initialized CREDENTIAL_IDENTITY_FINGERPRINT_KEY directly on the VPS' "$workspace/stdout" || fail "fingerprint initialization was not explicit"
+      ;;
     migration-failure)
       ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
       ;;
-    application-health-failure)
-      grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
+    application-health-failure|legacy-bootstrap-health-failure)
+      grep -q "APP_IMAGE=$recorded_previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "successful rollback outcome was not explicit"
       ;;
     rollback-failure)
@@ -309,6 +315,8 @@ run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$
 run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario legacy-image-rejected 1 unused "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario legacy-image-bootstrap 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
+run_scenario legacy-bootstrap-health-failure 20 deploy-failed-rollback-succeeded "$LOCAL_PREVIOUS_IMAGE_ID" "$LEGACY_PREVIOUS_IMAGE"
+run_scenario initialize-fingerprint-key 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"

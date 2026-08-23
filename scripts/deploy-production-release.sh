@@ -148,6 +148,42 @@ is_rollback_image_reference() {
   is_immutable_image_reference "$1" || is_content_addressed_local_image "$1"
 }
 
+initialize_credential_identity_fingerprint_key() {
+  local key line
+  local replaced=false
+  local temporary
+
+  if grep -Eq '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=[0-9a-f]{64}$' .env; then
+    return 0
+  fi
+  [ "${INITIALIZE_CREDENTIAL_FINGERPRINT_KEY:-false}" = "true" ] || return 0
+
+  key="$(openssl rand -hex 32)"
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Failed to generate the production credential identity fingerprint key." >&2
+    return 1
+  }
+
+  umask 077
+  temporary="$(mktemp .env.XXXXXX)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      CREDENTIAL_IDENTITY_FINGERPRINT_KEY=*)
+        if [ "$replaced" = false ]; then
+          printf 'CREDENTIAL_IDENTITY_FINGERPRINT_KEY=%s\n' "$key" >> "$temporary"
+          replaced=true
+        fi
+        ;;
+      *) printf '%s\n' "$line" >> "$temporary" ;;
+    esac
+  done < .env
+  if [ "$replaced" = false ]; then
+    printf 'CREDENTIAL_IDENTITY_FINGERPRINT_KEY=%s\n' "$key" >> "$temporary"
+  fi
+  mv -f "$temporary" .env
+  echo "Initialized CREDENTIAL_IDENTITY_FINGERPRINT_KEY directly on the VPS."
+}
+
 
 run_verified_database_backup() {
   local backup_log="$RELEASE_ARTIFACT_DIR/contract-backup.log"
@@ -415,10 +451,17 @@ restore_previous_release() {
   COMPOSE_CONFIG_STATUS=unvalidated
   export RELEASE_SHA="$PREVIOUS_COMMIT"
 
-  if ! docker pull "$PREVIOUS_IMAGE"; then
+  if is_immutable_image_reference "$PREVIOUS_IMAGE"; then
+    if ! docker pull "$PREVIOUS_IMAGE"; then
+      record_result "${failure_reason}-rollback-failed"
+      write_release_state "rollback-failed"
+      echo "DEPLOY FAILED: previous immutable image could not be pulled." >&2
+      return 1
+    fi
+  elif ! docker image inspect "$PREVIOUS_IMAGE" >/dev/null; then
     record_result "${failure_reason}-rollback-failed"
     write_release_state "rollback-failed"
-    echo "DEPLOY FAILED: previous immutable image could not be pulled." >&2
+    echo "DEPLOY FAILED: previous content-addressed local image is unavailable." >&2
     return 1
   fi
   if ! APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans; then
@@ -554,6 +597,7 @@ fi
 write_release_state "deploy-started"
 git fetch --prune origin "$DEPLOY_BRANCH"
 git cat-file -e "${DEPLOY_SHA}^{commit}"
+initialize_credential_identity_fingerprint_key
 
 PREVIOUS_COMMIT="$(git rev-parse HEAD)"
 previous_app_container="$(compose ps -q app)"
