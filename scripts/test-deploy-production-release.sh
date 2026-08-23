@@ -36,8 +36,10 @@ grep -Fq 'ref: ${{ env.DEPLOY_SHA }}' "$ROOT_DIR/.github/workflows/deploy-produc
   || { printf 'FAIL: deploy checkout must use the selected deployment SHA\n' >&2; exit 1; }
 grep -Fq 'EXPECTED_RELEASE_SHA' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
   || { printf 'FAIL: external smoke must bind to the candidate release identity\n' >&2; exit 1; }
-! grep -Fq 'GHCR_TOKEN' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: GitHub token must not be forwarded to the VPS\n' >&2; exit 1; }
+grep -Fq "docker login ghcr.io --username '\$GHCR_USERNAME' --password-stdin" "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: workflow must authenticate the VPS to GHCR through stdin\n' >&2; exit 1; }
+grep -Fq 'docker logout ghcr.io' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
+  || { printf 'FAIL: workflow must remove transient VPS GHCR credentials\n' >&2; exit 1; }
 grep -Fq 'Re-run external public smoke after rollback' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
   || { printf 'FAIL: rollback must repeat public smoke after restoration\n' >&2; exit 1; }
 ! grep -Fq 'docker login ghcr.io' "$RELEASE_SCRIPT" \

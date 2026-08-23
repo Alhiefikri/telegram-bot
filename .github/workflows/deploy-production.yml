@@ -160,6 +160,19 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > ~/.ssh/production_key
           chmod 600 ~/.ssh/production_key
+
+      - name: Authenticate VPS Docker to GHCR for this release
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" \
+            | ssh -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+                "docker login ghcr.io --username '$GHCR_USERNAME' --password-stdin >/dev/null"
       - name: Deploy over SSH
         id: remote-deploy
         continue-on-error: true
@@ -314,6 +327,17 @@ jobs:
           fi
           echo "External public smoke or its rollback verification failed. Emergency manual recovery is required." >&2
           exit 21
+
+      - name: Remove transient GHCR credentials from VPS
+        if: always()
+        continue-on-error: true
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            'docker logout ghcr.io >/dev/null 2>&1 || true'
 
       - name: Download release-gate diagnostics
         if: always()

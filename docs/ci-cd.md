@@ -74,7 +74,7 @@ production image job elevate only their own job to `packages: write`.
   - Checks out `DEPLOY_SHA` before streaming `scripts/deploy-production-release.sh`, so delayed deploys use orchestration code from the same revision as the application and image.
   - Does not rerun Composer, NPM, PHPUnit, asset smoke, or a Docker build; those are the required `CI` evidence for the pinned SHA.
   - Deploys over SSH to the VPS with Docker Compose project `telegram-bot-prod`.
-  - Uses the VPS-local read-only Docker credential store for GHCR pulls; GitHub tokens are never sent to or persisted on the VPS.
+  - Authenticates Docker on the VPS to private GHCR only for the release, streaming the workflow-scoped read-only `GITHUB_TOKEN` through SSH stdin; an `always()` cleanup logs out after deploy diagnostics. The token is never a process argument, release-script variable, or artifact.
   - Uses `./scripts/safe-compose-config.sh` before every Compose action, including diagnostics, rollback, contract migration, and backup.
   - Reads the image digest recorded on the deployment commit by the selected CI run. The `production-image` status must point to that exact CI run URL; production pulls only that immutable GHCR digest and never rebuilds the application image.
   - Records the previous Git commit and immutable running image before changing the checkout. Mutable tags and local image names are rejected as rollback targets.
@@ -110,13 +110,12 @@ Production application secrets such as `APP_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM
 The destructive contract gate also reads `GPG_RECIPIENT` or `GPG_PASSPHRASE` from the VPS-local `.env` (exactly one must be configured). A recipient-encrypted backup requires the corresponding private key on the VPS so the gate can perform its readability check; neither value is sent from GitHub Actions.
 
 
-CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the image job receives `packages: write` and `statuses: write`, while all other workflow jobs remain read-only. If the GHCR package is private, authenticate Docker on the VPS once using a dedicated machine user or fine-grained token with read-only package access. Do not use a personal token with repository write access:
-
-```bash
-printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
-```
-
-The credential remains in the VPS Docker credential store and is not passed through deployment logs or workflow artifacts.
+CI publishes with the workflow-scoped `GITHUB_TOKEN`; only the base-mirror and
+production-image jobs receive `packages: write`, while other jobs retain
+`packages: read`. Deployment streams its job-scoped read-only package token to
+`docker login --password-stdin` on the VPS immediately before the pull and
+executes `docker logout` in an `always()` cleanup. The token is masked, never
+placed in SSH arguments, and not retained as a long-lived production secret.
 
 ## Dependency vulnerability policy
 
