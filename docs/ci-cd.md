@@ -218,7 +218,7 @@ Every production migration must follow expand-and-contract compatibility because
 
 Do not include destructive renames, column/table drops, incompatible type changes, irreversible data rewrites, or long blocking DDL in the automatic release migration. Those changes require a verified database backup and explicit human approval before dispatching the workflow. If a change cannot preserve compatibility with the retained image, treat it as a planned maintenance release with a documented restore procedure rather than relying on automatic application rollback.
 
-The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, explicit recovery stdin isolation, immutable rollback rejection, migration failure before cutover, application health failure with successful rollback, rollback health failure, external-smoke rollback, optional failed-job recovery failure, remote journal reconciliation, verified-backup contract success/failure, and backup-gate failure. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. `./scripts/test-check-migration-prefixes.sh` verifies that the migration prefix guard fails on a new duplicate, tolerates an allowlisted historical duplicate, and rejects a stale allowlist entry. CI runs these contracts through the PHP hardening suite and release harness.
+The disposable harness `./scripts/test-deploy-production-release.sh` exercises successful deploy, explicit recovery stdin isolation, immutable rollback rejection, one-time content-addressed legacy bootstrap, migration failure before cutover, application health failure with successful rollback, rollback health failure, external-smoke rollback, optional failed-job recovery failure, remote journal reconciliation, verified-backup contract success/failure, and backup-gate failure. `./scripts/test-redact-release-diagnostics.sh` verifies that representative payload and credential forms cannot enter the diagnostic artifact. `./scripts/test-check-migration-prefixes.sh` verifies that the migration prefix guard fails on a new duplicate, tolerates an allowlisted historical duplicate, and rejects a stale allowlist entry. CI runs these contracts through the PHP hardening suite and release harness.
 
 ## Image identity and retention
 
@@ -236,6 +236,12 @@ docker compose -p telegram-bot-prod --env-file .env ps -q scheduler \
 ```
 
 The first value is the configured immutable GHCR reference and the second is the local content-addressed image ID. They should correspond to the digest printed in the deployment summary.
+
+`bootstrap_local_rollback_image=true` is a one-time bridge for a production
+container that still reports a mutable legacy tag. It records the running
+container's immutable local `.Image` ID (`sha256:...`) as the immediate rollback
+target; it never treats the mutable tag itself as safe. Leave the input false
+after the first successful GHCR-digest deployment.
 
 The post-deploy release interface is intentionally cheap but deeper than liveness:
 

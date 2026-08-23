@@ -7,6 +7,7 @@ PREVIOUS_COMMIT=1111111111111111111111111111111111111111
 CANDIDATE_COMMIT=2222222222222222222222222222222222222222
 PREVIOUS_IMAGE=ghcr.io/example/telegram-bot@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 LEGACY_PREVIOUS_IMAGE=telegram-bot-prod-app
+LOCAL_PREVIOUS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
@@ -60,8 +61,14 @@ run_scenario() {
   local previous_image=${5:-$PREVIOUS_IMAGE}
   local operation=deploy
   local recover_failed=false
+  local bootstrap_local_rollback=false
+  local recorded_previous_image="$previous_image"
   local workspace bin artifacts status
   [ "$scenario" = "recovery-failure" ] && recover_failed=true
+  if [ "$scenario" = "legacy-image-bootstrap" ]; then
+    bootstrap_local_rollback=true
+    recorded_previous_image="$LOCAL_PREVIOUS_IMAGE_ID"
+  fi
   case "$scenario" in
     contract-success|contract-failure|backup-failure) operation=contract ;;
     reconcile-success|reconcile-failure) operation=reconcile ;;
@@ -139,9 +146,10 @@ scenario=$(cat "$MOCK_WORKSPACE/scenario")
 current_image=$(cat "$MOCK_WORKSPACE/current-image")
 image_id() {
   case "$1" in
-    *aaaaaaaaaaaaaaaa*) printf 'sha256:previous-id\n' ;;
-    *bbbbbbbbbbbbbbbb*) printf 'sha256:candidate-id\n' ;;
-    *) printf 'sha256:unknown-id\n' ;;
+    *aaaaaaaaaaaaaaaa*) printf 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' ;;
+    *bbbbbbbbbbbbbbbb*) printf 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n' ;;
+    *telegram-bot-prod-app*) printf 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' ;;
+    *) printf 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n' ;;
   esac
 }
 
@@ -201,7 +209,7 @@ SCRIPT
   set +e
   PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" DEPLOY_BRANCH=main \
     DEPLOY_SHA="$CANDIDATE_COMMIT" COMPOSE_PROJECT_NAME=telegram-bot-prod APP_IMAGE="$CANDIDATE_IMAGE" \
-    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" \
+    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$bootstrap_local_rollback" \
     RELEASE_ARTIFACT_DIR="$artifacts" RELEASE_HEALTH_ATTEMPTS=1 RELEASE_HEALTH_INTERVAL=0 \
     GPG_RECIPIENT=backup@example.test \
     bash "$RELEASE_SCRIPT" > "$workspace/stdout" 2> "$workspace/stderr"
@@ -240,7 +248,7 @@ SCRIPT
   assert_eq "$(cat "$workspace/current-image")" "$expected_image"
   if [ "$operation" = "deploy" ] || [ "$operation" = "reconcile" ]; then
     assert_eq "$(cat "$artifacts/previous-commit.txt")" "$PREVIOUS_COMMIT"
-    assert_eq "$(cat "$artifacts/previous-image.txt")" "$previous_image"
+    assert_eq "$(cat "$artifacts/previous-image.txt")" "$recorded_previous_image"
   fi
   [ -x "$artifacts/redact-release-diagnostics.sh" ] || fail "artifact-local redactor is missing or not executable"
   [ -f "$artifacts/compose.log" ] || fail "release diagnostics did not produce a redacted compose log"
@@ -250,6 +258,9 @@ SCRIPT
       grep -q 'compose .* run --rm --no-deps .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration"
       grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
       ! grep -q 'database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php' "$workspace/commands.log" || fail "success ran the deferred contract migration before cutover"
+      ;;
+    legacy-image-bootstrap)
+      grep -q 'content-addressed local rollback image' "$workspace/stdout" || fail "legacy rollback bootstrap was not explicit"
       ;;
     migration-failure)
       ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
@@ -297,6 +308,7 @@ run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_
 run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario legacy-image-rejected 1 unused "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
+run_scenario legacy-image-bootstrap 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"

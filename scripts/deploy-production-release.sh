@@ -134,6 +134,20 @@ is_immutable_image_reference() {
   [ "${#digest}" -eq 64 ] && [[ "$digest" =~ ^[0-9a-f]+$ ]]
 }
 
+is_content_addressed_local_image() {
+  local reference="$1"
+  local digest="${reference#sha256:}"
+  case "$reference" in
+    sha256:*) ;;
+    *) return 1 ;;
+  esac
+  [ "${#digest}" -eq 64 ] && [[ "$digest" =~ ^[0-9a-f]+$ ]]
+}
+
+is_rollback_image_reference() {
+  is_immutable_image_reference "$1" || is_content_addressed_local_image "$1"
+}
+
 
 run_verified_database_backup() {
   local backup_log="$RELEASE_ARTIFACT_DIR/contract-backup.log"
@@ -386,8 +400,8 @@ load_previous_release() {
     echo "Recorded rollback commit is invalid." >&2
     return 1
   }
-  is_immutable_image_reference "$PREVIOUS_IMAGE" || {
-    echo "Recorded rollback image is not an immutable GHCR digest reference." >&2
+  is_rollback_image_reference "$PREVIOUS_IMAGE" || {
+    echo "Recorded rollback image is not content-addressed." >&2
     return 1
   }
 }
@@ -544,12 +558,20 @@ git cat-file -e "${DEPLOY_SHA}^{commit}"
 PREVIOUS_COMMIT="$(git rev-parse HEAD)"
 previous_app_container="$(compose ps -q app)"
 [ -n "$previous_app_container" ] || { echo "Cannot identify the currently running app container." >&2; exit 1; }
-PREVIOUS_IMAGE="$(docker inspect "$previous_app_container" --format '{{.Config.Image}}')"
-if ! is_immutable_image_reference "$PREVIOUS_IMAGE"; then
-  echo "Current app image is not an immutable GHCR digest reference and cannot be used for rollback: $PREVIOUS_IMAGE" >&2
+configured_previous_image="$(docker inspect "$previous_app_container" --format '{{.Config.Image}}')"
+if is_immutable_image_reference "$configured_previous_image"; then
+  PREVIOUS_IMAGE="$configured_previous_image"
+elif [ "${BOOTSTRAP_LOCAL_ROLLBACK_IMAGE:-false}" = "true" ]; then
+  PREVIOUS_IMAGE="$(docker inspect "$previous_app_container" --format '{{.Image}}')"
+  is_content_addressed_local_image "$PREVIOUS_IMAGE" || {
+    echo "Current app container does not expose a valid content-addressed local image ID." >&2
+    exit 1
+  }
+  echo "Bootstrapping one release with content-addressed local rollback image: $PREVIOUS_IMAGE"
+else
+  echo "Current app image is not an immutable GHCR digest reference and cannot be used for rollback: $configured_previous_image" >&2
   exit 1
 fi
-echo "Current app image is an immutable digest reference: $PREVIOUS_IMAGE"
 printf '%s\n' "$PREVIOUS_COMMIT" > "$RELEASE_ARTIFACT_DIR/previous-commit.txt"
 printf '%s\n' "$PREVIOUS_IMAGE" > "$RELEASE_ARTIFACT_DIR/previous-image.txt"
 write_release_state "previous-release-recorded"
