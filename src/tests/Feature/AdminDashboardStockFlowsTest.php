@@ -85,6 +85,8 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('aria-controls="stock-input-quick-panel"', false)
             ->assertSee('role="tabpanel"', false)
             ->assertSee('id="stock-input-account-panel"', false)
+            ->assertSee('email | password | MFA secret')
+            ->assertSee('email | password | akses token')
             ->assertSee('x-bind:aria-invalid', false)
             ->assertSee('x-bind:aria-describedby', false)
             ->assertSee('credential_format', false);
@@ -571,6 +573,33 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSeeInOrder(['Canva Pro', 'Stok', '5'])
             ->assertSeeInOrder(['Canva Pro', 'Tersedia', '4'])
             ->assertSeeInOrder(['Canva Pro', 'Dipesan', '1']);
+    }
+
+    public function test_admin_can_add_bulk_access_token_rows_from_quick_input(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_format' => ProductStockIntakeSubmission::BULK_FORMAT_ACCESS_TOKEN,
+                'stock_items' => "bulk-token-one@example.test|Password-One|TOKEN-ONE|CLIENT-ID-ONE|recovery-one@example.test\nbulk-token-two@example.test|Password-Two|TOKEN-TWO|CLIENT-ID-TWO|recovery-two@example.test",
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $items = ProductStockItem::query()->orderBy('id')->get();
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(
+            [
+                'TOKEN-ONE|CLIENT-ID-ONE|recovery-one@example.test',
+                'TOKEN-TWO|CLIENT-ID-TWO|recovery-two@example.test',
+            ],
+            $items->map(static fn (ProductStockItem $item): string => $item->credential_payload['access_value'])->all(),
+        );
+        $this->assertSame(
+            [CredentialAccessMethod::AuthToken, CredentialAccessMethod::AuthToken],
+            $items->map(static fn (ProductStockItem $item): CredentialAccessMethod => CredentialAccessMethod::from($item->credential_payload['access_method']))->all(),
+        );
     }
 
     public function test_add_stock_response_does_not_wait_for_slow_telegram_delivery(): void

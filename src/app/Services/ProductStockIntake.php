@@ -33,6 +33,7 @@ final class ProductStockIntake
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
+        private readonly CredentialDeliveryFormatter $credentialFormatter,
         private readonly CredentialIdentityFingerprint $fingerprints,
         private readonly CredentialIdentityBackfillReadinessService $identityBackfillReadiness,
         private readonly LegacyCredentialIdentityParser $legacyIdentityParser,
@@ -58,7 +59,7 @@ final class ProductStockIntake
             : $submission;
         $this->assertActorMayAdjustStock($actor);
 
-        if ($submission->isStructuredAccount()) {
+        if ($submission->usesStructuredCredentials()) {
             $this->assertStructuredInputEnabled();
         }
 
@@ -78,7 +79,7 @@ final class ProductStockIntake
                     return $this->resultFromOperation($existing, true);
                 }
 
-                if ($submission->isStructuredAccount()) {
+                if ($submission->usesStructuredCredentials()) {
                     $this->assertFingerprintReady();
                 }
 
@@ -333,11 +334,12 @@ final class ProductStockIntake
      */
     private function normalizeAndValidate(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
     {
-        if ($submission->isLegacy()) {
-            return $this->normalizeLegacy($submission, $rejectSubmissionDuplicates);
-        }
-
-        return $this->normalizeStructured($submission, $rejectSubmissionDuplicates);
+        return match (true) {
+            $submission->isBulkMfaSecret() => $this->normalizeBulkMfaSecret($submission, $rejectSubmissionDuplicates),
+            $submission->isBulkAccessToken() => $this->normalizeBulkAccessToken($submission, $rejectSubmissionDuplicates),
+            $submission->isLegacy() => $this->normalizeLegacy($submission, $rejectSubmissionDuplicates),
+            default => $this->normalizeStructured($submission, $rejectSubmissionDuplicates),
+        };
     }
 
     /**
@@ -394,6 +396,191 @@ final class ProductStockIntake
             'items' => $items,
             'canonical_items' => $canonicalItems,
             'submission_duplicates' => $submissionDuplicates,
+        ];
+    }
+
+    /**
+     * The selected MFA bulk format keeps the existing legacy storage
+     * contract, but rejects malformed triplets before they can become stock
+     * rows.
+     *
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
+     */
+    private function normalizeBulkMfaSecret(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
+    {
+        $errors = [];
+        $items = [];
+        $canonicalItems = [];
+        $rawLength = 0;
+
+        foreach ($submission->items() as $index => $value) {
+            if (! is_string($value)) {
+                $errors["stock_items.{$index}"][] = 'Isi stok harus berupa teks.';
+
+                continue;
+            }
+
+            $secret = trim($value);
+            if ($secret === '') {
+                continue;
+            }
+
+            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
+            $parts = $this->bulkTripletParts($secret);
+            if ($parts === null) {
+                $errors["stock_items.{$index}"][] = 'Format baris harus email|password|MFA secret.';
+
+                continue;
+            }
+
+            $items[] = [
+                'index' => (int) $index,
+                'format' => CredentialFormat::Legacy,
+                'secret' => $secret,
+                'payload' => null,
+                'identities' => $this->legacyIdentities($secret),
+            ];
+            $canonicalItems[] = ['secret' => $secret];
+        }
+
+        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
+            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
+        }
+        if ($items === []) {
+            $errors['stock_items'][] = 'Isi minimal satu baris stok.';
+        }
+
+        $submissionDuplicates = $this->submissionDuplicateKinds($items);
+        if ($rejectSubmissionDuplicates) {
+            $this->appendSubmissionDuplicateErrors($errors, $submissionDuplicates, structured: false);
+        }
+        $this->throwIfInvalid($errors);
+
+        return [
+            'items' => $items,
+            'canonical_items' => $canonicalItems,
+            'submission_duplicates' => $submissionDuplicates,
+        ];
+    }
+
+    /**
+     * The access-token bulk format is promoted to a structured credential so
+     * delivery can label and mark the token separately from an MFA secret.
+     *
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
+     */
+    private function normalizeBulkAccessToken(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
+    {
+        $errors = [];
+        $items = [];
+        $canonicalItems = [];
+        $rawLength = 0;
+
+        foreach ($submission->items() as $index => $value) {
+            if (! is_string($value)) {
+                $errors["stock_items.{$index}"][] = 'Isi stok harus berupa teks.';
+
+                continue;
+            }
+
+            $secret = trim($value);
+            if ($secret === '') {
+                continue;
+            }
+
+            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
+            $parts = $this->bulkAccessTokenParts($secret);
+            if ($parts === null) {
+                $errors["stock_items.{$index}"][] = 'Format baris harus email|password|akses token.';
+
+                continue;
+            }
+
+            try {
+                $payload = StructuredCredentialPayload::fromValues(
+                    $parts['email'],
+                    $parts['password'],
+                    CredentialAccessMethod::AuthToken,
+                    $parts['access_token'],
+                );
+            } catch (Throwable) {
+                $errors["stock_items.{$index}"][] = 'Nilai akses token pada baris tidak valid.';
+
+                continue;
+            }
+
+            $items[] = [
+                'index' => (int) $index,
+                'format' => CredentialFormat::StructuredAccount,
+                'secret' => null,
+                'payload' => $payload,
+                'identities' => $payload->identityValues(),
+            ];
+            $canonicalItems[] = $payload->toArray();
+        }
+
+        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
+            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
+        }
+        if ($items === []) {
+            $errors['stock_items'][] = 'Isi minimal satu baris stok.';
+        }
+
+        $submissionDuplicates = $this->submissionDuplicateKinds($items);
+        if ($rejectSubmissionDuplicates) {
+            $this->appendSubmissionDuplicateErrors($errors, $submissionDuplicates, structured: false);
+        }
+        $this->throwIfInvalid($errors);
+
+        return [
+            'items' => $items,
+            'canonical_items' => $canonicalItems,
+            'submission_duplicates' => $submissionDuplicates,
+        ];
+    }
+
+    /**
+     * @return array{email:string,password:string,mfa:string}|null
+     */
+    private function bulkTripletParts(string $secret): ?array
+    {
+        return $this->credentialFormatter->parts($secret);
+    }
+
+    /**
+     * Access-token values may themselves be followed by pipe-delimited
+     * provider context. Only the first two separators belong to the bulk
+     * envelope; the complete remainder stays copyable as one value.
+     *
+     * @return array{email:string,password:string,access_token:string}|null
+     */
+    private function bulkAccessTokenParts(string $secret): ?array
+    {
+        $parts = explode('|', $secret, 3);
+        $email = trim((string) ($parts[0] ?? ''));
+        $password = (string) ($parts[1] ?? '');
+        $accessToken = (string) ($parts[2] ?? '');
+
+        if (count($parts) !== 3
+            || filter_var($email, FILTER_VALIDATE_EMAIL) === false
+            || trim($password) === ''
+            || trim($accessToken) === ''
+            || strpbrk($email.$password.$accessToken, "\r\n") !== false) {
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'password' => $password,
+            'access_token' => $accessToken,
         ];
     }
 
@@ -793,7 +980,14 @@ final class ProductStockIntake
 
     private function movementNotes(ProductStockIntakeSubmission $submission, int $itemCount): string
     {
-        return $submission->isStructuredAccount()
+        if ($submission->isBulkMfaSecret()) {
+            return "Tambah stok bulk email/password/MFA secret dashboard ({$itemCount} item).";
+        }
+        if ($submission->isBulkAccessToken()) {
+            return "Tambah stok bulk email/password/akses token dashboard ({$itemCount} item).";
+        }
+
+        return $submission->usesStructuredCredentials()
             ? "Tambah stok akun terstruktur dashboard ({$itemCount} item)."
             : "Tambah stok manual dashboard ({$itemCount} item).";
     }

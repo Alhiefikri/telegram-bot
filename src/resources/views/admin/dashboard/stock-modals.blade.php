@@ -65,12 +65,35 @@
                                     <span x-text="`${stockItemCount()} item`">0 item</span>
                                 </div>
 
+                                <div class="rounded-[0.45rem] border-2 border-neo-ink bg-white p-3">
+                                    <label for="stock-format" class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink">Format setiap baris</label>
+                                    <select
+                                        id="stock-format"
+                                        name="stock_format"
+                                        x-model="stockInputFormat"
+                                        class="mt-1.5 min-h-11 w-full rounded-[0.4rem] border-2 border-neo-ink bg-[#fff8d6] px-3 text-xs font-black text-neo-ink focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                    >
+                                        <option value="legacy">Teks biasa / legacy</option>
+                                        <option value="email_password_mfa_secret">email | password | MFA secret</option>
+                                        <option value="email_password_access_token" x-bind:disabled="!structuredStockInputEnabled">email | password | akses token</option>
+                                    </select>
+                                    <p class="mt-1.5 text-[10px] font-bold leading-4 text-neo-ink/70">
+                                        Pilihan ini berlaku untuk semua baris yang diinput. Setiap baris harus berisi satu credential.
+                                    </p>
+                                    <p x-show="stockInputFormat === 'email_password_access_token'" class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/70">
+                                        Untuk akses token, semua isi setelah <code>email|password|</code> dipertahankan sebagai satu nilai, termasuk bagian yang memakai tanda <code>|</code>.
+                                    </p>
+                                    <p x-show="stockInputFormat === 'email_password_access_token' && !structuredStockInputEnabled" class="mt-1.5 text-[10px] font-black text-[#b91c1c]">
+                                        Format akses token menunggu pemeriksaan kesiapan identitas.
+                                    </p>
+                                </div>
+
                                 <div>
                                     <x-admin-dashboard.textarea
                                         id="stock-items"
                                         name="stock_items"
                                         rows="6"
-                                        placeholder="email@example.com|password&#10;KEY-XXXX-1234"
+                                        x-bind:placeholder="stockInputFormat === 'email_password_mfa_secret' ? 'email@example.com|password|MFA-SECRET&#10;akun2@example.com|password2|MFA-SECRET-2' : (stockInputFormat === 'email_password_access_token' ? 'email@example.com|password|ACCESS-TOKEN|CLIENT-ID|recovery@example.com&#10;akun2@example.com|password2|ACCESS-TOKEN-2' : 'email@example.com|password&#10;KEY-XXXX-1234')"
                                         x-model="stockItems"
                                         x-ref="stockItems"
                                         required

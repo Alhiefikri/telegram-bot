@@ -16,7 +16,17 @@ final readonly class ProductStockIntakeSubmission
 {
     public const MODE_LEGACY = 'legacy';
 
+    public const MODE_BULK_MFA_SECRET = 'bulk_mfa_secret';
+
+    public const MODE_BULK_ACCESS_TOKEN = 'bulk_access_token';
+
     public const MODE_STRUCTURED_ACCOUNT = 'structured_account';
+
+    public const BULK_FORMAT_LEGACY = 'legacy';
+
+    public const BULK_FORMAT_MFA_SECRET = 'email_password_mfa_secret';
+
+    public const BULK_FORMAT_ACCESS_TOKEN = 'email_password_access_token';
 
     /**
      * @param  list<string|array<string, mixed>>  $items
@@ -30,7 +40,12 @@ final readonly class ProductStockIntakeSubmission
             throw new InvalidArgumentException('Stock intake operation key must be a UUID.');
         }
 
-        if (! in_array($this->mode, [self::MODE_LEGACY, self::MODE_STRUCTURED_ACCOUNT], true)) {
+        if (! in_array($this->mode, [
+            self::MODE_LEGACY,
+            self::MODE_BULK_MFA_SECRET,
+            self::MODE_BULK_ACCESS_TOKEN,
+            self::MODE_STRUCTURED_ACCOUNT,
+        ], true)) {
             throw new InvalidArgumentException('Stock intake mode is invalid.');
         }
     }
@@ -43,6 +58,27 @@ final readonly class ProductStockIntakeSubmission
         return new self(
             operationKey: $operationKey ?? (string) Str::uuid(),
             mode: self::MODE_LEGACY,
+            items: array_values($stockItems),
+        );
+    }
+
+    /**
+     * Build the selected bulk triplet format from the Quick Input form.
+     *
+     * @param  list<string>  $stockItems
+     */
+    public static function bulk(array $stockItems, string $format, ?string $operationKey = null): self
+    {
+        $mode = match ($format) {
+            self::BULK_FORMAT_LEGACY => self::MODE_LEGACY,
+            self::BULK_FORMAT_MFA_SECRET, 'email_password_mfa' => self::MODE_BULK_MFA_SECRET,
+            self::BULK_FORMAT_ACCESS_TOKEN, 'email_password_auth_token' => self::MODE_BULK_ACCESS_TOKEN,
+            default => throw new InvalidArgumentException('Bulk stock format is invalid.'),
+        };
+
+        return new self(
+            operationKey: $operationKey ?? (string) Str::uuid(),
+            mode: $mode,
             items: array_values($stockItems),
         );
     }
@@ -74,6 +110,19 @@ final readonly class ProductStockIntakeSubmission
      */
     public static function fromArray(array $input): self
     {
+        if (isset($input['stock_format'])) {
+            $items = $input['items'] ?? ($input['stock_items'] ?? []);
+            if (! is_array($items)) {
+                throw new InvalidArgumentException('Stock intake items are invalid.');
+            }
+
+            return self::bulk(
+                $items,
+                (string) $input['stock_format'],
+                isset($input['operation_key']) ? (string) $input['operation_key'] : null,
+            );
+        }
+
         $mode = (string) ($input['mode'] ?? (array_key_exists('accounts', $input)
             ? self::MODE_STRUCTURED_ACCOUNT
             : self::MODE_LEGACY));
@@ -86,6 +135,8 @@ final readonly class ProductStockIntakeSubmission
 
         return match ($mode) {
             self::MODE_LEGACY => self::legacy($items, $operationKey),
+            self::MODE_BULK_MFA_SECRET => self::bulk($items, self::BULK_FORMAT_MFA_SECRET, $operationKey),
+            self::MODE_BULK_ACCESS_TOKEN => self::bulk($items, self::BULK_FORMAT_ACCESS_TOKEN, $operationKey),
             self::MODE_STRUCTURED_ACCOUNT => self::structured($items, $operationKey),
             default => throw new InvalidArgumentException('Stock intake mode is invalid.'),
         };
@@ -93,7 +144,22 @@ final readonly class ProductStockIntakeSubmission
 
     public function isLegacy(): bool
     {
-        return $this->mode === self::MODE_LEGACY;
+        return in_array($this->mode, [self::MODE_LEGACY, self::MODE_BULK_MFA_SECRET], true);
+    }
+
+    public function isBulkMfaSecret(): bool
+    {
+        return $this->mode === self::MODE_BULK_MFA_SECRET;
+    }
+
+    public function isBulkAccessToken(): bool
+    {
+        return $this->mode === self::MODE_BULK_ACCESS_TOKEN;
+    }
+
+    public function usesStructuredCredentials(): bool
+    {
+        return in_array($this->mode, [self::MODE_BULK_ACCESS_TOKEN, self::MODE_STRUCTURED_ACCOUNT], true);
     }
 
     /**

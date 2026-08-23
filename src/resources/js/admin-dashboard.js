@@ -199,6 +199,10 @@ export default function adminDashboard(initialState = {}) {
       initialState.stockForm?.stockProductDeliveryNote ?? "",
     stockItems: initialState.stockForm?.stockItems ?? "",
     stockOperationKey: initialState.stockForm?.stockOperationKey ?? "",
+    stockInputFormat: initialState.stockForm?.stockFormat ?? "legacy",
+    structuredStockInputEnabled: Boolean(
+      initialState.structuredStockInputEnabled
+    ),
     stockFormSubmitting: false,
     stockInputMode: "quick",
     ...emptyAccountInputState(),
@@ -1184,6 +1188,7 @@ export default function adminDashboard(initialState = {}) {
         stockProductDeliveryNote: product.deliveryNote ?? "",
         stockItems: "",
         stockOperationKey: newOperationKey(),
+        stockInputFormat: "legacy",
         stockFormSubmitting: false,
         stockInputMode: "quick",
         ...emptyAccountInputState(),
@@ -1203,6 +1208,7 @@ export default function adminDashboard(initialState = {}) {
       this.stockModalOpen = false;
       this.stockItems = "";
       this.stockOperationKey = "";
+      this.stockInputFormat = "legacy";
       this.stockInputMode = "quick";
       Object.assign(this, emptyAccountInputState());
       this.stockModalOpener = null;

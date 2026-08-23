@@ -81,6 +81,121 @@ class ProductStockIntakeTest extends TestCase
         Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
     }
 
+    public function test_bulk_mfa_secret_format_validates_each_triplet_and_keeps_legacy_delivery_compatibility(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $result = app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::bulk([
+                'mfa-one@example.test|Password-One|MFA-SECRET-ONE',
+                'mfa-two@example.test|Password-Two|MFA-SECRET-TWO',
+            ], ProductStockIntakeSubmission::BULK_FORMAT_MFA_SECRET),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $this->assertSame(2, $result->itemCount);
+        $this->assertSame(
+            ['legacy', 'legacy'],
+            ProductStockItem::query()->orderBy('id')->pluck('credential_format')->map(
+                static fn (CredentialFormat|string $format): string => $format instanceof CredentialFormat ? $format->value : $format,
+            )->all(),
+        );
+        $this->assertSame(
+            [
+                'mfa-one@example.test|Password-One|MFA-SECRET-ONE',
+                'mfa-two@example.test|Password-Two|MFA-SECRET-TWO',
+            ],
+            ProductStockItem::query()->orderBy('id')->get()->pluck('secret')->all(),
+        );
+        $this->assertStringContainsString(
+            'MFA secret',
+            (string) InventoryMovement::query()->sole()->notes,
+        );
+        $this->assertStringNotContainsString(
+            'MFA-SECRET-ONE',
+            (string) InventoryMovement::query()->sole()->notes,
+        );
+    }
+
+    public function test_bulk_access_token_format_creates_structured_copyable_auth_token_credentials(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $result = app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::bulk([
+                'token-one@example.test|Password-One|ACCESS-TOKEN-ONE|CLIENT-ID-ONE|recovery-one@example.test',
+                'token-two@example.test|Password-Two|ACCESS-TOKEN-TWO|CLIENT-ID-TWO|recovery-two@example.test',
+            ], ProductStockIntakeSubmission::BULK_FORMAT_ACCESS_TOKEN),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $this->assertSame(2, $result->itemCount);
+        $items = ProductStockItem::query()->orderBy('id')->get();
+        $this->assertSame(
+            ['structured_account', 'structured_account'],
+            $items->map(
+                static fn (ProductStockItem $item): string => $item->credential_format->value,
+            )->all(),
+        );
+        $this->assertSame(
+            [
+                [
+                    'email' => 'token-one@example.test',
+                    'access_value' => 'ACCESS-TOKEN-ONE|CLIENT-ID-ONE|recovery-one@example.test',
+                ],
+                [
+                    'email' => 'token-two@example.test',
+                    'access_value' => 'ACCESS-TOKEN-TWO|CLIENT-ID-TWO|recovery-two@example.test',
+                ],
+            ],
+            $items->map(static fn (ProductStockItem $item): array => [
+                'email' => $item->credential_payload['email'],
+                'access_value' => $item->credential_payload['access_value'],
+            ])->all(),
+        );
+        $this->assertSame(4, CredentialIdentity::query()->count());
+        $this->assertStringNotContainsString(
+            'ACCESS-TOKEN-ONE',
+            (string) InventoryMovement::query()->sole()->notes,
+        );
+    }
+
+    public function test_bulk_triplet_validation_rejects_the_whole_batch_without_persisting_credentials(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 1]);
+
+        try {
+            app(ProductStockIntake::class)->submit(
+                $product,
+                ProductStockIntakeSubmission::bulk([
+                    'valid@example.test|Password|MFA-SECRET',
+                    'not-a-triplet',
+                ], ProductStockIntakeSubmission::BULK_FORMAT_MFA_SECRET),
+                $admin,
+                dispatchNotifications: false,
+            );
+            $this->fail('Expected malformed bulk triplet to be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('stock_items.1', $exception->errors());
+            $this->assertStringNotContainsString(
+                'MFA-SECRET',
+                json_encode($exception->errors(), JSON_THROW_ON_ERROR),
+            );
+        }
+
+        $this->assertSame(3, $product->fresh()->stock);
+        $this->assertSame(0, ProductStockItem::query()->count());
+        $this->assertSame(0, CredentialIdentity::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+    }
+
     public function test_account_review_returns_server_normalized_safe_metadata_without_writing_stock(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

@@ -87,7 +87,11 @@ class AdminProductDashboardFormProtocol
     {
         return $this->productTabRedirect()
             ->withErrors($errors, self::STOCK_ADJUSTMENT_BAG)
-            ->withInput(['stock_product_id' => $product->id]);
+            ->withInput([
+                'stock_product_id' => $product->id,
+                'stock_format' => $request->input('stock_format'),
+                'operation_key' => $request->input('operation_key'),
+            ]);
     }
 
     public function stockItemUpdateValidationErrors(Request $request, Validator|array $validator, Product $product): RedirectResponse

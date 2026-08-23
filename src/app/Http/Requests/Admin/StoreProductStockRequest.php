@@ -5,6 +5,7 @@ namespace App\Http\Requests\Admin;
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
+use App\Services\ProductStockIntakeSubmission;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
@@ -26,6 +27,7 @@ class StoreProductStockRequest extends FormRequest
     {
         return [
             'stock_items' => ['required', 'string', 'max:5000'],
+            'stock_format' => ['nullable', 'string', 'in:legacy,email_password_mfa_secret,email_password_access_token,email_password_mfa,email_password_auth_token'],
             'operation_key' => ['nullable', 'uuid'],
         ];
     }
@@ -72,6 +74,13 @@ class StoreProductStockRequest extends FormRequest
         $value = $this->input('operation_key');
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    public function stockFormat(): string
+    {
+        $value = $this->input('stock_format');
+
+        return is_string($value) && $value !== '' ? $value : ProductStockIntakeSubmission::BULK_FORMAT_LEGACY;
     }
 
     protected function validationErrorRedirect(Validator $validator): RedirectResponse

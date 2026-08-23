@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\StructuredStockInputDisabled;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductStockRequest;
 use App\Models\Product;
@@ -23,11 +24,14 @@ class AdminProductStockController extends Controller
 
         $stockItems = $request->stockItems();
 
-        $itemCount = count($stockItems);
         try {
-            $stockIntake->submit(
+            $result = $stockIntake->submit(
                 $product,
-                ProductStockIntakeSubmission::legacy($stockItems, $request->operationKey()),
+                ProductStockIntakeSubmission::bulk(
+                    $stockItems,
+                    $request->stockFormat(),
+                    $request->operationKey(),
+                ),
                 $user,
                 $request->ip(),
             );
@@ -36,6 +40,10 @@ class AdminProductStockController extends Controller
             $errors['stock_items'] ??= ['Isi stok tidak valid.'];
 
             return $forms->stockValidationErrors($request, $product, $errors);
+        } catch (StructuredStockInputDisabled) {
+            return $forms->stockValidationErrors($request, $product, [
+                'stock_items' => ['Format access token belum tersedia karena pemeriksaan kesiapan identitas belum selesai.'],
+            ]);
         } catch (ProductStockIntakeIdempotencyConflict) {
             return $forms->stockValidationErrors($request, $product, [
                 'stock_items' => ['Kunci operasi sudah digunakan untuk pengajuan stok lain.'],
@@ -43,6 +51,6 @@ class AdminProductStockController extends Controller
         }
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_stock_add', $startedAt, ['queued' => true]);
 
-        return $forms->stockAdded($product->fresh(), $itemCount);
+        return $forms->stockAdded($product->fresh(), $result->itemCount);
     }
 }
