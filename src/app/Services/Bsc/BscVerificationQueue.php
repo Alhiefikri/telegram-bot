@@ -16,7 +16,9 @@ final class BscVerificationQueue
 
     public function dispatchForScan(Payment $payment): void
     {
-        $this->dispatch($payment, 0);
+        $payment->loadMissing('bscDetail');
+
+        $this->dispatch($payment, (int) ($payment->bscDetail?->tx_submission_version ?? 0));
     }
 
     private function queue(): string
