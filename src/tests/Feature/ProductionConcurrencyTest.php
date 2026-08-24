@@ -11,6 +11,7 @@ use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\AuditLog;
+use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -19,6 +20,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
@@ -34,6 +36,7 @@ use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
+use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
@@ -471,6 +474,69 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame([], $this->failedResultClasses($results));
         $this->assertSame(2, Payment::query()->where('binance_auto_verification_enabled', true)->count());
         $this->assertSame(2, Payment::query()->where('amount', 2_000_000)->count());
+    }
+
+    public function test_concurrent_bsc_checkouts_allocate_distinct_pending_amounts(): void
+    {
+        $this->requireConcurrencyLane();
+        config()->set('services.bsc', array_merge(config('services.bsc'), [
+            'rpc_url' => 'https://bsc-rpc.test',
+            'chain_id' => 56,
+            'usdt_contract' => '0x55d398326f99059ff775485246999027b3197955',
+            'expected_token_decimals' => 18,
+        ]));
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        {
+            public function chainId(): int
+            {
+                return 56;
+            }
+
+            public function contractCode(string $contract): string
+            {
+                return '0x60016001';
+            }
+
+            public function tokenDecimals(string $contract): int
+            {
+                return 18;
+            }
+
+            public function isValidErc1271Signature(string $contract, string $messageHashHex, string $signature): bool
+            {
+                return true;
+            }
+        });
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'bsc_payment_enabled' => true,
+            'bsc_unique_amount_increment_micro' => 100,
+            'is_active' => true,
+        ]);
+        BscPaymentReceiver::factory()->verified()->active()->create([
+            'address' => '0x4444444444444444444444444444444444444444',
+            'token_contract' => '0x55d398326f99059ff775485246999027b3197955',
+        ]);
+
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_000_000,
+        ]);
+        $firstCart = $this->cartForProduct($product);
+        $secondCart = $this->cartForProduct($product);
+
+        $results = $this->runConcurrently([
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($firstCart->id), CheckoutPaymentIntents::usdtBep20())->id,
+            fn () => app(OrderCheckoutService::class)->checkout(Cart::findOrFail($secondCart->id), CheckoutPaymentIntents::usdtBep20())->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+        $payments = Payment::query()->where('method', 'USDT_BEP20')->orderBy('amount')->get();
+        $this->assertCount(2, $payments);
+        $this->assertSame([2_000_000, 2_000_100], $payments->pluck('amount')->all());
+        $this->assertCount(2, PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->get());
     }
 
     public function test_concurrent_binance_verification_claims_one_transaction_once(): void

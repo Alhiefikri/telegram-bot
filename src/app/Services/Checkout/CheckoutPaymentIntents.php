@@ -17,6 +17,11 @@ final class CheckoutPaymentIntents
         return new BinancePayCheckoutIntent($deadline);
     }
 
+    public static function usdtBep20(?CarbonInterface $deadline = null): UsdtBep20CheckoutIntent
+    {
+        return new UsdtBep20CheckoutIntent($deadline);
+    }
+
     public static function pakasir(string $checkoutFlow = PakasirCheckoutFlow::HOSTED, ?CarbonInterface $deadline = null): PakasirCheckoutIntent
     {
         return new PakasirCheckoutIntent($checkoutFlow, $deadline);

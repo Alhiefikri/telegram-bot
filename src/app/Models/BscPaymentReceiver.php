@@ -83,6 +83,11 @@ class BscPaymentReceiver extends Model
         return $this->hasMany(BscReceiverOwnershipChallenge::class, 'receiver_id');
     }
 
+    public function paymentBscDetails(): HasMany
+    {
+        return $this->hasMany(PaymentBscDetail::class, 'receiver_id');
+    }
+
     public function isCryptographicallyVerified(): bool
     {
         return $this->verification_status === BscReceiverVerificationStatus::Verified;

@@ -11,6 +11,8 @@ use App\Models\AuditLog;
 use App\Models\BscPaymentReceiver;
 use App\Models\BscReceiverOwnershipChallenge;
 use App\Models\ManualPaymentSetting;
+use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Models\User;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReceiverManager;
@@ -19,9 +21,7 @@ use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class BscReceiverConfigurationTest extends TestCase
@@ -265,14 +265,27 @@ class BscReceiverConfigurationTest extends TestCase
 
     public function test_a_receiver_referenced_by_a_payment_detail_cannot_be_deleted(): void
     {
-        Schema::create('payment_bsc_details', function ($table): void {
-            $table->id();
-            $table->unsignedBigInteger('receiver_id');
-        });
         $receiver = BscPaymentReceiver::factory()->manuallyVerified()->active()->create([
             'token_contract' => self::CONTRACT,
         ]);
-        DB::table('payment_bsc_details')->insert(['receiver_id' => $receiver->id]);
+        $payment = Payment::factory()->create([
+            'provider' => 'manual',
+            'method' => 'USDT_BEP20',
+            'amount' => 1_000_000,
+            'currency' => 'USDT',
+        ]);
+        PaymentBscDetail::create([
+            'payment_id' => $payment->id,
+            'receiver_id' => $receiver->id,
+            'receiver_address' => $receiver->address_normalized,
+            'chain_id' => 56,
+            'token_contract' => self::CONTRACT,
+            'token_decimals' => 18,
+            'base_amount_micro' => 1_000_000,
+            'payable_amount_micro' => 1_000_000,
+            'expected_token_units' => '1000000000000000000',
+            'verification_status' => PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+        ]);
 
         $this->expectException(BscReceiverDeletionBlocked::class);
         $receiver->delete();

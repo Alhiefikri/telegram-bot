@@ -1,0 +1,76 @@
+<?php
+
+namespace App\Services\Checkout;
+
+use App\Exceptions\InvalidCheckout;
+use App\Models\Cart;
+use App\Models\ManualPaymentSetting;
+use App\Services\Bsc\BscReadiness;
+use App\Support\PaymentProvider;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Collection;
+
+final readonly class UsdtBep20CheckoutIntent implements CheckoutPaymentIntent
+{
+    public const METHOD = 'USDT_BEP20';
+
+    public function __construct(private ?CarbonInterface $deadline = null) {}
+
+    public function provider(): string
+    {
+        return PaymentProvider::MANUAL;
+    }
+
+    public function method(): string
+    {
+        return self::METHOD;
+    }
+
+    public function orderCurrency(): string
+    {
+        return 'IDR';
+    }
+
+    public function paymentAmount(Collection $items, Collection $products): int
+    {
+        return $items->sum(function ($item) use ($products): int {
+            $price = $products[$item->product_id]->usdt_price_amount;
+            if ($price === null) {
+                throw new InvalidCheckout('A cart item has no USDT price.');
+            }
+
+            return (int) $price * (int) $item->quantity;
+        });
+    }
+
+    public function paymentCurrency(): string
+    {
+        return 'USDT';
+    }
+
+    public function expiresAt(?CarbonInterface $requested = null): CarbonInterface
+    {
+        return $requested
+            ?? $this->deadline
+            ?? now()->addMinutes(ManualPaymentSetting::current()?->bscPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES);
+    }
+
+    public function assertReady(Cart $cart, Collection $items, Collection $products): void
+    {
+        $readiness = app(BscReadiness::class)->check();
+        if (! $readiness->isReady()) {
+            throw new InvalidCheckout('BSC payment rail is not ready. '.$readiness->configurationMessage());
+        }
+
+        foreach ($items as $item) {
+            if ($products[$item->product_id]->usdt_price_amount === null) {
+                throw new InvalidCheckout('A cart item has no USDT price.');
+            }
+        }
+    }
+
+    public function postCreationBehavior(): CheckoutPostCreationBehavior
+    {
+        return CheckoutPostCreationBehavior::BscInstructions;
+    }
+}

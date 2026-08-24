@@ -18,6 +18,7 @@ return [
         'rpc_timeout_seconds' => 5.0,
         'rpc_connect_timeout_seconds' => 2.0,
         'ownership_challenge_ttl_minutes' => 10,
+        'max_unique_amount_candidates' => 1000,
     ],
 
     'binance' => [

@@ -354,6 +354,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         match ($behavior) {
 
             CheckoutPostCreationBehavior::BinancePayInstructions,
+            CheckoutPostCreationBehavior::BscInstructions,
             CheckoutPostCreationBehavior::PakasirInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions => null,

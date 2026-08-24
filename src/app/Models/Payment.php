@@ -93,6 +93,21 @@ class Payment extends Model
         return $this->hasOne(ProviderCancellationAttempt::class);
     }
 
+    public function bscDetail()
+    {
+        return $this->hasOne(PaymentBscDetail::class);
+    }
+
+    public function paymentBscDetail()
+    {
+        return $this->bscDetail();
+    }
+
+    public function bscPaymentDetail()
+    {
+        return $this->bscDetail();
+    }
+
     protected function paymentMethodLabel(): Attribute
     {
         return Attribute::make(
