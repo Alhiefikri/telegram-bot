@@ -108,6 +108,16 @@ class Payment extends Model
         return $this->bscDetail();
     }
 
+    public function bscTransferEvidence()
+    {
+        return $this->hasMany(BscPaymentTransferEvidence::class, 'payment_id');
+    }
+
+    public function bscTransferEvidences()
+    {
+        return $this->bscTransferEvidence();
+    }
+
     protected function paymentMethodLabel(): Attribute
     {
         return Attribute::make(

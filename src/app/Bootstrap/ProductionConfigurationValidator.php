@@ -87,5 +87,17 @@ class ProductionConfigurationValidator
         if (((bool) $this->config->get('services.dogfood_timing.enabled') || (bool) $this->config->get('services.dogfood_timing.fake_telegram_outbound')) && ! (bool) $this->config->get('services.dogfood_timing.allow_runtime')) {
             throw new RuntimeException('Dogfood runtime flags are not allowed in production.');
         }
+
+        $bscRpcUrl = (string) $this->config->get('services.bsc.rpc_url', '');
+        if (! blank($bscRpcUrl) && ! str_starts_with($bscRpcUrl, 'https://')) {
+            throw new RuntimeException('BSC_RPC_URL must use HTTPS in production.');
+        }
+        if ((int) $this->config->get('services.bsc.chain_id', 56) !== 56) {
+            throw new RuntimeException('BSC_CHAIN_ID must be 56 in production.');
+        }
+        $bscContract = (string) $this->config->get('services.bsc.usdt_contract', '');
+        if (! blank($bscContract) && preg_match('/^0x[0-9a-fA-F]{40}$/', $bscContract) !== 1) {
+            throw new RuntimeException('BSC_USDT_CONTRACT must be a valid EVM address in production.');
+        }
     }
 }

@@ -33,6 +33,24 @@ class PaymentBscDetail extends Model
 {
     public const STATUS_AWAITING_TRANSFER = 'awaiting_transfer';
 
+    public const STATUS_TX_SUBMITTED = 'tx_submitted';
+
+    public const STATUS_CONFIRMING = 'confirming';
+
+    public const STATUS_CONFIRMED = 'confirmed';
+
+    public const STATUS_NOT_FOUND = 'not_found';
+
+    public const STATUS_MISMATCH = 'mismatch';
+
+    public const STATUS_TRANSACTION_ALREADY_USED = 'transaction_already_used';
+
+    public const STATUS_PROVIDER_ERROR = 'provider_error';
+
+    public const STATUS_MANUAL_REVIEW = 'manual_review';
+
+    public const STATUS_EXPIRED = 'expired';
+
     protected $primaryKey = 'payment_id';
 
     public $incrementing = false;
@@ -69,5 +87,15 @@ class PaymentBscDetail extends Model
     public function receiver(): BelongsTo
     {
         return $this->belongsTo(BscPaymentReceiver::class, 'receiver_id');
+    }
+
+    public function transferEvidence()
+    {
+        return $this->hasMany(BscPaymentTransferEvidence::class, 'payment_id');
+    }
+
+    public function transferEvidences()
+    {
+        return $this->transferEvidence();
     }
 }

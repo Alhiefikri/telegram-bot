@@ -16,6 +16,8 @@ use App\Services\Audit\AuditContext;
 use App\Services\Audit\HttpAuditContext;
 use App\Services\Bsc\BscRpcClient;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscVerificationRpcClientAdapter;
+use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Bsc\BscWalletOwnershipVerifier;
 use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use App\Services\EloquentInventoryLedger;
@@ -63,6 +65,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
         $this->app->bind(BscRpcClientInterface::class, BscRpcClient::class);
+        $this->app->bind(BscVerificationRpcClientInterface::class, function ($app): BscVerificationRpcClientInterface {
+            $client = $app->make(BscRpcClientInterface::class);
+
+            return $client instanceof BscVerificationRpcClientInterface
+                ? $client
+                : new BscVerificationRpcClientAdapter($client);
+        });
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);

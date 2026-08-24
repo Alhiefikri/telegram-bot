@@ -2,11 +2,15 @@
 
 namespace App\Services\Bsc;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Throwable;
 
-final class BscRpcClient implements BscRpcClientInterface
+final class BscRpcClient implements BscVerificationRpcClientInterface
 {
+    public const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef';
+
     private int $requestId = 0;
 
     public function chainId(): int
@@ -74,6 +78,80 @@ final class BscRpcClient implements BscRpcClientInterface
             && str_starts_with(strtolower($result), '0x1626ba7e');
     }
 
+    /** @return array<string, mixed>|null */
+    public function transactionReceipt(string $transactionHash): ?array
+    {
+        $hash = strtolower(trim($transactionHash));
+        if (preg_match('/^0x[0-9a-f]{64}$/', $hash) !== 1) {
+            throw new BscRpcException('BSC transaction hash must be 0x followed by 64 hexadecimal characters.', retryable: false);
+        }
+
+        $result = $this->call('eth_getTransactionReceipt', [$hash]);
+        if ($result === null) {
+            return null;
+        }
+        if (! is_array($result)) {
+            throw new BscRpcException('BSC RPC returned an invalid transaction receipt.');
+        }
+
+        return $result;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function blockByNumber(string|int $blockNumber): ?array
+    {
+        $result = $this->call('eth_getBlockByNumber', [$this->blockParameter($blockNumber), false]);
+        if ($result === null) {
+            return null;
+        }
+        if (! is_array($result)) {
+            throw new BscRpcException('BSC RPC returned an invalid block.');
+        }
+
+        return $result;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function transferLogs(
+        string $contract,
+        string|int $fromBlock,
+        string|int $toBlock,
+        ?string $receiver = null,
+    ): array {
+        $contract = $this->normalizeAddress($contract, 'token contract');
+
+        $fromNumber = $this->numericBlock($fromBlock);
+        $toNumber = $this->numericBlock($toBlock);
+        $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
+        if ($fromNumber === null || $toNumber === null || $fromNumber < 0 || $toNumber < $fromNumber || ($toNumber - $fromNumber + 1) > $maxBlocks) {
+            throw new BscRpcException('BSC log scan range exceeds the configured bounded window.', retryable: false);
+        }
+
+        $topics = [self::TRANSFER_TOPIC];
+        if ($receiver !== null) {
+            $receiver = $this->normalizeAddress($receiver, 'receiving address');
+            $topics[] = null;
+            $topics[] = '0x'.str_pad(substr($receiver, 2), 64, '0', STR_PAD_LEFT);
+        }
+
+        $result = $this->call('eth_getLogs', [[
+            'address' => $contract,
+            'fromBlock' => $this->blockParameter($fromBlock),
+            'toBlock' => $this->blockParameter($toBlock),
+            'topics' => $topics,
+        ]]);
+        if (! is_array($result)) {
+            throw new BscRpcException('BSC RPC returned an invalid Transfer-log result.');
+        }
+
+        $maxLogs = max(1, (int) config('services.bsc.max_scan_logs', 1_000));
+        if (count($result) > $maxLogs) {
+            throw new BscRpcException('BSC Transfer-log result exceeds the configured bounded result window.', retryable: false);
+        }
+
+        return array_values(array_filter($result, static fn (mixed $log): bool => is_array($log)));
+    }
+
     private function call(string $method, array $params = []): mixed
     {
         $rpcUrl = trim((string) config('services.bsc.rpc_url'));
@@ -88,12 +166,17 @@ final class BscRpcClient implements BscRpcClientInterface
                 'method' => $method,
                 'params' => $params,
             ]);
-        } catch (\Throwable $exception) {
-            throw new BscRpcException('BSC RPC request failed.', 0, $exception);
+        } catch (ConnectionException $exception) {
+            throw new BscRpcException('BSC RPC request failed.', retryable: true, previous: $exception);
+        } catch (Throwable $exception) {
+            throw new BscRpcException('BSC RPC request failed.', retryable: false, previous: $exception);
         }
 
         if ($response->failed()) {
-            throw new BscRpcException('BSC RPC returned HTTP '.$response->status().'.');
+            throw new BscRpcException(
+                'BSC RPC returned HTTP '.$response->status().'.',
+                retryable: $response->serverError() || $response->status() === 429,
+            );
         }
 
         $payload = $response->json();
@@ -117,8 +200,66 @@ final class BscRpcClient implements BscRpcClientInterface
     {
         return Http::acceptJson()
             ->asJson()
-            ->timeout((float) config('services.bsc.rpc_timeout_seconds', 5.0))
-            ->connectTimeout((float) config('services.bsc.rpc_connect_timeout_seconds', 2.0));
+            ->timeout(max(1, (int) ceil((float) config('services.bsc.rpc_timeout_seconds', 5.0))))
+            ->connectTimeout(max(1, (int) ceil((float) config('services.bsc.rpc_connect_timeout_seconds', 2.0))))
+            ->retry(
+                max(1, (int) config('services.bsc.rpc_max_attempts', 2)),
+                max(0, (int) config('services.bsc.rpc_retry_delay_ms', 150)),
+                fn (Throwable $exception): bool => $exception instanceof ConnectionException,
+            );
+    }
+
+    private function blockParameter(string|int $blockNumber): string
+    {
+        if (is_int($blockNumber)) {
+            if ($blockNumber < 0) {
+                throw new BscRpcException('BSC block number cannot be negative.', retryable: false);
+            }
+
+            return '0x'.dechex($blockNumber);
+        }
+
+        $value = strtolower(trim($blockNumber));
+        if (in_array($value, ['latest', 'pending', 'earliest', 'safe', 'finalized'], true)) {
+            return $value;
+        }
+        if (preg_match('/^0x[0-9a-f]+$/', $value) !== 1) {
+            throw new BscRpcException('BSC block number is invalid.', retryable: false);
+        }
+
+        return $value;
+    }
+
+    private function numericBlock(string|int $blockNumber): ?int
+    {
+        if (is_int($blockNumber)) {
+            return $blockNumber >= 0 ? $blockNumber : null;
+        }
+
+        $value = strtolower(trim($blockNumber));
+        if (preg_match('/^0x[0-9a-f]+$/', $value) !== 1) {
+            return null;
+        }
+
+        $hex = ltrim(substr($value, 2), '0');
+        if ($hex === '') {
+            return 0;
+        }
+        if (strlen($hex) > 16) {
+            return null;
+        }
+
+        return hexdec($hex);
+    }
+
+    private function normalizeAddress(string $address, string $label): string
+    {
+        $normalized = strtolower(trim($address));
+        if (preg_match('/^0x[0-9a-f]{40}$/', $normalized) !== 1) {
+            throw new BscRpcException('BSC '.$label.' is not a valid EVM address.', retryable: false);
+        }
+
+        return $normalized;
     }
 
     private function hexQuantityToInt(string $value): int

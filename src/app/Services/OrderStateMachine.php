@@ -204,6 +204,17 @@ class OrderStateMachine implements OrderLifecycle
             );
         }
 
+        if ($order->payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
+            && $payment->method === 'USDT_BEP20'
+            && $payment->status === PaymentStatus::Pending
+            && $payment->bscDetail()->whereNotNull('verification_grace_until')->where('verification_grace_until', '>', now())->exists())) {
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $order->payments->first(),
+                newlyApplied: false,
+            );
+        }
+
         return $this->releasePendingByOrderId($order->id, OrderStatus::Expired, PaymentStatus::Expired, true);
     }
 
@@ -413,6 +424,14 @@ class OrderStateMachine implements OrderLifecycle
 
         foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
             $payment->update(['status' => $paymentStatus]);
+            if ($payment->method === 'USDT_BEP20') {
+                $payment->bscDetail()->update([
+                    'verification_status' => $orderStatus === OrderStatus::Expired
+                        ? 'expired'
+                        : 'manual_review',
+                    'last_verified_at' => now(),
+                ]);
+            }
             $this->providerCancellationAttempts()->schedule($payment);
         }
         $order->update([
