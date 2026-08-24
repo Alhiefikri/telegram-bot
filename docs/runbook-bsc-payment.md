@@ -8,12 +8,16 @@ Keep BSC disabled until the database configuration and receiving address are rea
 
 ```env
 BSC_RPC_URL=https://provider.example/
+BSC_INDEXED_SOURCE=
 BSC_CHAIN_ID=56
 BSC_USDT_CONTRACT=0x55d398326f99059ff775485246999027b3197955
 BSC_USDT_DECIMALS=18
+BSC_READINESS_CACHE_SECONDS=60
 ```
 
 RPC credentials, if the provider requires them, remain server-side in the URL/secret environment and must never be placed in a Payment, audit log, Telegram message, browser response, or release artifact. Receiving addresses are database records, not environment variables, and are never hardcoded into the application.
+
+Readiness performs a bounded `eth_getLogs` capability probe for automatic transfer scanning. Set `BSC_INDEXED_SOURCE` only when the configured reconciliation deployment provides an equivalent indexed transfer source; otherwise an RPC that rejects `eth_getLogs` keeps BSC unavailable. The readiness result is shared for the configured short TTL and invalidated after committed BSC setting or receiver mutations.
 
 The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verification` worker. Do not add a second BSC worker or supervisor process.
 

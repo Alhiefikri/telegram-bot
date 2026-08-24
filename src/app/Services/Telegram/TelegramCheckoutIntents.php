@@ -3,7 +3,6 @@
 namespace App\Services\Telegram;
 
 use App\Exceptions\TelegramOutboundPreSendException;
-use App\Models\BscPaymentReceiver;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -37,6 +36,7 @@ class TelegramCheckoutIntents
         private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private KlikQrisQrisImage $klikQrisImages,
         private PaymentProviderResolver $providerResolver,
+        private BscReadiness $bscReadiness,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): array
@@ -142,19 +142,7 @@ class TelegramCheckoutIntents
 
     public function bscRailSelectable(): bool
     {
-        $setting = ManualPaymentSetting::current();
-        $contract = strtolower(trim((string) config('services.bsc.usdt_contract')));
-
-        return (bool) $setting?->bsc_payment_enabled
-            && filled(config('services.bsc.rpc_url'))
-            && (int) config('services.bsc.chain_id', 56) === 56
-            && $contract === BscReadiness::APPROVED_USDT_CONTRACT
-            && BscPaymentReceiver::query()
-                ->activeVerified()
-                ->where('chain_id', 56)
-                ->where('token_contract', $contract)
-                ->where('token_decimals', (int) config('services.bsc.expected_token_decimals', 18))
-                ->exists();
+        return $this->bscReadiness->check()->isReady();
     }
 
     public function binanceRailSelectable(): bool

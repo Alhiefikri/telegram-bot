@@ -4,7 +4,6 @@ namespace App\Storefront;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Models\BscPaymentReceiver;
 use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -130,19 +129,29 @@ class StorefrontProductPresenter
             ),
         ];
 
-        if (($this->binancePayEnabled() || $this->bscRailAvailable())
-            && $product->usdt_price_amount !== null) {
+        if ($product->usdt_price_amount === null) {
+            return $choices;
+        }
+
+        $binancePayAvailable = $this->binancePayEnabled();
+        $bscAvailable = $this->bscRailAvailable();
+
+        if ($binancePayAvailable || $bscAvailable) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
                 label: 'Bayar dengan Binance',
-                description: 'Pilih Binance Pay ID atau USDT BEP20 (BSC) pada langkah berikutnya.',
+                description: match (true) {
+                    $binancePayAvailable && $bscAvailable => 'Pilih Binance Pay ID atau USDT BEP20 (BSC) pada langkah berikutnya.',
+                    $binancePayAvailable => 'Checkout dengan Binance Pay ID pada langkah berikutnya.',
+                    default => 'Checkout dengan USDT BEP20 (BSC) pada langkah berikutnya.',
+                },
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,
                 productId: (int) $product->id,
             );
 
-            if ($this->binancePayEnabled()) {
+            if ($binancePayAvailable) {
                 $choices['website_binance_pay_id'] = new StorefrontProductCheckoutChoice(
                     key: 'website_binance_pay_id',
                     label: 'Pay with Binance Pay ID',
@@ -154,7 +163,7 @@ class StorefrontProductPresenter
                 );
             }
 
-            if ($this->bscRailAvailable()) {
+            if ($bscAvailable) {
                 $choices['website_usdt_bep20'] = new StorefrontProductCheckoutChoice(
                     key: 'website_usdt_bep20',
                     label: 'Pay with USDT BEP20 (BSC)',
@@ -203,19 +212,13 @@ class StorefrontProductPresenter
         }
 
         $setting = ManualPaymentSetting::current();
-        $contract = strtolower(trim((string) config('services.bsc.usdt_contract')));
-        $configured = (bool) $setting?->bsc_payment_enabled
-            && filled(config('services.bsc.rpc_url'))
-            && (int) config('services.bsc.chain_id', 56) === 56
-            && $contract === BscReadiness::APPROVED_USDT_CONTRACT
-            && BscPaymentReceiver::query()
-                ->activeVerified()
-                ->where('chain_id', 56)
-                ->where('token_contract', $contract)
-                ->where('token_decimals', (int) config('services.bsc.expected_token_decimals', 18))
-                ->exists();
+        if (! (bool) $setting?->bsc_payment_enabled) {
+            $this->bscRailAvailable = false;
 
-        $this->bscRailAvailable = $configured && $this->bscReadiness->check($setting)->isReady();
+            return $this->bscRailAvailable;
+        }
+
+        $this->bscRailAvailable = $this->bscReadiness->check($setting)->isReady();
 
         return $this->bscRailAvailable;
     }

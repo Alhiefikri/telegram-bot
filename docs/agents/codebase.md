@@ -298,7 +298,7 @@ USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Sma
 
 `BscConfirmationGrace` is the expiry guard. It accepts a grace timestamp only when matching successful evidence is stored with an inclusion block between Payment creation and the original deadline. `orders:expire-pending` therefore cannot be bypassed by a fabricated future timestamp. If a terminal Order later receives an exact transfer, BSC records evidence, marks the financially valid Payment paid through `OrderLifecycle`, creates `ManualFulfillmentReview`, and leaves the Order terminal.
 
-`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, and active verified receiver count. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
+`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, bounded `eth_getLogs` support (or an explicitly configured indexed source), and active verified receiver count. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
 
 ## 6. Order lifecycle dan inventory invariant
 

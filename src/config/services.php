@@ -12,6 +12,8 @@ return [
         // The receiver pool is database-managed. These are the only BSC
         // deployment values that belong in environment configuration.
         'rpc_url' => env('BSC_RPC_URL'),
+        'indexed_source' => env('BSC_INDEXED_SOURCE'),
+        'indexer_url' => env('BSC_INDEXER_URL'),
         'chain_id' => (int) env('BSC_CHAIN_ID', 56),
         'usdt_contract' => env('BSC_USDT_CONTRACT'),
         'explorer_base_url' => env('BSC_EXPLORER_BASE_URL', 'https://bscscan.com'),
@@ -29,6 +31,7 @@ return [
         'pending_backlog_alert_threshold' => (int) env('BSC_PENDING_BACKLOG_ALERT_THRESHOLD', 50),
         'late_payment_lookback_hours' => (int) env('BSC_LATE_PAYMENT_LOOKBACK_HOURS', 72),
         'owner_alert_cooldown_seconds' => (int) env('BSC_OWNER_ALERT_COOLDOWN_SECONDS', 900),
+        'readiness_cache_seconds' => (int) env('BSC_READINESS_CACHE_SECONDS', 60),
         'ownership_challenge_ttl_minutes' => 10,
         'max_unique_amount_candidates' => 1000,
     ],
