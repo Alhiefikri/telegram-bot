@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\BscPaymentTransferEvidence;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -36,10 +37,13 @@ final class BscPaymentVerification
 
     public function status(Payment $payment): BscVerificationStatus
     {
+        $payment->loadMissing('order');
         $detail = $payment->bscDetail()->first();
         $status = (string) ($detail?->verification_status ?? PaymentBscDetail::STATUS_AWAITING_TRANSFER);
         $outcome = $payment->status === PaymentStatus::Paid
-            ? BscVerificationOutcome::Confirmed
+            ? (in_array($payment->order?->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true)
+                ? BscVerificationOutcome::ManualReview
+                : BscVerificationOutcome::Confirmed)
             : (BscVerificationOutcome::tryFrom($status) ?? BscVerificationOutcome::NotConfigured);
 
         return new BscVerificationStatus(
@@ -150,6 +154,21 @@ final class BscPaymentVerification
                 ->lockForUpdate()
                 ->first();
             if ($existingEvidence !== null && (string) $existingEvidence->payment_id !== (string) $payment->id) {
+                $detail->update([
+                    'verification_status' => PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+                    'last_verified_at' => now(),
+                    'current_tx_hash' => $normalized,
+                    'evidence_payload' => [
+                        'reason' => 'transaction_already_used',
+                        'tx_hash' => $normalized,
+                    ],
+                ]);
+                $this->ensureManualFulfillmentReview(
+                    payment: $payment,
+                    reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                    providerReference: $normalized,
+                );
+
                 return BscVerificationSubmissionResult::of(
                     BscVerificationSubmissionOutcome::TransactionAlreadyUsed,
                     $payment->fresh(),
@@ -429,11 +448,17 @@ final class BscPaymentVerification
 
         try {
             if ($this->rpc->chainId() !== (int) $detail->chain_id || (int) $detail->chain_id !== 56) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                    'reason' => 'late_transfer_wrong_chain',
-                ]);
-
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                    hash: $hash,
+                    evidence: null,
+                    metadata: ['reason' => 'late_transfer_wrong_chain'],
+                );
             }
 
             $receipt = $this->rpc->transactionReceipt($hash);
@@ -450,33 +475,49 @@ final class BscPaymentVerification
             );
             if ($inspection->exactTransfers === []) {
                 $evidence = $inspection->transfers[0] ?? null;
-                if ($evidence !== null) {
-                    $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion);
-                }
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                    'reason' => 'late_transfer_did_not_match_payment',
-                ], $evidence);
 
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: ['reason' => 'late_transfer_did_not_match_payment'],
+                );
             }
 
             if (count($inspection->exactTransfers) !== 1) {
                 $evidence = $inspection->exactTransfers[0];
-                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                    'reason' => 'late_transfer_multiple_matching_logs',
-                ], $evidence);
 
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: ['reason' => 'late_transfer_multiple_matching_logs'],
+                );
             }
 
             $evidence = $inspection->exactTransfers[0];
             if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED, $submissionVersion, $hash, [
-                    'reason' => 'late_transaction_already_used',
-                ], $evidence);
-
-                return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::TransactionAlreadyUsed,
+                    detailStatus: PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+                    reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: ['reason' => 'late_transaction_already_used'],
+                );
             }
 
             $block = $this->rpc->blockByNumber($evidence->blockNumber);
@@ -493,24 +534,36 @@ final class BscPaymentVerification
             if ($blockNumber !== $evidence->blockNumber
                 || $latestNumber < $blockNumber
                 || ($receiptBlockHash !== null && $blockHash !== null && ! hash_equals($receiptBlockHash, $blockHash))) {
-                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                    'reason' => 'late_transfer_reorg_or_invalid_block',
-                ], $evidence);
-
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: ['reason' => 'late_transfer_reorg_or_invalid_block'],
+                );
             }
 
             if ($payment->created_at !== null
                 && ($blockTimestamp->timestamp < $payment->created_at->timestamp || $blockTimestamp->isFuture())) {
-                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                    'reason' => $blockTimestamp->isFuture()
-                        ? 'late_transfer_future_block'
-                        : 'late_transfer_before_payment_window',
-                ], $evidence);
-
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: [
+                        'reason' => $blockTimestamp->isFuture()
+                            ? 'late_transfer_future_block'
+                            : 'late_transfer_before_payment_window',
+                    ],
+                );
             }
 
             $evidence = $evidence
@@ -571,49 +624,82 @@ final class BscPaymentVerification
         );
 
         if (! $inspection->successfulReceipt()) {
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion, $hash, [
-                'reason' => $inspection->receiptState === 'failed' ? 'failed_receipt' : 'invalid_receipt',
-                'receipt_status' => $inspection->receiptState,
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::Mismatch, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::Mismatch,
+                detailStatus: PaymentBscDetail::STATUS_MISMATCH,
+                reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
+                hash: $hash,
+                evidence: null,
+                metadata: [
+                    'reason' => $inspection->receiptState === 'failed' ? 'failed_receipt' : 'invalid_receipt',
+                    'receipt_status' => $inspection->receiptState,
+                ],
+            );
         }
 
         if ($inspection->transfers === []) {
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion, $hash, [
-                'reason' => 'no_transfer_log',
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::Mismatch, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::Mismatch,
+                detailStatus: PaymentBscDetail::STATUS_MISMATCH,
+                reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
+                hash: $hash,
+                evidence: null,
+                metadata: ['reason' => 'no_transfer_log'],
+            );
         }
 
         if ($inspection->exactTransfers === []) {
             $evidence = $inspection->transfers[0];
             if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED, $submissionVersion, $hash, [
-                    'reason' => 'transaction_already_used',
-                ]);
-
-                return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::TransactionAlreadyUsed,
+                    detailStatus: PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+                    reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                    hash: $hash,
+                    evidence: $evidence,
+                    metadata: ['reason' => 'transaction_already_used'],
+                );
             }
 
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion, $hash, [
-                'reason' => 'transfer_predicate_mismatch',
-            ], $evidence);
-
-            return BscVerificationResult::of(BscVerificationOutcome::Mismatch, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::Mismatch,
+                detailStatus: PaymentBscDetail::STATUS_MISMATCH,
+                reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
+                hash: $hash,
+                evidence: $evidence,
+                metadata: ['reason' => 'transfer_predicate_mismatch'],
+            );
         }
 
         if (count($inspection->exactTransfers) !== 1) {
             $evidence = $inspection->exactTransfers[0];
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                'reason' => 'multiple_matching_transfer_logs',
-                'matching_log_count' => count($inspection->exactTransfers),
-            ], $evidence);
 
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                hash: $hash,
+                evidence: $evidence,
+                metadata: [
+                    'reason' => 'multiple_matching_transfer_logs',
+                    'matching_log_count' => count($inspection->exactTransfers),
+                ],
+            );
         }
 
         return $this->evaluateExactTransfer(
@@ -662,14 +748,22 @@ final class BscPaymentVerification
         }
 
         if (count($hashes) > 1) {
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, null, [
-                'reason' => 'multiple_transfer_candidates',
-                'candidate_count' => count($hashes),
-                'scanned_from_block' => $fromBlock,
-                'scanned_to_block' => $latestNumber,
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                hash: null,
+                evidence: null,
+                metadata: [
+                    'reason' => 'multiple_transfer_candidates',
+                    'candidate_count' => count($hashes),
+                    'scanned_from_block' => $fromBlock,
+                    'scanned_to_block' => $latestNumber,
+                ],
+            );
         }
 
         $hash = (string) $hashes[0];
@@ -810,14 +904,22 @@ final class BscPaymentVerification
             }
 
             if (count($hashes) > 1) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, null, [
-                    'reason' => 'multiple_late_transfer_candidates',
-                    'candidate_count' => count($hashes),
-                    'scanned_from_block' => $fromBlock,
-                    'scanned_to_block' => $latestNumber,
-                ]);
-
-                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, retryable: false);
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                    hash: null,
+                    evidence: null,
+                    metadata: [
+                        'reason' => 'multiple_late_transfer_candidates',
+                        'candidate_count' => count($hashes),
+                        'scanned_from_block' => $fromBlock,
+                        'scanned_to_block' => $latestNumber,
+                    ],
+                );
             }
 
             return $this->verifyLateCandidate($payment, $detail, (string) $hashes[0], $submissionVersion);
@@ -855,23 +957,33 @@ final class BscPaymentVerification
             throw new BscRpcException('BSC RPC returned incomplete block facts.');
         }
         if ($blockNumber !== $evidence->blockNumber || $latestNumber < $blockNumber) {
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $evidence->txHash, [
-                'reason' => 'reorg_or_invalid_block_number',
-            ], $evidence);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: ['reason' => 'reorg_or_invalid_block_number'],
+            );
         }
 
         $receiptBlockHash = BscTransactionHash::normalize((string) ($receipt['blockHash'] ?? ''));
         $blockHash = BscTransactionHash::normalize((string) ($block['hash'] ?? ''));
         if ($receiptBlockHash !== null && $blockHash !== null && ! hash_equals($receiptBlockHash, $blockHash)) {
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $evidence->txHash, [
-                'reason' => 'receipt_block_hash_changed',
-            ], $evidence);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: ['reason' => 'receipt_block_hash_changed'],
+            );
         }
 
         $evidence = $evidence
@@ -886,13 +998,6 @@ final class BscPaymentVerification
         if ($blockTimestamp->timestamp < $createdAt->timestamp
             || $blockTimestamp->timestamp > $deadline->timestamp
             || $blockTimestamp->isFuture()) {
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $evidence->txHash, [
-                'reason' => $blockTimestamp->isFuture()
-                    ? 'future_block_timestamp'
-                    : ($blockTimestamp->timestamp > $deadline->timestamp ? 'late_transfer' : 'transfer_before_payment_window'),
-            ], $evidence);
-
             if ($blockTimestamp->timestamp > $deadline->timestamp
                 && $payment->status === PaymentStatus::Pending
                 && $payment->order?->order_status === OrderStatus::PendingPayment) {
@@ -905,7 +1010,21 @@ final class BscPaymentVerification
                 return $this->recordLatePayment($payment, $evidence, $submissionVersion);
             }
 
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: [
+                    'reason' => $blockTimestamp->isFuture()
+                        ? 'future_block_timestamp'
+                        : ($blockTimestamp->timestamp > $deadline->timestamp ? 'late_transfer' : 'transfer_before_payment_window'),
+                ],
+            );
         }
 
         $graceUntil = $detail->verification_grace_until;
@@ -927,12 +1046,17 @@ final class BscPaymentVerification
         }
 
         if ($graceUntil !== null && $graceUntil->isPast() && $evidence->confirmations < $this->minimumConfirmations()) {
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $evidence->txHash, [
-                'reason' => 'confirmation_grace_expired',
-            ], $evidence);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: ['reason' => 'confirmation_grace_expired'],
+            );
         }
 
         $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
@@ -962,11 +1086,17 @@ final class BscPaymentVerification
         if ($graceUntil !== null && $graceUntil->isPast() && $blockTimestamp->timestamp <= $deadline->timestamp && $payment->status === PaymentStatus::Pending) {
             // A transfer that was included before expiry is safe to claim only
             // while the short confirmation grace remains open.
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $evidence->txHash, [
-                'reason' => 'confirmation_grace_expired',
-            ], $evidence);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: ['reason' => 'confirmation_grace_expired'],
+            );
         }
 
         return $this->claim($payment, $detail, $evidence, $submissionVersion);
@@ -1052,6 +1182,18 @@ final class BscPaymentVerification
                 // terminal, marks the financially valid Payment paid, and
                 // creates the existing ManualFulfillmentReview boundary.
                 $this->orders->applyPaymentPaid($locked);
+                $review = ManualFulfillmentReview::query()
+                    ->where('payment_id', $locked->id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($review !== null
+                    && $review->state === ManualFulfillmentReview::STATE_PENDING
+                    && $review->reason !== ManualFulfillmentReview::REASON_LATE_PAYMENT) {
+                    $review->update([
+                        'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+                        'provider_reference' => $evidence->txHash,
+                    ]);
+                }
 
                 $receivedAt = now();
                 PaymentEvent::query()->firstOrCreate(
@@ -1082,6 +1224,12 @@ final class BscPaymentVerification
             if (! $this->isUniqueViolation($exception)) {
                 throw $exception;
             }
+
+            $this->ensureManualFulfillmentReview(
+                payment: $payment,
+                reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                providerReference: $evidence->txHash,
+            );
 
             return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
         }
@@ -1126,6 +1274,11 @@ final class BscPaymentVerification
                                 ...$evidence->sanitizedPayload(),
                             ],
                         ]);
+                        $this->ensureManualFulfillmentReview(
+                            payment: $locked,
+                            reason: ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                            providerReference: $evidence->txHash,
+                        );
 
                         return BscVerificationOutcome::ManualReview;
                     }
@@ -1146,6 +1299,11 @@ final class BscPaymentVerification
                             'tx_hash' => $evidence->txHash,
                         ],
                     ]);
+                    $this->ensureManualFulfillmentReview(
+                        payment: $locked,
+                        reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                        providerReference: $evidence->txHash,
+                    );
 
                     return BscVerificationOutcome::TransactionAlreadyUsed;
                 }
@@ -1205,6 +1363,12 @@ final class BscPaymentVerification
                 return BscVerificationResult::of(BscVerificationOutcome::AlreadyPaid, $evidence, retryable: false);
             }
 
+            $this->ensureManualFulfillmentReview(
+                payment: $payment,
+                reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                providerReference: $evidence->txHash,
+            );
+
             return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
         }
 
@@ -1237,12 +1401,92 @@ final class BscPaymentVerification
         ?BscTransferEvidence $evidence,
         string $reason,
     ): BscVerificationResult {
-        if ($evidence !== null) {
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion);
-        }
-        $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MISMATCH, $submissionVersion, $hash, ['reason' => $reason], $evidence);
+        return $this->flagForManualReview(
+            payment: $payment,
+            detail: $detail,
+            submissionVersion: $submissionVersion,
+            outcome: BscVerificationOutcome::Mismatch,
+            detailStatus: PaymentBscDetail::STATUS_MISMATCH,
+            reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
+            hash: $hash,
+            evidence: $evidence,
+            metadata: ['reason' => $reason],
+        );
+    }
 
-        return BscVerificationResult::of(BscVerificationOutcome::Mismatch, $evidence, retryable: false);
+    /**
+     * Persist the BSC evidence state and create the one review task that an
+     * owner can act on. The payment-level unique key makes retries and
+     * reconciliation idempotent while the submission-version predicate keeps
+     * stale verification work from creating a review for a newer hash.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function flagForManualReview(
+        Payment $payment,
+        PaymentBscDetail $detail,
+        int $submissionVersion,
+        BscVerificationOutcome $outcome,
+        string $detailStatus,
+        string $reason,
+        ?string $hash,
+        ?BscTransferEvidence $evidence,
+        array $metadata = [],
+    ): BscVerificationResult {
+        if ($evidence !== null) {
+            $this->persistEvidence($payment, $evidence, $detailStatus, $submissionVersion);
+        }
+
+        $persisted = $this->persistStatus(
+            payment: $payment,
+            detail: $detail,
+            status: $detailStatus,
+            submissionVersion: $submissionVersion,
+            hash: $hash,
+            metadata: $metadata,
+            evidence: $evidence,
+        );
+        if ($persisted) {
+            $this->ensureManualFulfillmentReview(
+                payment: $payment,
+                reason: $reason,
+                providerReference: $evidence?->txHash ?? $hash,
+            );
+        }
+
+        return BscVerificationResult::of($outcome, $evidence, retryable: false);
+    }
+
+    private function ensureManualFulfillmentReview(
+        Payment $payment,
+        string $reason,
+        ?string $providerReference = null,
+    ): ?ManualFulfillmentReview {
+        $payment->loadMissing('order');
+        $providerReference ??= $payment->provider_reference ?: $payment->merchant_ref;
+
+        try {
+            return DB::transaction(
+                fn (): ManualFulfillmentReview => ManualFulfillmentReview::query()->firstOrCreate(
+                    ['payment_id' => $payment->id],
+                    [
+                        'order_id' => $payment->order_id,
+                        'amount' => $payment->provider_total_payment ?? $payment->amount,
+                        'currency' => $payment->currency,
+                        'reason' => $reason,
+                        'state' => ManualFulfillmentReview::STATE_PENDING,
+                        'provider_reference' => $providerReference,
+                    ],
+                ),
+                attempts: 5,
+            );
+        } catch (QueryException $exception) {
+            if (! $this->isUniqueViolation($exception)) {
+                throw $exception;
+            }
+
+            return ManualFulfillmentReview::query()->where('payment_id', $payment->id)->first();
+        }
     }
 
     private function evidenceBelongsToAnotherPayment(Payment $payment, BscTransferEvidence $evidence): bool

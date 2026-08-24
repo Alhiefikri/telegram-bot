@@ -12,7 +12,7 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Manual Fulfillment Review</p>
             <h1 class="mt-1 text-2xl font-black">{{ $review->order->invoice_number }}</h1>
-            <x-admin-dashboard.notice tone="warning" class="mt-4 rounded-xl text-sm font-bold">Late Payment tercatat paid, tetapi fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
+            <x-admin-dashboard.notice tone="warning" class="mt-4 rounded-xl text-sm font-bold">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
             <dl class="mt-5 grid gap-3 text-sm font-semibold sm:grid-cols-2">
                 <div><dt class="text-brand-muted">Status review</dt><dd class="font-black">{{ $review->state }}</dd></div>
                 <div><dt class="text-brand-muted">Alasan</dt><dd class="font-black">{{ $review->reason }}</dd></div>

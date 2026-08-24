@@ -50,17 +50,31 @@ class ManualFulfillmentResolutionService
     {
         $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
         $payment = Payment::query()->lockForUpdate()->findOrFail($review->payment_id);
-        if ($payment->status !== PaymentStatus::Paid || $order->payment_status !== PaymentStatus::Paid) {
-            throw new InvalidOrderTransition('Only paid late-payment reviews can be fulfilled.');
+        $isPendingBscReview = $payment->status === PaymentStatus::Pending
+            && $order->order_status === OrderStatus::PendingPayment
+            && strtolower((string) $payment->provider) === 'manual'
+            && strtoupper((string) $payment->method) === 'USDT_BEP20';
+
+        if ($isPendingBscReview) {
+            $completion = $this->orders->applyManualCompletion($order);
+            if (! $completion->newlyApplied) {
+                throw new InvalidOrderTransition('The BSC payment review could not be completed from its current state.');
+            }
+        } else {
+            if ($payment->status !== PaymentStatus::Paid || $order->payment_status !== PaymentStatus::Paid) {
+                throw new InvalidOrderTransition('Only paid manual fulfillment reviews can be fulfilled.');
+            }
+
+            [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
+            $this->inventory->recordLatePaymentSales($order, $items, $products, $movements);
+            foreach ($items as $item) {
+                $product = $products[$item->product_id] ?? throw new InsufficientStock('Ordered product is no longer available.');
+                $this->credentials->allocate($item, $product, $item->quantity);
+            }
+            $order->update(['order_status' => OrderStatus::Completed]);
         }
 
-        [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
-        $this->inventory->recordLatePaymentSales($order, $items, $products, $movements);
-        foreach ($items as $item) {
-            $product = $products[$item->product_id] ?? throw new InsufficientStock('Ordered product is no longer available.');
-            $this->credentials->allocate($item, $product, $item->quantity);
-        }
-        $order->update(['order_status' => OrderStatus::Completed]);
+        $order->refresh();
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
         $this->audit->log('manual_fulfillment_review.fulfilled', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'order_status' => OrderStatus::Completed->value], $actor, $ip);
         $effect = $this->outboundEffects->recordReceipt($order);
@@ -94,6 +108,15 @@ class ManualFulfillmentResolutionService
 
     private function reject(ManualFulfillmentReview $review, User $actor, string $reason, ?string $ip): ManualFulfillmentReview
     {
+        $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
+        $payment = Payment::query()->lockForUpdate()->findOrFail($review->payment_id);
+        if ($payment->status === PaymentStatus::Pending
+            && $order->order_status === OrderStatus::PendingPayment
+            && strtolower((string) $payment->provider) === 'manual'
+            && strtoupper((string) $payment->method) === 'USDT_BEP20') {
+            $this->orders->applyPendingCancellation($order);
+        }
+
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_REJECTED, $actor, $reason);
         $this->audit->log('manual_fulfillment_review.rejected', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason], $actor, $ip);
 

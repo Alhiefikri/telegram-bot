@@ -12,7 +12,7 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Antrean operasional</p>
             <h1 class="mt-1 text-2xl font-black">Manual Fulfillment Review</h1>
-            <p class="mt-2 text-sm font-semibold text-brand-muted">Late Payment tetap tercatat paid. Tidak ada stok atau kredensial yang dikirim otomatis dari antrean ini. Riwayat resolusi juga ditampilkan.</p>
+            <p class="mt-2 text-sm font-semibold text-brand-muted">BSC evidence yang ambigu atau Late Payment tidak diselesaikan otomatis. Tidak ada stok atau kredensial yang dikirim dari antrean ini sampai ada keputusan Owner.</p>
 
             <div class="mt-5 space-y-3">
                 @forelse ($reviews as $review)
@@ -26,7 +26,7 @@
                         </div>
                     </a>
                 @empty
-                    <x-admin-dashboard.empty-state title="Tidak ada Late Payment yang menunggu review." />
+                    <x-admin-dashboard.empty-state title="Tidak ada review yang menunggu keputusan." />
                 @endforelse
             </div>
 

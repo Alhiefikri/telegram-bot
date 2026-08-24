@@ -24,11 +24,22 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_LATE_PAYMENT = 'late_payment';
 
+    public const REASON_BSC_MISMATCH = 'bsc_mismatch';
+
+    public const REASON_BSC_TRANSACTION_ALREADY_USED = 'bsc_transaction_already_used';
+
+    public const REASON_BSC_AMBIGUOUS = 'bsc_ambiguous';
+
+    public const REASON_BSC_MANUAL_REVIEW = 'bsc_manual_review';
+
+    public function scopeOpen(Builder $query): void
+    {
+        $query->whereIn('state', [self::STATE_PENDING, self::STATE_REFUND_UNCERTAIN]);
+    }
+
     public function scopeOpenLatePayment(Builder $query): void
     {
-        $query
-            ->whereIn('state', [self::STATE_PENDING, self::STATE_REFUND_UNCERTAIN])
-            ->where('reason', self::REASON_LATE_PAYMENT);
+        $query->open()->where('reason', self::REASON_LATE_PAYMENT);
     }
 
     protected function casts(): array
