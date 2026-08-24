@@ -30,6 +30,7 @@ final class CheckoutInstructionDeliveryPipeline
         TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
         TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
         TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+        TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
     ];
 
     public function __construct(
@@ -121,7 +122,10 @@ final class CheckoutInstructionDeliveryPipeline
 
             $this->synchronizeSentProjection($finalized, $messageId, $finalized->sent_at ?? now());
 
-            if ($claimed->effect_type === TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT) {
+            if (in_array($claimed->effect_type, [
+                TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+            ], true)) {
                 $terminalOrder = $order->fresh(['payments']);
                 if (in_array($terminalOrder->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)) {
                     DeleteBuyerBinanceCheckoutInstruction::dispatch($terminalOrder->id, now()->toISOString())
@@ -170,6 +174,11 @@ final class CheckoutInstructionDeliveryPipeline
                 ->where('method', 'BINANCE_PAY_ID')
                 ->latest('created_at')
                 ->first(),
+            TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => $order->payments()
+                ->where('provider', PaymentProvider::MANUAL)
+                ->where('method', 'USDT_BEP20')
+                ->latest('created_at')
+                ->first(),
             default => null,
         };
     }
@@ -201,6 +210,12 @@ final class CheckoutInstructionDeliveryPipeline
                 $payment,
                 $order->customer ?? throw new RuntimeException('Checkout customer is missing.'),
             ),
+            TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => $checkoutIntents->sendBscPaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+                $payment,
+                $order->customer ?? throw new RuntimeException('Checkout customer is missing.'),
+            ),
             default => throw new RuntimeException('Unsupported Telegram checkout effect type.'),
         };
     }
@@ -212,6 +227,7 @@ final class CheckoutInstructionDeliveryPipeline
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => 'klikqris_payment_instructions',
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => 'pakasir_payment_instructions',
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance_payment_instructions',
+            TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc_payment_instructions',
             default => 'checkout_payment_instructions',
         };
     }
@@ -223,6 +239,7 @@ final class CheckoutInstructionDeliveryPipeline
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => PaymentProvider::KLIKQRIS,
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => PaymentProvider::PAKASIR,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance',
+            TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc',
             default => 'unknown',
         };
     }

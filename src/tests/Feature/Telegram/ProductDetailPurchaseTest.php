@@ -591,7 +591,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Pay with Binance · 2.5 USDT', (string) $binance['text']);
 
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(318032, 'binance-pay', 'detail:pay:binance:'.$product->id.':'.$state['interactionToken'], [], 318031, 'private', 88006))->assertOk();
+        $this->chooseBinancePayId($customer, $product, $state, 318032, 88006);
         $this->postTelegramWebhook($this->callbackUpdate(318033, 'binance-duplicate', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318031, 'private', 88006))->assertOk();
 
         $this->assertSame(1, Cart::count(), 'cart count');
@@ -895,15 +895,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
         $product->forceFill(['usdt_price_amount' => 3_000_000])->save();
-        $this->postTelegramWebhook($this->callbackUpdate(
-            3180661,
-            'binance-after-usdt-change',
-            'detail:pay:binance:'.$product->id.':'.$state['interactionToken'],
-            [],
-            318066,
-            'private',
-            88066,
-        ))->assertOk();
+        $this->chooseBinancePayId($customer, $product, $state, 3180661, 88066);
 
         $payment = Payment::query()->sole();
         $this->assertSame('BINANCE_PAY_ID', $payment->method);
@@ -1043,5 +1035,46 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
     private function lastMessageText(string $productName): string
     {
         return (string) $this->lastDetailMessage($productName)['text'];
+    }
+
+    /** @param array<string, mixed> $state */
+    private function chooseBinancePayId(Customer $customer, Product $product, array $state, int $updateId, int $detailMessageId): string
+    {
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId,
+            'binance-selector-'.$updateId,
+            'detail:pay:binance:'.$product->id.':'.$state['interactionToken'],
+            [],
+            $customer->telegram_id,
+            'private',
+            $detailMessageId,
+        ))->assertOk();
+
+        $record = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Binance'))
+            ->last();
+        $this->assertNotNull($record);
+        $data = $record[0]->data();
+        $markup = $data['reply_markup'] ?? [];
+        if (is_string($markup)) {
+            $markup = json_decode($markup, true);
+        }
+        $callback = collect($markup['inline_keyboard'] ?? [])
+            ->flatten(1)
+            ->pluck('callback_data')
+            ->first(fn ($value): bool => is_string($value) && str_contains($value, ':binance_pay_id:'));
+        $this->assertIsString($callback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId + 1,
+            'binance-rail-'.$updateId,
+            $callback,
+            [],
+            $customer->telegram_id,
+            'private',
+            123457,
+        ))->assertOk();
+
+        return $callback;
     }
 }

@@ -2,11 +2,15 @@
 
 namespace App\Storefront;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\Bsc\BscPaymentVerification;
+use App\Services\Bsc\BscVerificationOutcome;
+use App\Services\Bsc\BscVerificationStatus;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
@@ -33,6 +37,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly OrderLifecycle $orders,
         private readonly StorefrontShopPaymentRefreshCoordinator $coordinator,
         private readonly BinancePaymentVerification $verification,
+        private readonly BscPaymentVerification $bscVerification,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
@@ -70,6 +75,47 @@ class StorefrontShopPaymentStatusRefresh
                 shouldReload: $projection->isPaid,
                 redirectUrl: $this->invoiceUrls->show($order),
                 message: $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus),
+            );
+        }
+
+        if ($this->isBscPayment($payment)) {
+            $order->refresh();
+            $payment->loadMissing('bscDetail');
+            $status = $this->bscVerification->status($payment);
+            if ($this->orders->project($order, $payment)->isPendingPayment) {
+                try {
+                    $this->bscVerification->queueForStatusRefresh($payment);
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $status = $status->outcome === BscVerificationOutcome::ProviderError
+                        ? $status
+                        : new BscVerificationStatus(
+                            BscVerificationOutcome::ProviderError,
+                            'provider_error',
+                            $status->transactionHash,
+                            $status->confirmations,
+                            $status->attempts,
+                            $status->version,
+                        );
+                }
+            }
+            $projection = $this->orders->project($order, $payment);
+            $required = ManualPaymentSetting::current()?->bscMinConfirmations()
+                ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS;
+
+            return StorefrontShopSignedStatusRefreshResult::refreshed(
+                paymentStatus: $payment->status,
+                orderStatus: $order->order_status,
+                isPaid: $projection->isPaid,
+                isTerminal: $projection->isTerminal,
+                qrisReady: false,
+                shouldReload: $projection->isPaid,
+                redirectUrl: $this->invoiceUrls->show($order),
+                message: $this->bscStatusMessage($status->outcome, $status->confirmations, $required),
+                paymentRail: 'usdt_bep20',
+                bscStatus: $status->status,
+                bscConfirmations: $status->confirmations,
+                bscRequiredConfirmations: $required,
             );
         }
 
@@ -263,6 +309,26 @@ class StorefrontShopPaymentStatusRefresh
     {
         return strtolower((string) $payment?->provider) === PaymentProvider::MANUAL
             && strtoupper((string) $payment?->method) === 'BINANCE_PAY_ID';
+    }
+
+    private function isBscPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === PaymentProvider::MANUAL
+            && strtoupper((string) $payment?->method) === 'USDT_BEP20';
+    }
+
+    private function bscStatusMessage(BscVerificationOutcome $outcome, ?int $confirmations, int $required): string
+    {
+        return match ($outcome) {
+            BscVerificationOutcome::Confirmed,
+            BscVerificationOutcome::AlreadyPaid => 'BSC payment verified. Your invoice will refresh with delivery details.',
+            BscVerificationOutcome::Confirming => 'The exact BSC transfer was found, but it has '.($confirmations ?? 0).'/'.$required.' confirmations. We will check again automatically.',
+            BscVerificationOutcome::ProviderError => 'The BSC authority is temporarily unavailable. Your payment remains pending and will be checked again.',
+            BscVerificationOutcome::ManualReview,
+            BscVerificationOutcome::Mismatch,
+            BscVerificationOutcome::TransactionAlreadyUsed => 'This BSC payment needs manual review. Do not submit another transfer.',
+            default => 'No valid BSC transfer has been confirmed yet. You can submit a transaction hash or check again shortly.',
+        };
     }
 
     private function shouldVerifyBinance(OrderLifecycleProjection $projection, BinanceVerificationStatus $verificationStatus): bool

@@ -23,6 +23,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramBinanceRailSelectionSession;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -238,7 +239,18 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(174, 'cb-binance-queued', 'checkout:binance'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(174, 'cb-binance-selector', 'checkout:binance', [], 12345, 'private', 8100))->assertOk();
+        $selection = app(TelegramBinanceRailSelectionSession::class)->get($customer);
+        $this->assertNotNull($selection);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            175,
+            'cb-binance-queued',
+            'checkout:binance:rail:binance_pay_id:'.$selection['nonce'],
+            [],
+            12345,
+            'private',
+            123457,
+        ))->assertOk();
 
         $order = Order::firstOrFail();
         Queue::assertPushedOn('telegram-outbound', SendBinanceCheckoutInstructions::class, fn (SendBinanceCheckoutInstructions $job): bool => $job->orderId === $order->id);

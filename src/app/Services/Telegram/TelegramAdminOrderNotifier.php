@@ -278,6 +278,7 @@ class TelegramAdminOrderNotifier
             'QR_MANUAL' => 'QR Manual',
             'api_qris', 'hosted' => 'QRIS',
             'BINANCE_PAY_ID' => 'Binance Pay',
+            'USDT_BEP20' => 'USDT BEP20 (BSC)',
             default => $label,
         };
     }

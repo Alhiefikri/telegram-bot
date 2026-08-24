@@ -4,5 +4,5 @@ namespace App\Services\Telegram;
 
 interface TelegramCheckoutPaymentIntentSelector
 {
-    public function select(bool $binance): TelegramCheckoutPaymentIntentSelection;
+    public function select(string|bool $rail): TelegramCheckoutPaymentIntentSelection;
 }

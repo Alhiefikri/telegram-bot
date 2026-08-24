@@ -32,6 +32,11 @@ class StorefrontInvoiceUrl
         return URL::temporarySignedRoute('storefront.shop.orders.binance-order-id', $this->expiresAt($order), $order, false);
     }
 
+    public function bscTxHash(Order $order): string
+    {
+        return URL::temporarySignedRoute('storefront.shop.orders.bsc-tx-hash', $this->expiresAt($order), $order, false);
+    }
+
     private function expiresAt(Order $order): \DateTimeInterface
     {
         $days = max(1, (int) config('services.storefront.invoice_url_ttl_days', 7));

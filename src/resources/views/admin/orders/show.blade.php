@@ -74,6 +74,23 @@
                 </x-admin-dashboard.notice>
             @endif
 
+            @if ($bscReview)
+                <x-admin-dashboard.notice tone="warning" class="mt-5 rounded-xl text-sm font-bold">
+                    <p class="font-black">USDT BEP20 (BSC) verification</p>
+                    <dl class="mt-3 grid gap-2 sm:grid-cols-2">
+                        <div><dt class="text-brand-muted">Status</dt><dd>{{ $bscReview['status'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Expected amount</dt><dd>{{ $bscReview['expected_amount'] }}</dd></div>
+                        <div class="sm:col-span-2"><dt class="text-brand-muted">Receiving address snapshot</dt><dd class="break-all">{{ $bscReview['receiver'] }}</dd></div>
+                        <div><dt class="text-brand-muted">TX hash</dt><dd class="break-all">{{ $bscReview['tx_hash'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Confirmations</dt><dd>{{ $bscReview['confirmations'] }}</dd></div>
+                        <div><dt class="text-brand-muted">From address</dt><dd class="break-all">{{ $bscReview['from_address'] }}</dd></div>
+                    </dl>
+                    @if ($bscReview['explorer'])
+                        <a href="{{ $bscReview['explorer'] }}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-flex font-black underline">Open BSC explorer</a>
+                    @endif
+                </x-admin-dashboard.notice>
+            @endif
+
             @if ($canCompleteManual || $canRejectManual)
                 <div class="mt-5 flex flex-wrap gap-3">
                     @if ($canCompleteManual)

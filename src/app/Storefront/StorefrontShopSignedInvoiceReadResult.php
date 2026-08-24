@@ -5,6 +5,7 @@ namespace App\Storefront;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\Bsc\BscVerificationStatus;
 use Carbon\CarbonImmutable;
 
 class StorefrontShopSignedInvoiceReadResult
@@ -19,6 +20,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly StorefrontShopSignedInvoiceState $state,
         public readonly string $statusUrl,
         public readonly string $binanceOrderIdUrl,
+        public readonly string $bscTxHashUrl,
         public readonly string $redirectUrl,
         public readonly string $cancelUrl,
         public readonly bool $canCancel,
@@ -41,6 +43,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly string $manualFulfillmentStatus,
         public readonly string $statusMessage,
         public readonly ?BinanceVerificationStatus $binanceVerificationStatus = null,
+        public readonly ?BscVerificationStatus $bscVerificationStatus = null,
     ) {}
 
     public function isPaid(): bool

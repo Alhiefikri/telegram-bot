@@ -43,6 +43,8 @@ class TelegramOutboundEffectService
 
     public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
 
+    public const TYPE_BSC_CHECKOUT = TelegramOutboundEffectType::BscCheckoutInstructions->value;
+
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
     public const TYPE_ADMIN_PENDING = TelegramOutboundEffectType::AdminOrderPendingNotification->value;
@@ -91,6 +93,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_PAKASIR_CHECKOUT = 'pakasir-payment-v1';
 
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
+
+    public const TEMPLATE_BSC_CHECKOUT = 'bsc-payment-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -143,6 +147,7 @@ class TelegramOutboundEffectService
         self::TYPE_KLIKQRIS_CHECKOUT,
         self::TYPE_PAKASIR_CHECKOUT,
         self::TYPE_BINANCE_CHECKOUT,
+        self::TYPE_BSC_CHECKOUT,
     ];
 
     public const ADMIN_BROADCAST_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::ADMIN_BROADCAST_MAX_ATTEMPTS;
@@ -215,7 +220,7 @@ class TelegramOutboundEffectService
                 'target_type' => 'customer',
                 'telegram_chat_id' => (string) $customer->telegram_id,
                 'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
-                'telegram_method' => 'sendPhoto',
+                'telegram_method' => $effectType === self::TYPE_BSC_CHECKOUT ? 'sendMessage' : 'sendPhoto',
                 'locale' => $customer->locale,
                 'template_version' => self::templateVersion($effectType),
                 'state' => TelegramOutboundEffectState::Pending->value,
@@ -873,6 +878,7 @@ class TelegramOutboundEffectService
             $payment->provider === PaymentProvider::KLIKQRIS => self::TYPE_KLIKQRIS_CHECKOUT,
             $payment->provider === PaymentProvider::PAKASIR => self::TYPE_PAKASIR_CHECKOUT,
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => self::TYPE_BINANCE_CHECKOUT,
+            $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => self::TYPE_BSC_CHECKOUT,
             default => null,
         };
     }
@@ -1696,6 +1702,7 @@ class TelegramOutboundEffectService
             self::TYPE_KLIKQRIS_CHECKOUT => self::TEMPLATE_KLIKQRIS_CHECKOUT,
             self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
+            self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,

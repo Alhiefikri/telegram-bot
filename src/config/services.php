@@ -14,6 +14,7 @@ return [
         'rpc_url' => env('BSC_RPC_URL'),
         'chain_id' => (int) env('BSC_CHAIN_ID', 56),
         'usdt_contract' => env('BSC_USDT_CONTRACT'),
+        'explorer_base_url' => env('BSC_EXPLORER_BASE_URL', 'https://bscscan.com'),
         'expected_token_decimals' => 18,
         'rpc_timeout_seconds' => (float) env('BSC_RPC_TIMEOUT_SECONDS', 5),
         'rpc_connect_timeout_seconds' => (float) env('BSC_RPC_CONNECT_TIMEOUT_SECONDS', 2),
@@ -184,6 +185,7 @@ return [
     'storefront' => [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),
+        'bsc_tx_hash_rate_limit_per_minute' => (int) env('STOREFRONT_BSC_TX_HASH_RATE_LIMIT_PER_MINUTE', 5),
         'telegram_reservation_floor' => (int) env('STOREFRONT_TELEGRAM_RESERVATION_FLOOR', 1),
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
         'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),

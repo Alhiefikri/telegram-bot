@@ -223,7 +223,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID')->exists()
+                    $job = $order->payments()->where('provider', PaymentProvider::MANUAL)->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20'])->exists()
                         ? DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
                         : DeleteBuyerCheckoutMessages::dispatch($order->id, now()->toISOString());
                     $job

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\VerifyBscPayment;
 use App\Models\BscPaymentReceiver;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
@@ -11,6 +12,7 @@ use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -161,6 +163,83 @@ class BinancePaymentRailSelectionTest extends TestCase
         $this->assertSame(2, Payment::count());
         $this->assertSame(1, Payment::query()->where('method', 'BINANCE_PAY_ID')->count());
         $this->assertSame(1, Payment::query()->where('method', 'USDT_BEP20')->count());
+    }
+
+    public function test_bsc_invoice_renders_the_snapshotted_amount_address_and_network_warning(): void
+    {
+        Queue::fake();
+        $receiver = $this->activeReceiver('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'bsc_invoice',
+            'payment_method' => 'usdt_bep20',
+        ]);
+        $order = Order::with('payments.bscDetail')->sole();
+        $payment = $order->payments->sole();
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee($receiver->address_normalized)
+            ->assertSee('2.5 USDT')
+            ->assertSee('BNB Smart Chain (BEP20) ONLY')
+            ->assertSee('ERC20, TRC20, opBNB')
+            ->assertSee('Submit BSC TX Hash')
+            ->assertSee('Check Payment');
+    }
+
+    public function test_bsc_hash_validation_does_not_consume_attempts_and_valid_hash_queues_verification(): void
+    {
+        Queue::fake();
+        $this->activeReceiver('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'bsc_hash',
+            'payment_method' => 'usdt_bep20',
+        ]);
+        $order = Order::with('payments.bscDetail')->sole();
+        $payment = $order->payments->sole();
+        $url = app(StorefrontInvoiceUrl::class)->bscTxHash($order);
+
+        $this->post($url, ['bsc_tx_hash' => 'not-a-hash'])->assertRedirect();
+        $this->assertSame(0, (int) $payment->bscDetail->fresh()->tx_attempts);
+
+        $hash = '0x'.str_repeat('a', 64);
+        $this->post($url, ['bsc_tx_hash' => $hash])->assertRedirect();
+        $detail = $payment->bscDetail->fresh();
+        $this->assertSame(1, (int) $detail->tx_attempts);
+        $this->assertSame(strtolower($hash), $detail->current_tx_hash);
+        Queue::assertPushed(VerifyBscPayment::class, fn (VerifyBscPayment $job): bool => $job->paymentId === $payment->id && $job->submissionVersion === 1);
+    }
+
+    public function test_storefront_product_modal_exposes_two_explicit_binance_rails(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->activeReceiver('0xcccccccccccccccccccccccccccccccccccccccc');
+        Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('websiteBinancePayId', false)
+            ->assertSee('websiteUsdtBep20', false)
+            ->assertSee('name="payment_choice"', false)
+            ->assertSee('name="payment_method"', false);
     }
 
     private function activeReceiver(string $address): BscPaymentReceiver

@@ -147,11 +147,13 @@
 
                                     <fieldset class="grid gap-2" x-show="selectedProduct?.checkout?.websiteBinancePay || selectedProduct?.checkout?.websiteQris" @if ($errors->has('payment_method')) aria-describedby="storefront-payment-method-error" @endif>
                                         <legend class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Metode pembayaran</legend>
+                                        <input type="hidden" name="payment_method" :value="finalPaymentMethod()">
                                         <template x-for="choice in orderedCheckoutChoices()" :key="choice.key">
                                             <div>
                                                 <input type="radio"
-                                                       name="payment_method"
+                                                       name="payment_choice"
                                                        x-model="paymentMethod"
+                                                       x-on:change="selectPaymentMethod(paymentMethodForChoice(choice))"
                                                        :id="'storefront-payment-method-' + paymentMethodForChoice(choice)"
                                                        :value="paymentMethodForChoice(choice)"
                                                        :disabled="!choice.enabled"
@@ -164,12 +166,24 @@
                                                 </label>
                                             </div>
                                         </template>
+                                        <div x-show="paymentMethod === 'binance_pay'" x-cloak class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3">
+                                            <p class="text-sm font-black text-[var(--sf-ink)]">Pilih rail Binance</p>
+                                            <div class="mt-2 grid gap-2">
+                                                <template x-for="choice in binanceRailChoices()" :key="choice.key">
+                                                    <label class="flex cursor-pointer items-start gap-2 rounded-md border-2 border-[var(--sf-border)] bg-white px-3 py-2 text-left text-sm font-black text-[var(--sf-ink)]">
+                                                        <input type="radio" name="binance_rail" x-model="binanceRail" :value="paymentMethodForChoice(choice)" class="mt-1" :disabled="!choice.enabled">
+                                                        <span><span class="block" x-text="choice.label"></span><span class="mt-1 block text-sm font-semibold leading-6 text-[var(--sf-muted)]" x-text="choice.description"></span></span>
+                                                    </label>
+                                                </template>
+                                            </div>
+                                            <button type="button" class="mt-3 text-sm font-black text-[var(--sf-accent)] underline" x-on:click="cancelBinanceRailSelection()">Back to payment choices</button>
+                                        </div>
                                         @error('payment_method')
                                             <p id="storefront-payment-method-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
                                     </fieldset>
                                     <p x-show="paymentMethod === 'qris'" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-ink)]">Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.</p>
-                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Binance Pay dibayar dalam USDT dan diverifikasi manual. Instruksi serta nomor invoice tersedia setelah checkout.</p>
+                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose Binance Pay ID or USDT BEP20 (BSC). The final rail is submitted explicitly with this checkout.</p>
 
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong

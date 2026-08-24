@@ -700,6 +700,7 @@ function initShopPaymentStatus() {
     const statusUrl = container.getAttribute("data-status-url");
     const redirectUrl = container.getAttribute("data-redirect-url");
     const isBinance = container.getAttribute("data-payment-kind") === "binance";
+    const isBsc = container.getAttribute("data-payment-kind") === "bsc";
     const title = container.querySelector("[data-payment-status-title]");
     const message = container.querySelector("[data-payment-status-message]");
     const announcement = container.querySelector(
@@ -755,10 +756,16 @@ function initShopPaymentStatus() {
 
       button.disabled = true;
       setStatus(
-        isBinance ? "Checking Binance Pay" : "Mengecek pembayaran",
-        isBinance
-          ? "We are checking your submitted Order ID securely."
-          : "Tunggu sebentar, status QRIS sedang dicek."
+        isBsc
+          ? "Checking BSC payment"
+          : isBinance
+            ? "Checking Binance Pay"
+            : "Mengecek pembayaran",
+        isBsc
+          ? "We are checking the approved BSC transfer securely."
+          : isBinance
+            ? "We are checking your submitted Order ID securely."
+            : "Tunggu sebentar, status QRIS sedang dicek."
       );
 
       try {
@@ -826,6 +833,30 @@ function initShopPaymentStatus() {
           return;
         }
 
+        if (isBsc && data.bsc_status) {
+          const confirmations =
+            Number.parseInt(data.bsc_confirmations, 10) || 0;
+          const required =
+            Number.parseInt(data.bsc_required_confirmations, 10) || 3;
+          setStatus(
+            data.bsc_status === "confirming"
+              ? `Confirming BSC transfer (${confirmations}/${required})`
+              : "BSC payment status",
+            data.message ||
+              `The BSC transfer currently has ${confirmations}/${required} confirmations.`
+          );
+          if (data.is_paid === true || data.is_terminal === true) {
+            container.setAttribute("data-terminal", "true");
+            if (data.is_paid === true) {
+              window.location.href =
+                data.redirect_url || redirectUrl || window.location.href;
+            }
+          } else {
+            button.disabled = false;
+          }
+          return;
+        }
+
         if (isTerminalStatus(data)) {
           setStatus(
             "Status pembayaran final",
@@ -879,6 +910,7 @@ export function storefrontModal() {
     supportContactValue: "",
     supportContactOpen: false,
     paymentMethod: "qris",
+    binanceRail: "binance_pay_id",
     quantityAnnouncement: "",
     modalOpener: null,
     restoreCheckout: null,
@@ -927,6 +959,7 @@ export function storefrontModal() {
         this.supportContactChannel || this.supportContactValue
       );
       this.paymentMethod = this.normalizePaymentMethod(options.paymentMethod);
+      this.binanceRail = this.normalizeBinanceRail(options.paymentMethod);
       this.productModalOpen = true;
       trackStorefrontEvent("storefront.checkout_opened", {
         product_id: product?.checkout?.websiteQris?.productId || product?.id,
@@ -996,8 +1029,24 @@ export function storefrontModal() {
         this.selectedProduct.checkout.websiteBinancePay,
       ].filter(Boolean);
     },
+    binanceRailChoices() {
+      if (!this.selectedProduct) {
+        return [];
+      }
+
+      return [
+        this.selectedProduct.checkout.websiteBinancePayId,
+        this.selectedProduct.checkout.websiteUsdtBep20,
+      ].filter(Boolean);
+    },
     normalizePaymentMethod(method) {
-      const requestedMethod = method === "binance_pay" ? "binance_pay" : "qris";
+      const requestedMethod = [
+        "binance_pay",
+        "binance_pay_id",
+        "usdt_bep20",
+      ].includes(method)
+        ? "binance_pay"
+        : "qris";
       const availableChoices = this.orderedCheckoutChoices().filter(
         (choice) => choice.enabled
       );
@@ -1012,15 +1061,63 @@ export function storefrontModal() {
 
       return this.paymentMethodForChoice(availableChoices[0]) || "qris";
     },
-    selectedCheckoutChoice() {
+    normalizeBinanceRail(method) {
+      const available = this.binanceRailChoices().filter(
+        (choice) => choice.enabled
+      );
+      const requested = ["binance_pay_id", "usdt_bep20"].includes(method)
+        ? method
+        : "binance_pay_id";
+
+      return available.some(
+        (choice) => this.paymentMethodForChoice(choice) === requested
+      )
+        ? requested
+        : this.paymentMethodForChoice(available[0]) || "binance_pay_id";
+    },
+    selectPaymentMethod(method) {
+      this.paymentMethod = method;
+      if (method === "binance_pay") {
+        this.binanceRail = this.normalizeBinanceRail(this.binanceRail);
+      }
+    },
+    cancelBinanceRailSelection() {
+      this.paymentMethod = "qris";
+    },
+    finalPaymentMethod() {
       return this.paymentMethod === "binance_pay"
-        ? this.selectedProduct?.checkout?.websiteBinancePay
-        : this.selectedProduct?.checkout?.websiteQris;
+        ? this.normalizeBinanceRail(this.binanceRail)
+        : "qris";
+    },
+    selectedCheckoutChoice() {
+      if (this.paymentMethod !== "binance_pay") {
+        return this.selectedProduct?.checkout?.websiteQris;
+      }
+
+      return (
+        this.binanceRailChoices().find(
+          (choice) =>
+            this.paymentMethodForChoice(choice) ===
+            this.normalizeBinanceRail(this.binanceRail)
+        ) || this.selectedProduct?.checkout?.websiteBinancePay
+      );
     },
     paymentMethodForChoice(choice) {
-      return ["websiteBinancePay", "website_binance_pay"].includes(choice?.key)
-        ? "binance_pay"
-        : "qris";
+      if (["websiteBinancePay", "website_binance_pay"].includes(choice?.key)) {
+        return "binance_pay";
+      }
+
+      if (
+        ["websiteBinancePayId", "website_binance_pay_id"].includes(choice?.key)
+      ) {
+        return "binance_pay_id";
+      }
+
+      if (["websiteUsdtBep20", "website_usdt_bep20"].includes(choice?.key)) {
+        return "usdt_bep20";
+      }
+
+      return "qris";
     },
     focusModal(focusInvalid = false) {
       const panel = this.$refs.dialogPanel;

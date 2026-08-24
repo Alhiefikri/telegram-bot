@@ -52,6 +52,26 @@ final class BscPaymentVerification
     }
 
     /**
+     * Queue a bounded scanner lookup for interactive status refreshes. The
+     * caller receives only persisted state; authoritative RPC reads remain in
+     * VerifyBscPayment on the shared verification queue.
+     */
+    public function queueForStatusRefresh(Payment $payment): bool
+    {
+        $payment->loadMissing('bscDetail');
+        if ($payment->status !== PaymentStatus::Pending
+            || $payment->provider !== 'manual'
+            || $payment->method !== 'USDT_BEP20'
+            || $payment->bscDetail === null) {
+            return false;
+        }
+
+        $this->queue->dispatchForScan($payment);
+
+        return true;
+    }
+
+    /**
      * Persist a customer-submitted hash and enqueue verification. This method
      * deliberately performs no RPC call; the queue job is the only transport
      * boundary for authoritative chain reads.

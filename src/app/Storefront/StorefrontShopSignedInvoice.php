@@ -8,6 +8,9 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\Bsc\BscPaymentVerification;
+use App\Services\Bsc\BscVerificationOutcome;
+use App\Services\Bsc\BscVerificationStatus;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
@@ -28,6 +31,7 @@ class StorefrontShopSignedInvoice
         private readonly StorefrontPakasirHostedPaymentUrl $hostedPaymentUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
         private readonly BinancePaymentVerification $verification,
+        private readonly BscPaymentVerification $bscVerification,
         private readonly KlikQrisNativeQrisService $klikQris,
     ) {}
 
@@ -36,8 +40,10 @@ class StorefrontShopSignedInvoice
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
 
         $payment = $this->latestPayment($order);
+        $payment?->loadMissing('bscDetail');
         $projection = $this->orders->project($order, $payment);
         $verificationStatus = $this->binanceVerificationStatus($payment);
+        $bscVerificationStatus = $this->bscVerificationStatus($payment);
         $state = $this->state($projection);
         $redirectUrl = $this->redirectUrl($order);
         $klikQrisResult = $this->isKlikQrisPayment($payment) ? $this->klikQris->classify($payment) : null;
@@ -52,6 +58,7 @@ class StorefrontShopSignedInvoice
             state: $state,
             statusUrl: $this->invoiceUrls->status($order),
             binanceOrderIdUrl: $this->invoiceUrls->binanceOrderId($order),
+            bscTxHashUrl: $this->invoiceUrls->bscTxHash($order),
             redirectUrl: $redirectUrl,
             cancelUrl: $this->invoiceUrls->cancel($order),
             canCancel: $this->canCancel($order, $projection),
@@ -72,8 +79,9 @@ class StorefrontShopSignedInvoice
             accountCopyText: $this->accountCopyText($accountGroups),
             paidDeliveryType: $this->paidDeliveryType($order, $state, $accountGroups),
             manualFulfillmentStatus: $this->manualFulfillmentStatus($order, $payment),
-            statusMessage: $this->statusMessage($order, $payment, $verificationStatus),
+            statusMessage: $this->statusMessage($order, $payment, $verificationStatus, $bscVerificationStatus),
             binanceVerificationStatus: $verificationStatus,
+            bscVerificationStatus: $bscVerificationStatus,
         );
     }
 
@@ -93,6 +101,16 @@ class StorefrontShopSignedInvoice
         }
 
         return $this->verification->status($payment);
+    }
+
+    private function bscVerificationStatus(?Payment $payment): ?BscVerificationStatus
+    {
+        if (strtolower((string) $payment?->provider) !== 'manual'
+            || strtoupper((string) $payment?->method) !== 'USDT_BEP20') {
+            return null;
+        }
+
+        return $this->bscVerification->status($payment);
     }
 
     private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState
@@ -159,12 +177,24 @@ class StorefrontShopSignedInvoice
         return $this->hostedPaymentUrls->for($payment);
     }
 
-    public function statusMessage(Order $order, ?Payment $payment, ?BinanceVerificationStatus $verificationStatus = null): string
-    {
+    public function statusMessage(
+        Order $order,
+        ?Payment $payment,
+        ?BinanceVerificationStatus $verificationStatus = null,
+        ?BscVerificationStatus $bscVerificationStatus = null,
+    ): string {
         $projection = $this->orders->project($order, $payment);
 
         if ($projection->isTerminal) {
+            if ($bscVerificationStatus !== null) {
+                return $this->bscStatusMessage($bscVerificationStatus);
+            }
+
             return $this->terminalCopy->message($projection, $payment);
+        }
+
+        if ($bscVerificationStatus !== null) {
+            return $this->bscStatusMessage($bscVerificationStatus);
         }
 
         $verificationStatus ??= $this->binanceVerificationStatus($payment);
@@ -173,6 +203,20 @@ class StorefrontShopSignedInvoice
         }
 
         return $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus);
+    }
+
+    private function bscStatusMessage(BscVerificationStatus $status): string
+    {
+        return match ($status->outcome) {
+            BscVerificationOutcome::Confirmed,
+            BscVerificationOutcome::AlreadyPaid => 'BSC payment verified. Your product will be delivered automatically.',
+            BscVerificationOutcome::Confirming => 'The exact BSC transfer was found, but it is still waiting for enough confirmations.',
+            BscVerificationOutcome::ManualReview,
+            BscVerificationOutcome::Mismatch,
+            BscVerificationOutcome::TransactionAlreadyUsed => 'This BSC payment needs manual review. Do not send another transfer.',
+            BscVerificationOutcome::ProviderError => 'The BSC authority is temporarily unavailable. Your payment remains pending.',
+            default => 'No valid BSC transfer has been confirmed yet.',
+        };
     }
 
     /**

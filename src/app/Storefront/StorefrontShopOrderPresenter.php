@@ -2,9 +2,12 @@
 
 namespace App\Storefront;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\Bsc\BscVerificationOutcome;
+use App\Services\Bsc\BscVerificationStatus;
 use Carbon\Carbon;
 
 class StorefrontShopOrderPresenter
@@ -46,6 +49,7 @@ class StorefrontShopOrderPresenter
                 ? $this->invoiceUrls->qrisImage($invoice->order)
                 : null,
             'binanceOrderIdUrl' => $invoice->binanceOrderIdUrl,
+            'bscTxHashUrl' => $invoice->bscTxHashUrl,
             'redirectUrl' => $invoice->redirectUrl,
             'cancelUrl' => $invoice->cancelUrl,
             'canCancel' => $invoice->canCancel,
@@ -67,6 +71,7 @@ class StorefrontShopOrderPresenter
             'paymentDeadline' => $invoice->qrisEffectiveExpiresAt
                 ?? $this->localPaymentDeadline($invoice),
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
+            'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
@@ -78,6 +83,16 @@ class StorefrontShopOrderPresenter
                 ? 'Binance UID'
                 : ($invoice->payment?->binance_receiver_type === 'pay_id' ? 'Binance Pay ID' : (filled(config('services.binance.pay_id')) ? 'Binance Pay ID' : 'Binance UID')),
             'binancePayId' => (string) ($invoice->payment?->binance_receiver_value ?: (config('services.binance.pay_id') ?: config('services.binance.pay_uid'))),
+            'bscReceiverAddress' => (string) ($invoice->payment?->bscDetail?->receiver_address ?? ''),
+            'bscPayableAmount' => $invoice->payment?->bscDetail?->payable_amount_micro,
+            'bscBaseAmount' => $invoice->payment?->bscDetail?->base_amount_micro,
+            'bscNetworkLabel' => 'BNB Smart Chain (BEP20)',
+            'bscVerificationStatus' => $this->bscStatus($invoice->bscVerificationStatus),
+            'bscVerificationOutcome' => $invoice->bscVerificationStatus?->outcome->value,
+            'bscConfirmations' => $invoice->bscVerificationStatus?->confirmations ?? 0,
+            'bscRequiredConfirmations' => ManualPaymentSetting::current()?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            'bscVerificationClosed' => $invoice->bscVerificationStatus?->outcome === BscVerificationOutcome::Expired
+                || $invoice->isTerminal(),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
             'usageGuides' => $invoice->usageGuides,
@@ -103,6 +118,22 @@ class StorefrontShopOrderPresenter
             BinanceVerificationOutcome::Mismatch,
             BinanceVerificationOutcome::TransactionAlreadyUsed => 'mismatch',
             BinanceVerificationOutcome::IncompleteWindow => 'checking',
+            default => $status->outcome->value,
+        };
+    }
+
+    private function bscStatus(?BscVerificationStatus $status): string
+    {
+        if ($status === null) {
+            return 'awaiting_transfer';
+        }
+
+        return match ($status->outcome) {
+            BscVerificationOutcome::Confirmed,
+            BscVerificationOutcome::AlreadyPaid => 'confirmed',
+            BscVerificationOutcome::ManualReview,
+            BscVerificationOutcome::Mismatch,
+            BscVerificationOutcome::TransactionAlreadyUsed => 'manual_review',
             default => $status->outcome->value,
         };
     }

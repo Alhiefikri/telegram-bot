@@ -324,7 +324,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         );
     }
 
-    public function test_binance_payment_instructions_follow_customer_locale_without_extra_action_button(): void
+    public function test_binance_rail_selector_follows_customer_locale(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->fakeTelegramHttp();
@@ -345,24 +345,24 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $carts->addItem($carts->activeCartFor($english), $englishProduct, 1);
         $carts->addItem($carts->activeCartFor($malay), $malayProduct, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41061, 'binance-id', 'checkout:binance', ['id' => 41061], 41061))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41062, 'binance-en', 'checkout:binance', ['id' => 41062], 41062))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41063, 'binance-ms', 'checkout:binance', ['id' => 41063], 41063))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41061, 'binance-id', 'checkout:binance', ['id' => 41061], 41061, 'private', 91061))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41062, 'binance-en', 'checkout:binance', ['id' => 41062], 41062, 'private', 91062))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41063, 'binance-ms', 'checkout:binance', ['id' => 41063], 41063, 'private', 91063))->assertOk();
 
         $this->assertLocalizedCopy(
-            $this->customerPhotoPayload(41061),
-            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran sebagai foto dengan caption /payment', 'Batalkan Order'],
-            ['💎 Binance Pay checkout', '💎 CHECKOUT USDT', '1️⃣', 'Send the payment screenshot', 'Cancel Order'],
+            $this->customerPayload('/sendMessage', 41061),
+            ['💎 Pilih metode pembayaran Binance', 'Pay with Binance Pay ID', '❌ Batal'],
+            ['Choose a Binance payment method', 'Bayar dengan Binance Pay ID'],
         );
         $this->assertLocalizedCopy(
-            $this->customerPhotoPayload(41062),
-            ['💎 Binance Pay checkout', 'BINANCE PAY ID', 'Scan the QR code or enter the Pay ID', 'Send the payment screenshot as a photo with the caption /payment', 'Cancel Order'],
-            ['💎 Checkout Binance Pay', '💎 USDT CHECKOUT', '1️⃣', 'Kirim screenshot pembayaran', 'Batalkan Order'],
+            $this->customerPayload('/sendMessage', 41062),
+            ['💎 Choose a Binance payment method', 'Pay with Binance Pay ID', '❌ Cancel'],
+            ['Pilih metode pembayaran Binance', 'Bayar dengan Binance Pay ID'],
         );
         $this->assertLocalizedCopy(
-            $this->customerPhotoPayload(41063),
-            ['💎 Checkout Binance Pay', 'BINANCE PAY ID', 'Imbas kod QR atau masukkan ID Pay', 'Hantar tangkapan skrin pembayaran sebagai foto dengan kapsyen /payment', 'Batalkan Pesanan'],
-            ['💎 Binance Pay checkout', 'Scan QR code atau masukkan Pay ID', 'Kirim screenshot pembayaran', 'Cancel Order'],
+            $this->customerPayload('/sendMessage', 41063),
+            ['💎 Pilih kaedah bayaran Binance', 'Bayar dengan Binance Pay ID', '❌ Batal'],
+            ['Choose a Binance payment method', 'Pay with Binance Pay ID'],
         );
 
     }

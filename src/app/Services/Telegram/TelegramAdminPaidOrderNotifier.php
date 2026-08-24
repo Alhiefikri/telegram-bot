@@ -179,6 +179,7 @@ class TelegramAdminPaidOrderNotifier
         return match ($label) {
             'QR_MANUAL' => 'QR Manual',
             'api_qris', 'hosted' => 'QRIS',
+            'USDT_BEP20' => 'USDT BEP20 (BSC)',
             default => $label,
         };
     }

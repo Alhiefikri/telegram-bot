@@ -127,6 +127,20 @@ class ApplicationRateLimiterRegistrar
             ];
         });
 
+        $this->rateLimiter->for('storefront-bsc-tx-hash', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.storefront.bsc_tx_hash_rate_limit_per_minute', 5));
+            $source = $request->ip() ?: 'unknown';
+            $routeOrder = $request->route('order');
+            $order = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
+                ? (string) $routeOrder->getKey()
+                : 'unknown';
+
+            return [
+                Limit::perMinute($limit)->by('storefront:bsc-tx-hash:order:'.$order),
+                Limit::perMinute($limit * 3)->by('storefront:bsc-tx-hash:source:'.$source),
+            ];
+        });
+
         $this->rateLimiter->for('storefront-order-access', function (Request $request) {
             $limit = max(1, (int) $this->config->get('services.storefront.credential_access_rate_limit_per_minute', 5));
             $source = $request->ip() ?: 'unknown';

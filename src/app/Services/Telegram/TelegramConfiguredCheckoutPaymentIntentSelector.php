@@ -6,9 +6,12 @@ final readonly class TelegramConfiguredCheckoutPaymentIntentSelector implements 
 {
     public function __construct(private TelegramCheckoutIntents $checkoutIntents) {}
 
-    public function select(bool $binance): TelegramCheckoutPaymentIntentSelection
+    public function select(string|bool $rail): TelegramCheckoutPaymentIntentSelection
     {
-        $selection = $this->checkoutIntents->configuredProviderSelection($binance);
+        $paymentRail = is_bool($rail)
+            ? ($rail ? 'binance_pay_id' : 'qris')
+            : $rail;
+        $selection = $this->checkoutIntents->configuredProviderSelection($paymentRail);
 
         return new TelegramCheckoutPaymentIntentSelection(
             requestedPaymentMode: $selection->requestedProvider,

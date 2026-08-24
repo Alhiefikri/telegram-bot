@@ -112,6 +112,7 @@ class TelegramLocale
         return match (strtolower($label)) {
             'qris', 'hosted' => 'QRIS',
             'binance_pay_id', 'binance pay' => 'Binance Pay',
+            'usdt_bep20' => 'USDT BEP20 (BSC)',
             'qr_manual' => $this->translate($customer, 'payment.method.manual'),
             'bank_transfer', 'bank transfer' => $this->translate($customer, 'payment.method.bank_transfer'),
             default => $label !== '' ? $label : $this->translate($customer, 'payment.method.unknown'),

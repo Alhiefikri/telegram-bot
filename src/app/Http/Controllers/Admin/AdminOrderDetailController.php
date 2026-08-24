@@ -26,11 +26,12 @@ class AdminOrderDetailController extends Controller
 
         Gate::authorize('view', $order);
 
-        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'salesProofPost']);
+        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.bscDetail.transferEvidence', 'salesProofPost']);
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
         $hasMismatchEvidence = $operations->hasPendingBinanceMismatch($order);
+        $bscPayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20');
 
         return view('admin.orders.show', [
             'order' => $order,
@@ -54,6 +55,7 @@ class AdminOrderDetailController extends Controller
                     ? now()->setTimestamp((int) floor((int) $payload['transactionTime'] / 1_000))->timezone((string) config('app.timezone'))->format('d M Y H:i')
                     : '-',
             ] : null,
+            'bscReview' => $this->bscReview($bscPayment),
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
             'auditEntries' => $this->auditEntries($order),
             'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment))->all(),
@@ -91,6 +93,35 @@ class AdminOrderDetailController extends Controller
                 ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
                 ->first()?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'events' => $events,
+        ];
+    }
+
+    /** @return array<string, string>|null */
+    private function bscReview(?Payment $payment): ?array
+    {
+        $detail = $payment?->bscDetail;
+        if ($detail === null) {
+            return null;
+        }
+
+        $hash = trim((string) $detail->current_tx_hash);
+        $explorer = null;
+        $baseUrl = rtrim((string) config('services.bsc.explorer_base_url'), '/');
+        $host = parse_url($baseUrl, PHP_URL_HOST);
+        if ($hash !== '' && preg_match('/^0x[0-9a-f]{64}$/', $hash) === 1 && is_string($host) && in_array(strtolower($host), ['bscscan.com', 'www.bscscan.com'], true)) {
+            $explorer = $baseUrl.'/tx/'.$hash;
+        }
+
+        $evidence = $detail->transferEvidence->sortByDesc('last_verified_at')->first();
+
+        return [
+            'status' => (string) $detail->verification_status,
+            'receiver' => (string) $detail->receiver_address,
+            'expected_amount' => rtrim(rtrim(number_format((int) $detail->payable_amount_micro / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
+            'tx_hash' => $hash !== '' ? $this->maskIdentifier($hash) : '-',
+            'from_address' => $this->maskIdentifier((string) ($evidence?->from_address ?? $detail->current_from_address ?? '')),
+            'confirmations' => (string) ($detail->current_confirmations ?? $evidence?->confirmations ?? 0),
+            'explorer' => $explorer ?? '',
         ];
     }
 

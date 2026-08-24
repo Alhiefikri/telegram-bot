@@ -320,9 +320,9 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('x-ref="dialogPanel"', false)
             ->assertSee('@keydown="handleModalKeydown($event)"', false)
             ->assertSee('type="radio"', false)
-            ->assertSee('name="payment_method"', false)
+            ->assertSee('name="payment_choice"', false)
             ->assertSee('Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.')
-            ->assertDontSee('type="hidden" name="payment_method"', false);
+            ->assertSee('type="hidden" name="payment_method"', false);
     }
 
     public function test_failed_checkout_reopens_modal_state_and_renders_inline_buyer_error(): void

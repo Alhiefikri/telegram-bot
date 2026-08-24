@@ -139,7 +139,9 @@ class TelegramBuyerCheckoutInstructionCleaner
                 || ($prefix === 'manual_checkout_customer_notification' && ! Payment::query()
                     ->where('order_id', $target->id)
                     ->where(fn ($query) => $query
-                        ->where(fn ($binance) => $binance->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'))
+                        ->where(fn ($binance) => $binance
+                            ->where('provider', PaymentProvider::MANUAL)
+                            ->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20']))
                         ->orWhere('provider', PaymentProvider::KLIKQRIS))
                     ->exists())) {
                 return null;

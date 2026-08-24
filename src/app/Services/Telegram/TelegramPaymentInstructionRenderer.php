@@ -2,8 +2,10 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
@@ -83,6 +85,55 @@ class TelegramPaymentInstructionRenderer
             'receiver' => $payId,
             'receiver_instruction' => $receiverInstruction,
         ]);
+    }
+
+    /**
+     * Render the immutable BSC Payment snapshot. No current receiver setting
+     * or environment address is read here; the Payment detail is the source
+     * of truth once checkout has committed.
+     *
+     * @return array{text: string, reply_markup: array{inline_keyboard: list<list<array<string, string>>>}}
+     */
+    public function bsc(Order $order, Payment $payment, string $locale = 'en'): array
+    {
+        $order->loadMissing('orderItems');
+        $payment->loadMissing('bscDetail');
+        $detail = $payment->bscDetail;
+        if (! $detail instanceof PaymentBscDetail) {
+            throw new \RuntimeException('BSC Payment detail snapshot is missing.');
+        }
+
+        $setting = ManualPaymentSetting::current();
+        $confirmations = max(
+            $detail->verification_status === PaymentBscDetail::STATUS_AWAITING_TRANSFER ? 0 : (int) ($detail->current_confirmations ?? 0),
+            0,
+        );
+        $minimumConfirmations = $setting?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS;
+        $deadline = $payment->expired_at ?? $order->expires_at;
+        $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
+        $baseAmount = $this->formatUsdt((int) $detail->base_amount_micro);
+
+        $text = $this->text($locale, 'payment.bsc.instructions', [
+            'invoice' => $order->invoice_number,
+            'items' => $this->orderItemsSummary($order),
+            'product_total' => $baseAmount,
+            'amount' => $amount,
+            'address' => $detail->receiver_address,
+            'deadline' => $deadline ? $this->formatDate($deadline, $locale) : $this->text($locale, 'payment.bsc.deadline_default'),
+            'confirmations' => $minimumConfirmations,
+            'current_confirmations' => $confirmations,
+        ]);
+
+        return [
+            'text' => $text,
+            'reply_markup' => [
+                'inline_keyboard' => [
+                    [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]],
+                    [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'bsc:check:'.$order->id]],
+                    [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                ],
+            ],
+        ];
     }
 
     public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false, string $locale = 'id'): TelegramPaymentInstruction
@@ -284,6 +335,11 @@ class TelegramPaymentInstructionRenderer
     private function formatRupiah(int $amount): string
     {
         return 'Rp'.number_format($amount, 0, ',', '.');
+    }
+
+    private function formatUsdt(int $amount): string
+    {
+        return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
     }
 
     private function orderItemsSummary(Order $order): string

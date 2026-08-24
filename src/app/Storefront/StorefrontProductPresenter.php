@@ -4,9 +4,11 @@ namespace App\Storefront;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\BscPaymentReceiver;
 use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\Bsc\BscReadiness;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 
@@ -18,9 +20,12 @@ class StorefrontProductPresenter
 
     private ?bool $binanceAutomaticVerificationAvailable = null;
 
+    private ?bool $bscRailAvailable = null;
+
     public function __construct(
         private readonly StorefrontSupport $support,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly BscReadiness $bscReadiness,
     ) {}
 
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null, ?CheckoutMaintenanceState $maintenanceState = null): StorefrontProductPresentation
@@ -125,7 +130,7 @@ class StorefrontProductPresenter
             ),
         ];
 
-        if ($this->binancePayEnabled()
+        if (($this->binancePayEnabled() || $this->bscRailAvailable())
             && $product->usdt_price_amount !== null) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
@@ -140,6 +145,30 @@ class StorefrontProductPresenter
                 enabled: true,
                 productId: (int) $product->id,
             );
+
+            if ($this->binancePayEnabled()) {
+                $choices['website_binance_pay_id'] = new StorefrontProductCheckoutChoice(
+                    key: 'website_binance_pay_id',
+                    label: 'Pay with Binance Pay ID',
+                    description: 'Send the exact USDT amount through Binance Pay ID. Existing Binance Pay verification rules remain unchanged.',
+                    url: route('storefront.shop.checkout'),
+                    method: 'POST',
+                    enabled: true,
+                    productId: (int) $product->id,
+                );
+            }
+
+            if ($this->bscRailAvailable()) {
+                $choices['website_usdt_bep20'] = new StorefrontProductCheckoutChoice(
+                    key: 'website_usdt_bep20',
+                    label: 'Pay with USDT BEP20 (BSC)',
+                    description: 'Send the exact snapshotted amount on BNB Smart Chain (BEP20). Submit the transaction hash after paying.',
+                    url: route('storefront.shop.checkout'),
+                    method: 'POST',
+                    enabled: true,
+                    productId: (int) $product->id,
+                );
+            }
         }
 
         return $choices;
@@ -169,6 +198,30 @@ class StorefrontProductPresenter
     private function binanceAutomaticVerificationAvailable(): bool
     {
         return $this->binanceAutomaticVerificationAvailable ?? false;
+    }
+
+    private function bscRailAvailable(): bool
+    {
+        if ($this->bscRailAvailable !== null) {
+            return $this->bscRailAvailable;
+        }
+
+        $setting = ManualPaymentSetting::current();
+        $contract = strtolower(trim((string) config('services.bsc.usdt_contract')));
+        $configured = (bool) $setting?->bsc_payment_enabled
+            && filled(config('services.bsc.rpc_url'))
+            && (int) config('services.bsc.chain_id', 56) === 56
+            && preg_match('/^0x[0-9a-f]{40}$/', $contract) === 1
+            && BscPaymentReceiver::query()
+                ->activeVerified()
+                ->where('chain_id', 56)
+                ->where('token_contract', $contract)
+                ->where('token_decimals', (int) config('services.bsc.expected_token_decimals', 18))
+                ->exists();
+
+        $this->bscRailAvailable = $configured && $this->bscReadiness->check($setting)->isReady();
+
+        return $this->bscRailAvailable;
     }
 
     /**

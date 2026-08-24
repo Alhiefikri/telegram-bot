@@ -14,10 +14,10 @@
                 </a>
 
                 @php
-                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBinancePay ? 'Order Binance Pay dibuat' : ($isManualQris ? 'Order pembayaran manual dibuat' : ($isQrisPayable ? 'Order QRIS dibuat' : $qrisReadinessTitle)));
+                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBscPayment ? 'Order USDT BEP20 dibuat' : ($isBinancePay ? 'Order Binance Pay dibuat' : ($isManualQris ? 'Order pembayaran manual dibuat' : ($isQrisPayable ? 'Order QRIS dibuat' : $qrisReadinessTitle))));
                     $summary = $isPaid
                         ? 'sudah lunas. Data akun tersedia di bawah.'
-                        : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : ($isManualQris ? 'sudah mencadangkan stok. Bayar melalui QR manual dan hubungi admin dengan nomor invoice ini.' : ($isQrisPayable ? 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' : 'sudah mencadangkan stok, tetapi QRIS belum siap dibayar. Gunakan tombol retry di bawah atau hubungi bantuan jika tetap gagal.')));
+                        : ($isBscPayment ? 'sudah mencadangkan stok. Bayar tepat USDT melalui BNB Smart Chain (BEP20) sebelum masa order berakhir.' : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : ($isManualQris ? 'sudah mencadangkan stok. Bayar melalui QR manual dan hubungi admin dengan nomor invoice ini.' : ($isQrisPayable ? 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' : 'sudah mencadangkan stok, tetapi QRIS belum siap dibayar. Gunakan tombol retry di bawah atau hubungi bantuan jika tetap gagal.'))));
 
                     if ($isTerminal && ! $isPaid) {
                         $headline = match ($order->order_status?->value) {
@@ -35,7 +35,7 @@
 
                 <div class="mx-auto mt-6 min-w-0 max-w-xl text-center">
                     <div class="mx-auto grid h-14 min-w-14 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent-soft)] px-2 shadow-[5px_5px_0_var(--sf-shadow)] sm:h-16 sm:min-w-16">
-                        <span class="font-display text-xl font-black sm:text-2xl">{{ $isPaid ? 'OK' : ($isTerminal ? 'END' : ($isBinancePay ? 'USDT' : 'QR')) }}</span>
+                        <span class="font-display text-xl font-black sm:text-2xl">{{ $isPaid ? 'OK' : ($isTerminal ? 'END' : (($isBinancePay || $isBscPayment) ? 'USDT' : 'QR')) }}</span>
                     </div>
                     <h1 class="mt-5 text-balance font-display text-[1.75rem] font-black leading-tight text-[var(--sf-ink)] sm:text-4xl">
                         {{ $headline }}
@@ -53,7 +53,9 @@
                 @endif
 
                 @if ($isPendingPayment)
-                    @if ($isBinancePay)
+                    @if ($isBscPayment)
+                        @include('storefront.partials.shop.bsc-payment')
+                    @elseif ($isBinancePay)
                         @include('storefront.partials.shop.binance-payment')
                     @else
                         @include('storefront.partials.shop.qris-payment')

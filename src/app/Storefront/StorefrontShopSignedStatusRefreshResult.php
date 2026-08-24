@@ -27,6 +27,10 @@ class StorefrontShopSignedStatusRefreshResult
         public readonly ?string $message = null,
         public readonly ?string $status = null,
         public readonly ?int $retryAfter = null,
+        public readonly ?string $paymentRail = null,
+        public readonly ?string $bscStatus = null,
+        public readonly ?int $bscConfirmations = null,
+        public readonly ?int $bscRequiredConfirmations = null,
     ) {}
 
     public static function unsupportedPayment(): self
@@ -83,6 +87,10 @@ class StorefrontShopSignedStatusRefreshResult
         bool $shouldReload,
         string $redirectUrl,
         ?string $message = null,
+        ?string $paymentRail = null,
+        ?string $bscStatus = null,
+        ?int $bscConfirmations = null,
+        ?int $bscRequiredConfirmations = null,
     ): self {
         return new self(
             ok: true,
@@ -100,6 +108,10 @@ class StorefrontShopSignedStatusRefreshResult
             shouldReload: $shouldReload,
             redirectUrl: $redirectUrl,
             message: $message,
+            paymentRail: $paymentRail,
+            bscStatus: $bscStatus,
+            bscConfirmations: $bscConfirmations,
+            bscRequiredConfirmations: $bscRequiredConfirmations,
         );
     }
 
@@ -123,7 +135,7 @@ class StorefrontShopSignedStatusRefreshResult
             ], fn ($value): bool => $value !== null);
         }
 
-        return [
+        $payload = [
             'ok' => true,
             'status' => $this->status,
             'payment_status' => $this->paymentStatus?->value,
@@ -135,5 +147,16 @@ class StorefrontShopSignedStatusRefreshResult
             'redirect_url' => $this->redirectUrl,
             'message' => $this->message,
         ];
+
+        if ($this->paymentRail !== null) {
+            $payload += [
+                'payment_rail' => $this->paymentRail,
+                'bsc_status' => $this->bscStatus,
+                'bsc_confirmations' => $this->bscConfirmations,
+                'bsc_required_confirmations' => $this->bscRequiredConfirmations,
+            ];
+        }
+
+        return $payload;
     }
 }

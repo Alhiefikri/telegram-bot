@@ -419,6 +419,17 @@ class OrderStateMachine implements OrderLifecycle
             );
         }
 
+        if ($mustBeDue && $payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
+            && $payment->method === 'USDT_BEP20'
+            && $payment->status === PaymentStatus::Pending
+            && $payment->bscDetail()->whereNotNull('verification_grace_until')->where('verification_grace_until', '>', now())->exists())) {
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $payments->first(),
+                newlyApplied: false,
+            );
+        }
+
         $this->inventory->releaseOrderReservations($order);
         $this->credentials()->release($order);
 

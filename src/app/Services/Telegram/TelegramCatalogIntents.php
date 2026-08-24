@@ -101,7 +101,7 @@ class TelegramCatalogIntents
         $binanceAvailable = ! $maintenance->active
             && $availableStock > 0
             && $product->usdt_price_amount !== null
-            && $this->checkout->binancePayEnabled();
+            && $this->checkout->binanceRailSelectable();
         $keyboard = [];
 
         if ($selectionCanPay) {

@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Exceptions\TelegramOutboundPreSendException;
+use App\Models\BscPaymentReceiver;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -138,6 +139,28 @@ class TelegramCheckoutIntents
             && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
     }
 
+    public function bscRailSelectable(): bool
+    {
+        $setting = ManualPaymentSetting::current();
+        $contract = strtolower(trim((string) config('services.bsc.usdt_contract')));
+
+        return (bool) $setting?->bsc_payment_enabled
+            && filled(config('services.bsc.rpc_url'))
+            && (int) config('services.bsc.chain_id', 56) === 56
+            && preg_match('/^0x[0-9a-f]{40}$/', $contract) === 1
+            && BscPaymentReceiver::query()
+                ->activeVerified()
+                ->where('chain_id', 56)
+                ->where('token_contract', $contract)
+                ->where('token_decimals', (int) config('services.bsc.expected_token_decimals', 18))
+                ->exists();
+    }
+
+    public function binanceRailSelectable(): bool
+    {
+        return $this->binancePayEnabled() || $this->bscRailSelectable();
+    }
+
     public function formatUsdt(int $amount): string
     {
         return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
@@ -182,6 +205,21 @@ class TelegramCheckoutIntents
                 $this->codeEntityForLine($text, $receiver, $receiver),
             ],
         ]);
+    }
+
+    public function sendBscPaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
+    {
+        $instruction = $this->paymentInstructions->bsc(
+            $order,
+            $payment,
+            $this->locale->code($customer),
+        );
+
+        return $this->bot->sendMessage(
+            $chatId,
+            $instruction['text'],
+            $instruction['reply_markup'],
+        );
     }
 
     /** @return array{type: 'code', offset: int, length: int} */
@@ -270,9 +308,13 @@ class TelegramCheckoutIntents
         ];
     }
 
-    public function configuredProviderSelection(bool $binance = false): PaymentProviderSelection
+    public function configuredProviderSelection(string|bool|null $rail = null): PaymentProviderSelection
     {
-        return $this->providerResolver->resolve($binance ? 'binance_pay' : null);
+        $paymentRail = is_bool($rail)
+            ? ($rail ? 'binance_pay_id' : null)
+            : $rail;
+
+        return $this->providerResolver->resolve($paymentRail);
     }
 
     public function paymentMode(): string

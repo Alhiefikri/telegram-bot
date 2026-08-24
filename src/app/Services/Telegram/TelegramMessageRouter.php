@@ -31,6 +31,7 @@ class TelegramMessageRouter
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
         private TelegramBinanceVerifyIntents $binanceVerify,
+        private TelegramBscVerifyIntents $bscVerify,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -189,6 +190,7 @@ class TelegramMessageRouter
         if ($text === '/batal') {
             $this->session->forgetWithLock($customer);
             $this->binanceVerify->cancelPrompt($customer);
+            $this->bscVerify->cancelPrompt($customer);
             $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.cancelled'));
 
@@ -234,6 +236,10 @@ class TelegramMessageRouter
             }
             $this->orders->sendOrderDetail($customer, $chatId, $invoice);
 
+            return;
+        }
+
+        if ($isPrivateChat && $this->bscVerify->handleHashInput($customer, $chatId, $text)) {
             return;
         }
 

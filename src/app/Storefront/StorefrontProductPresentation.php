@@ -72,6 +72,8 @@ final readonly class StorefrontProductPresentation
             'checkout' => [
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
                 'websiteBinancePay' => $this->checkoutChoice('website_binance_pay')?->toModalPayload(),
+                'websiteBinancePayId' => $this->checkoutChoice('website_binance_pay_id')?->toModalPayload(),
+                'websiteUsdtBep20' => $this->checkoutChoice('website_usdt_bep20')?->toModalPayload(),
             ],
             'maintenance' => [
                 'active' => $this->checkoutMaintenanceActive,

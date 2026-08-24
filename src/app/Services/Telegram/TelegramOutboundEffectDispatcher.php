@@ -9,6 +9,7 @@ use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
@@ -59,6 +60,11 @@ final class TelegramOutboundEffectDispatcher
                 (string) $effect->getKey(),
             ),
             TelegramOutboundEffectType::BinanceCheckoutInstructions->value => SendBinanceCheckoutInstructions::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            TelegramOutboundEffectType::BscCheckoutInstructions->value => SendBscCheckoutInstructions::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
