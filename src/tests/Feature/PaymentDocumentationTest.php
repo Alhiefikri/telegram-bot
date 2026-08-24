@@ -86,4 +86,40 @@ class PaymentDocumentationTest extends TestCase
             );
         }
     }
+
+    public function test_bsc_operator_contract_documents_database_activation_and_shared_queue_configuration(): void
+    {
+        $readme = file_get_contents(base_path('README.md'));
+        $runbook = file_get_contents(base_path('../docs/runbook-bsc-payment.md'));
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+
+        $this->assertStringContainsString('bsc:check-readiness --json', $readme);
+        $this->assertStringContainsString('ManualFulfillmentReview', $readme);
+        $this->assertStringContainsString('BSC_USDT_CONTRACT', $runbook);
+        $this->assertStringContainsString('payment_bsc_details', $runbook);
+        $this->assertStringContainsString('BSC_USDT_DECIMALS', $compose);
+        $this->assertStringContainsString('BSC_PENDING_BACKLOG_ALERT_THRESHOLD', $compose);
+        $this->assertStringNotContainsString('RAILWAY_', $runbook);
+    }
+
+    public function test_bsc_environment_examples_keep_receivers_out_of_environment_and_forward_rpc_identity(): void
+    {
+        $envExamples = [
+            file_get_contents(base_path('../.env.example')),
+            file_get_contents(base_path('.env.example')),
+        ];
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+
+        foreach ($envExamples as $envExample) {
+            $this->assertMatchesRegularExpression('/^BSC_RPC_URL=$/m', $envExample);
+            $this->assertMatchesRegularExpression('/^BSC_CHAIN_ID=56$/m', $envExample);
+            $this->assertMatchesRegularExpression('/^BSC_USDT_CONTRACT=$/m', $envExample);
+            $this->assertStringNotContainsString('BSC_RECEIVER_ADDRESS=', $envExample);
+        }
+
+        foreach (['BSC_RPC_URL', 'BSC_CHAIN_ID', 'BSC_USDT_CONTRACT', 'BSC_USDT_DECIMALS'] as $variable) {
+            $this->assertStringContainsString('  '.$variable.': ${'.$variable, $sharedAppEnvironment);
+        }
+    }
 }

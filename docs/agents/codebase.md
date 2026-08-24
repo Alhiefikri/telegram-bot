@@ -292,6 +292,14 @@ Binance diverifikasi oleh [`BinancePaymentVerification`](../../src/app/Services/
 
 Binance API key harus read-only dan dibatasi IP. History provider dibaca oleh `BinanceTransactionHistoryReader`; queue jobs (`VerifyBinanceAmountUnique`, `VerifyBinanceOrderId`) adalah transport adapter. Mismatch/late evidence tidak auto-claim; hasilnya dapat masuk manual review sesuai outcome.
 
+### 5.6 USDT BEP20 (BSC)
+
+USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Smart Chain. [`BscPaymentVerification`](../../src/app/Services/Bsc/BscPaymentVerification.php) adalah pemilik receipt/log validation, exact transfer predicate, confirmation/grace decision, sanitized evidence, late-payment detection, and single claim. It calls `OrderLifecycle`; it does not send Telegram copy or update stock directly.
+
+`BscConfirmationGrace` is the expiry guard. It accepts a grace timestamp only when matching successful evidence is stored with an inclusion block between Payment creation and the original deadline. `orders:expire-pending` therefore cannot be bypassed by a fabricated future timestamp. If a terminal Order later receives an exact transfer, BSC records evidence, marks the financially valid Payment paid through `OrderLifecycle`, creates `ManualFulfillmentReview`, and leaves the Order terminal.
+
+`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, and active verified receiver count. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
+
 ## 6. Order lifecycle dan inventory invariant
 
 Flow normal:
@@ -338,6 +346,7 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
+- `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
 - `orders:expire-pending` tiap menit;
 - recovery Telegram updates/outbound dan payment proofs tiap menit; `telegram:recover-outbound` mengubah lease kadaluarsa menjadi `unknown`, lalu hanya mengirim effect `pending`/`failed` yang dispatchable;
 - cleanup login links tiap jam dan retained data tiap hari;
@@ -351,7 +360,7 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 - `telegram-outbound` — checkout instructions dan pending-order admin notification.
 - `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert.
 - `telegram-broadcast` — broadcast dan price/stock notification batches.
-- `binance-verification` — Binance verification jobs.
+- `binance-verification` — Binance Pay ID and USDT BEP20 verification jobs; BSC does not add another worker.
 
 Jobs yang mengirim efek eksternal memakai unique/claim markers agar retry tidak mengirim efek ganda. Queue job bukan tempat menaruh business transition baru; job memanggil service owner lalu dapat retry bila dependency eksternal gagal.
 

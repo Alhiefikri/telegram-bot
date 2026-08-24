@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Bsc\BscOperationalAlertNotifier;
+use App\Services\Bsc\BscOperationalMetrics;
+use App\Services\Bsc\BscReadiness;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -15,12 +18,16 @@ class HealthCheck extends Command
         {--queue-schema}
         {--queue-depth : Report queued job count and oldest queued age for operational queues.}
         {--supervisor}
+        {--bsc : Check enabled BSC readiness and pending verification backlog.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
 
     protected $description = 'Check operational health for database, queue schema, supervisor-managed processes, and scheduler liveness.';
 
-    public function handle(): int
-    {
+    public function handle(
+        BscReadiness $bscReadiness,
+        BscOperationalMetrics $bscMetrics,
+        BscOperationalAlertNotifier $bscAlerts,
+    ): int {
         $healthy = true;
 
         if ($this->option('db')) {
@@ -71,6 +78,33 @@ class HealthCheck extends Command
             } catch (Throwable $exception) {
                 $healthy = false;
                 $this->error('Queue depth: failed - '.$exception->getMessage());
+            }
+        }
+
+        if ($this->option('bsc')) {
+            try {
+                $report = $bscReadiness->check();
+                if (! $report->enabled) {
+                    $this->info('BSC: disabled');
+                } elseif (! $report->isReady()) {
+                    $healthy = false;
+                    $this->error('BSC: failed - '.$report->configurationMessage());
+                    $bscAlerts->notifyReadiness($report);
+                } else {
+                    $this->info("BSC: ready active_receivers={$report->activeReceiverCount} chain={$report->rpcChainId} decimals={$report->tokenDecimals}");
+                }
+
+                $backlog = $bscMetrics->pendingVerification();
+                $threshold = max(1, (int) config('services.bsc.pending_backlog_alert_threshold', 50));
+                $this->info("BSC backlog: pending={$backlog['pending']} oldest_age={$backlog['oldest_age_seconds']}s threshold={$threshold}");
+                if ($backlog['pending'] > $threshold) {
+                    $healthy = false;
+                    $this->error('BSC backlog exceeds the configured alert threshold.');
+                    $bscAlerts->notifyBacklog($backlog['pending'], $threshold, $backlog['oldest_age_seconds']);
+                }
+            } catch (Throwable $exception) {
+                $healthy = false;
+                $this->error('BSC: failed safely - '.$exception->getMessage());
             }
         }
 

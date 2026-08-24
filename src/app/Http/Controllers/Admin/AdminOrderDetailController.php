@@ -27,7 +27,7 @@ class AdminOrderDetailController extends Controller
 
         Gate::authorize('view', $order);
 
-        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.bscDetail.transferEvidence', 'salesProofPost']);
+        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.manualFulfillmentReview', 'payments.bscDetail.transferEvidence', 'salesProofPost']);
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
@@ -108,15 +108,24 @@ class AdminOrderDetailController extends Controller
         $evidence = $detail->transferEvidence->sortByDesc('last_verified_at')->first();
         $hash = trim((string) ($evidence?->tx_hash ?? ''));
         $explorer = $bscExplorer->forTransaction($evidence?->tx_hash);
+        $review = $payment->manualFulfillmentReview;
 
         return [
             'status' => (string) $detail->verification_status,
-            'receiver' => (string) $detail->receiver_address,
+            'contract' => (string) ($evidence?->token_contract ?? $detail->token_contract),
+            'receiver' => (string) ($evidence?->receiver_address ?? $detail->receiver_address),
+            'sender' => (string) ($evidence?->from_address ?? $detail->current_from_address ?? '-'),
             'expected_amount' => rtrim(rtrim(number_format((int) $detail->payable_amount_micro / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
-            'tx_hash' => $hash !== '' ? $this->maskIdentifier($hash) : '-',
-            'from_address' => $this->maskIdentifier((string) ($evidence?->from_address ?? $detail->current_from_address ?? '')),
+            'amount' => (string) ($evidence?->amount_units ?? $detail->expected_token_units),
+            'tx_hash' => $hash !== '' ? $hash : '-',
+            'from_address' => (string) ($evidence?->from_address ?? $detail->current_from_address ?? '-'),
+            'block' => (string) ($evidence?->block_number ?? $detail->current_block_number ?? '-'),
+            'block_hash' => (string) ($evidence?->block_hash ?? '-'),
+            'block_timestamp' => $evidence?->block_timestamp?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i:s') ?? '-',
+            'receipt_status' => (string) ($evidence?->receipt_status ?? '-'),
             'confirmations' => (string) ($detail->current_confirmations ?? $evidence?->confirmations ?? 0),
             'explorer' => $explorer ?? '',
+            'manual_review_url' => $review === null ? '' : route('admin.manual-fulfillment-reviews.show', $review),
         ];
     }
 

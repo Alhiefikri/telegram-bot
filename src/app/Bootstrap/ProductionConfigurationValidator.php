@@ -2,6 +2,7 @@
 
 namespace App\Bootstrap;
 
+use App\Services\Bsc\BscReadiness;
 use Illuminate\Contracts\Config\Repository;
 use RuntimeException;
 
@@ -98,6 +99,12 @@ class ProductionConfigurationValidator
         $bscContract = (string) $this->config->get('services.bsc.usdt_contract', '');
         if (! blank($bscContract) && preg_match('/^0x[0-9a-fA-F]{40}$/', $bscContract) !== 1) {
             throw new RuntimeException('BSC_USDT_CONTRACT must be a valid EVM address in production.');
+        }
+        if (! blank($bscContract) && strtolower($bscContract) !== BscReadiness::APPROVED_USDT_CONTRACT) {
+            throw new RuntimeException('BSC_USDT_CONTRACT must be the approved BNB Smart Chain USDT contract in production.');
+        }
+        if ((int) $this->config->get('services.bsc.expected_token_decimals', 18) !== 18) {
+            throw new RuntimeException('BSC_USDT_DECIMALS must be 18 for the approved BNB Smart Chain USDT contract.');
         }
     }
 }

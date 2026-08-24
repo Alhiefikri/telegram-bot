@@ -317,6 +317,9 @@ final class BscReceiverManager
         }
 
         $contract = BscPaymentReceiver::normalizeAddress((string) config('services.bsc.usdt_contract'));
+        if ($contract !== BscReadiness::APPROVED_USDT_CONTRACT) {
+            throw new InvalidArgumentException('BSC_USDT_CONTRACT harus approved USDT BNB Smart Chain contract.');
+        }
 
         return [$chainId, $contract, (int) config('services.bsc.expected_token_decimals', 18)];
     }

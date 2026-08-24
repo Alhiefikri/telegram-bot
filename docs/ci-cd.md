@@ -214,6 +214,21 @@ Configure the Binance API key, secret, and Pay ID or UID, then the owner selects
 
 For an immediate rollback affecting new checkouts, select **Amount unik (legacy)** in the same dashboard. Environment variables store provider credentials; they do not select checkout mode.
 
+### BSC activation and rollback validation
+
+USDT BEP20 activation is database-backed. The release may deploy with BSC disabled; it must not add a wallet address to `.env`, hardcode a destination, or create another worker. After the additive migrations run, validate the shared scheduler and the sanitized BSC readiness contract:
+
+```bash
+docker compose -p telegram-bot-prod exec -T app php artisan migrate:status
+docker compose -p telegram-bot-prod exec -T app php artisan schedule:list
+docker compose -p telegram-bot-prod exec -T app php artisan bsc:check-readiness --json
+docker compose -p telegram-bot-prod exec -T app php artisan ops:health --db --queue-schema --queue-depth --bsc
+```
+
+`bsc:check-readiness` passes when BSC is disabled or when the enabled setting has an HTTPS RPC, chain 56, the approved USDT contract/18-decimal metadata, and an active ownership-verified receiver. Receiver ownership is completed by an Owner with recent re-authentication and EIP-191/ERC-1271 verification; the committed setting/receiver observers invalidate the Storefront response cache.
+
+Disable BSC by changing the database setting, not by deleting environment values or historical snapshots. For a release rollback, use the existing immutable commit/image rollback workflow and verified backup. Existing BSC `Payment` snapshots and `BINANCE_PAY_ID` Payments must remain unchanged. Re-run the readiness, `ops:health`, `migrate:status`, and `schedule:list` checks after rollback; an intentionally disabled BSC rail is a healthy result.
+
 ## Migration compatibility and approval policy
 
 The SQLite `PHP tests` job is the fast general regression lane. The `PostgreSQL migration and concurrency release gate` job is authoritative for production database compatibility because it uses the same database family as production, starts from an empty database, and exercises locking and process-level concurrency behavior. A deployment commit is not eligible for release unless the complete `CI` workflow, including this PostgreSQL job, succeeds for that exact SHA.

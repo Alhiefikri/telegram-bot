@@ -5,9 +5,12 @@ namespace App\Services\Bsc;
 use App\Models\BscPaymentReceiver;
 use App\Models\ManualPaymentSetting;
 use Illuminate\Support\Carbon;
+use Throwable;
 
 final class BscReadiness
 {
+    public const APPROVED_USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
+
     public function __construct(private readonly BscRpcClientInterface $rpc) {}
 
     public function check(?ManualPaymentSetting $setting = null): BscReadinessReport
@@ -48,6 +51,8 @@ final class BscReadiness
             $missing[] = 'BSC_USDT_CONTRACT';
         } elseif (preg_match('/^0x[a-f0-9]{40}$/', $contract) !== 1) {
             $invalid['BSC_USDT_CONTRACT'] = 'BSC_USDT_CONTRACT harus berupa address EVM yang valid.';
+        } elseif ($contract !== self::APPROVED_USDT_CONTRACT) {
+            $invalid['BSC_USDT_CONTRACT'] = 'BSC_USDT_CONTRACT bukan approved USDT BNB Smart Chain contract.';
         }
         $activeReceiverCount = $this->activeReceiverCount($configuredChainId, $contract, $expectedDecimals);
         if ($activeReceiverCount < 1) {
@@ -72,6 +77,8 @@ final class BscReadiness
                 }
             } catch (BscRpcException $exception) {
                 $invalid['BSC_RPC'] = 'Readiness RPC BSC gagal: '.$exception->getMessage();
+            } catch (Throwable) {
+                $invalid['BSC_RPC'] = 'Readiness RPC BSC gagal.';
             }
         }
 
@@ -101,7 +108,7 @@ final class BscReadiness
             }
 
             return $query->count();
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return 0;
         }
     }

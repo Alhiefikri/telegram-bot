@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Bsc\BscConfirmationGrace;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +27,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly ?ProviderCancellationAttempts $providerCancellationAttempts = null,
         private readonly ?TelegramOutboundEffectService $outboundEffects = null,
         private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
+        private readonly ?BscConfirmationGrace $bscConfirmationGrace = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -197,17 +199,6 @@ class OrderStateMachine implements OrderLifecycle
             && $payment->binance_auto_verification_enabled
             && $payment->status === PaymentStatus::Pending
             && $payment->binance_verification_grace_until?->isFuture())) {
-            return new OrderLifecycleResult(
-                order: null,
-                payment: $order->payments->first(),
-                newlyApplied: false,
-            );
-        }
-
-        if ($order->payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
-            && $payment->method === 'USDT_BEP20'
-            && $payment->status === PaymentStatus::Pending
-            && $payment->bscDetail()->whereNotNull('verification_grace_until')->where('verification_grace_until', '>', now())->exists())) {
             return new OrderLifecycleResult(
                 order: null,
                 payment: $order->payments->first(),
@@ -419,10 +410,7 @@ class OrderStateMachine implements OrderLifecycle
             );
         }
 
-        if ($mustBeDue && $payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
-            && $payment->method === 'USDT_BEP20'
-            && $payment->status === PaymentStatus::Pending
-            && $payment->bscDetail()->whereNotNull('verification_grace_until')->where('verification_grace_until', '>', now())->exists())) {
+        if ($mustBeDue && $payments->contains(fn (Payment $payment): bool => $this->bscConfirmationGrace()->isActive($payment, $order))) {
             return new OrderLifecycleResult(
                 order: null,
                 payment: $payments->first(),
@@ -492,6 +480,11 @@ class OrderStateMachine implements OrderLifecycle
     private function providerCancellationAttempts(): ProviderCancellationAttempts
     {
         return $this->providerCancellationAttempts ?? app(ProviderCancellationAttempts::class);
+    }
+
+    private function bscConfirmationGrace(): BscConfirmationGrace
+    {
+        return $this->bscConfirmationGrace ?? app(BscConfirmationGrace::class);
     }
 
     private function dispatchAdminPendingNotificationDelete(Order $order): void

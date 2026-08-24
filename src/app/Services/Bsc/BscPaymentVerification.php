@@ -24,13 +24,14 @@ final class BscPaymentVerification
         private readonly BscTokenTransferReader $reader,
         private readonly OrderLifecycle $orders,
         private readonly BscVerificationQueue $queue,
+        private readonly BscConfirmationGrace $confirmationGrace,
     ) {}
 
     public function enabled(): bool
     {
         return filled(config('services.bsc.rpc_url'))
             && (int) config('services.bsc.chain_id', 56) === 56
-            && preg_match('/^0x[0-9a-fA-F]{40}$/', (string) config('services.bsc.usdt_contract')) === 1;
+            && strtolower(trim((string) config('services.bsc.usdt_contract'))) === BscReadiness::APPROVED_USDT_CONTRACT;
     }
 
     public function status(Payment $payment): BscVerificationStatus
@@ -125,11 +126,12 @@ final class BscPaymentVerification
             }
 
             $graceUntil = $detail->verification_grace_until;
+            $activeGrace = $this->confirmationGrace->isActive($payment, $order);
             if ($graceUntil !== null && $graceUntil->isPast()) {
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::GraceExpired, $payment->fresh());
             }
 
-            if ($deadline->isPast() && $graceUntil === null) {
+            if ($deadline->isPast() && ! $activeGrace) {
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::Expired, $payment->fresh());
             }
 
@@ -220,9 +222,11 @@ final class BscPaymentVerification
             && $payment->method === 'USDT_BEP20'
             && ($payment->status !== PaymentStatus::Pending
                 || $payment->order?->order_status !== OrderStatus::PendingPayment)
-            && $detail !== null
-            && $lateHash !== null) {
-            return $this->verifyLateCandidate($payment, $detail, $lateHash, $submissionVersion);
+            && ! in_array($payment->status, [PaymentStatus::Refunded], true)
+            && $detail !== null) {
+            return $lateHash !== null
+                ? $this->verifyLateCandidate($payment, $detail, $lateHash, $submissionVersion)
+                : $this->scanForLateTransfer($payment, $detail);
         }
 
         $guard = $this->guard($payment);
@@ -237,7 +241,7 @@ final class BscPaymentVerification
         $configuredContract = strtolower(trim((string) config('services.bsc.usdt_contract')));
         $configuredChainId = (int) config('services.bsc.chain_id', 56);
         if ($configuredChainId !== 56
-            || preg_match('/^0x[0-9a-f]{40}$/', $configuredContract) !== 1
+            || $configuredContract !== BscReadiness::APPROVED_USDT_CONTRACT
             || (int) $detail->chain_id !== 56
             || strtolower((string) $detail->token_contract) !== $configuredContract
             || (int) $detail->token_decimals < 6) {
@@ -380,6 +384,13 @@ final class BscPaymentVerification
         if ($submissionVersion > 0 && (int) $detail->tx_submission_version !== $submissionVersion) {
             return BscVerificationResult::of(BscVerificationOutcome::StaleSubmission, retryable: false);
         }
+        if (! $this->validConfiguredSnapshot($detail)) {
+            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, $hash, [
+                'reason' => 'late_transfer_invalid_bsc_snapshot',
+            ]);
+
+            return BscVerificationResult::of(BscVerificationOutcome::NotConfigured, retryable: false);
+        }
 
         try {
             if ($this->rpc->chainId() !== (int) $detail->chain_id || (int) $detail->chain_id !== 56) {
@@ -433,12 +444,45 @@ final class BscPaymentVerification
                 return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
             }
 
-            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
-                'reason' => 'late_transfer_requires_manual_review',
-            ], $evidence);
+            $block = $this->rpc->blockByNumber($evidence->blockNumber);
+            $latest = $this->rpc->blockByNumber('latest');
+            $blockNumber = $this->blockNumber($block['number'] ?? null);
+            $latestNumber = $this->blockNumber($latest['number'] ?? null);
+            $blockTimestamp = $this->blockTimestamp($block['timestamp'] ?? null);
+            if ($block === null || $latest === null || $blockNumber === null || $latestNumber === null || $blockTimestamp === null) {
+                throw new BscRpcException('BSC RPC returned incomplete late-payment block facts.');
+            }
 
-            return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            $receiptBlockHash = BscTransactionHash::normalize((string) ($receipt['blockHash'] ?? ''));
+            $blockHash = BscTransactionHash::normalize((string) ($block['hash'] ?? ''));
+            if ($blockNumber !== $evidence->blockNumber
+                || $latestNumber < $blockNumber
+                || ($receiptBlockHash !== null && $blockHash !== null && ! hash_equals($receiptBlockHash, $blockHash))) {
+                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW);
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
+                    'reason' => 'late_transfer_reorg_or_invalid_block',
+                ], $evidence);
+
+                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            }
+
+            if ($payment->created_at !== null
+                && ($blockTimestamp->timestamp < $payment->created_at->timestamp || $blockTimestamp->isFuture())) {
+                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_MANUAL_REVIEW);
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, $submissionVersion, $hash, [
+                    'reason' => $blockTimestamp->isFuture()
+                        ? 'late_transfer_future_block'
+                        : 'late_transfer_before_payment_window',
+                ], $evidence);
+
+                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
+            }
+
+            $evidence = $evidence
+                ->withBlockHash($blockHash ?? $receiptBlockHash ?? $evidence->blockHash)
+                ->withChainFacts($blockTimestamp, $latestNumber - $blockNumber + 1);
+
+            return $this->recordLatePayment($payment, $evidence, $submissionVersion);
         } catch (BscRpcException $exception) {
             report($exception);
             $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, $hash, [
@@ -596,6 +640,81 @@ final class BscPaymentVerification
         return $this->verifySubmittedHash($payment, $detail, $hash, $submissionVersion);
     }
 
+    private function scanForLateTransfer(Payment $payment, PaymentBscDetail $detail): BscVerificationResult
+    {
+        try {
+            if (! $this->validConfiguredSnapshot($detail)) {
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, 0, null, [
+                    'reason' => 'late_scan_invalid_bsc_snapshot',
+                ]);
+
+                return BscVerificationResult::of(BscVerificationOutcome::NotConfigured, retryable: false);
+            }
+            if ($this->rpc->chainId() !== 56 || (int) $detail->chain_id !== 56) {
+                return $this->mismatch($payment, $detail, 0, null, null, 'late_scan_wrong_chain');
+            }
+
+            $latest = $this->rpc->blockByNumber('latest');
+            $latestNumber = $this->blockNumber($latest['number'] ?? null);
+            if ($latestNumber === null) {
+                throw new BscRpcException('BSC RPC returned an invalid latest block.');
+            }
+
+            $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
+            $fromBlock = max(0, $latestNumber - $maxBlocks + 1);
+            $logs = $this->rpc->transferLogs(
+                (string) $detail->token_contract,
+                $fromBlock,
+                $latestNumber,
+                (string) $detail->receiver_address,
+            );
+            $hashes = collect($logs)
+                ->map(fn (mixed $log): ?string => is_array($log)
+                    ? BscTransactionHash::normalize((string) ($log['transactionHash'] ?? ''))
+                    : null)
+                ->filter()
+                ->unique()
+                ->values();
+
+            if ($hashes->isEmpty()) {
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_EXPIRED, 0, null, [
+                    'reason' => 'no_late_transfer_candidate',
+                    'scanned_from_block' => $fromBlock,
+                    'scanned_to_block' => $latestNumber,
+                ]);
+
+                return BscVerificationResult::of(BscVerificationOutcome::NotFound, retryable: true);
+            }
+
+            if ($hashes->count() > 1) {
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_MANUAL_REVIEW, 0, null, [
+                    'reason' => 'multiple_late_transfer_candidates',
+                    'candidate_count' => $hashes->count(),
+                    'scanned_from_block' => $fromBlock,
+                    'scanned_to_block' => $latestNumber,
+                ]);
+
+                return BscVerificationResult::of(BscVerificationOutcome::ManualReview, retryable: false);
+            }
+
+            return $this->verifyLateCandidate($payment, $detail, (string) $hashes->first(), 0);
+        } catch (BscRpcException $exception) {
+            report($exception);
+            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, 0, null, [
+                'reason' => 'late_scan_rpc_error',
+            ]);
+
+            return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: $exception->retryable);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, 0, null, [
+                'reason' => 'late_scan_verification_error',
+            ]);
+
+            return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: false);
+        }
+    }
+
     /** @param array<string, mixed> $receipt */
     private function evaluateExactTransfer(
         Payment $payment,
@@ -650,6 +769,15 @@ final class BscPaymentVerification
                     ? 'future_block_timestamp'
                     : ($blockTimestamp->timestamp > $deadline->timestamp ? 'late_transfer' : 'transfer_before_payment_window'),
             ], $evidence);
+
+            if ($blockTimestamp->timestamp > $deadline->timestamp
+                && $payment->status === PaymentStatus::Pending
+                && $payment->order?->order_status === OrderStatus::PendingPayment) {
+                $this->orders->applyPendingExpiry($payment->order);
+                $payment->refresh();
+
+                return $this->recordLatePayment($payment, $evidence, $submissionVersion);
+            }
 
             return BscVerificationResult::of(BscVerificationOutcome::ManualReview, $evidence, retryable: false);
         }
@@ -707,6 +835,108 @@ final class BscPaymentVerification
         }
 
         return $this->claim($payment, $detail, $evidence, $submissionVersion);
+    }
+
+    private function recordLatePayment(
+        Payment $payment,
+        BscTransferEvidence $evidence,
+        int $submissionVersion,
+    ): BscVerificationResult {
+        try {
+            $outcome = DB::transaction(function () use ($payment, $evidence, $submissionVersion): BscVerificationOutcome {
+                $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
+                $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+                $lockedDetail = PaymentBscDetail::query()->whereKey($locked->id)->lockForUpdate()->firstOrFail();
+
+                if ($locked->status === PaymentStatus::Paid) {
+                    return BscVerificationOutcome::AlreadyPaid;
+                }
+
+                if ($submissionVersion > 0 && (int) $lockedDetail->tx_submission_version !== $submissionVersion) {
+                    return BscVerificationOutcome::StaleSubmission;
+                }
+
+                $existing = BscPaymentTransferEvidence::query()
+                    ->where('tx_hash', $evidence->txHash)
+                    ->lockForUpdate()
+                    ->first();
+                if ($existing !== null && (string) $existing->payment_id !== (string) $locked->id) {
+                    return BscVerificationOutcome::TransactionAlreadyUsed;
+                }
+
+                if ($existing === null) {
+                    BscPaymentTransferEvidence::query()->create($this->evidenceAttributes(
+                        $locked->id,
+                        $evidence,
+                        PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    ));
+                } else {
+                    $existing->update([
+                        'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                        'confirmations' => $evidence->confirmations,
+                        'last_verified_at' => now(),
+                    ]);
+                }
+
+                $locked->update([
+                    'provider_reference' => $evidence->txHash,
+                    'provider_payload' => [
+                        'reason' => 'late_payment',
+                        ...$evidence->sanitizedPayload(),
+                    ],
+                ]);
+                $lockedDetail->update([
+                    'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    'last_verified_at' => now(),
+                    'current_tx_hash' => $evidence->txHash,
+                    'current_confirmations' => $evidence->confirmations,
+                    'current_block_number' => $evidence->blockNumber,
+                    'current_from_address' => $evidence->fromAddress,
+                    'evidence_payload' => [
+                        'reason' => 'late_payment',
+                        ...$evidence->sanitizedPayload(),
+                    ],
+                ]);
+
+                // OrderLifecycle deliberately keeps the terminal Order
+                // terminal, marks the financially valid Payment paid, and
+                // creates the existing ManualFulfillmentReview boundary.
+                $this->orders->applyPaymentPaid($locked);
+
+                $receivedAt = now();
+                PaymentEvent::query()->firstOrCreate(
+                    [
+                        'provider' => 'bsc',
+                        'event_type' => PaymentEventType::Reconciliation->value,
+                        'idempotency_key' => $this->eventIdempotencyKey($evidence->txHash),
+                    ],
+                    [
+                        'payment_id' => $locked->id,
+                        'merchant_ref' => $locked->merchant_ref,
+                        'provider_reference' => $evidence->txHash,
+                        'provider_status' => 'LATE_PAYMENT',
+                        'raw_payload' => [
+                            'reason' => 'late_payment',
+                            ...$evidence->sanitizedPayload(),
+                        ],
+                        'received_at' => $receivedAt,
+                        'last_received_at' => $receivedAt,
+                        'received_count' => 1,
+                        'processed_at' => $receivedAt,
+                    ],
+                );
+
+                return BscVerificationOutcome::ManualReview;
+            }, 5);
+        } catch (QueryException $exception) {
+            if (! $this->isUniqueViolation($exception)) {
+                throw $exception;
+            }
+
+            return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, $evidence, retryable: false);
+        }
+
+        return BscVerificationResult::of($outcome, $evidence, retryable: false);
     }
 
     private function claim(
@@ -806,7 +1036,7 @@ final class BscPaymentVerification
                     'provider_reference' => $evidence->txHash,
                     'provider_status' => 'CONFIRMED',
                     'raw_payload' => $evidence->sanitizedPayload(),
-                    'idempotency_key' => 'bsc:'.$evidence->txHash,
+                    'idempotency_key' => $this->eventIdempotencyKey($evidence->txHash),
                     'received_at' => $receivedAt,
                     'last_received_at' => $receivedAt,
                     'received_count' => 1,
@@ -973,7 +1203,11 @@ final class BscPaymentVerification
             return true;
         }
 
-        return ($detail->verification_grace_until ?? $deadline)->isPast();
+        if ($this->confirmationGrace->isActive($payment, $payment->order)) {
+            return false;
+        }
+
+        return $deadline->isPast();
     }
 
     private function minimumConfirmations(): int
@@ -1025,5 +1259,19 @@ final class BscPaymentVerification
     {
         return in_array((string) ($exception->errorInfo[0] ?? ''), ['23000', '23505'], true)
             || str_contains(strtolower($exception->getMessage()), 'unique');
+    }
+
+    private function eventIdempotencyKey(string $transactionHash): string
+    {
+        return substr(hash('sha256', strtolower($transactionHash)), 0, 64);
+    }
+
+    private function validConfiguredSnapshot(PaymentBscDetail $detail): bool
+    {
+        return (int) config('services.bsc.chain_id', 56) === 56
+            && strtolower(trim((string) config('services.bsc.usdt_contract'))) === BscReadiness::APPROVED_USDT_CONTRACT
+            && (int) $detail->chain_id === 56
+            && strtolower((string) $detail->token_contract) === BscReadiness::APPROVED_USDT_CONTRACT
+            && (int) $detail->token_decimals >= 6;
     }
 }

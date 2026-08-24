@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\VerifyBscPayment;
 use App\Models\BscPaymentReceiver;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -183,6 +184,27 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(1, PaymentEvent::query()->where('provider', 'bsc')->count());
     }
 
+    public function test_transfer_included_after_the_deadline_becomes_late_payment_before_order_expiry_races(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('7', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $deadline = now()->subSeconds(30);
+        $payment->update(['expired_at' => $deadline]);
+        $payment->order()->update(['expires_at' => $deadline]);
+        $this->rpc->blocks['100'] = $this->block(100, now()->subSeconds(10), '0x'.str_repeat('e', 64));
+
+        $result = app(BscPaymentVerification::class)->verify($payment->fresh(), $hash);
+
+        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->fresh()->order->order_status);
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+        ]);
+    }
+
     public function test_wrong_amount_is_mismatch_and_never_claims(): void
     {
         $payment = $this->payment();
@@ -217,6 +239,22 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
     }
 
+    public function test_disabling_new_bsc_checkout_does_not_change_an_existing_payment_snapshot_or_verification(): void
+    {
+        $payment = $this->payment();
+        $detail = $payment->bscDetail()->firstOrFail();
+        $hash = '0x'.str_repeat('6', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        ManualPaymentSetting::current()->update(['bsc_payment_enabled' => false]);
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame($detail->receiver_address, $payment->fresh()->bscDetail->receiver_address);
+        $this->assertSame(self::CONTRACT, $payment->fresh()->bscDetail->token_contract);
+    }
+
     public function test_a_late_exact_transfer_is_recorded_for_manual_review_without_reviving_the_order(): void
     {
         $payment = $this->payment();
@@ -236,10 +274,46 @@ class BscPaymentVerificationTest extends TestCase
         $result = app(BscPaymentVerification::class)->verify($payment->fresh(), $hash, 1);
 
         $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
-        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Expired, $payment->fresh()->order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->order->payment_status);
         $this->assertSame(PaymentBscDetail::STATUS_MANUAL_REVIEW, $payment->fresh()->bscDetail()->firstOrFail()->verification_status);
         $this->assertSame(1, $payment->fresh()->bscTransferEvidence()->count());
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'order_id' => $payment->order_id,
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+            'provider_reference' => $hash,
+        ]);
+        $this->assertSame(1, PaymentEvent::query()->where('provider', 'bsc')->count());
+    }
+
+    public function test_reconciliation_finds_a_late_transfer_without_a_submitted_hash_and_uses_manual_review(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('8', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $lateDeadline = now()->subMinute();
+        $payment->update(['expired_at' => $lateDeadline]);
+        $payment->order()->update([
+            'expires_at' => $lateDeadline,
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+        ]);
+        $payment->update(['status' => PaymentStatus::Expired]);
+        $this->rpc->blocks['100'] = $this->block(100, now()->subSeconds(10), '0x'.str_repeat('e', 64));
+        $this->rpc->logs = [['transactionHash' => $hash]];
+
+        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
+
+        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->fresh()->order->order_status);
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+        ]);
     }
 
     public function test_a_globally_reused_transaction_cannot_claim_a_second_payment(): void

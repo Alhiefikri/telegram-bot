@@ -79,14 +79,22 @@
                     <p class="font-black">USDT BEP20 (BSC) verification</p>
                     <dl class="mt-3 grid gap-2 sm:grid-cols-2">
                         <div><dt class="text-brand-muted">Status</dt><dd>{{ $bscReview['status'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Receipt</dt><dd>{{ $bscReview['receipt_status'] }}</dd></div>
                         <div><dt class="text-brand-muted">Expected amount</dt><dd>{{ $bscReview['expected_amount'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Observed token units</dt><dd class="break-all font-mono text-xs">{{ $bscReview['amount'] }}</dd></div>
+                        <div class="sm:col-span-2"><dt class="text-brand-muted">Token contract</dt><dd class="break-all font-mono text-xs">{{ $bscReview['contract'] }}</dd></div>
                         <div class="sm:col-span-2"><dt class="text-brand-muted">Receiving address snapshot</dt><dd class="break-all">{{ $bscReview['receiver'] }}</dd></div>
                         <div><dt class="text-brand-muted">TX hash</dt><dd class="break-all">{{ $bscReview['tx_hash'] }}</dd></div>
                         <div><dt class="text-brand-muted">Confirmations</dt><dd>{{ $bscReview['confirmations'] }}</dd></div>
-                        <div><dt class="text-brand-muted">From address</dt><dd class="break-all">{{ $bscReview['from_address'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Sender</dt><dd class="break-all">{{ $bscReview['sender'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Block</dt><dd>{{ $bscReview['block'] }}</dd></div>
+                        <div><dt class="text-brand-muted">Block timestamp</dt><dd>{{ $bscReview['block_timestamp'] }}</dd></div>
                     </dl>
                     @if ($bscReview['explorer'])
                         <a href="{{ $bscReview['explorer'] }}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-flex font-black underline">Open BSC explorer</a>
+                    @endif
+                    @if ($bscReview['manual_review_url'])
+                        <a href="{{ $bscReview['manual_review_url'] }}" class="mt-3 ml-3 inline-flex font-black underline">Open manual fulfillment review</a>
                     @endif
                 </x-admin-dashboard.notice>
             @endif

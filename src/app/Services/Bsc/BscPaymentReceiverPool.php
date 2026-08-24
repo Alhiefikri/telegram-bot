@@ -57,6 +57,9 @@ final class BscPaymentReceiverPool
         } catch (\InvalidArgumentException $exception) {
             throw new InvalidCheckout('BSC payment rail has no valid approved token contract.', previous: $exception);
         }
+        if ($tokenContract !== BscReadiness::APPROVED_USDT_CONTRACT) {
+            throw new InvalidCheckout('BSC payment rail requires the approved BNB Smart Chain USDT contract.');
+        }
 
         $tokenDecimals = (int) config('services.bsc.expected_token_decimals', 18);
         if ($tokenDecimals < 6) {

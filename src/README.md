@@ -16,10 +16,10 @@ Komponen utama:
 - **Web Storefront**: katalog publik dan guest checkout melalui `/shop`, signed invoice, dan Recovery Key; tidak bergantung pada Telegram.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
 - **Payment Provider Switch**: owner memilih `Manual`, `Pakasir`, atau `KlikQRIS` untuk checkout baru. Payment yang sudah dibuat tetap memakai provider asal.
-- **Payment rails**: Manual QR, Pakasir hosted/native QRIS, KlikQRIS Native QRIS, dan Binance Pay. KlikQRIS tidak melakukan automatic fallback ke Manual; outcome create yang tidak pasti dipulihkan pada Payment yang sama.
+- **Payment rails**: Manual QR, Pakasir hosted/native QRIS, KlikQRIS Native QRIS, Binance Pay ID, dan USDT BEP20 pada BNB Smart Chain. KlikQRIS tidak melakukan automatic fallback ke Manual; outcome create yang tidak pasti dipulihkan pada Payment yang sama.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
-- **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance pada queue terpisah.
-- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir/Binance, recovery Telegram, cleanup, dan statistik harian.
+- **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance/BSC pada queue terpisah yang sama.
+- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir/Binance/BSC, recovery Telegram, cleanup, dan statistik harian.
 
 Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail implementasi, schema database, dan API internal sebaiknya dibaca langsung dari codebase/test.
 
@@ -135,9 +135,17 @@ Outcome yang dapat diterima caller adalah `Payable`, `Creating`, `RecoveryPendin
 
 Jika hasil create tidak pasti, sistem melakukan status recovery pada Payment/invoice yang sama. Tidak ada Payment kedua dan tidak ada automatic fallback ke Manual. Callback KlikQRIS hanya signal; `KlikQrisCallbackProcessor` melakukan status lookup authoritative sebelum memanggil `OrderLifecycle`. Scheduler menjalankan `klikqris:reconcile` ketika environment aktif. Detail keputusan ada di [ADR-0006](../docs/adr/0006-klikqris-native-qris-and-pakasir-retirement.md) dan runbook ada di [KlikQRIS sandbox validation](../docs/klikqris-sandbox-validation.md).
 
-### 3.6 Binance Pay
+### 3.6 Binance Pay ID
 
 Binance disimpan sebagai `provider=manual` dengan `method=BINANCE_PAY_ID`, sehingga caller harus memeriksa `method` dan tidak boleh menyimpulkan rail hanya dari provider. Verifikasi otomatis dikelola `BinancePaymentVerification` dalam mode `amount_unique` atau `order_id`; mismatch dan bukti terlambat tidak auto-claim dan dapat masuk manual review.
+
+### 3.7 USDT BEP20 (BSC)
+
+USDT BEP20 adalah Binance Payment Rail kedua dengan `provider=manual` dan `method=USDT_BEP20`. Authority-nya adalah BNB Smart Chain, bukan Binance Pay history. Payment menyimpan snapshot BSC Receiving Address, approved USDT contract, expected token units, unique payable amount, TX-hash attempts, confirmation state, dan sanitized evidence.
+
+BSC tetap disabled sampai Owner mengaktifkan `bsc_payment_enabled` dari dashboard setelah `bsc:check-readiness --json` menunjukkan RPC chain 56, approved contract metadata/18 decimals, dan minimal satu receiver yang sudah ownership-verified serta aktif. Address tidak pernah disimpan di ENV atau hardcoded source; ENV hanya berisi RPC endpoint, chain/token identity, timeout, dan safe explorer host. Mutasi receiver memerlukan Owner re-authentication dan EIP-191/ERC-1271 (atau explicit high-risk manual verification), lalu meng-invalidate Storefront response cache setelah commit.
+
+`bsc:reconcile` memakai worker `binance-verification` yang sama. Transfer exact yang sudah sukses tetapi belum mencapai tiga confirmations tetap `confirming`; RPC failure menjadi `provider_error` dan tidak melepaskan reservasi. Transfer yang masuk setelah Order expired/cancelled menjadi Late Payment: lifecycle menandai Payment paid, membuat `ManualFulfillmentReview`, mempertahankan Order terminal, dan tidak melakukan fulfillment otomatis. Owner menyelesaikannya melalui manual-review flow.
 
 ## 4. Admin Flow
 
@@ -722,11 +730,15 @@ Langkah cek:
 - `src/app/Services/KlikQris/KlikQrisCallbackProcessor.php` — callback signal + authoritative status verification.
 - `src/app/Services/Pakasir/PakasirNativeQrisService.php` — legacy Pakasir native QRIS create/recovery.
 - `src/app/Services/Binance/BinancePaymentVerification.php` — Binance verification workflow.
+- `src/app/Services/Bsc/BscPaymentVerification.php` — authoritative BSC Payment verification and atomic claim/manual-review workflow.
+- `src/app/Services/Bsc/BscReadiness.php` — DB activation, RPC/token metadata, and active receiver readiness.
+- `src/app/Console/Commands/CheckBscReadiness.php` — command `bsc:check-readiness --json` for deployment validation.
+- `src/app/Console/Commands/ReconcileBscPayments.php` — command `bsc:reconcile {--chunk=100}` using the shared Binance verification queue.
 - `src/app/Storefront/StorefrontShopCheckout.php` — guest storefront checkout dan Recovery Key issuance.
 - `src/app/Storefront/StorefrontShopPaymentStatusRefresh.php` — signed invoice status refresh/recovery adapter.
 - `src/app/Services/Admin/AdminOrderOperations.php` — operasi admin untuk complete manual order dan resend receipt, termasuk audit log.
 - `src/app/Services/OrderStateMachine.php` — transisi status order/payment, release reservasi, sale stock movement, refund, cancel, dan expiry.
-- `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor}`.
+- `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor} {--bsc}`.
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileKlikQrisPayments.php` — command `klikqris:reconcile {--chunk=100}`.

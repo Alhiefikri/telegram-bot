@@ -34,13 +34,6 @@ class ExpirePendingOrders extends Command
                 ->where('binance_auto_verification_enabled', true)
                 ->whereNotNull('binance_verification_grace_until')
                 ->where('binance_verification_grace_until', '>', now()))
-            ->whereDoesntHave('payments', fn ($query) => $query
-                ->where('provider', 'manual')
-                ->where('method', 'USDT_BEP20')
-                ->where('status', PaymentStatus::Pending->value)
-                ->whereHas('bscDetail', fn ($detail) => $detail
-                    ->whereNotNull('verification_grace_until')
-                    ->where('verification_grace_until', '>', now())))
             ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed, &$expiredThisRun): void {
                 foreach ($chunk as $order) {
                     try {

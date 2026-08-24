@@ -455,6 +455,16 @@ wait_for_health() {
     sleep "${RELEASE_HEALTH_INTERVAL:-5}"
   done
 
+  # BSC readiness is a database-backed activation gate. Keep this command
+  # capability-detected so an immutable rollback to the immediately previous
+  # release (before this command existed) remains safe.
+  if compose exec -T app php artisan list --raw </dev/null 2>/dev/null | grep -q '^bsc:check-readiness[[:space:]]'; then
+    if ! compose exec -T app php artisan bsc:check-readiness --json </dev/null; then
+      echo "Release gate failed: enabled BSC is not ready." >&2
+      return 1
+    fi
+  fi
+
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
     if compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null; then
       return 0

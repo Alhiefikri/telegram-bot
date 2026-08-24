@@ -207,7 +207,7 @@ class StorefrontProductPresenter
         $configured = (bool) $setting?->bsc_payment_enabled
             && filled(config('services.bsc.rpc_url'))
             && (int) config('services.bsc.chain_id', 56) === 56
-            && preg_match('/^0x[0-9a-f]{40}$/', $contract) === 1
+            && $contract === BscReadiness::APPROVED_USDT_CONTRACT
             && BscPaymentReceiver::query()
                 ->activeVerified()
                 ->where('chain_id', 56)

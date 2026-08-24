@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Bsc\BscReadiness;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\PaymentProviderSelection;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
@@ -147,7 +148,7 @@ class TelegramCheckoutIntents
         return (bool) $setting?->bsc_payment_enabled
             && filled(config('services.bsc.rpc_url'))
             && (int) config('services.bsc.chain_id', 56) === 56
-            && preg_match('/^0x[0-9a-f]{40}$/', $contract) === 1
+            && $contract === BscReadiness::APPROVED_USDT_CONTRACT
             && BscPaymentReceiver::query()
                 ->activeVerified()
                 ->where('chain_id', 56)
