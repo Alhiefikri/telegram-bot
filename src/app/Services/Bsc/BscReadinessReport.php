@@ -18,6 +18,9 @@ final readonly class BscReadinessReport
         public ?int $rpcChainId = null,
         public ?int $tokenDecimals = null,
         public ?Carbon $checkedAt = null,
+        public ?int $settingId = null,
+        public ?string $settingUpdatedAt = null,
+        public ?string $configurationFingerprint = null,
     ) {}
 
     public function isReady(): bool

@@ -2,6 +2,7 @@
 
 namespace App\Services\Bsc;
 
+use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\ManualPaymentSetting;
 use Illuminate\Support\Carbon;
@@ -65,6 +66,9 @@ final class BscReadiness
                 invalid: [],
                 activeReceiverCount: $activeReceiverCount,
                 checkedAt: $checkedAt,
+                settingId: $setting?->getKey() !== null ? (int) $setting->getKey() : null,
+                settingUpdatedAt: $this->settingUpdatedAt($setting),
+                configurationFingerprint: $this->configurationFingerprint($setting),
             );
         }
 
@@ -137,7 +141,42 @@ final class BscReadiness
             rpcChainId: $rpcChainId,
             tokenDecimals: $tokenDecimals,
             checkedAt: $checkedAt,
+            settingId: $setting?->getKey() !== null ? (int) $setting->getKey() : null,
+            settingUpdatedAt: $this->settingUpdatedAt($setting),
+            configurationFingerprint: $this->configurationFingerprint($setting),
         );
+    }
+
+    /**
+     * Re-check only the database and runtime configuration snapshot inside
+     * the checkout transaction. This method must stay free of RPC calls: the
+     * remote readiness report is resolved before checkout acquires locks.
+     */
+    public function assertCheckoutSnapshot(?BscReadinessReport $report, ?ManualPaymentSetting $setting): void
+    {
+        if ($report === null || ! $report->isReady()) {
+            $message = $report?->configurationMessage() ?? 'BSC readiness preflight is missing.';
+            throw new InvalidCheckout('BSC payment rail is not ready. '.$message);
+        }
+
+        if ($setting === null || ! $setting->is_active || ! $setting->bsc_payment_enabled) {
+            throw new InvalidCheckout('BSC payment rail is no longer enabled. Try again.');
+        }
+
+        if ($report->settingId !== (int) $setting->getKey()
+            || $report->settingUpdatedAt !== $this->settingUpdatedAt($setting)
+            || $report->configurationFingerprint !== $this->configurationFingerprint($setting)) {
+            throw new InvalidCheckout('BSC payment rail readiness changed. Try again.');
+        }
+
+        $activeReceiverCount = $this->activeReceiverCount(
+            (int) config('services.bsc.chain_id', 56),
+            strtolower(trim((string) config('services.bsc.usdt_contract'))),
+            (int) config('services.bsc.expected_token_decimals', 18),
+        );
+        if ($activeReceiverCount < 1 || $activeReceiverCount !== $report->activeReceiverCount) {
+            throw new InvalidCheckout('BSC payment rail receiving addresses changed. Try again.');
+        }
     }
 
     private function assertTransferLogScanningSupported(string $contract): void
@@ -176,9 +215,15 @@ final class BscReadiness
         Cache::add(self::CACHE_VERSION_KEY, 1, now()->addYears(5));
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
 
-        return self::CACHE_KEY_PREFIX.'.v'.$version.'.'.hash('sha256', json_encode([
+        return self::CACHE_KEY_PREFIX.'.v'.$version.'.'.$this->configurationFingerprint($setting);
+    }
+
+    private function configurationFingerprint(?ManualPaymentSetting $setting): string
+    {
+        return hash('sha256', json_encode([
             'setting_id' => $setting?->getKey(),
-            'setting_updated_at' => $setting?->updated_at?->getTimestamp(),
+            'setting_updated_at' => $this->settingUpdatedAt($setting),
+            'setting_active' => (bool) $setting?->is_active,
             'enabled' => (bool) $setting?->bsc_payment_enabled,
             'rpc_url' => trim((string) config('services.bsc.rpc_url')),
             'chain_id' => (int) config('services.bsc.chain_id', 56),
@@ -187,6 +232,11 @@ final class BscReadiness
             'indexed_source' => trim((string) config('services.bsc.indexed_source')),
             'indexer_url' => trim((string) config('services.bsc.indexer_url')),
         ], JSON_THROW_ON_ERROR));
+    }
+
+    private function settingUpdatedAt(?ManualPaymentSetting $setting): ?string
+    {
+        return $setting?->updated_at?->format('Y-m-d H:i:s.uP');
     }
 
     private function activeReceiverCount(?int $chainId = null, ?string $contract = null, ?int $decimals = null): int

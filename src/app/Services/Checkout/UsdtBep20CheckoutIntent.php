@@ -5,7 +5,6 @@ namespace App\Services\Checkout;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\ManualPaymentSetting;
-use App\Services\Bsc\BscReadiness;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -63,9 +62,8 @@ final readonly class UsdtBep20CheckoutIntent implements CheckoutPaymentIntent
         Collection $products,
         ?ManualPaymentSetting $setting = null,
     ): void {
-        $readiness = app(BscReadiness::class)->check($setting);
-        if (! $readiness->isReady()) {
-            throw new InvalidCheckout('BSC payment rail is not ready. '.$readiness->configurationMessage());
+        if (! ($setting ?? ManualPaymentSetting::current())?->bsc_payment_enabled) {
+            throw new InvalidCheckout('BSC payment rail is no longer enabled. Try again.');
         }
 
         foreach ($items as $item) {

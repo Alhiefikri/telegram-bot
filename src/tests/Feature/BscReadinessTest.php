@@ -2,17 +2,28 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
+use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 final class BscReadinessTest extends TestCase
@@ -37,6 +48,12 @@ final class BscReadinessTest extends TestCase
         {
             public int $calls = 0;
 
+            public int $transactionBaseline = 0;
+
+            public int $callsUnderCheckoutTransaction = 0;
+
+            public bool $disableSettingOnFirstCall = false;
+
             public bool $logsSupported = true;
 
             public bool $metadataAvailable = true;
@@ -45,9 +62,11 @@ final class BscReadinessTest extends TestCase
 
             public int $tokenDecimalsValue = 18;
 
+            private bool $settingDisabled = false;
+
             public function chainId(): int
             {
-                $this->calls++;
+                $this->recordCall();
 
                 if (! $this->metadataAvailable) {
                     throw new BscRpcException('RPC is unavailable.', retryable: true);
@@ -58,7 +77,7 @@ final class BscReadinessTest extends TestCase
 
             public function contractCode(string $contract): string
             {
-                $this->calls++;
+                $this->recordCall();
 
                 if (! $this->metadataAvailable) {
                     throw new BscRpcException('RPC is unavailable.', retryable: true);
@@ -69,7 +88,7 @@ final class BscReadinessTest extends TestCase
 
             public function tokenDecimals(string $contract): int
             {
-                $this->calls++;
+                $this->recordCall();
 
                 if (! $this->metadataAvailable) {
                     throw new BscRpcException('RPC is unavailable.', retryable: true);
@@ -95,13 +114,25 @@ final class BscReadinessTest extends TestCase
 
             public function transferLogs(string $contract, string|int $fromBlock, string|int $toBlock, ?string $receiver = null): array
             {
-                $this->calls++;
+                $this->recordCall();
 
                 if (! $this->logsSupported) {
                     throw new BscRpcException('eth_getLogs is not supported.', retryable: false);
                 }
 
                 return [];
+            }
+
+            private function recordCall(): void
+            {
+                $this->calls++;
+                if (DB::transactionLevel() > $this->transactionBaseline) {
+                    $this->callsUnderCheckoutTransaction++;
+                }
+                if ($this->disableSettingOnFirstCall && ! $this->settingDisabled) {
+                    $this->settingDisabled = true;
+                    ManualPaymentSetting::current()?->update(['bsc_payment_enabled' => false]);
+                }
             }
         };
 
@@ -228,5 +259,145 @@ final class BscReadinessTest extends TestCase
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay'));
         $this->assertNull($presentation->checkoutChoice('website_usdt_bep20'));
         $this->assertStringNotContainsString('BSC', (string) $presentation->checkoutChoice('website_binance_pay')?->description);
+    }
+
+    public function test_bsc_checkout_does_not_call_rpc_while_checkout_locks_are_held(): void
+    {
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $customer = Customer::factory()->create();
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'active',
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+
+        $this->rpc->transactionBaseline = DB::transactionLevel();
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+
+        $this->assertSame('USDT_BEP20', $order->payments->sole()->method);
+        $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
+    }
+
+    public function test_failed_bsc_readiness_rejects_before_checkout_side_effects(): void
+    {
+        $this->rpc->logsSupported = false;
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $customer = Customer::factory()->create();
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'active',
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        $this->rpc->transactionBaseline = DB::transactionLevel();
+
+        try {
+            app(OrderCheckoutService::class)->checkout(
+                $cart,
+                CheckoutPaymentIntents::usdtBep20(),
+            );
+            $this->fail('Expected failed BSC readiness to reject checkout.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertStringContainsString('BSC payment rail is not ready.', $exception->getMessage());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
+    }
+
+    public function test_stale_bsc_readiness_is_rejected_against_the_locked_setting_snapshot(): void
+    {
+        $this->rpc->disableSettingOnFirstCall = true;
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $customer = Customer::factory()->create();
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'active',
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        $this->rpc->transactionBaseline = DB::transactionLevel();
+
+        try {
+            app(OrderCheckoutService::class)->checkout(
+                $cart,
+                CheckoutPaymentIntents::usdtBep20(),
+            );
+            $this->fail('Expected stale BSC readiness to reject checkout.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertStringContainsString('BSC payment rail', $exception->getMessage());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
+    }
+
+    public function test_binance_pay_id_checkout_does_not_preflight_bsc_readiness(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $customer = Customer::factory()->create();
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'active',
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        $this->rpc->transactionBaseline = DB::transactionLevel();
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::binancePayId(),
+        );
+
+        $this->assertSame('BINANCE_PAY_ID', $order->payments->sole()->method);
+        $this->assertSame(0, $this->rpc->calls);
+        $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
     }
 }

@@ -16,6 +16,8 @@ use App\Services\Binance\BinancePayClient;
 use App\Services\Binance\BinanceUniquePaymentAmount;
 use App\Services\Bsc\BscPaymentReceiverPool;
 use App\Services\Bsc\BscPaymentReceiverSnapshot;
+use App\Services\Bsc\BscReadiness;
+use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -37,6 +39,7 @@ class OrderCheckoutService
         private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
         private readonly BscPaymentReceiverPool $bscReceiverPool,
         private readonly BscUniquePaymentAmount $uniqueBscAmount,
+        private readonly BscReadiness $bscReadiness,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
@@ -45,11 +48,15 @@ class OrderCheckoutService
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
     {
         $paymentIntent ??= CheckoutPaymentIntents::manualQris();
+        $bscReadiness = $this->preflightBscReadiness($paymentIntent);
 
         $order = null;
         for ($i = 0; $i < 5; $i++) {
             try {
-                $order = DB::transaction(fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey), 5);
+                $order = DB::transaction(
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $bscReadiness),
+                    5,
+                );
 
                 return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {
@@ -62,8 +69,12 @@ class OrderCheckoutService
         throw new InvalidCheckout('Unable to create unique checkout references.');
     }
 
-    private function checkoutOnce(Cart $cart, CheckoutPaymentIntent $paymentIntent, ?string $checkoutKey): Order
-    {
+    private function checkoutOnce(
+        Cart $cart,
+        CheckoutPaymentIntent $paymentIntent,
+        ?string $checkoutKey,
+        ?BscReadinessReport $bscReadiness,
+    ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
 
@@ -117,6 +128,9 @@ class OrderCheckoutService
             $paymentIntent = $this->providerResolver->resolve(setting: $activeSetting)->paymentIntent;
         }
 
+        if ($this->isBscPaymentIntent($paymentIntent)) {
+            $this->bscReadiness->assertCheckoutSnapshot($bscReadiness, $activeSetting);
+        }
         $paymentIntent->assertReady($lockedCart, $items, $products, $activeSetting);
         $expiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
 
@@ -188,6 +202,23 @@ class OrderCheckoutService
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
 
         return $order->fresh(['orderItems', 'payments']);
+    }
+
+    private function preflightBscReadiness(CheckoutPaymentIntent $paymentIntent): ?BscReadinessReport
+    {
+        if (! $this->isBscPaymentIntent($paymentIntent)) {
+            return null;
+        }
+
+        // The report, including an unready result, is resolved before the
+        // transaction. The locked boundary rejects it without repeating RPC
+        // work, which preserves idempotent reuse of an existing checkout.
+        return $this->bscReadiness->check();
+    }
+
+    private function isBscPaymentIntent(CheckoutPaymentIntent $paymentIntent): bool
+    {
+        return $paymentIntent->method() === UsdtBep20CheckoutIntent::METHOD;
     }
 
     private function paymentAmountFor(
