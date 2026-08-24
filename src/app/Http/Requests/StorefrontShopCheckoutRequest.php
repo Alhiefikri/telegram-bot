@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Storefront\StorefrontUrl;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -24,7 +25,7 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'buyer_name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/'],
             'support_contact_channel' => ['nullable', 'string', 'required_with:support_contact_value', Rule::in(['telegram', 'whatsapp'])],
             'support_contact_value' => ['nullable', 'string', 'max:120', 'required_with:support_contact_channel'],
-            'payment_method' => ['nullable', 'in:qris,binance_pay'],
+            'payment_method' => ['nullable', Rule::in(CheckoutPaymentIntents::acceptedPaymentRails())],
         ];
     }
 

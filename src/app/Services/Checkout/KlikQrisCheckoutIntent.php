@@ -4,6 +4,7 @@ namespace App\Services\Checkout;
 
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
+use App\Models\ManualPaymentSetting;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
@@ -39,15 +40,21 @@ final readonly class KlikQrisCheckoutIntent implements CheckoutPaymentIntent
         return 'IDR';
     }
 
-    public function expiresAt(?CarbonInterface $requested = null): CarbonInterface
-    {
+    public function expiresAt(
+        ?CarbonInterface $requested = null,
+        ?ManualPaymentSetting $setting = null,
+    ): CarbonInterface {
         return $requested
             ?? $this->deadline
             ?? now()->addMinutes((int) config('services.klikqris.qris_ttl_minutes', 15));
     }
 
-    public function assertReady(Cart $cart, Collection $items, Collection $products): void
-    {
+    public function assertReady(
+        Cart $cart,
+        Collection $items,
+        Collection $products,
+        ?ManualPaymentSetting $setting = null,
+    ): void {
         try {
             app(KlikQrisCheckoutSelector::class)
                 ->assertReady('KlikQRIS active provider checkout is not ready.');

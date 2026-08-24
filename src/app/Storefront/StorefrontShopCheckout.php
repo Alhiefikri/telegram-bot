@@ -15,6 +15,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntent;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
@@ -48,7 +49,8 @@ class StorefrontShopCheckout
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
     {
-        $checkoutKey = $this->checkoutKey($input, $sessionId);
+        $paymentRail = $this->paymentRail($input->paymentMethod);
+        $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail);
         if ($checkoutKey === null) {
             return $this->startOnce($input, null);
         }
@@ -96,7 +98,7 @@ class StorefrontShopCheckout
 
         $product = $this->product($input->productId);
 
-        $paymentIntent = $this->paymentIntent($input->paymentMethod, $product);
+        $paymentIntent = $this->paymentIntent($this->paymentRail($input->paymentMethod), $product);
 
         if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
@@ -195,7 +197,9 @@ class StorefrontShopCheckout
 
     private function paymentIntent(string $paymentMethod, Product $product): CheckoutPaymentIntent
     {
-        if ($paymentMethod === 'binance_pay') {
+        $paymentRail = $this->paymentRail($paymentMethod);
+
+        if (CheckoutPaymentIntents::isBinancePayIdRail($paymentRail)) {
             $settings = ManualPaymentSetting::current();
             if (! $settings?->binance_pay_enabled
                 || (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid')))
@@ -203,7 +207,17 @@ class StorefrontShopCheckout
                 throw new InvalidCheckout('Binance Pay belum tersedia untuk produk ini.');
             }
 
-            return $this->providerResolver->resolve('binance_pay')->paymentIntent;
+            return $this->providerResolver->resolve($paymentRail)->paymentIntent;
+        }
+
+        if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
+            if ($product->usdt_price_amount === null) {
+                throw new InvalidCheckout('BSC payment rail is not available for this product.');
+            }
+
+            // Readiness is deliberately checked by OrderCheckoutService after
+            // it locks the authoritative checkout setting inside its transaction.
+            return $this->providerResolver->resolve($paymentRail)->paymentIntent;
         }
 
         if (ManualPaymentSetting::current() === null) {
@@ -246,7 +260,7 @@ class StorefrontShopCheckout
         return $payment->isPayableNativePakasirQris();
     }
 
-    private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId): ?string
+    private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId, ?string $paymentRail = null): ?string
     {
         if ($sessionId === null || $sessionId === '') {
             return null;
@@ -257,10 +271,20 @@ class StorefrontShopCheckout
             $input->productId,
             $input->quantity,
             mb_strtolower(trim($input->buyerName)),
-            $input->paymentMethod,
+            $paymentRail ?? $this->paymentRail($input->paymentMethod),
         ]);
 
         return hash_hmac('sha256', $payload, (string) config('app.key'));
+    }
+
+    private function paymentRail(string $paymentMethod): string
+    {
+        $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
+        if (! CheckoutPaymentIntents::isSupportedPaymentRail($paymentRail)) {
+            throw new InvalidCheckout('Metode pembayaran tidak tersedia.');
+        }
+
+        return $paymentRail;
     }
 
     private function storeSupportContact(Order $order, StorefrontShopCheckoutInput $input): void

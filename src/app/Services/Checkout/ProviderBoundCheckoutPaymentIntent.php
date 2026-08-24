@@ -3,6 +3,7 @@
 namespace App\Services\Checkout;
 
 use App\Models\Cart;
+use App\Models\ManualPaymentSetting;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
@@ -45,14 +46,20 @@ final readonly class ProviderBoundCheckoutPaymentIntent implements CheckoutPayme
         return $this->intent->paymentCurrency();
     }
 
-    public function expiresAt(?CarbonInterface $requested = null): CarbonInterface
-    {
-        return $this->intent->expiresAt($requested);
+    public function expiresAt(
+        ?CarbonInterface $requested = null,
+        ?ManualPaymentSetting $setting = null,
+    ): CarbonInterface {
+        return $this->intent->expiresAt($requested, $setting);
     }
 
-    public function assertReady(Cart $cart, Collection $items, Collection $products): void
-    {
-        $this->intent->assertReady($cart, $items, $products);
+    public function assertReady(
+        Cart $cart,
+        Collection $items,
+        Collection $products,
+        ?ManualPaymentSetting $setting = null,
+    ): void {
+        $this->intent->assertReady($cart, $items, $products, $setting);
     }
 
     public function postCreationBehavior(): CheckoutPostCreationBehavior

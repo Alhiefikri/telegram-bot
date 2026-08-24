@@ -48,16 +48,22 @@ final readonly class UsdtBep20CheckoutIntent implements CheckoutPaymentIntent
         return 'USDT';
     }
 
-    public function expiresAt(?CarbonInterface $requested = null): CarbonInterface
-    {
+    public function expiresAt(
+        ?CarbonInterface $requested = null,
+        ?ManualPaymentSetting $setting = null,
+    ): CarbonInterface {
         return $requested
             ?? $this->deadline
-            ?? now()->addMinutes(ManualPaymentSetting::current()?->bscPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES);
+            ?? now()->addMinutes(($setting ?? ManualPaymentSetting::current())?->bscPaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES);
     }
 
-    public function assertReady(Cart $cart, Collection $items, Collection $products): void
-    {
-        $readiness = app(BscReadiness::class)->check();
+    public function assertReady(
+        Cart $cart,
+        Collection $items,
+        Collection $products,
+        ?ManualPaymentSetting $setting = null,
+    ): void {
+        $readiness = app(BscReadiness::class)->check($setting);
         if (! $readiness->isReady()) {
             throw new InvalidCheckout('BSC payment rail is not ready. '.$readiness->configurationMessage());
         }

@@ -10,6 +10,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\Product;
@@ -191,6 +192,32 @@ class BscPaymentAllocationTest extends TestCase
 
         $this->expectException(InvalidCheckout::class);
         app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
+    }
+
+    public function test_switching_rails_on_an_existing_cart_requires_cancel_and_reorder(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $this->activeReceiver('0x4444444444444444444444444444444444444444');
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 1_000_000,
+        ]);
+        $cart = $this->cartForProduct($product);
+
+        app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePayId());
+
+        try {
+            app(OrderCheckoutService::class)->checkout($cart->fresh(), CheckoutPaymentIntents::usdtBep20());
+            $this->fail('Expected changing the rail on an existing checkout to fail.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertStringContainsString('requires cancelling the existing Order', $exception->getMessage());
+        }
+
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame('BINANCE_PAY_ID', Payment::query()->sole()->method);
     }
 
     public function test_payment_bsc_detail_factory_materializes_consistent_snapshots(): void

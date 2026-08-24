@@ -65,6 +65,8 @@ class OrderCheckoutService
     private function checkoutOnce(Cart $cart, CheckoutPaymentIntent $paymentIntent, ?string $checkoutKey): Order
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
+
             return $existing;
         }
 
@@ -75,6 +77,8 @@ class OrderCheckoutService
             if ($existing?->order_status === OrderStatus::Cancelled) {
                 $lockedCart->update(['status' => CartStatus::Active]);
             } elseif ($existing) {
+                $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
+
                 return $existing;
             }
         }
@@ -113,11 +117,11 @@ class OrderCheckoutService
             $paymentIntent = $this->providerResolver->resolve(setting: $activeSetting)->paymentIntent;
         }
 
-        $expiresAt = $paymentIntent->expiresAt();
-        $paymentIntent->assertReady($lockedCart, $items, $products);
+        $paymentIntent->assertReady($lockedCart, $items, $products, $activeSetting);
+        $expiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
 
         $paymentMode = $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
-            ? $paymentIntent->verificationMode($lockedCart)
+            ? $paymentIntent->verificationMode($lockedCart, $activeSetting)
             : 'amount_unique';
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $basePaymentAmount = $paymentIntent->paymentAmount($items, $products);
@@ -125,7 +129,7 @@ class OrderCheckoutService
         $paymentAmount = $this->paymentAmountFor($paymentIntent, $items, $products, $paymentMode, $basePaymentAmount);
         if ($paymentIntent->method() === UsdtBep20CheckoutIntent::METHOD) {
             $bscReceiverSnapshot = $this->bscReceiverPool->selectSnapshot();
-            $paymentAmount = $this->uniqueBscAmount->allocate($basePaymentAmount);
+            $paymentAmount = $this->uniqueBscAmount->allocate($basePaymentAmount, setting: $activeSetting);
         }
 
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
@@ -206,6 +210,21 @@ class OrderCheckoutService
     private function isUniqueViolation(QueryException $e): bool
     {
         return in_array((string) ($e->errorInfo[0] ?? ''), ['23000', '23505'], true) || str_contains(strtolower($e->getMessage()), 'unique');
+    }
+
+    private function assertCheckoutRailCanBeReused(Order $order, CheckoutPaymentIntent $paymentIntent): void
+    {
+        $existingMethod = $order->payments()->latest('created_at')->value('method');
+        if ($existingMethod === null || $existingMethod === $paymentIntent->method()) {
+            return;
+        }
+
+        if (! CheckoutPaymentIntents::isBinancePaymentMethod($existingMethod)
+            && ! CheckoutPaymentIntents::isBinancePaymentMethod($paymentIntent->method())) {
+            return;
+        }
+
+        throw new InvalidCheckout('Changing the Binance payment rail requires cancelling the existing Order and starting checkout again.');
     }
 
     private function assertWebReservationBudget(Cart $cart, $items, $products): void

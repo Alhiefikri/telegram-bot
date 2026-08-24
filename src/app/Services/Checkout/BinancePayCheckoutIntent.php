@@ -10,6 +10,8 @@ use Illuminate\Support\Collection;
 
 final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 {
+    public const METHOD = 'BINANCE_PAY_ID';
+
     public function __construct(private ?CarbonInterface $deadline = null) {}
 
     public function provider(): string
@@ -19,12 +21,12 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 
     public function method(): string
     {
-        return 'BINANCE_PAY_ID';
+        return self::METHOD;
     }
 
-    public function verificationMode(?Cart $cart = null): string
+    public function verificationMode(?Cart $cart = null, ?ManualPaymentSetting $setting = null): string
     {
-        $mode = ManualPaymentSetting::current()?->binance_verification_mode;
+        $mode = ($setting ?? ManualPaymentSetting::current())?->binance_verification_mode;
 
         return in_array($mode, ['amount_unique', 'order_id'], true) ? $mode : 'amount_unique';
     }
@@ -51,17 +53,23 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
         return 'USDT';
     }
 
-    public function expiresAt(?CarbonInterface $requested = null): CarbonInterface
-    {
+    public function expiresAt(
+        ?CarbonInterface $requested = null,
+        ?ManualPaymentSetting $setting = null,
+    ): CarbonInterface {
         return $requested
             ?? $this->deadline
-            ?? now()->addMinutes(ManualPaymentSetting::current()?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES);
+            ?? now()->addMinutes(($setting ?? ManualPaymentSetting::current())?->binancePaymentTtlMinutes() ?? ManualPaymentSetting::DEFAULT_BINANCE_PAYMENT_TTL_MINUTES);
     }
 
-    public function assertReady(Cart $cart, Collection $items, Collection $products): void
-    {
+    public function assertReady(
+        Cart $cart,
+        Collection $items,
+        Collection $products,
+        ?ManualPaymentSetting $setting = null,
+    ): void {
         $receiverConfigured = filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid'));
-        if (! ManualPaymentSetting::current()?->binance_pay_enabled || ! $receiverConfigured) {
+        if (! ($setting ?? ManualPaymentSetting::current())?->binance_pay_enabled || ! $receiverConfigured) {
             throw new InvalidCheckout('Binance Pay is not ready.');
         }
 

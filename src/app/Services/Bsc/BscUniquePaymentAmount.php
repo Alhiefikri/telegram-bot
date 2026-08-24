@@ -17,12 +17,13 @@ final class BscUniquePaymentAmount
         int $baseAmountMicro,
         ?int $incrementMicro = null,
         ?int $maxCandidates = null,
+        ?ManualPaymentSetting $setting = null,
     ): int {
         if ($baseAmountMicro < 0) {
             throw new InvalidCheckout('BSC payment amount cannot be negative.');
         }
 
-        $incrementMicro ??= ManualPaymentSetting::current()?->bscUniqueAmountIncrementMicro()
+        $incrementMicro ??= ($setting ?? ManualPaymentSetting::current())?->bscUniqueAmountIncrementMicro()
             ?? self::DEFAULT_INCREMENT_MICRO;
         $maxCandidates ??= (int) config('services.bsc.max_unique_amount_candidates', self::DEFAULT_MAX_CANDIDATES);
 

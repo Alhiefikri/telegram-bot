@@ -16,11 +16,30 @@ final readonly class PaymentProviderResolver
     public function resolve(?string $paymentMethod = null, ?ManualPaymentSetting $setting = null): PaymentProviderSelection
     {
         $setting ??= ManualPaymentSetting::current();
+        $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
         $requestedProvider = $setting?->paymentProvider() ?? PaymentProvider::MANUAL;
         $configuredPakasirCheckoutFlow = (string) ($setting?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
         $pakasirCheckoutFlow = PakasirCheckoutFlow::isAllowed($configuredPakasirCheckoutFlow)
             ? $configuredPakasirCheckoutFlow
             : PakasirCheckoutFlow::HOSTED;
+
+        $providerVersion = (int) ($setting?->payment_provider_version ?? 0);
+        $settingId = $setting?->getKey();
+
+        // Binance rails are customer-selected payment rails, not values of the
+        // active QRIS provider switch. Resolve them directly and do not let a
+        // Pakasir/KlikQRIS switch or readiness result rewrite the rail.
+        if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)) {
+            return new PaymentProviderSelection(
+                requestedProvider: $requestedProvider,
+                provider: PaymentProvider::MANUAL,
+                pakasirCheckoutFlow: $pakasirCheckoutFlow,
+                providerVersion: $providerVersion,
+                settingId: $settingId,
+                paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL, $pakasirCheckoutFlow),
+            );
+        }
+
         $provider = $requestedProvider;
 
         if ($requestedProvider === PaymentProvider::PAKASIR) {
@@ -31,24 +50,14 @@ final readonly class PaymentProviderResolver
             }
         }
 
-        $intent = $this->intentFor($paymentMethod, $provider, $pakasirCheckoutFlow);
-        if ($this->isBinancePayment($paymentMethod)) {
-            return new PaymentProviderSelection(
-                requestedProvider: $requestedProvider,
-                provider: PaymentProvider::MANUAL,
-                pakasirCheckoutFlow: $pakasirCheckoutFlow,
-                providerVersion: (int) ($setting?->payment_provider_version ?? 0),
-                settingId: $setting?->getKey(),
-                paymentIntent: $intent,
-            );
-        }
+        $intent = $this->intentFor($paymentRail, $provider, $pakasirCheckoutFlow);
 
         return new PaymentProviderSelection(
             requestedProvider: $requestedProvider,
             provider: $provider,
             pakasirCheckoutFlow: $pakasirCheckoutFlow,
-            providerVersion: (int) ($setting?->payment_provider_version ?? 0),
-            settingId: $setting?->getKey(),
+            providerVersion: $providerVersion,
+            settingId: $settingId,
             paymentIntent: new ProviderBoundCheckoutPaymentIntent(
                 intent: $intent,
                 configuredProvider: $requestedProvider,
@@ -69,8 +78,13 @@ final readonly class PaymentProviderResolver
 
     private function intentFor(?string $paymentMethod, string $provider, string $pakasirCheckoutFlow): CheckoutPaymentIntent
     {
-        if ($this->isBinancePayment($paymentMethod)) {
-            return CheckoutPaymentIntents::binancePay();
+        $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
+
+        if (CheckoutPaymentIntents::isBinancePayIdRail($paymentRail)) {
+            return CheckoutPaymentIntents::binancePayId();
+        }
+        if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
+            return CheckoutPaymentIntents::usdtBep20();
         }
 
         return match ($provider) {
@@ -78,10 +92,5 @@ final readonly class PaymentProviderResolver
             PaymentProvider::KLIKQRIS => CheckoutPaymentIntents::klikQris(),
             default => CheckoutPaymentIntents::manualQris(),
         };
-    }
-
-    private function isBinancePayment(?string $paymentMethod): bool
-    {
-        return in_array(strtolower(trim((string) $paymentMethod)), ['binance_pay', 'binance_pay_id'], true);
     }
 }

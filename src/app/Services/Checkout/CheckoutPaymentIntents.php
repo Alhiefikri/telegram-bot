@@ -7,14 +7,76 @@ use Carbon\CarbonInterface;
 
 final class CheckoutPaymentIntents
 {
+    public const RAIL_QRIS = 'qris';
+
+    public const RAIL_BINANCE_PAY = 'binance_pay';
+
+    public const RAIL_BINANCE_PAY_ID = 'binance_pay_id';
+
+    public const RAIL_USDT_BEP20 = 'usdt_bep20';
+
+    /** @return list<string> */
+    public static function supportedPaymentRails(): array
+    {
+        return [self::RAIL_QRIS, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20];
+    }
+
+    /** @return list<string> */
+    public static function acceptedPaymentRails(): array
+    {
+        return [...self::supportedPaymentRails(), self::RAIL_BINANCE_PAY];
+    }
+
+    public static function normalizePaymentRail(?string $paymentRail): string
+    {
+        $paymentRail = strtolower(trim((string) $paymentRail));
+
+        return $paymentRail === self::RAIL_BINANCE_PAY
+            ? self::RAIL_BINANCE_PAY_ID
+            : ($paymentRail !== '' ? $paymentRail : self::RAIL_QRIS);
+    }
+
+    public static function isSupportedPaymentRail(?string $paymentRail): bool
+    {
+        return in_array(self::normalizePaymentRail($paymentRail), self::supportedPaymentRails(), true);
+    }
+
+    public static function isBinancePaymentRail(?string $paymentRail): bool
+    {
+        return in_array(self::normalizePaymentRail($paymentRail), [self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20], true);
+    }
+
+    public static function isBinancePayIdRail(?string $paymentRail): bool
+    {
+        return self::normalizePaymentRail($paymentRail) === self::RAIL_BINANCE_PAY_ID;
+    }
+
+    public static function isUsdtBep20Rail(?string $paymentRail): bool
+    {
+        return self::normalizePaymentRail($paymentRail) === self::RAIL_USDT_BEP20;
+    }
+
+    public static function isBinancePaymentMethod(?string $paymentMethod): bool
+    {
+        return in_array(strtoupper(trim((string) $paymentMethod)), [
+            BinancePayCheckoutIntent::METHOD,
+            UsdtBep20CheckoutIntent::METHOD,
+        ], true);
+    }
+
     public static function manualQris(?CarbonInterface $deadline = null): ManualQrisCheckoutIntent
     {
         return new ManualQrisCheckoutIntent($deadline);
     }
 
-    public static function binancePay(?CarbonInterface $deadline = null): BinancePayCheckoutIntent
+    public static function binancePayId(?CarbonInterface $deadline = null): BinancePayCheckoutIntent
     {
         return new BinancePayCheckoutIntent($deadline);
+    }
+
+    public static function binancePay(?CarbonInterface $deadline = null): BinancePayCheckoutIntent
+    {
+        return self::binancePayId($deadline);
     }
 
     public static function usdtBep20(?CarbonInterface $deadline = null): UsdtBep20CheckoutIntent
