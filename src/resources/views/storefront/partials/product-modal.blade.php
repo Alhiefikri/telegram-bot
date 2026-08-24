@@ -166,8 +166,8 @@
                                                 </label>
                                             </div>
                                         </template>
-                                        <div x-show="paymentMethod === 'binance_pay'" x-cloak class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3">
-                                            <p class="text-sm font-black text-[var(--sf-ink)]">Pilih rail Binance</p>
+                                        <div x-show="paymentMethod === 'binance_pay'" x-cloak class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" aria-label="Binance payment rail selector">
+                                            <p class="text-sm font-black text-[var(--sf-ink)]">Choose a Binance payment rail</p>
                                             <div class="mt-2 grid gap-2">
                                                 <template x-for="choice in binanceRailChoices()" :key="choice.key">
                                                     <label class="flex cursor-pointer items-start gap-2 rounded-md border-2 border-[var(--sf-border)] bg-white px-3 py-2 text-left text-sm font-black text-[var(--sf-ink)]">
@@ -176,14 +176,14 @@
                                                     </label>
                                                 </template>
                                             </div>
-                                            <button type="button" class="mt-3 text-sm font-black text-[var(--sf-accent)] underline" x-on:click="cancelBinanceRailSelection()">Back to payment choices</button>
+                                            <button type="button" class="mt-3 text-sm font-black text-[var(--sf-accent)] underline" x-on:click="cancelBinanceRailSelection()">Cancel</button>
                                         </div>
                                         @error('payment_method')
                                             <p id="storefront-payment-method-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
                                     </fieldset>
                                     <p x-show="paymentMethod === 'qris'" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-ink)]">Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.</p>
-                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose Binance Pay ID or USDT BEP20 (BSC). The final rail is submitted explicitly with this checkout.</p>
+                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout.</p>
 
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong

@@ -44,6 +44,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly string $statusMessage,
         public readonly ?BinanceVerificationStatus $binanceVerificationStatus = null,
         public readonly ?BscVerificationStatus $bscVerificationStatus = null,
+        public readonly ?string $bscExplorerUrl = null,
     ) {}
 
     public function isPaid(): bool

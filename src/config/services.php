@@ -15,6 +15,10 @@ return [
         'chain_id' => (int) env('BSC_CHAIN_ID', 56),
         'usdt_contract' => env('BSC_USDT_CONTRACT'),
         'explorer_base_url' => env('BSC_EXPLORER_BASE_URL', 'https://bscscan.com'),
+        'explorer_allowed_hosts' => array_values(array_filter(array_map(
+            static fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('BSC_EXPLORER_ALLOWED_HOSTS', 'bscscan.com,www.bscscan.com')),
+        ))),
         'expected_token_decimals' => 18,
         'rpc_timeout_seconds' => (float) env('BSC_RPC_TIMEOUT_SECONDS', 5),
         'rpc_connect_timeout_seconds' => (float) env('BSC_RPC_CONNECT_TIMEOUT_SECONDS', 2),

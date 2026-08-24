@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\Bsc\BscExplorerUrl;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Request;
@@ -20,7 +21,7 @@ use Illuminate\View\View;
 
 class AdminOrderDetailController extends Controller
 {
-    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations): View
+    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer): View
     {
         $user = $request->attributes->get('adminUser');
 
@@ -55,7 +56,7 @@ class AdminOrderDetailController extends Controller
                     ? now()->setTimestamp((int) floor((int) $payload['transactionTime'] / 1_000))->timezone((string) config('app.timezone'))->format('d M Y H:i')
                     : '-',
             ] : null,
-            'bscReview' => $this->bscReview($bscPayment),
+            'bscReview' => $this->bscReview($bscPayment, $bscExplorer),
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
             'auditEntries' => $this->auditEntries($order),
             'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment))->all(),
@@ -97,22 +98,16 @@ class AdminOrderDetailController extends Controller
     }
 
     /** @return array<string, string>|null */
-    private function bscReview(?Payment $payment): ?array
+    private function bscReview(?Payment $payment, BscExplorerUrl $bscExplorer): ?array
     {
         $detail = $payment?->bscDetail;
         if ($detail === null) {
             return null;
         }
 
-        $hash = trim((string) $detail->current_tx_hash);
-        $explorer = null;
-        $baseUrl = rtrim((string) config('services.bsc.explorer_base_url'), '/');
-        $host = parse_url($baseUrl, PHP_URL_HOST);
-        if ($hash !== '' && preg_match('/^0x[0-9a-f]{64}$/', $hash) === 1 && is_string($host) && in_array(strtolower($host), ['bscscan.com', 'www.bscscan.com'], true)) {
-            $explorer = $baseUrl.'/tx/'.$hash;
-        }
-
         $evidence = $detail->transferEvidence->sortByDesc('last_verified_at')->first();
+        $hash = trim((string) ($evidence?->tx_hash ?? ''));
+        $explorer = $bscExplorer->forTransaction($evidence?->tx_hash);
 
         return [
             'status' => (string) $detail->verification_status,

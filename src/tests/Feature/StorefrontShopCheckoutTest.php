@@ -71,14 +71,22 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains('storefront.signed', $orderIdRoute->middleware());
         $this->assertContains('throttle:storefront-binance-order-id', $orderIdRoute->middleware());
 
+        $bscHashRoute = $this->assertRouteContract('storefront.shop.orders.bsc-tx-hash', 'POST', 'shop/orders/{order}/bsc-tx-hash');
+        $this->assertContains('storefront.signed', $bscHashRoute->middleware());
+        $this->assertContains('throttle:storefront-bsc-tx-hash', $bscHashRoute->middleware());
+        $this->assertNotNull(app(RateLimiter::class)->limiter('storefront-bsc-tx-hash'));
+
         $order = Order::factory()->create();
         $showUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
         $statusUrl = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
+        $bscHashUrl = URL::signedRoute('storefront.shop.orders.bsc-tx-hash', $order, null, false);
 
         $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($showUrl, PHP_URL_PATH));
         $this->assertSame('/shop/orders/'.$order->getKey().'/status', parse_url($statusUrl, PHP_URL_PATH));
+        $this->assertSame('/shop/orders/'.$order->getKey().'/bsc-tx-hash', parse_url($bscHashUrl, PHP_URL_PATH));
         $this->assertTrue(URL::hasValidSignature(Request::create($showUrl, 'GET'), false));
         $this->assertTrue(URL::hasValidSignature(Request::create($statusUrl, 'POST'), false));
+        $this->assertTrue(URL::hasValidSignature(Request::create($bscHashUrl, 'POST'), false));
     }
 
     public function test_direct_checkout_url_redirects_to_the_shop_instead_of_returning_method_not_allowed(): void

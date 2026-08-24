@@ -134,12 +134,8 @@ class StorefrontProductPresenter
             && $product->usdt_price_amount !== null) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
-                label: 'Binance Pay · '.rtrim(rtrim(number_format($product->usdt_price_amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT',
-                description: $this->binanceOrderIdAvailable()
-                    ? 'Bayar nominal USDT persis. Setelah transfer, kirim Binance Pay Order ID untuk verifikasi otomatis.'
-                    : ($this->binanceAutomaticVerificationAvailable()
-                        ? 'Bayar nominal USDT persis. Sistem akan memeriksa transfer Binance secara otomatis.'
-                        : 'Bayar USDT melalui Binance Pay. Verifikasi dilakukan manual.'),
+                label: 'Bayar dengan Binance',
+                description: 'Pilih Binance Pay ID atau USDT BEP20 (BSC) pada langkah berikutnya.',
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,

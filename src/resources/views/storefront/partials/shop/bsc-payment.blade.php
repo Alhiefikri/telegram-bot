@@ -3,30 +3,46 @@
     $bscProductTotal = $storefront->usdt((int) ($bscBaseAmount ?? $bscPayableAmount ?? $payment?->amount ?? 0));
     $bscStatus = $bscVerificationStatus ?? 'awaiting_transfer';
     $bscClosed = $bscVerificationClosed ?? false;
+    $bscDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
+    $bscStatusLabel = match ($bscStatus) {
+        'awaiting_transfer' => 'Awaiting transfer',
+        'tx_submitted' => 'Transaction submitted',
+        'confirming' => 'Confirming',
+        'confirmed' => 'Confirmed',
+        'not_found' => 'Not found',
+        'provider_error' => 'Provider error',
+        'mismatch' => 'Mismatch',
+        'manual_review' => 'Manual review',
+        'transaction_already_used' => 'Transaction already used',
+        'expired' => 'Expired',
+        default => 'Pending verification',
+    };
 @endphp
 
 <x-storefront.panel as="section" class="mt-5" aria-label="USDT BEP20 payment">
     <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Binance Payment Rail</p>
     <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">USDT BEP20 (BSC)</h2>
-    <p class="mt-2 text-base font-semibold leading-7 text-[var(--sf-muted)]">Send the exact USDT amount to the receiving address below on BNB Smart Chain.</p>
+    <p class="mt-2 text-base font-semibold leading-7 text-[var(--sf-muted)]">Send the exact USDT amount to the snapshotted receiving address below on BNB Smart Chain.</p>
 
     <dl class="mt-5 grid gap-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-sm font-bold leading-6 shadow-[4px_4px_0_var(--sf-shadow)]">
         <div>
             <dt class="text-[var(--sf-muted)]">Product total</dt>
-            <dd class="font-display text-xl font-black text-[var(--sf-accent)]">{{ $bscProductTotal }} USDT</dd>
+            <dd class="font-display text-xl font-black text-[var(--sf-accent)]">{{ $bscProductTotal }}</dd>
         </div>
         <div>
             <dt class="text-[var(--sf-muted)]">Send exactly</dt>
             <dd class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <code class="break-all font-mono text-xl font-black text-[var(--sf-ink)]">{{ $bscAmount }} USDT</code>
+                <code class="break-all font-mono text-xl font-black text-[var(--sf-ink)]">{{ $bscAmount }}</code>
                 <button type="button" class="neo-button h-11 min-w-11 w-fit bg-white px-3 text-sm font-black text-[var(--sf-ink)]" data-copy-text="{{ $bscAmount }}" data-copy-success="USDT amount copied.">Copy amount</button>
             </dd>
         </div>
         <div>
             <dt class="text-[var(--sf-muted)]">Receiving address</dt>
             <dd class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <code class="break-all font-mono text-sm font-black text-[var(--sf-ink)]">{{ $bscReceiverAddress }}</code>
-                <button type="button" class="neo-button h-11 min-w-11 w-fit bg-white px-3 text-sm font-black text-[var(--sf-ink)]" data-copy-text="{{ $bscReceiverAddress }}" data-copy-success="BSC address copied.">Copy address</button>
+                <code class="break-all font-mono text-sm font-black text-[var(--sf-ink)]">{{ $bscReceiverAddress ?: 'Unavailable' }}</code>
+                @if (filled($bscReceiverAddress))
+                    <button type="button" class="neo-button h-11 min-w-11 w-fit bg-white px-3 text-sm font-black text-[var(--sf-ink)]" data-copy-text="{{ $bscReceiverAddress }}" data-copy-success="BSC address copied.">Copy address</button>
+                @endif
             </dd>
         </div>
         <div>
@@ -40,10 +56,15 @@
     </div>
 
     <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-        <p class="font-black text-[var(--sf-ink)]">Valid for 30 minutes</p>
+        <p class="font-black text-[var(--sf-ink)]">Payment deadline: {{ $bscDeadlineLabel ?? '30 minutes from checkout' }}</p>
         <p class="mt-1">The exact transfer is automatically confirmed after {{ $bscRequiredConfirmations }} confirmations. The deadline is fixed; submitting a hash does not extend it.</p>
-        <p class="mt-2 font-black text-[var(--sf-ink)]">Status: {{ str_replace('_', ' ', $bscStatus) }} ({{ $bscConfirmations }}/{{ $bscRequiredConfirmations }} confirmations)</p>
+        <p class="mt-2 font-black text-[var(--sf-ink)]">Status: {{ $bscStatusLabel }} ({{ $bscConfirmations }}/{{ $bscRequiredConfirmations }} confirmations)</p>
+        <p class="mt-1 text-sm">{{ $statusMessage }}</p>
     </div>
+
+    @if (filled($bscExplorerUrl))
+        <a href="{{ $bscExplorerUrl }}" target="_blank" rel="noopener noreferrer" class="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-2 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">View validated transaction</a>
+    @endif
 
     @if ($isPendingPayment && ! $bscClosed)
         <form method="POST" action="{{ $bscTxHashUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">

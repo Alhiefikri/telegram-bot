@@ -66,6 +66,16 @@ final class BscPaymentVerification
             return false;
         }
 
+        if (! in_array($payment->bscDetail->verification_status, [
+            PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+            PaymentBscDetail::STATUS_TX_SUBMITTED,
+            PaymentBscDetail::STATUS_CONFIRMING,
+            PaymentBscDetail::STATUS_NOT_FOUND,
+            PaymentBscDetail::STATUS_PROVIDER_ERROR,
+        ], true)) {
+            return false;
+        }
+
         $this->queue->dispatchForScan($payment);
 
         return true;
@@ -123,13 +133,13 @@ final class BscPaymentVerification
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::Expired, $payment->fresh());
             }
 
-            $sameHash = $detail->current_tx_hash === $normalized;
+            $sameHash = BscTransactionHash::normalize((string) $detail->current_tx_hash) === $normalized;
             if ($sameHash && (int) $detail->tx_submission_version > 0) {
                 return BscVerificationSubmissionResult::of(
                     BscVerificationSubmissionOutcome::Accepted,
                     $payment->fresh(),
                     (int) $detail->tx_submission_version,
-                    $detail->verification_status !== PaymentBscDetail::STATUS_CONFIRMED,
+                    false,
                 );
             }
 

@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationStatus;
+use App\Services\Bsc\BscExplorerUrl;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationStatus;
@@ -32,6 +33,7 @@ class StorefrontShopSignedInvoice
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
         private readonly BinancePaymentVerification $verification,
         private readonly BscPaymentVerification $bscVerification,
+        private readonly BscExplorerUrl $bscExplorer,
         private readonly KlikQrisNativeQrisService $klikQris,
     ) {}
 
@@ -40,7 +42,7 @@ class StorefrontShopSignedInvoice
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product']);
 
         $payment = $this->latestPayment($order);
-        $payment?->loadMissing('bscDetail');
+        $payment?->loadMissing(['bscDetail.transferEvidence']);
         $projection = $this->orders->project($order, $payment);
         $verificationStatus = $this->binanceVerificationStatus($payment);
         $bscVerificationStatus = $this->bscVerificationStatus($payment);
@@ -82,6 +84,7 @@ class StorefrontShopSignedInvoice
             statusMessage: $this->statusMessage($order, $payment, $verificationStatus, $bscVerificationStatus),
             binanceVerificationStatus: $verificationStatus,
             bscVerificationStatus: $bscVerificationStatus,
+            bscExplorerUrl: $this->bscExplorerUrl($payment),
         );
     }
 
@@ -111,6 +114,20 @@ class StorefrontShopSignedInvoice
         }
 
         return $this->bscVerification->status($payment);
+    }
+
+    private function bscExplorerUrl(?Payment $payment): ?string
+    {
+        if (strtolower((string) $payment?->provider) !== 'manual'
+            || strtoupper((string) $payment?->method) !== 'USDT_BEP20') {
+            return null;
+        }
+
+        $evidence = $payment?->bscDetail?->transferEvidence
+            ?->sortByDesc(fn ($transfer): int => $transfer->last_verified_at?->getTimestamp() ?? 0)
+            ->first();
+
+        return $this->bscExplorer->forTransaction($evidence?->tx_hash);
     }
 
     private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState

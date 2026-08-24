@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\VerifyBscPayment;
 use App\Models\BscPaymentReceiver;
+use App\Models\BscPaymentTransferEvidence;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -188,10 +189,111 @@ class BinancePaymentRailSelectionTest extends TestCase
             ->assertOk()
             ->assertSee($receiver->address_normalized)
             ->assertSee('2.5 USDT')
+            ->assertDontSee('2.5 USDT USDT')
             ->assertSee('BNB Smart Chain (BEP20) ONLY')
             ->assertSee('ERC20, TRC20, opBNB')
+            ->assertSee('Payment deadline:')
             ->assertSee('Submit BSC TX Hash')
             ->assertSee('Check Payment');
+    }
+
+    public function test_bsc_invoice_keeps_payment_snapshot_after_receiver_rotation_and_only_links_validated_evidence(): void
+    {
+        Queue::fake();
+        $receiver = $this->activeReceiver('0xdddddddddddddddddddddddddddddddddddddddd');
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'bsc_snapshot',
+            'payment_method' => 'usdt_bep20',
+        ]);
+        $order = Order::with('payments.bscDetail')->sole();
+        $payment = $order->payments->sole();
+        $snapshotAddress = (string) $payment->bscDetail->receiver_address;
+        $deadline = $payment->expired_at->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
+
+        $receiver->forceFill([
+            'address' => '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+            'address_normalized' => '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        ])->save();
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee($snapshotAddress)
+            ->assertDontSee('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+            ->assertSee('Payment deadline: '.$deadline, false)
+            ->assertDontSee('View validated transaction');
+
+        $hash = '0x'.str_repeat('d', 64);
+        BscPaymentTransferEvidence::create([
+            'payment_id' => $payment->id,
+            'tx_hash' => $hash,
+            'token_contract' => self::CONTRACT,
+            'receiver_address' => $snapshotAddress,
+            'from_address' => '0x'.str_repeat('f', 40),
+            'amount_units' => '2500000000000000000',
+            'block_number' => 100,
+            'block_hash' => '0x'.str_repeat('e', 64),
+            'block_timestamp' => now(),
+            'receipt_status' => 'success',
+            'log_index' => 0,
+            'confirmations' => 3,
+            'verification_status' => PaymentBscDetail::STATUS_CONFIRMED,
+            'first_seen_at' => now(),
+            'last_verified_at' => now(),
+        ]);
+
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('https://bscscan.com/tx/'.$hash, false)
+            ->assertSee('View validated transaction');
+
+        config()->set('services.bsc.explorer_base_url', 'https://evil.example');
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertDontSee('https://evil.example/tx/'.$hash, false)
+            ->assertDontSee('View validated transaction');
+    }
+
+    public function test_bsc_invoice_keeps_verification_states_distinct_and_safe(): void
+    {
+        Queue::fake();
+        $this->activeReceiver('0xffffffffffffffffffffffffffffffffffffffff');
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'bsc_states',
+            'payment_method' => 'usdt_bep20',
+        ]);
+        $order = Order::with('payments.bscDetail')->sole();
+        $detail = $order->payments->sole()->bscDetail;
+
+        foreach ([
+            PaymentBscDetail::STATUS_NOT_FOUND => 'Not found',
+            PaymentBscDetail::STATUS_CONFIRMING => 'Confirming',
+            PaymentBscDetail::STATUS_PROVIDER_ERROR => 'Provider error',
+            PaymentBscDetail::STATUS_MISMATCH => 'Mismatch',
+            PaymentBscDetail::STATUS_MANUAL_REVIEW => 'Manual review',
+            PaymentBscDetail::STATUS_CONFIRMED => 'Confirmed',
+        ] as $status => $label) {
+            $detail->forceFill(['verification_status' => $status])->save();
+
+            $this->get($response->headers->get('Location'))
+                ->assertOk()
+                ->assertSee('Status: '.$label, false);
+        }
     }
 
     public function test_bsc_hash_validation_does_not_consume_attempts_and_valid_hash_queues_verification(): void
@@ -222,6 +324,11 @@ class BinancePaymentRailSelectionTest extends TestCase
         $this->assertSame(1, (int) $detail->tx_attempts);
         $this->assertSame(strtolower($hash), $detail->current_tx_hash);
         Queue::assertPushed(VerifyBscPayment::class, fn (VerifyBscPayment $job): bool => $job->paymentId === $payment->id && $job->submissionVersion === 1);
+
+        $this->post($url, ['bsc_tx_hash' => strtoupper($hash)])->assertRedirect();
+        $this->assertSame(1, (int) $payment->bscDetail->fresh()->tx_attempts);
+        $this->assertSame(1, (int) $payment->bscDetail->fresh()->tx_submission_version);
+        Queue::assertPushed(VerifyBscPayment::class, 1);
     }
 
     public function test_storefront_product_modal_exposes_two_explicit_binance_rails(): void
@@ -239,7 +346,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             ->assertSee('websiteBinancePayId', false)
             ->assertSee('websiteUsdtBep20', false)
             ->assertSee('name="payment_choice"', false)
-            ->assertSee('name="payment_method"', false);
+            ->assertSee('name="payment_method"', false)
+            ->assertSee('cancelBinanceRailSelection', false)
+            ->assertSee('>Cancel<', false);
     }
 
     private function activeReceiver(string $address): BscPaymentReceiver

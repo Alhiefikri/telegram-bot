@@ -83,8 +83,9 @@ class StorefrontShopPaymentStatusRefresh
             $payment->loadMissing('bscDetail');
             $status = $this->bscVerification->status($payment);
             if ($this->orders->project($order, $payment)->isPendingPayment) {
+                $queued = false;
                 try {
-                    $this->bscVerification->queueForStatusRefresh($payment);
+                    $queued = $this->bscVerification->queueForStatusRefresh($payment);
                 } catch (Throwable $exception) {
                     report($exception);
                     $status = $status->outcome === BscVerificationOutcome::ProviderError
@@ -97,6 +98,16 @@ class StorefrontShopPaymentStatusRefresh
                             $status->attempts,
                             $status->version,
                         );
+                }
+
+                if ($queued) {
+                    // RPC reads belong to the queue. Refresh after dispatch so
+                    // a synchronous worker still reports persisted state and
+                    // never treats browser-provided evidence as authoritative.
+                    $order->refresh();
+                    $payment->refresh();
+                    $payment->loadMissing('bscDetail');
+                    $status = $this->bscVerification->status($payment);
                 }
             }
             $projection = $this->orders->project($order, $payment);

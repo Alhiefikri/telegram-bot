@@ -91,6 +91,7 @@ class StorefrontShopOrderPresenter
             'bscVerificationOutcome' => $invoice->bscVerificationStatus?->outcome->value,
             'bscConfirmations' => $invoice->bscVerificationStatus?->confirmations ?? 0,
             'bscRequiredConfirmations' => ManualPaymentSetting::current()?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            'bscExplorerUrl' => $invoice->bscExplorerUrl,
             'bscVerificationClosed' => $invoice->bscVerificationStatus?->outcome === BscVerificationOutcome::Expired
                 || $invoice->isTerminal(),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
@@ -131,9 +132,9 @@ class StorefrontShopOrderPresenter
         return match ($status->outcome) {
             BscVerificationOutcome::Confirmed,
             BscVerificationOutcome::AlreadyPaid => 'confirmed',
-            BscVerificationOutcome::ManualReview,
-            BscVerificationOutcome::Mismatch,
-            BscVerificationOutcome::TransactionAlreadyUsed => 'manual_review',
+            BscVerificationOutcome::Mismatch => 'mismatch',
+            BscVerificationOutcome::ManualReview => 'manual_review',
+            BscVerificationOutcome::TransactionAlreadyUsed => 'transaction_already_used',
             default => $status->outcome->value,
         };
     }
