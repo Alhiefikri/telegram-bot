@@ -26,6 +26,7 @@ final class PaidInvoiceOrderPresentationAdapter
 
     public function __construct(
         private readonly PaymentReceiptReport $receiptReport,
+        private readonly PaidInvoiceBuyerNameMasker $buyerNameMasker,
     ) {}
 
     public function present(Order $order): PaidInvoicePresentation
@@ -37,6 +38,7 @@ final class PaidInvoiceOrderPresentationAdapter
         return new PaidInvoicePresentation(
             invoiceId: $this->invoiceIdentifier($order),
             buyerIdentifier: $this->maskBuyerTelegramId($order->customer),
+            buyerName: $this->buyerNameMasker->mask($order->customer),
             paidAt: $this->paidAt($payment),
             paymentMethod: $this->paymentMethod($payment),
             currency: $this->currency($payment, $order),

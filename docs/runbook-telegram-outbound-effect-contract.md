@@ -72,8 +72,10 @@ artifacts after the contract migration.
 ## Runtime recovery contract
 
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
-minute with overlap protection. Run the command manually after an outage or
-queue-worker interruption:
+minute with a bounded 10-minute overlap mutex. Production cutover also runs
+`schedule:clear-cache`, so a mutex left by the previous scheduler cannot
+suppress recovery for Laravel's default 24-hour expiry. Run the command
+manually after an outage or queue-worker interruption:
 
 ```sh
 php artisan telegram:recover-outbound --chunk=100 --queue=notifications

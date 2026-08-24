@@ -13,6 +13,9 @@ use App\Services\InventoryLedger;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Storefront\StorefrontUrl;
+use App\Support\DogfoodTiming;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
 
@@ -116,6 +119,12 @@ final class SalesProofDeliveryPipeline
 
             if ($finalized !== null) {
                 $this->synchronizeSentProjection($finalized);
+                Log::info('telegram.sales_proof_effect_sent', [
+                    'effect_id' => (string) $finalized->getKey(),
+                    'source_correlation_id' => DogfoodTiming::correlation($finalized->source_id),
+                    'attempts' => (int) $finalized->attempts,
+                    'telegram_message_id' => (string) $finalized->telegram_message_id,
+                ]);
             }
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
@@ -127,6 +136,7 @@ final class SalesProofDeliveryPipeline
                 if ($finalized !== null) {
                     $this->synchronizeUnknownProjection($finalized);
                 }
+                $this->logDeliveryFailure($finalized ?? $claimed, $exception, 'unknown');
 
                 return;
             }
@@ -139,6 +149,7 @@ final class SalesProofDeliveryPipeline
             if ($finalized !== null) {
                 $this->synchronizeFailedProjection($finalized);
             }
+            $this->logDeliveryFailure($finalized ?? $claimed, $exception, 'failed');
         }
     }
 
@@ -231,6 +242,28 @@ final class SalesProofDeliveryPipeline
         );
         if ($finalized !== null) {
             $this->synchronizeFailedProjection($finalized);
+            Log::warning('telegram.sales_proof_effect_not_deliverable', [
+                'effect_id' => (string) $finalized->getKey(),
+                'source_correlation_id' => DogfoodTiming::correlation($finalized->source_id),
+                'attempts' => (int) $finalized->attempts,
+                'reason' => $reason,
+            ]);
         }
+    }
+
+    private function logDeliveryFailure(
+        TelegramOutboundEffect $effect,
+        Throwable $exception,
+        string $state,
+    ): void {
+        Log::warning('telegram.sales_proof_effect_failed', [
+            'effect_id' => (string) $effect->getKey(),
+            'source_correlation_id' => DogfoodTiming::correlation($effect->source_id),
+            'attempts' => (int) $effect->attempts,
+            'state' => $state,
+            'last_error_code' => $effect->last_error_code,
+            'http_status' => $exception instanceof RequestException ? $exception->response?->status() : null,
+            'exception' => $exception::class,
+        ]);
     }
 }

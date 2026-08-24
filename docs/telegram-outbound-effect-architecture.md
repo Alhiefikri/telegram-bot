@@ -177,8 +177,9 @@ proves that a later unit remains pending after credential ambiguity.
 
 ## Operational recovery
 
-The scheduler runs telegram:recover-outbound --queue=notifications every
-minute with withoutOverlapping(). The command performs source discovery and
+The scheduler runs `telegram:recover-outbound --queue=notifications` every
+minute with a bounded 10-minute `withoutOverlapping` mutex. Production cutover
+also clears stale scheduler mutexes. The command performs source discovery and
 delivery recovery in this order:
 
 1. TelegramOutboundEffectRecovery asks the ledger protocol to turn expired

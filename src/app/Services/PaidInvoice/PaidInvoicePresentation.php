@@ -27,13 +27,13 @@ final readonly class PaidInvoicePresentation
         public int $providerFee,
         public int $totalPaid,
         public string $status = 'PAID',
-        public ?string $buyerName = null,
+        public string $buyerName = 'Buyer',
     ) {
         if ($this->invoiceId === '' || $this->buyerIdentifier === '' || $this->paymentMethod === '') {
             throw new \InvalidArgumentException('Paid invoice presentation identifiers and labels are required.');
         }
 
-        if ($this->buyerName !== null && trim($this->buyerName) === '') {
+        if (trim($this->buyerName) === '') {
             throw new \InvalidArgumentException('Paid invoice presentation buyer name cannot be empty.');
         }
 
@@ -76,7 +76,7 @@ final readonly class PaidInvoicePresentation
         return [
             'order_id' => $this->invoiceId,
             'buyer_telegram_id' => $this->buyerIdentifier,
-            'buyer_display' => $this->buyerName ?: $this->buyerIdentifier,
+            'buyer_display' => $this->buyerName,
             'paid_at_wib' => $this->paidAtWib(),
             'payment_method' => $this->paymentMethod,
             'status' => $this->status,

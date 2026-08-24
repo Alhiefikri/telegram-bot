@@ -22,6 +22,8 @@ grep -Fq 'telegram:outbound-contract --strict' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: deferred Telegram outbound contract must have a strict preflight\n' >&2; exit 1; }
 grep -Fq 'telegram:recover-outbound --chunk=100 --queue=telegram-outbound' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: deferred Telegram outbound contract must recover effects before contracting\n' >&2; exit 1; }
+grep -Fq 'php artisan schedule:clear-cache </dev/null' "$RELEASE_SCRIPT" \
+  || { printf 'FAIL: production cutover must clear stale scheduler mutexes\n' >&2; exit 1; }
 grep -Fq 'contract-backup-verified.txt' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: destructive contract must record verified backup evidence\n' >&2; exit 1; }
 grep -Fq 'release-state.env' "$RELEASE_SCRIPT" \

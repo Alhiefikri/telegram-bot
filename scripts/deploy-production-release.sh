@@ -467,6 +467,12 @@ wait_for_health() {
 verify_release_gates() {
   wait_for_health || return 1
 
+  echo "Clearing stale Laravel scheduler mutexes after candidate cutover."
+  if ! compose exec -T app php artisan schedule:clear-cache </dev/null; then
+    echo "Release gate failed: stale scheduler mutex cleanup failed." >&2
+    return 1
+  fi
+
   if [ "${RECOVER_FAILED_TELEGRAM_UPDATES:-false}" = "true" ]; then
     if ! compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null; then
       echo "Release gate failed: Telegram update recovery failed." >&2

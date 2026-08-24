@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -119,6 +120,15 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
         $this->assertStringContainsString('php artisan schedule:run', $script);
         $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
+    }
+
+    public function test_telegram_outbound_recovery_mutex_has_a_bounded_expiration(): void
+    {
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn ($candidate): bool => str_contains((string) $candidate->command, 'telegram:recover-outbound'));
+
+        $this->assertNotNull($event);
+        $this->assertSame(10, $event->expiresAt);
     }
 
     public function test_production_php_upload_limits_allow_product_images(): void

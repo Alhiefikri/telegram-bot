@@ -9,9 +9,11 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
+use App\Services\PaidInvoice\PaidInvoicePresentation;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\PaidInvoice\PaidInvoiceRenderResult;
 use App\Services\PaidInvoice\PaidInvoiceSyntheticPresentationAdapter;
+use App\Services\Telegram\SalesProofPostFormatter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -49,6 +51,7 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame(PaidInvoiceRenderer::HEIGHT, $decoded[1] ?? null);
         $this->assertLessThanOrEqual(PaidInvoiceRenderer::MAX_BYTES, strlen($result->bytes));
         $this->assertSame('858*****05', $metadata['buyer_telegram_id']);
+        $this->assertSame('Buyer', $metadata['buyer_display']);
         $this->assertSame('QRIS', $metadata['payment_method']);
         $this->assertSame('PAID', $metadata['status']);
         $this->assertSame('21 August 2026, 12:34 WIB', $metadata['paid_at_wib']);
@@ -79,6 +82,111 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertStringNotContainsString('Mutable live product', json_encode($metadata, JSON_UNESCAPED_UNICODE));
         $this->assertStringNotContainsString('8581234505', json_encode($metadata));
         $this->assertStringNotContainsString('secret', json_encode($metadata));
+    }
+
+    public function test_real_telegram_order_uses_a_masked_telegram_name_in_caption_and_invoice(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-REAL-TELEGRAM-NAME',
+            items: [[
+                'product_name' => 'Spotify Private',
+                'quantity' => 1,
+                'unit_price' => 10000,
+                'subtotal' => 10000,
+            ]],
+            payment: [
+                'method' => 'qris',
+                'provider_fee' => 336,
+                'provider_total_payment' => 10336,
+                'paid_at' => CarbonImmutable::parse('2026-08-24 02:17:00 UTC'),
+            ],
+        );
+        $order->customer->setRawAttributes([
+            'telegram_id' => 8581234505,
+            'first_name' => 'Ciapnih',
+            'username' => 'ciapnih',
+        ]);
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 1251);
+        $rendered = app(PaidInvoiceRenderer::class)->render($presentation);
+
+        $this->assertSame('Cia***', $presentation->buyerName);
+        $this->assertSame('Cia***', $presentation->metadata()['buyer_display']);
+        $this->assertStringContainsString('Buyer: Cia***', $caption);
+        $this->assertStringNotContainsString('Buyer ID:', $caption);
+        $this->assertStringNotContainsString('858*****05', $caption);
+        $this->assertSame('Cia***', $rendered->metadata['buyer_display']);
+        $this->assertSame('858*****05', $rendered->metadata['buyer_telegram_id']);
+        $this->assertStringNotContainsString('Ciapnih', $caption);
+        $this->assertStringNotContainsString('ciapnih', $caption);
+
+        $alternate = app(PaidInvoiceRenderer::class)->render(new PaidInvoicePresentation(
+            invoiceId: $presentation->invoiceId,
+            buyerIdentifier: $presentation->buyerIdentifier,
+            paidAt: $presentation->paidAt,
+            paymentMethod: $presentation->paymentMethod,
+            currency: $presentation->currency,
+            items: $presentation->items,
+            providerFee: $presentation->providerFee,
+            totalPaid: $presentation->totalPaid,
+            buyerName: 'Bob***',
+        ));
+        $this->assertNotSame($rendered->bytes, $alternate->bytes);
+    }
+
+    public function test_real_telegram_order_falls_back_to_username_when_first_name_is_missing(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-USERNAME-FALLBACK',
+            items: [],
+            payment: ['method' => 'qris'],
+        );
+        $order->customer->setRawAttributes([
+            'telegram_id' => 8581234505,
+            'first_name' => null,
+            'username' => '@ciapnih',
+        ]);
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 1);
+
+        $this->assertSame('cia***', $presentation->buyerName);
+        $this->assertStringContainsString('Buyer: cia***', $caption);
+        $this->assertStringNotContainsString('Buyer ID:', $caption);
+
+        $order->customer->setRawAttributes([
+            'telegram_id' => 8581234505,
+            'first_name' => 'Telegram Customer',
+            'username' => '@ciapnih',
+        ]);
+        $placeholderPresentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+
+        $this->assertSame('cia***', $placeholderPresentation->buyerName);
+    }
+
+    public function test_real_telegram_order_uses_a_safe_generic_name_when_telegram_names_are_missing(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-NAME-FALLBACK',
+            items: [],
+            payment: ['method' => 'qris'],
+        );
+        $order->customer->setRawAttributes([
+            'telegram_id' => 8581234505,
+            'first_name' => "\n\t",
+            'username' => null,
+        ]);
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 1);
+
+        $this->assertSame('Buyer', $presentation->buyerName);
+        $this->assertStringContainsString('Buyer: Buyer', $caption);
+        $this->assertStringNotContainsString('Buyer ID:', $caption);
     }
 
     public function test_synthetic_product_presentation_renders_without_persisted_order_or_payment(): void

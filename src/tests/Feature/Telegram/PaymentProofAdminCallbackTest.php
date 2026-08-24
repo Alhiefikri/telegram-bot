@@ -1012,7 +1012,13 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 88]]),
         ]);
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
-        $customer = Customer::factory()->create(['telegram_id' => 123456789, 'username' => 'AdamSecret', 'locale' => 'id']);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 123456789,
+            'first_name' => 'Ciapnih',
+            'username' => 'ciapnih',
+            'locale' => 'id',
+        ]);
+        $telegramFrom = ['id' => 123456789, 'first_name' => 'Ciapnih', 'username' => 'ciapnih'];
         $first = Product::factory()->create([
             'name' => 'Email Account',
             'stock' => 5,
@@ -1026,14 +1032,14 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem($cart, $first, 1);
         app(CartService::class)->addItem($cart, $second, 1);
 
-        $this->postTelegramWebhook($this->callbackUpdate(301, 'cb-manual-proof', 'checkout', chatId: 123456789))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(301, 'cb-manual-proof', 'checkout', from: $telegramFrom, chatId: 123456789))->assertOk();
         $order = Order::firstOrFail();
         ProductStockItem::create([
             'product_id' => $first->id,
             'order_item_id' => $order->orderItems()->where('product_id', $first->id)->sole()->id,
             'secret' => 'buyer@example.test|Buyer-password|Buyer Auth Token|https://otp.example.test/private',
         ]);
-        $this->postTelegramWebhook($this->paymentPhotoUpdate(302, $order->invoice_number, ['username' => 'AdamSecret'], chatId: 123456789))->assertOk();
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(302, $order->invoice_number, $telegramFrom, chatId: 123456789))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(303, 'approve-proof', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
         $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
@@ -1045,7 +1051,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             1,
         );
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $copy);
-        $this->assertStringContainsString('Buyer ID: 123*****89', $copy);
+        $this->assertStringContainsString('Buyer: Cia***', $copy);
+        $this->assertStringNotContainsString('Buyer ID:', $copy);
         $this->assertStringContainsString('Paid via: QR Manual', $copy);
         $this->assertStringNotContainsString('Paid via: QR_MANUAL', $copy);
         $this->assertStringContainsString('Paid via:', $copy);
@@ -1074,10 +1081,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('sendPhoto', $channelEffect->telegram_method);
         $channelCaption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $channelCaption);
-        $this->assertStringContainsString('Buyer ID: 123*****89', $channelCaption);
+        $this->assertStringContainsString('Buyer: Cia***', $channelCaption);
+        $this->assertStringNotContainsString('Buyer ID:', $channelCaption);
         $this->assertStringContainsString('Shop Now', (string) $this->telegramRequestField($channelPhotos->first()[0], 'reply_markup'));
         $this->assertStringContainsString('Thank you for choosing Lhie Store.', $channelCaption);
-        $this->assertStringNotContainsString('AdamSecret', $channelCaption);
+        $this->assertStringNotContainsString('Ciapnih', $channelCaption);
+        $this->assertStringNotContainsString('ciapnih', $channelCaption);
         $this->assertStringNotContainsString('12345', $channelCaption);
         foreach ([
             'buyer@example.test',
@@ -1363,6 +1372,56 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('99', $post->telegram_message_id);
         $this->assertNull($post->last_error);
         $this->assertNotNull($post->sent_at);
+    }
+
+    public function test_outbound_recovery_redispatches_a_retryable_sales_proof_effect(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 123456789,
+            'first_name' => 'Ciapnih',
+            'username' => 'ciapnih',
+        ]);
+        $product = Product::factory()->create(['name' => 'Retry Product']);
+        $order = $this->paidOrderWithSaleProof($customer, $product, 'Retry Product');
+        SalesProofPost::create([
+            'order_id' => $order->id,
+            'status' => SalesProofPost::STATUS_FAILED,
+            'attempts' => 1,
+            'last_error' => 'Telegram delivery failed before completion.',
+        ]);
+        $effect = TelegramOutboundEffect::factory()->create([
+            'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_group_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
+            'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'target_type' => 'store_channel',
+            'telegram_chat_id' => '-100123',
+            'queue' => 'notifications',
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+            'state' => TelegramOutboundEffectState::Failed,
+            'attempts' => 1,
+            'next_attempt_at' => now()->subSecond(),
+            'last_error_code' => 'telegram_delivery_failed',
+            'last_error' => 'Telegram delivery failed before completion.',
+        ]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=')
+            ->assertSuccessful();
+
+        Queue::assertPushed(
+            PublishSalesProofPost::class,
+            fn (PublishSalesProofPost $job): bool => $job->orderId === $order->id
+                && $job->effectId === $effect->id,
+        );
     }
 
     public function test_sales_proof_render_failure_does_not_consume_number_before_later_success(): void

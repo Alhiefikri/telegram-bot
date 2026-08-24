@@ -46,4 +46,24 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringContainsString('…', $caption);
         $this->assertStringNotContainsStringIgnoringCase('fake', $caption);
     }
+
+    public function test_photo_caption_uses_a_safe_generic_name_instead_of_a_buyer_id_fallback(): void
+    {
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-NAME-FALLBACK',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [],
+            providerFee: 0,
+            totalPaid: 10000,
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 18);
+
+        $this->assertStringContainsString('Buyer: Buyer', $caption);
+        $this->assertStringNotContainsString('Buyer ID:', $caption);
+        $this->assertStringNotContainsString('284*****24', $caption);
+    }
 }

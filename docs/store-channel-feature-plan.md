@@ -19,7 +19,8 @@ This plan captures the domain decisions and implementation slices for adding a S
 - Every paid order from every payment method creates at most one Sales Proof Post.
 - Sales Proof Post failure never rolls back or blocks the order. Failed posts retry automatically up to three times, then can be retried manually from the order detail page.
 - The public Sales Proof Post is one English `sendPhoto` delivery: the shared
-  public-safe invoice image plus an English caption with masked buyer ID,
+  public-safe invoice image plus an English caption with a masked Telegram
+  buyer name (display name first, username fallback),
   invoice/order ID, item summary, payment method, WIB completion time,
   quantity, subtotal, amount paid, successful-order number, thanks, and the
   `🛒 Shop Now` action.
@@ -37,7 +38,9 @@ approved those fields in the shared invoice, and issue
 [#324](https://github.com/Alhiefikri/telegram-bot/issues/324) approved the same
 invoice and English totals in Store Channel Sales Proof. The implementation
 must continue excluding credentials, OTP destinations, access tokens, Recovery
-Keys, support contacts, usernames, display names, and full Telegram IDs.
+Keys, support contacts, unmasked usernames, unmasked display names, and full
+Telegram IDs. The public buyer label may contain only a short masked Telegram
+display name or username prefix.
 
 ## Architecture boundaries
 
@@ -122,7 +125,7 @@ Per-customer prompt reuse/deletion state:
 3. The job claims the order in Sales Proof Post storage. If the order is already sent, it stops.
 4. The real publisher adapts the paid Order to the shared public-safe invoice presentation. The formatter builds a bounded English caption with:
    - `ORDER PAYMENT CONFIRMED`,
-   - masked Buyer ID and full invoice/order ID,
+   - masked Telegram buyer name and full invoice/order ID,
    - one item line or bounded multi-item list,
    - `Paid via` and English WIB completion time,
    - quantity, subtotal, amount paid, and successful-order number,
