@@ -26,6 +26,7 @@ final class AdminDashboardStatsData
         private readonly SalesProofPostNumbering $salesProofNumbers,
         private readonly PaymentReceiptReport $receiptReport,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly BscDashboardData $bscDashboard,
     ) {}
 
     /**
@@ -270,6 +271,7 @@ final class AdminDashboardStatsData
             'status_badge' => [
                 'label' => $statusBadge,
             ],
+            'bsc' => $this->bscDashboard->forAdmin($user),
         ];
     }
 

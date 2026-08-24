@@ -1,0 +1,302 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\BscReceiverVerificationStatus;
+use App\Enums\UserRole;
+use App\Exceptions\BscReceiverChallengeException;
+use App\Exceptions\BscReceiverDeletionBlocked;
+use App\Jobs\SendBscReceiverMutationNotification;
+use App\Models\AuditLog;
+use App\Models\BscPaymentReceiver;
+use App\Models\BscReceiverOwnershipChallenge;
+use App\Models\ManualPaymentSetting;
+use App\Models\User;
+use App\Services\Bsc\BscReadiness;
+use App\Services\Bsc\BscReceiverManager;
+use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
+use Tests\TestCase;
+
+class BscReceiverConfigurationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.chain_id', 56);
+        config()->set('services.bsc.usdt_contract', self::CONTRACT);
+        config()->set('services.bsc.expected_token_decimals', 18);
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+            'bsc_payment_enabled' => false,
+        ]);
+    }
+
+    public function test_non_owner_cannot_mutate_a_receiver_even_after_password_confirmation(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->withSession(['auth.password_confirmed_at' => now()->timestamp])
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Admin wallet',
+                'address' => '0x1111111111111111111111111111111111111111',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+    }
+
+    public function test_owner_must_reauthenticate_before_adding_a_receiver(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet utama',
+                'address' => '0x2222222222222222222222222222222222222222',
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+    }
+
+    public function test_owner_add_creates_pending_receiver_and_one_time_challenge(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->withSession(['auth.password_confirmed_at' => now()->timestamp])
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet utama',
+                'address' => '0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD',
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $receiver = BscPaymentReceiver::query()->firstOrFail();
+        $challenge = BscReceiverOwnershipChallenge::query()->firstOrFail();
+
+        $this->assertSame('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', $receiver->address_normalized);
+        $this->assertSame(BscReceiverVerificationStatus::PendingVerification, $receiver->verification_status);
+        $this->assertFalse($receiver->is_active);
+        $this->assertSame($owner->id, $challenge->user_id);
+        $this->assertSame($receiver->address_normalized, $challenge->wallet_address);
+        $this->assertStringContainsString('Challenge ID: '.$challenge->id, $challenge->message);
+        $this->assertStringContainsString('Purpose: add_bsc_receiving_address', $challenge->message);
+        $this->assertNotSame($challenge->message, $challenge->message_hash);
+        Queue::assertPushed(SendBscReceiverMutationNotification::class);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'bsc_receiver.added', 'subject_id' => (string) $receiver->id]);
+    }
+
+    public function test_bsc_runtime_settings_are_stored_without_changing_the_binance_pay_rail(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $setting = ManualPaymentSetting::current();
+
+        $this->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'bsc_settings',
+                'payment_mode' => 'manual',
+                'bsc_payment_enabled' => '1',
+                'bsc_payment_ttl_minutes' => 30,
+                'bsc_min_confirmations' => 3,
+                'bsc_require_finalized_block' => '1',
+                'bsc_confirmation_grace_minutes' => 3,
+                'bsc_unique_amount_increment_micro' => 100,
+                'bsc_hash_attempt_limit' => 5,
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings');
+
+        $setting = $setting->fresh();
+        $this->assertTrue($setting->bsc_payment_enabled);
+        $this->assertSame(30, $setting->bscPaymentTtlMinutes());
+        $this->assertSame(3, $setting->bscMinConfirmations());
+        $this->assertTrue($setting->bsc_require_finalized_block);
+        $this->assertSame('manual', $setting->payment_mode);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'bsc_settings.updated']);
+    }
+
+    public function test_bad_expired_wrong_chain_and_replayed_challenges_are_rejected(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->useOwnershipVerifier(true);
+        $manager = app(BscReceiverManager::class);
+        $registration = $manager->add('Wallet utama', '0x3333333333333333333333333333333333333333', $owner);
+
+        $challenge = $registration->challenge;
+        $challenge->forceFill(['chain_id' => 55])->save();
+        $this->expectException(BscReceiverChallengeException::class);
+        $manager->verify($registration->receiver, (string) $challenge->id, 'eoa', '0x'.str_repeat('1', 130), $owner);
+    }
+
+    public function test_owner_can_reissue_an_expired_or_lost_challenge_without_duplicating_the_receiver(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $manager = app(BscReceiverManager::class);
+        $registration = $manager->add('Wallet utama', '0x7777777777777777777777777777777777777777', $owner);
+
+        $renewed = $manager->renewChallenge($registration->receiver, $owner);
+
+        $this->assertNotSame((string) $registration->challenge->id, (string) $renewed->id);
+        $this->assertNotNull($registration->challenge->fresh()->used_at);
+        $this->assertSame(1, BscPaymentReceiver::query()->count());
+    }
+
+    public function test_successful_signature_verification_keeps_receiver_inactive_until_explicit_activation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->useOwnershipVerifier(true);
+        $manager = app(BscReceiverManager::class);
+        $registration = $manager->add('Wallet utama', '0x4444444444444444444444444444444444444444', $owner);
+
+        $verified = $manager->verify(
+            $registration->receiver,
+            (string) $registration->challenge->id,
+            'eoa',
+            '0x'.str_repeat('2', 130),
+            $owner,
+        );
+        $this->assertSame(BscReceiverVerificationStatus::Verified, $verified->verification_status);
+        $this->assertFalse($verified->is_active);
+
+        $active = $manager->activate($verified, $owner);
+        $this->assertTrue($active->is_active);
+        $inactive = $manager->deactivate($active, $owner);
+        $this->assertFalse($inactive->is_active);
+        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.verified'));
+        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.activated'));
+        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.deactivated'));
+    }
+
+    public function test_manual_verified_requires_an_explicit_high_risk_acknowledgement(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $manager = app(BscReceiverManager::class);
+        $registration = $manager->add('Custodial wallet', '0x5555555555555555555555555555555555555555', $owner);
+
+        $this->expectException(BscReceiverChallengeException::class);
+        $manager->manualVerify($registration->receiver, false, $owner);
+    }
+
+    public function test_readiness_requires_enabled_setting_rpc_identity_and_active_verified_receiver(): void
+    {
+        $rpc = new class implements BscRpcClientInterface
+        {
+            public function chainId(): int
+            {
+                return 56;
+            }
+
+            public function contractCode(string $contract): string
+            {
+                return '0x60016001';
+            }
+
+            public function tokenDecimals(string $contract): int
+            {
+                return 18;
+            }
+
+            public function isValidErc1271Signature(string $contract, string $messageHashHex, string $signature): bool
+            {
+                return true;
+            }
+        };
+        app()->instance(BscRpcClientInterface::class, $rpc);
+
+        $setting = ManualPaymentSetting::current();
+        $setting->forceFill(['bsc_payment_enabled' => true])->save();
+        $notReady = app(BscReadiness::class)->check($setting);
+        $this->assertFalse($notReady->isReady());
+        $this->assertContains('ACTIVE_VERIFIED_BSC_RECEIVER', $notReady->missing);
+
+        BscPaymentReceiver::factory()->verified()->active()->create([
+            'chain_id' => 56,
+            'token_contract' => self::CONTRACT,
+        ]);
+        $ready = app(BscReadiness::class)->check($setting->fresh());
+        $this->assertTrue($ready->isReady());
+        $this->assertSame(56, $ready->rpcChainId);
+        $this->assertSame(18, $ready->tokenDecimals);
+    }
+
+    public function test_committed_setting_and_receiver_mutations_invalidate_storefront_response_version(): void
+    {
+        Cache::put('storefront.response.version', 100, now()->addHour());
+        ManualPaymentSetting::current()->forceFill(['bsc_payment_enabled' => true])->save();
+        $afterSetting = (int) Cache::get('storefront.response.version');
+
+        BscPaymentReceiver::factory()->manuallyVerified()->active()->create([
+            'token_contract' => self::CONTRACT,
+        ]);
+        $afterReceiver = (int) Cache::get('storefront.response.version');
+
+        $this->assertGreaterThan(100, $afterSetting);
+        $this->assertGreaterThan($afterSetting, $afterReceiver);
+    }
+
+    public function test_direct_manager_mutations_are_owner_only(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $this->expectException(AuthorizationException::class);
+
+        app(BscReceiverManager::class)->add(
+            'Not allowed',
+            '0x6666666666666666666666666666666666666666',
+            $admin,
+        );
+    }
+
+    public function test_a_receiver_referenced_by_a_payment_detail_cannot_be_deleted(): void
+    {
+        Schema::create('payment_bsc_details', function ($table): void {
+            $table->id();
+            $table->unsignedBigInteger('receiver_id');
+        });
+        $receiver = BscPaymentReceiver::factory()->manuallyVerified()->active()->create([
+            'token_contract' => self::CONTRACT,
+        ]);
+        DB::table('payment_bsc_details')->insert(['receiver_id' => $receiver->id]);
+
+        $this->expectException(BscReceiverDeletionBlocked::class);
+        $receiver->delete();
+    }
+
+    private function useOwnershipVerifier(bool $accepted): void
+    {
+        app()->instance(BscWalletOwnershipVerifierInterface::class, new class($accepted) implements BscWalletOwnershipVerifierInterface
+        {
+            public function __construct(private readonly bool $accepted) {}
+
+            public function verify(
+                BscPaymentReceiver $receiver,
+                BscReceiverOwnershipChallenge $challenge,
+                string $walletType,
+                string $signature,
+            ): bool {
+                return $this->accepted;
+            }
+        });
+    }
+
+    private function assertAuditCount(string $action): int
+    {
+        return (int) AuditLog::query()->where('action', $action)->count();
+    }
+}

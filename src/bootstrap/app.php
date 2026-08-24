@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthorizeAdminAccess;
+use App\Http\Middleware\AuthorizeBscReceiverMutation;
 use App\Http\Middleware\PreventAdminMiniAppCache;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'admin.access' => AuthorizeAdminAccess::class,
+            'admin.bsc-owner' => AuthorizeBscReceiverMutation::class,
             'admin.no-cache' => PreventAdminMiniAppCache::class,
             'storefront.signed' => ValidateStorefrontSignedInvoice::class,
         ]);

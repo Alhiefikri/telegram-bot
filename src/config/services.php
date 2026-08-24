@@ -8,6 +8,18 @@ return [
         'identity_fingerprint_key_path' => storage_path('app/private/credential-identity-fingerprint.key'),
     ],
 
+    'bsc' => [
+        // The receiver pool is database-managed. These are the only BSC
+        // deployment values that belong in environment configuration.
+        'rpc_url' => env('BSC_RPC_URL'),
+        'chain_id' => (int) env('BSC_CHAIN_ID', 56),
+        'usdt_contract' => env('BSC_USDT_CONTRACT'),
+        'expected_token_decimals' => 18,
+        'rpc_timeout_seconds' => 5.0,
+        'rpc_connect_timeout_seconds' => 2.0,
+        'ownership_challenge_ttl_minutes' => 10,
+    ],
+
     'binance' => [
         'pay_id' => env('BINANCE_PAY_ID'),
         'pay_uid' => env('BINANCE_PAY_UID'),

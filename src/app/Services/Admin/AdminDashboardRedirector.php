@@ -71,6 +71,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_STATS, 'admin-payment-settings');
     }
 
+    public function bscSettings(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_STATS, 'admin-bsc-settings');
+    }
+
     public function supportSettings(): RedirectResponse
     {
         return $this->dashboard(self::TAB_STATS, 'admin-support-settings');

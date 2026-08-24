@@ -1,6 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  STATS TAB (Ringkasan)                              ║
                  ╚═════════════════════════════════════════════════════╝ --}}
+            @php($bsc = $paymentControl['bsc'] ?? [])
             <div id="admin-section-stats" data-admin-return-target tabindex="-1" x-show="activeTab === 'stats'" class="mt-4 space-y-4">
 
                 {{-- Link Toko section --}}
@@ -418,6 +419,158 @@
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
                             Hanya owner/admin yang bisa mengubah mode pembayaran.
                         </x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                <x-admin-dashboard.card
+                    id="admin-bsc-settings"
+                    data-admin-return-target
+                    tabindex="-1"
+                    as="section"
+                    tone="blue"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="BSC Receiving Address"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Binance USDT BEP20</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">BSC Receiving Address</h2>
+                        </div>
+                        <x-admin-dashboard.badge :tone="($bsc['readiness']['ready'] ?? false) ? 'emerald' : 'amber'" dot>
+                            {{ $bsc['readiness']['label'] ?? 'Belum siap' }}
+                        </x-admin-dashboard.badge>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">
+                        {{ $bsc['readiness']['message'] ?? 'BSC belum dikonfigurasi.' }}
+                    </p>
+                    <p class="mt-1 text-[11px] font-semibold text-brand-muted">
+                        Receiver aktif terverifikasi: {{ $bsc['readiness']['active_receiver_count'] ?? 0 }} ·
+                        Chain RPC: {{ $bsc['readiness']['rpc_chain_id'] ?? 'belum dicek' }} ·
+                        Decimals: {{ $bsc['readiness']['token_decimals'] ?? 'belum dicek' }}
+                    </p>
+
+                    @error('receiver', 'bsc')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+
+                    @if ($bsc['can_manage_settings'] ?? false)
+                        <form method="POST" action="{{ $bsc['settings_url'] }}" class="mt-4 space-y-3" aria-label="Pengaturan BSC">
+                            @csrf
+                            <input type="hidden" name="update_scope" value="bsc_settings">
+                            <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
+                            @if ($paymentControl['requested_mode'] === 'pakasir')
+                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
+                            @endif
+                            <input type="hidden" name="bsc_payment_enabled" value="0">
+                            <label class="flex items-center gap-2 text-xs font-black text-neo-ink">
+                                <input type="checkbox" name="bsc_payment_enabled" value="1" @checked($bsc['enabled'] ?? false) class="h-4 w-4 rounded border-2 border-neo-ink">
+                                Aktifkan rail USDT BEP20 jika readiness lengkap
+                            </label>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    TTL BSC (menit)
+                                    <x-admin-dashboard.input class="mt-1" min="1" max="1440" name="bsc_payment_ttl_minutes" type="number" :value="$bsc['ttl_minutes']" />
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Minimum confirmations
+                                    <x-admin-dashboard.input class="mt-1" min="3" max="100" name="bsc_min_confirmations" type="number" :value="$bsc['min_confirmations']" />
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Confirmation grace (menit)
+                                    <x-admin-dashboard.input class="mt-1" min="0" max="60" name="bsc_confirmation_grace_minutes" type="number" :value="$bsc['confirmation_grace_minutes']" />
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink">
+                                    Hash attempts
+                                    <x-admin-dashboard.input class="mt-1" min="1" max="20" name="bsc_hash_attempt_limit" type="number" :value="$bsc['hash_attempt_limit']" />
+                                </label>
+                                <label class="block text-xs font-bold text-neo-ink sm:col-span-2">
+                                    Unique amount increment (micro-USDT)
+                                    <x-admin-dashboard.input class="mt-1" min="1" max="1000000" name="bsc_unique_amount_increment_micro" type="number" :value="$bsc['unique_amount_increment_micro']" />
+                                </label>
+                            </div>
+                            <input type="hidden" name="bsc_require_finalized_block" value="0">
+                            <label class="flex items-center gap-2 text-[11px] font-bold text-brand-muted">
+                                <input type="checkbox" name="bsc_require_finalized_block" value="1" @checked($bsc['require_finalized_block'] ?? false) class="h-4 w-4 rounded border-2 border-neo-ink">
+                                Tambahkan finalized-block sebagai gate ekstra
+                            </label>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Simpan pengaturan BSC</x-admin-dashboard.button>
+                        </form>
+                    @endif
+
+                    @if ($bsc['can_manage_receivers'] ?? false)
+                        <form method="POST" action="{{ $bsc['add_url'] }}" class="mt-4 space-y-3 border-t-2 border-neo-ink/15 pt-4" aria-label="Tambah BSC receiver">
+                            @csrf
+                            <div>
+                                <p class="text-[11px] font-black uppercase tracking-wider text-brand-muted">Tambah receiver</p>
+                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">Address baru selalu pending verification dan tidak langsung menerima checkout.</p>
+                            </div>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <x-admin-dashboard.input name="label" placeholder="Wallet utama" value="{{ old('label') }}" required />
+                                <x-admin-dashboard.input name="address" placeholder="0x..." value="{{ old('address') }}" required />
+                            </div>
+                            <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Tambah & buat ownership challenge</x-admin-dashboard.button>
+                        </form>
+
+                        <div class="mt-4 space-y-3 border-t-2 border-neo-ink/15 pt-4">
+                            @forelse (($bsc['receivers'] ?? []) as $receiver)
+                                <div class="rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <p class="text-xs font-black text-neo-ink">{{ $receiver['label'] }}</p>
+                                            <p class="mt-1 break-all text-[11px] font-semibold text-brand-muted">{{ $receiver['address'] }}</p>
+                                        </div>
+                                        <x-admin-dashboard.badge :tone="$receiver['is_active'] ? 'emerald' : 'amber'">
+                                            {{ $receiver['is_active'] ? 'Aktif' : $receiver['verification_label'] }}
+                                        </x-admin-dashboard.badge>
+                                    </div>
+
+                                    @if ($receiver['pending_challenge_message'])
+                                        <textarea readonly rows="7" class="neo-input mt-3 w-full bg-white px-3 py-2 text-[10px] font-mono leading-4">{{ $receiver['pending_challenge_message'] }}</textarea>
+                                        <form method="POST" action="{{ $receiver['verify_url'] }}" class="mt-2 space-y-2">
+                                            @csrf
+                                            <input type="hidden" name="challenge_id" value="{{ $receiver['pending_challenge_id'] }}">
+                                            <div class="grid gap-2 sm:grid-cols-2">
+                                                <select name="wallet_type" class="neo-input w-full bg-white px-3 py-2 text-xs font-bold" required>
+                                                    <option value="eoa">EOA · EIP-191</option>
+                                                    <option value="erc1271">Smart wallet · ERC-1271</option>
+                                                </select>
+                                                <x-admin-dashboard.input name="signature" placeholder="0x + signature hex" required />
+                                            </div>
+                                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Verifikasi ownership signature</x-admin-dashboard.button>
+                                        </form>
+                                        <form method="POST" action="{{ $receiver['challenge_url'] }}" class="mt-2">
+                                            @csrf
+                                            <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Buat challenge baru</x-admin-dashboard.button>
+                                        </form>
+                                        <form method="POST" action="{{ $receiver['manual_verify_url'] }}" class="mt-2">
+                                            @csrf
+                                            <label class="flex items-start gap-2 text-[10px] font-semibold leading-4 text-amber-900">
+                                                <input type="checkbox" name="high_risk_ack" value="1" required class="mt-0.5 h-4 w-4 rounded border-2 border-amber-900">
+                                                Manual verified high risk: custodial address tidak membuktikan kontrol cryptographic.
+                                            </label>
+                                            <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="mt-2 w-full text-[11px]">Tandai manual_verified</x-admin-dashboard.button>
+                                        </form>
+                                    @elseif ($receiver['is_active'])
+                                        <form method="POST" action="{{ $receiver['deactivate_url'] }}" class="mt-3">
+                                            @csrf
+                                            <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="w-full text-[11px]">Nonaktifkan receiver</x-admin-dashboard.button>
+                                        </form>
+                                    @elseif (in_array($receiver['verification_status'], ['verified', 'manual_verified'], true))
+                                        <form method="POST" action="{{ $receiver['activate_url'] }}" class="mt-3">
+                                            @csrf
+                                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Aktifkan receiver</x-admin-dashboard.button>
+                                        </form>
+                                    @endif
+                                </div>
+                            @empty
+                                <p class="text-xs font-semibold text-brand-muted">Belum ada BSC Receiving Address.</p>
+                            @endforelse
+                        </div>
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Hanya Owner yang dapat menambah, memverifikasi, mengaktifkan, atau menonaktifkan destination address BSC.</x-admin-dashboard.notice>
                     @endif
                 </x-admin-dashboard.card>
 

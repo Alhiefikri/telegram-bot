@@ -4,7 +4,9 @@ namespace App\Providers;
 
 use App\Bootstrap\ApplicationRateLimiterRegistrar;
 use App\Bootstrap\ProductionConfigurationValidator;
+use App\Models\BscPaymentReceiver;
 use App\Models\Category;
+use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Observers\ProductAuditObserver;
 use App\Observers\StorefrontCacheInvalidationObserver;
@@ -12,6 +14,10 @@ use App\Services\Admin\AdminAccessAuthorizer;
 use App\Services\Admin\AdminAccessAuthorizerInterface;
 use App\Services\Audit\AuditContext;
 use App\Services\Audit\HttpAuditContext;
+use App\Services\Bsc\BscRpcClient;
+use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscWalletOwnershipVerifier;
+use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -56,6 +62,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(OrderLifecycle::class, OrderStateMachine::class);
         $this->app->bind(AuditContext::class, HttpAuditContext::class);
         $this->app->bind(AdminAccessAuthorizerInterface::class, AdminAccessAuthorizer::class);
+        $this->app->bind(BscRpcClientInterface::class, BscRpcClient::class);
+        $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
@@ -90,6 +98,8 @@ class AppServiceProvider extends ServiceProvider
         Product::observe(ProductAuditObserver::class);
         Product::observe(StorefrontCacheInvalidationObserver::class);
         Category::observe(StorefrontCacheInvalidationObserver::class);
+        ManualPaymentSetting::observe(StorefrontCacheInvalidationObserver::class);
+        BscPaymentReceiver::observe(StorefrontCacheInvalidationObserver::class);
 
         DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
 

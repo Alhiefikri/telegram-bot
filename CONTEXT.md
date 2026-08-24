@@ -107,6 +107,18 @@ _Avoid_: Deleted product, inactive product
 The process of checking a Binance Pay transfer against a pending payment before the order is completed, using the expected amount, currency, configured receiver, and, when required, the Binance Order ID. It can confirm the payment, leave it awaiting more evidence, or send it for manual review.
 _Avoid_: Binance payment proof (that means screenshot evidence)
 
+**Binance Payment Rail**:
+A customer-selected payment path under Binance checkout: Binance Pay ID or USDT BEP20 on BNB Smart Chain. The selected rail determines the payment instructions and the authoritative verification source for that Payment.
+_Avoid_: Binance method when the specific rail is unknown, Binance Pay for a BSC transfer
+
+**BSC Payment Verification**:
+The process of checking a USDT BEP20 transfer on BNB Smart Chain against the immutable receiver, token contract, expected amount, payment window, and confirmation policy of a pending Payment. A transaction hash is evidence to look up, not proof accepted without on-chain validation.
+_Avoid_: BSC screenshot verification, explorer-page verification, Binance Pay verification
+
+**BSC Receiving Address**:
+An Owner-managed public BNB Smart Chain address that can be assigned to a new USDT BEP20 Payment. Its address, network, and token contract are snapshotted on assignment so later address rotation does not change an existing Payment.
+_Avoid_: Binance Pay ID, wallet credential, private key
+
 **Payment Provider Switch**:
 The owner-controlled store setting that selects Manual, Pakasir, or KlikQRIS for new checkouts without changing payments already created with another provider.
 _Avoid_: Customer provider choice, automatic provider fallback

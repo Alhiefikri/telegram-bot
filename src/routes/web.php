@@ -8,6 +8,8 @@ use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
+use App\Http\Controllers\Admin\AdminBscReceiverController;
+use App\Http\Controllers\Admin\AdminPasswordConfirmationController;
 use App\Http\Controllers\Admin\AdminManualFulfillmentReviewController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
@@ -96,6 +98,10 @@ Route::prefix('akun')->name('customer.')->group(function (): void {
 
 Route::middleware('admin.no-cache')->group(function (): void {
     Route::redirect('/telegram-mini-app', '/admin')->name('telegram-mini-app.dashboard');
+    Route::get('/admin/confirm-password', [AdminPasswordConfirmationController::class, 'create'])->name('password.confirm');
+    Route::post('/admin/confirm-password', [AdminPasswordConfirmationController::class, 'store'])
+        ->middleware('throttle:6,1')
+        ->name('admin.password.confirm.store');
 
     Route::prefix('admin')->name('admin.')->group(function (): void {
         Route::get('login', [AdminLoginController::class, 'create'])->name('login');
@@ -105,6 +111,14 @@ Route::middleware('admin.no-cache')->group(function (): void {
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::prefix('bsc')->name('bsc.')->middleware(['admin.bsc-owner', 'password.confirm:password.confirm,900'])->group(function (): void {
+                Route::post('receivers', [AdminBscReceiverController::class, 'store'])->name('receivers.store');
+                Route::post('receivers/{receiver}/challenge', [AdminBscReceiverController::class, 'challenge'])->name('receivers.challenge');
+                Route::post('receivers/{receiver}/verify', [AdminBscReceiverController::class, 'verify'])->name('receivers.verify');
+                Route::post('receivers/{receiver}/manual-verify', [AdminBscReceiverController::class, 'manualVerify'])->name('receivers.manual-verify');
+                Route::post('receivers/{receiver}/activate', [AdminBscReceiverController::class, 'activate'])->name('receivers.activate');
+                Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
+            });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');

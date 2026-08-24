@@ -10,8 +10,10 @@
   "license": "MIT",
   "require": {
     "php": "^8.3",
+    "brick/math": "^0.18",
     "chillerlan/php-qrcode": "^5.0.5",
     "guzzlehttp/guzzle": "^7.15.2",
+    "kornrunner/keccak": "^1.1",
     "laravel/framework": "^13.8",
     "league/commonmark": "^2.9.0"
   },

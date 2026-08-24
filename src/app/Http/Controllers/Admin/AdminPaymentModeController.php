@@ -30,7 +30,7 @@ class AdminPaymentModeController extends Controller
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
         $updateScope = (string) ($validated['update_scope'] ?? 'provider_switch');
-        $providerSwitch = ! in_array($updateScope, ['binance_settings', 'binance_verification'], true);
+        $providerSwitch = ! in_array($updateScope, ['binance_settings', 'binance_verification', 'bsc_settings'], true);
         $mode = (string) $validated['payment_mode'];
         $checkoutFlow = $mode === PaymentProvider::PAKASIR
             ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
@@ -100,6 +100,20 @@ class AdminPaymentModeController extends Controller
                     $setting = $binanceModes->change($setting, (string) $validated['binance_verification_mode']);
                 }
 
+                foreach ([
+                    'bsc_payment_enabled',
+                    'bsc_payment_ttl_minutes',
+                    'bsc_min_confirmations',
+                    'bsc_require_finalized_block',
+                    'bsc_confirmation_grace_minutes',
+                    'bsc_unique_amount_increment_micro',
+                    'bsc_hash_attempt_limit',
+                ] as $bscField) {
+                    if (array_key_exists($bscField, $validated)) {
+                        $setting->{$bscField} = $validated[$bscField];
+                    }
+                }
+
                 if ($updateScope === 'binance_verification') {
                     $mode = $setting->paymentProvider();
                 }
@@ -117,7 +131,7 @@ class AdminPaymentModeController extends Controller
 
         $newValues = $this->settingValues($setting);
         $auditLogger->log(
-            'payment_mode.updated',
+            $updateScope === 'bsc_settings' ? 'bsc_settings.updated' : 'payment_mode.updated',
             $setting,
             $oldValues,
             $newValues,
@@ -155,6 +169,13 @@ class AdminPaymentModeController extends Controller
             'qris_payment_ttl_minutes' => $setting->qrisPaymentTtlMinutes(),
             'binance_payment_ttl_minutes' => $setting->binancePaymentTtlMinutes(),
             'binance_verification_mode' => $setting->binance_verification_mode,
+            'bsc_payment_enabled' => (bool) $setting->bsc_payment_enabled,
+            'bsc_payment_ttl_minutes' => $setting->bscPaymentTtlMinutes(),
+            'bsc_min_confirmations' => $setting->bscMinConfirmations(),
+            'bsc_require_finalized_block' => (bool) $setting->bsc_require_finalized_block,
+            'bsc_confirmation_grace_minutes' => $setting->bscConfirmationGraceMinutes(),
+            'bsc_unique_amount_increment_micro' => $setting->bscUniqueAmountIncrementMicro(),
+            'bsc_hash_attempt_limit' => $setting->bscHashAttemptLimit(),
         ];
     }
 }
