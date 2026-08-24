@@ -8,10 +8,12 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Exceptions\BscReceiverChallengeException;
 use App\Exceptions\InsufficientStock;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\AuditLog;
 use App\Models\BscPaymentReceiver;
+use App\Models\BscReceiverOwnershipChallenge;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -36,6 +38,7 @@ use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
+use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -537,6 +540,41 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertCount(2, $payments);
         $this->assertSame([2_000_000, 2_000_100], $payments->pluck('amount')->all());
         $this->assertCount(2, PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->get());
+    }
+
+    public function test_concurrent_bsc_receiver_registration_creates_one_receiver_and_one_challenge(): void
+    {
+        $this->requireConcurrencyLane();
+        config()->set('services.bsc', array_merge(config('services.bsc'), [
+            'chain_id' => 56,
+            'usdt_contract' => '0x55d398326f99059ff775485246999027b3197955',
+            'expected_token_decimals' => 18,
+        ]));
+
+        $firstOwner = User::factory()->create(['role' => UserRole::Owner]);
+        $secondOwner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->installBscReceiverInsertDelay();
+
+        try {
+            $results = $this->runConcurrently([
+                fn () => app(BscReceiverManager::class)
+                    ->add('Wallet pertama', '0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD', User::findOrFail($firstOwner->id))
+                    ->receiver
+                    ->id,
+                fn () => app(BscReceiverManager::class)
+                    ->add('Wallet kedua', '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', User::findOrFail($secondOwner->id))
+                    ->receiver
+                    ->id,
+            ]);
+        } finally {
+            $this->removeBscReceiverInsertDelay();
+        }
+
+        $this->assertSame(1, $this->successfulResultCount($results));
+        $this->assertSame([BscReceiverChallengeException::class], $this->failedResultClasses($results));
+        $this->assertSame(1, BscPaymentReceiver::query()->count());
+        $this->assertSame(1, BscReceiverOwnershipChallenge::query()->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'bsc_receiver.added')->count());
     }
 
     public function test_concurrent_binance_verification_claims_one_transaction_once(): void
@@ -1277,6 +1315,34 @@ class ProductionConcurrencyTest extends TestCase
             ], JSON_THROW_ON_ERROR));
             exit(1);
         }
+    }
+
+    private function installBscReceiverInsertDelay(): void
+    {
+        DB::unprepared(<<<'SQL'
+            DROP TRIGGER IF EXISTS test_bsc_receiver_insert_delay ON bsc_payment_receivers;
+            DROP FUNCTION IF EXISTS test_bsc_receiver_insert_delay();
+            CREATE FUNCTION test_bsc_receiver_insert_delay()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM pg_sleep(0.25);
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER test_bsc_receiver_insert_delay
+            BEFORE INSERT ON bsc_payment_receivers
+            FOR EACH ROW EXECUTE FUNCTION test_bsc_receiver_insert_delay();
+        SQL);
+    }
+
+    private function removeBscReceiverInsertDelay(): void
+    {
+        DB::unprepared(<<<'SQL'
+            DROP TRIGGER IF EXISTS test_bsc_receiver_insert_delay ON bsc_payment_receivers;
+            DROP FUNCTION IF EXISTS test_bsc_receiver_insert_delay();
+        SQL);
     }
 
     private function claimTelegramUpdateWithAuditSideEffect(int $updateId): int

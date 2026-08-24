@@ -255,7 +255,7 @@ Add an Owner-managed `bsc_payment_receivers` table/model. Suggested fields:
 | `id` | Stable identifier; referenced by assignment audit and Payment snapshot. |
 | `label` | Human-readable operational label, not customer identity. |
 | `address` | Full EVM address, validated and normalized for comparison. |
-| `address_normalized` | Lowercase canonical comparison value; unique among active records. |
+| `address_normalized` | Lowercase canonical comparison value; unique across the receiver lifecycle. |
 | `chain_id` | `56` for production BSC Mainnet. |
 | `token_contract` | The approved USDT BSC contract; not customer-supplied. |
 | `token_decimals` | Readiness-validated contract metadata, normally expected to be 18 for the configured contract. |
@@ -330,7 +330,7 @@ Allocator algorithm:
 6. Enforce a database partial unique index for pending automatic BSC amounts.
 7. Let the existing checkout retry path handle a concurrent unique conflict; never silently reuse an ambiguous amount.
 
-The uniqueness scope is global across active BSC receivers. An address is still part of the verification predicate, but global uniqueness makes scanner matching, customer support, and manual review safer.
+The uniqueness scope is global across all BSC receiver records, including inactive and pending records. An address is still part of the verification predicate, but global uniqueness makes scanner matching, customer support, and manual review safer.
 
 The allocator must not alter Binance Pay ID amount semantics. In particular, an Order ID Binance Pay Payment remains exact-price as required by the current design.
 

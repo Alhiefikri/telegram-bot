@@ -10,6 +10,7 @@ use App\Models\BscReceiverOwnershipChallenge;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -29,37 +30,48 @@ final class BscReceiverManager
         $address = BscPaymentReceiver::normalizeAddress($address);
         [$chainId, $tokenContract, $tokenDecimals] = $this->configuredToken();
 
-        return DB::transaction(function () use ($label, $address, $actor, $ip, $chainId, $tokenContract, $tokenDecimals): BscReceiverRegistration {
-            if (BscPaymentReceiver::query()->where('address_normalized', $address)->exists()) {
-                throw new BscReceiverChallengeException('BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.');
+        try {
+            return DB::transaction(function () use ($label, $address, $actor, $ip, $chainId, $tokenContract, $tokenDecimals): BscReceiverRegistration {
+                if (BscPaymentReceiver::query()->where('address_normalized', $address)->exists()) {
+                    throw new BscReceiverChallengeException('BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.');
+                }
+
+                $receiver = BscPaymentReceiver::create([
+                    'label' => $label,
+                    'address' => $address,
+                    'chain_id' => $chainId,
+                    'token_contract' => $tokenContract,
+                    'token_decimals' => $tokenDecimals,
+                    'is_active' => false,
+                    'verification_status' => BscReceiverVerificationStatus::PendingVerification,
+                ]);
+                $challenge = $this->issueChallenge($receiver, $actor);
+
+                $this->auditLogger->log(
+                    'bsc_receiver.added',
+                    $receiver,
+                    null,
+                    $this->safeValues($receiver) + [
+                        'challenge_id' => (string) $challenge->getKey(),
+                        'reason' => 'receiver_added_pending_ownership_verification',
+                    ],
+                    $actor,
+                    $ip,
+                );
+                $this->notifyAfterCommit('added', $receiver, $actor);
+
+                return new BscReceiverRegistration($receiver, $challenge);
+            }, 5);
+        } catch (QueryException $exception) {
+            if (! $this->isAddressUniqueViolation($exception)) {
+                throw $exception;
             }
 
-            $receiver = BscPaymentReceiver::create([
-                'label' => $label,
-                'address' => $address,
-                'chain_id' => $chainId,
-                'token_contract' => $tokenContract,
-                'token_decimals' => $tokenDecimals,
-                'is_active' => false,
-                'verification_status' => BscReceiverVerificationStatus::PendingVerification,
-            ]);
-            $challenge = $this->issueChallenge($receiver, $actor);
-
-            $this->auditLogger->log(
-                'bsc_receiver.added',
-                $receiver,
-                null,
-                $this->safeValues($receiver) + [
-                    'challenge_id' => (string) $challenge->getKey(),
-                    'reason' => 'receiver_added_pending_ownership_verification',
-                ],
-                $actor,
-                $ip,
+            throw new BscReceiverChallengeException(
+                'BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.',
+                previous: $exception,
             );
-            $this->notifyAfterCommit('added', $receiver, $actor);
-
-            return new BscReceiverRegistration($receiver, $challenge);
-        }, 5);
+        }
     }
 
     public function verify(
@@ -339,6 +351,20 @@ final class BscReceiverManager
         if (! $actor->role?->canManageBscReceivers()) {
             throw new AuthorizationException('Hanya Owner yang dapat mengubah BSC Receiving Address.');
         }
+    }
+
+    private function isAddressUniqueViolation(QueryException $exception): bool
+    {
+        if (! in_array((string) ($exception->errorInfo[0] ?? ''), ['23000', '23505'], true)) {
+            return false;
+        }
+
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'bsc_receivers_address_unique')
+            || str_contains($message, 'bsc_receivers_active_address_unique')
+            || (str_contains($message, 'bsc_payment_receivers')
+                && str_contains($message, 'address_normalized'));
     }
 
     /** @return array<string, mixed> */

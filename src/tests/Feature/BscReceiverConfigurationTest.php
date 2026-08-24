@@ -19,8 +19,10 @@ use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -101,6 +103,103 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertNotSame($challenge->message, $challenge->message_hash);
         Queue::assertPushed(SendBscReceiverMutationNotification::class);
         $this->assertDatabaseHas('audit_logs', ['action' => 'bsc_receiver.added', 'subject_id' => (string) $receiver->id]);
+    }
+
+    public function test_normalized_receiver_address_is_unique_across_all_lifecycle_states(): void
+    {
+        BscPaymentReceiver::factory()->create([
+            'address' => '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+            'is_active' => false,
+            'verification_status' => BscReceiverVerificationStatus::PendingVerification,
+        ]);
+
+        $this->expectException(QueryException::class);
+
+        BscPaymentReceiver::factory()->create([
+            'address' => '0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD',
+            'is_active' => false,
+            'verification_status' => BscReceiverVerificationStatus::PendingVerification,
+        ]);
+    }
+
+    public function test_duplicate_receiver_addition_returns_a_conflict_without_second_challenge(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $manager = app(BscReceiverManager::class);
+
+        $manager->add('Wallet utama', '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', $owner);
+
+        try {
+            $manager->add('Wallet duplikat', '0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD', $owner);
+            $this->fail('Expected duplicate BSC receiver registration to be rejected.');
+        } catch (BscReceiverChallengeException $exception) {
+            $this->assertStringContainsString('sudah terdaftar', $exception->getMessage());
+        }
+
+        $this->assertSame(1, BscPaymentReceiver::query()->count());
+        $this->assertSame(1, BscReceiverOwnershipChallenge::query()->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'bsc_receiver.added')->count());
+        Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
+    }
+
+    public function test_database_address_conflict_is_translated_without_partial_side_effects(): void
+    {
+        if (DB::getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('The local transaction-conflict harness requires SQLite triggers.');
+        }
+
+        DB::unprepared(<<<'SQL'
+            CREATE TRIGGER test_bsc_receiver_unique_conflict
+            BEFORE INSERT ON bsc_payment_receivers
+            WHEN NEW.address_normalized = '0x9999999999999999999999999999999999999999'
+            BEGIN
+                INSERT INTO bsc_payment_receivers (
+                    label,
+                    address,
+                    address_normalized,
+                    chain_id,
+                    token_contract,
+                    token_decimals,
+                    is_active,
+                    verification_status,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    'Conflicting receiver',
+                    '0x9999999999999999999999999999999999999999',
+                    '0x9999999999999999999999999999999999999999',
+                    56,
+                    '0x55d398326f99059ff775485246999027b3197955',
+                    18,
+                    0,
+                    'pending_verification',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                );
+            END
+        SQL);
+
+        try {
+            $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+            try {
+                app(BscReceiverManager::class)->add(
+                    'Wallet utama',
+                    '0x9999999999999999999999999999999999999999',
+                    $owner,
+                );
+                $this->fail('Expected the database address conflict to be translated.');
+            } catch (BscReceiverChallengeException $exception) {
+                $this->assertStringContainsString('sudah terdaftar', $exception->getMessage());
+            }
+        } finally {
+            DB::unprepared('DROP TRIGGER IF EXISTS test_bsc_receiver_unique_conflict');
+        }
+
+        $this->assertSame(0, BscPaymentReceiver::query()->count());
+        $this->assertSame(0, BscReceiverOwnershipChallenge::query()->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'bsc_receiver.added')->count());
     }
 
     public function test_bsc_runtime_settings_are_stored_without_changing_the_binance_pay_rail(): void
