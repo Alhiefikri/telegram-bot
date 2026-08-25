@@ -78,7 +78,7 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   let dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
   await expect(dialog).toBeVisible();
   await expect(
-    dialog.locator('input[type="radio"][name="payment_method"]').first()
+    dialog.locator('input[type="radio"][name="payment_choice"]').first()
   ).toBeAttached();
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
@@ -142,13 +142,13 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
         name: "Browser QA Produk A",
       });
       const paymentMethods = dialog.locator(
-        'input[type="radio"][name="payment_method"]'
+        'input[type="radio"][name="payment_choice"]'
       );
       const qris = dialog.locator(
-        'input[type="radio"][name="payment_method"][value="qris"]'
+        'input[type="radio"][name="payment_choice"][value="qris"]'
       );
       const binance = dialog.locator(
-        'input[type="radio"][name="payment_method"][value="binance_pay"]'
+        'input[type="radio"][name="payment_choice"][value="binance_pay"]'
       );
       const scrollRegion = dialog.locator("[data-storefront-checkout-scroll]");
       const optionalSupport = dialog.locator(
@@ -191,7 +191,7 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
       ).toBeVisible();
       await expect(
         dialog.getByText(
-          "Binance Pay dibayar dalam USDT dan diverifikasi manual. Instruksi serta nomor invoice tersedia setelah checkout."
+          "Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout."
         )
       ).toBeVisible();
 
@@ -311,7 +311,7 @@ test("restores QRIS for customer checkout when Binance becomes unavailable", asy
 
   const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
   const binance = dialog.locator(
-    'input[type="radio"][name="payment_method"][value="binance_pay"]'
+    'input[type="radio"][name="payment_choice"][value="binance_pay"]'
   );
   await expect(binance).toBeVisible();
   await dialog
@@ -332,7 +332,7 @@ test("restores QRIS for customer checkout when Binance becomes unavailable", asy
     name: "Browser QA Produk A",
   });
   const qris = restoredDialog.locator(
-    'input[type="radio"][name="payment_method"][value="qris"]'
+    'input[type="radio"][name="payment_choice"][value="qris"]'
   );
 
   await expect(restoredDialog).toBeVisible();
