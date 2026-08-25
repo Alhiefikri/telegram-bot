@@ -10,7 +10,6 @@ use App\Models\Cart;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Payment;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlanWriter;
@@ -127,48 +126,34 @@ class OrderCheckoutService
         }
 
         $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
-        $usingPaymentPlan = $this->paymentPreparations->hasAdapterFor($paymentIntent);
-        if (! $usingPaymentPlan) {
-            $paymentIntent->assertReady($lockedCart, $items, $products, $activeSetting);
+
+        $preflightContext = new CheckoutPaymentPreflightContext(
+            currentSetting: $activeSetting,
+            requestedProvider: $paymentIntent->provider(),
+            requestedMethod: $paymentIntent->method(),
+        );
+        if (! $preflight->matches($preflightContext)) {
+            if ($preflight->hasState()) {
+                throw new InvalidCheckout('Checkout payment preflight is stale.');
+            }
+
+            $preflight = CheckoutPaymentPreflight::none($preflightContext);
         }
 
-        $expiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
+        $requestedExpiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
-        $paymentPlan = null;
-        $paymentAmount = null;
+        $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
+            cart: $lockedCart,
+            items: $items,
+            products: $products,
+            lockedSetting: $activeSetting,
+            preflight: $preflight,
+            requestedExpiresAt: $requestedExpiresAt,
+        ));
 
-        if ($usingPaymentPlan) {
-            $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
-                cart: $lockedCart,
-                items: $items,
-                products: $products,
-                lockedSetting: $activeSetting,
-                preflight: $preflight,
-                requestedExpiresAt: $expiresAt,
-            ));
-        } else {
-            $paymentAmount = $paymentIntent->paymentAmount($items, $products);
-        }
+        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
 
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan?->orderCurrency() ?? $paymentIntent->orderCurrency(), 'expires_at' => $paymentPlan?->orderExpiresAt() ?? $expiresAt]);
-
-        if ($paymentPlan !== null) {
-            $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
-        } else {
-            $payment = Payment::create([
-                'order_id' => $order->id,
-                'provider' => $paymentIntent->provider(),
-                'merchant_ref' => $this->numbers->merchantReference(),
-                'method' => $paymentIntent->method(),
-                'binance_auto_verification_enabled' => false,
-                'binance_verification_mode' => 'amount_unique',
-                'binance_verification_status' => 'checking',
-                'amount' => $paymentAmount,
-                'currency' => $paymentIntent->paymentCurrency(),
-                'status' => PaymentStatus::Pending,
-                'expired_at' => $expiresAt,
-            ]);
-        }
+        $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];

@@ -23,6 +23,9 @@ use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use App\Services\Checkout\BinanceCheckoutPaymentPreparation;
 use App\Services\Checkout\BscCheckoutPaymentPreparation;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
+use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
+use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
+use App\Services\Checkout\PakasirCheckoutPaymentPreparation;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -79,10 +82,18 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
-        $this->app->singleton(CheckoutPaymentPreparationResolver::class, fn ($app) => new CheckoutPaymentPreparationResolver([
-            BinanceCheckoutPaymentPreparation::IDENTITY => $app->make(BinanceCheckoutPaymentPreparation::class),
-            BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),
-        ]));
+        $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
+            $pakasir = $app->make(PakasirCheckoutPaymentPreparation::class);
+
+            return new CheckoutPaymentPreparationResolver([
+                ManualQrisCheckoutPaymentPreparation::IDENTITY => $app->make(ManualQrisCheckoutPaymentPreparation::class),
+                PakasirCheckoutPaymentPreparation::HOSTED_IDENTITY => $pakasir,
+                PakasirCheckoutPaymentPreparation::API_QRIS_IDENTITY => $pakasir,
+                KlikQrisCheckoutPaymentPreparation::IDENTITY => $app->make(KlikQrisCheckoutPaymentPreparation::class),
+                BinanceCheckoutPaymentPreparation::IDENTITY => $app->make(BinanceCheckoutPaymentPreparation::class),
+                BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),
+            ]);
+        });
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
         $this->app->singleton(PaidInvoiceRenderer::class);
         $this->app->singleton(TelegramCallbackAckState::class);

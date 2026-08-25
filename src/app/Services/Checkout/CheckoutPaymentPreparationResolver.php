@@ -31,8 +31,8 @@ final class CheckoutPaymentPreparationResolver
             return $this->adapters[$identity];
         }
 
-        // Existing intent objects implement the contract as a compatibility
-        // bridge until the rail adapters are cut over in later slices.
+        // Built-in rails are registered by AppServiceProvider. Keep the
+        // intent bridge for legacy and test-only preparation objects.
         return $intent;
     }
 
