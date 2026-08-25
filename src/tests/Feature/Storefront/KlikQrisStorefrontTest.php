@@ -11,7 +11,6 @@ use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use App\Storefront\StorefrontShopSignedInvoice;
-use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -42,12 +41,6 @@ class KlikQrisStorefrontTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'klikqris',
-            'pakasir_enabled' => false,
-            'pakasir_base_url' => null,
-            'pakasir_slug' => null,
-            'pakasir_api_key' => null,
-            'pakasir_qris_enabled' => false,
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::HOSTED,
         ]);
         Http::fake([
             'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) {
@@ -95,27 +88,6 @@ class KlikQrisStorefrontTest extends TestCase
         $this->assertStringNotContainsString('SECRET_SIGNATURE_SHOULD_NOT_RENDER', $html);
     }
 
-    public function test_disabled_klikqris_selector_preserves_existing_pakasir_checkout_selection(): void
-    {
-        config()->set('services.klikqris.sandbox_enabled', false);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: 15000,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.PAKASIR.FALLBACK',
-            fee: 103,
-        );
-        $product = $this->availableProduct(['price_amount' => 15000, 'stock' => 1]);
-
-        app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
-            productId: $product->id,
-            quantity: 1,
-            buyerName: 'Pakasir Buyer',
-        ));
-
-        $payment = Payment::query()->sole();
-        $this->assertSame('pakasir', $payment->provider);
-        $this->assertTrue($payment->isPayableNativePakasirQris());
-    }
 
     public function test_signed_invoice_fails_closed_when_persisted_klikqris_display_amount_mismatches_provider_total(): void
     {
@@ -310,8 +282,6 @@ class KlikQrisStorefrontTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'klikqris',
-            'pakasir_enabled' => false,
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::HOSTED,
         ]);
         $base64 = KlikQrisSandboxScenarios::pngDataUri('storefront-base64-only');
         Http::fake([
@@ -348,23 +318,4 @@ class KlikQrisStorefrontTest extends TestCase
         $this->assertStringContainsString('QRIS belum siap dibayar', $html);
     }
 
-    public function test_pakasir_status_refresh_still_uses_pakasir_and_manual_or_binance_remain_unsupported(): void
-    {
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(amount: 1000, paymentNumber: '00020101021226610016ID.CO.QRIS.STATUS.PAKASIR', fee: 103);
-        $product = $this->availableProduct(['price_amount' => 1000, 'stock' => 1]);
-        app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(productId: $product->id, quantity: 1, buyerName: 'Pakasir Status'));
-        $pakasirPayment = Payment::query()->where('provider', 'pakasir')->sole();
-        Http::fake(['*' => Http::response(['transaction' => ['status' => 'completed', 'amount' => 1103, 'order_id' => $pakasirPayment->merchant_ref]], 200)]);
-
-        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $pakasirPayment->order, null, false))->assertOk();
-        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'pakasir'));
-
-        foreach (['manual', 'binance'] as $provider) {
-            $order = Order::factory()->create();
-            Payment::factory()->for($order)->create(['provider' => $provider, 'method' => $provider]);
-            $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
-                ->assertStatus(422);
-        }
-    }
 }

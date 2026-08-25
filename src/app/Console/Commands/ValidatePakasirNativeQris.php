@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
-use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
@@ -13,7 +12,6 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Pakasir\PakasirTransaction;
-use App\Support\PakasirCheckoutFlow;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use Throwable;
@@ -91,26 +89,9 @@ class ValidatePakasirNativeQris extends Command
 
     private function validateConfiguration(array &$report, PakasirProviderReadiness $pakasirReadiness): void
     {
-        $setting = ManualPaymentSetting::current();
-        $paymentMode = (string) ($setting?->payment_mode ?: 'manual');
-        $checkoutFlow = (string) ($setting?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
-        $readiness = $pakasirReadiness->checkout($checkoutFlow);
+        $readiness = $pakasirReadiness->verification();
 
-        if ($paymentMode !== 'pakasir') {
-            $this->addCheck($report, 'fail', 'dashboard payment_mode=pakasir', "Configured dashboard value is {$paymentMode}.");
-        } else {
-            $this->addCheck($report, 'pass', 'dashboard payment_mode=pakasir');
-        }
-
-        if ($checkoutFlow !== PakasirCheckoutFlow::API_QRIS) {
-            $this->addCheck($report, 'fail', 'dashboard pakasir_checkout_flow=api_qris', "Configured dashboard value is {$checkoutFlow}.");
-        } else {
-            $this->addCheck($report, 'pass', 'dashboard pakasir_checkout_flow=api_qris');
-        }
-
-        if ($checkoutFlowMessage = $readiness->invalidMessage('pakasir_checkout_flow')) {
-            $this->addCheck($report, 'fail', 'dashboard pakasir_checkout_flow valid', $checkoutFlowMessage);
-        }
+        $this->addCheck($report, 'pass', 'legacy Pakasir validation only');
 
         foreach (['PAKASIR_SLUG', 'PAKASIR_API_KEY'] as $label) {
             if ($readiness->isMissing($label)) {

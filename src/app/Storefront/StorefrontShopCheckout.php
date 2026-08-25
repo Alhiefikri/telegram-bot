@@ -21,10 +21,8 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
-use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -36,7 +34,6 @@ class StorefrontShopCheckout
     public function __construct(
         private readonly CartService $carts,
         private readonly OrderCheckoutService $orders,
-        private readonly PakasirNativeQrisService $nativeQris,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
@@ -225,9 +222,6 @@ class StorefrontShopCheckout
         }
 
         $selection = $this->providerResolver->resolve('qris');
-        if ($selection->requestedProvider === PaymentProvider::PAKASIR && $selection->provider === PaymentProvider::MANUAL) {
-            throw new InvalidCheckout('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
-        }
 
         return $selection->paymentIntent;
     }
@@ -240,24 +234,17 @@ class StorefrontShopCheckout
             return;
         }
 
-        if ($payment->provider === PaymentProvider::PAKASIR && $payment->method === PakasirCheckoutFlow::API_QRIS) {
-            $this->nativeQris->ensureCreated($payment);
-        }
     }
 
     private function usesNativeQris(?Payment $payment): bool
     {
-        return $payment?->provider === PaymentProvider::KLIKQRIS
-            || ($payment?->provider === PaymentProvider::PAKASIR && $payment?->method === PakasirCheckoutFlow::API_QRIS);
+        return $payment?->provider === PaymentProvider::KLIKQRIS;
     }
 
     private function hasPayableNativeQris(Payment $payment): bool
     {
-        if ($payment->provider === PaymentProvider::KLIKQRIS) {
-            return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
-        }
-
-        return $payment->isPayableNativePakasirQris();
+        return $payment->provider === PaymentProvider::KLIKQRIS
+            && $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
     }
 
     private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId, ?string $paymentRail = null): ?string

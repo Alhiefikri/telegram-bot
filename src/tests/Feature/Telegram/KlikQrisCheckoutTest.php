@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Exceptions\InvalidCheckout;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendBinanceCheckoutInstructions;
@@ -38,7 +39,6 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         KlikQrisSandboxScenarios::configureReadySandbox();
         ManualPaymentSetting::create([
             'payment_mode' => 'klikqris',
-            'pakasir_checkout_flow' => 'api_qris',
             'is_active' => true,
         ]);
 
@@ -55,26 +55,16 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
-    public function test_sandbox_selector_is_fail_closed_when_not_ready_and_keeps_existing_pakasir_selection(): void
+    public function test_new_selector_rejects_retired_pakasir_setting(): void
     {
-        Queue::fake();
-        KlikQrisSandboxScenarios::configureReadySandbox();
-        config()->set('services.klikqris', array_replace(config('services.klikqris'), [
-            'sandbox_enabled' => false,
-        ]));
         ManualPaymentSetting::create([
             'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'hosted',
             'is_active' => true,
         ]);
 
-        $selection = app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+        $this->expectException(InvalidCheckout::class);
 
-        $this->assertSame('pakasir', $selection->requestedPaymentMode);
-        $this->assertSame('pakasir', $selection->paymentMode);
-        $this->assertSame('pakasir', $selection->paymentIntent->provider());
-        $this->assertSame(CheckoutPostCreationBehavior::PakasirInstructions, $selection->paymentIntent->postCreationBehavior());
-        Queue::assertNotPushed(SendKlikQrisCheckoutInstructions::class);
+        app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
     }
 
     public function test_klikqris_job_dedupes_confirmed_successful_send_but_keeps_at_least_once_retry_semantics(): void

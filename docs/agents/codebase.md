@@ -31,7 +31,7 @@ repository root
 - PostgreSQL sebagai database utama;
 - database-backed queue dengan worker pool terpisah;
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
-- Telegram Bot API, Pakasir, KlikQRIS, dan Binance sebagai dependency eksternal sesuai konfigurasi.
+- Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
 
 Suite PHPUnit biasa dipaksa menggunakan SQLite in-memory, cache array, queue sync, dan session array lewat [`src/phpunit.xml`](../../src/phpunit.xml). Itu cepat tetapi tidak membuktikan seluruh locking PostgreSQL; gunakan `composer test:concurrency-gate` untuk race yang menyentuh stok, checkout, payment, atau admin mutation.
 
@@ -228,16 +228,14 @@ Reporting memakai cache singkat yang memasukkan environment dan seluruh paramete
 
 ### 5.1 Provider selection
 
-`PaymentProvider::allowed()` saat ini adalah `manual`, `pakasir`, dan `klikqris`. `ManualPaymentSetting` menyimpan provider aktif, versi setting, TTL, dan flow Pakasir. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent`:
+`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; setting Pakasir aktif dimigrasikan ke KlikQRIS dan tidak lagi menyimpan checkout flow Pakasir. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent` dan menolak Pakasir untuk checkout baru.
 
 `CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
 
 | Rail                 | `Payment.provider` | `Payment.method` | Intent/preparation/verification utama                                                                                             |
 | -------------------- | ------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | QR Manual            | `manual`           | `QR_MANUAL`      | `ManualQrisCheckoutIntent` + `ManualQrisCheckoutPaymentPreparation`, admin completion                                           |
-| Pakasir hosted       | `pakasir`          | `hosted`         | `PakasirCheckoutIntent` + `PakasirCheckoutPaymentPreparation`, hosted URL                                                       |
-| Pakasir Native QRIS  | `pakasir`          | `api_qris`       | `PakasirCheckoutPaymentPreparation` + `PakasirNativeQrisService`                                                               |
-| KlikQRIS Native QRIS | `klikqris`          | `qris`            | `KlikQrisCheckoutPaymentPreparation` + `KlikQrisNativeQrisService`                                                             |
+| KlikQRIS Native QRIS | `klikqris`         | `qris`           | `KlikQrisCheckoutPaymentPreparation` + `KlikQrisNativeQrisService`                                                               |
 | Binance Pay          | `manual`           | `BINANCE_PAY_ID` | `BinanceCheckoutPaymentPreparation` + `BinancePaymentVerification`                                                             |
 | USDT BEP20/BSC       | `manual`           | `USDT_BEP20`     | `BscCheckoutPaymentPreparation` + `BscPaymentVerification`                                                                     |
 
@@ -264,14 +262,13 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 
 OrderCheckoutService tidak memetakan rail, menghitung field Binance/BSC, atau melakukan external I/O dari fase `prepare()`. Aturan amount/receiver/verification rail tetap berada pada preparation adapter dan service verification masing-masing.
 
-### 5.3 Pakasir
+### 5.3 Pakasir legacy settlement
 
-Pakasir adalah provider legacy yang masih harus melayani Payment lama. Ia memiliki hosted checkout dan Native QRIS API. `PakasirNativeQrisService` menyimpan hasil create yang tervalidasi pada Payment yang sama, mempersempit expiry lokal mengikuti expiry provider, dan melakukan recovery melalui Transaction Detail bila hasil create meragukan.
+Pakasir tidak lagi tersedia untuk checkout baru. Payment lama dengan `provider=pakasir` tetap immutable dan diproses melalui compatibility lane sampai retirement gate lulus. `PakasirCallbackProcessor` mencocokkan project/slug, merchant reference, amount, method, dan status; callback paid tetap melakukan Transaction Detail API verification sebelum memanggil `OrderLifecycle`.
 
-Webhook Pakasir hanya intake. `PakasirCallbackProcessor` mencocokkan project/slug, merchant reference, amount, method, dan status; untuk callback paid ia tetap melakukan Transaction Detail API verification sebelum memanggil `OrderLifecycle`. `pakasir:reconcile` juga memproses pending dan payment yang baru saja expired/failed dalam lookback window.
+`pakasir:reconcile` memproses Payment lama yang masih pending atau baru dilepas, dan provider cancellation attempt tetap idempotent. `pakasir:retirement-status --json` melaporkan settlement readiness; ketika `gate=awaiting_owner_approval`, owner harus merekam approval sebelum compatibility lane dihapus.
 
-Native Pakasir memiliki hosted URL sebagai jalur tampilan/fallback pada adapter Telegram. Ini adalah behavior legacy Pakasir; jangan menyalinnya ke KlikQRIS.
-
+Jangan membuat hosted checkout atau Native QRIS Pakasir baru, dan jangan memindahkan logic legacy ini ke KlikQRIS.
 ### 5.4 KlikQRIS Native QRIS
 
 KlikQRIS adalah module yang memiliki boundary sendiri sesuai [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md). [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php) adalah satu-satunya tempat untuk:
@@ -355,7 +352,7 @@ Perbedaan subtle: paid Pakasir secara default memproyeksikan Order ke `completed
 | `POST /api/webhook/pakasir`          | `PakasirWebhookController`            | callback untrusted, Transaction Detail verification             |
 | `POST /api/webhook/klikqris/sandbox` | `KlikQrisSandboxWebhookController`    | sandbox secret/readiness dan authoritative status               |
 | `POST /api/webhook/klikqris`         | `KlikQrisProductionWebhookController` | production secret/readiness dan authoritative status            |
-
+| `POST /api/webhook/pakasir`          | `PakasirWebhookController`            | legacy callback intake; Transaction Detail verification             |
 Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown status, dan provider outage. Provider event/payload harus melalui sanitizer sebelum disimpan atau ditampilkan.
 
 ### Scheduler
@@ -366,7 +363,7 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
-- `orders:expire-pending` tiap menit;
+- `pakasir:reconcile --chunk=100` tiap menit hanya untuk Payment legacy sampai retirement gate passed;
 - recovery Telegram updates/outbound dan payment proofs tiap menit; `telegram:recover-outbound` mengubah lease kadaluarsa menjadi `unknown`, lalu hanya mengirim effect `pending`/`failed` yang dispatchable;
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.

@@ -58,6 +58,40 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $audit->new_values['provider']);
     }
 
+    public function test_pakasir_is_not_available_for_new_provider_switches(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        KlikQrisSandboxScenarios::configureReadySandbox();
+
+        $this->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'provider_switch',
+                'payment_mode' => 'pakasir',
+                'confirm_provider_switch' => '1',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors([
+                'payment_mode' => 'Provider pembayaran tidak valid.',
+            ], null, 'paymentMode');
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('KlikQRIS')
+            ->assertDontSee('Hosted Pakasir')
+            ->assertDontSee('QR Native Pakasir')
+            ->assertDontSee('pakasir_checkout_flow', false);
+    }
+
+    public function test_pakasir_setting_is_rejected_by_new_checkout_selector(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+
+        $this->expectException(InvalidCheckout::class);
+
+        app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+    }
+
     public function test_provider_switch_requires_explicit_confirmation(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
@@ -233,15 +267,10 @@ class PaymentProviderSwitchTest extends TestCase
             ])
             ->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
-        config()->set('services.pakasir.slug', 'sedulur-digital');
-        config()->set('services.pakasir.api_key', 'pakasir-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-
         $this->from('/admin?tab=stats')
             ->actingAs($owner)
             ->post(route('admin.payment-mode.update'), [
                 'payment_mode' => 'pakasir',
-                'pakasir_checkout_flow' => 'hosted',
                 'payment_provider_version' => 0,
                 'confirm_provider_switch' => '1',
             ])

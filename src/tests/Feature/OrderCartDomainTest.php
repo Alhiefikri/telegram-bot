@@ -141,11 +141,6 @@ class OrderCartDomainTest extends TestCase
     {
         config()->set('services.pakasir.slug', null);
         config()->set('services.pakasir.api_key', null);
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
-            'is_active' => true,
-        ]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
 
         try {

@@ -24,7 +24,6 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Support\PakasirCheckoutFlow;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -192,18 +191,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
                 'QR_MANUAL',
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
             ],
-            'Pakasir hosted' => [
-                'pakasir_hosted',
-                'pakasir',
-                PakasirCheckoutFlow::HOSTED,
-                TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
-            ],
-            'Pakasir native QRIS' => [
-                'pakasir_native_qris',
-                'pakasir',
-                PakasirCheckoutFlow::API_QRIS,
-                TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
-            ],
             'KlikQRIS' => [
                 'klikqris',
                 'klikqris',
@@ -351,25 +338,11 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
                 'payment_mode' => 'manual',
                 'is_active' => true,
             ]),
-            'pakasir_hosted', 'pakasir_native_qris' => $this->configurePakasir($rail),
             'klikqris' => $this->configureKlikQris(),
             default => throw new \InvalidArgumentException('Unknown characterization rail: '.$rail),
         };
     }
 
-    private function configurePakasir(string $rail): void
-    {
-        config()->set('services.pakasir.slug', 'characterization-store');
-        config()->set('services.pakasir.api_key', 'characterization-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => $rail === 'pakasir_native_qris'
-                ? PakasirCheckoutFlow::API_QRIS
-                : PakasirCheckoutFlow::HOSTED,
-            'is_active' => true,
-        ]);
-    }
 
     private function configureKlikQris(): void
     {
@@ -384,8 +357,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
     {
         return match ($rail) {
             'manual' => CheckoutPaymentIntents::manualQris(),
-            'pakasir_hosted' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED),
-            'pakasir_native_qris' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS),
             'klikqris' => CheckoutPaymentIntents::klikQris(),
             default => throw new \InvalidArgumentException('Unknown characterization rail: '.$rail),
         };

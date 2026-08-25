@@ -46,71 +46,8 @@ class AdminOrderPaymentOperationsTest extends TestCase
             ->assertSee('IDR');
     }
 
-    public function test_admin_dashboard_distinguishes_pakasir_native_qris_checkout_flow(): void
-    {
-        config()->set('services.pakasir.slug', 'warung-ai');
-        config()->set('services.pakasir.api_key', 'pakasir-secret');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
 
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        ManualPaymentSetting::query()->create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
-            'is_active' => true,
-        ]);
 
-        $this->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertSee('Pakasir native QRIS aktif')
-            ->assertSee('Provider Pakasir native QRIS')
-            ->assertSee('Paid tetap diverifikasi melalui status provider');
-    }
-
-    public function test_admin_cannot_enable_pakasir_mode_without_required_config(): void
-    {
-        config()->set('services.pakasir.slug', '');
-        config()->set('services.pakasir.api_key', '');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
-
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-
-        $this->from('/admin?tab=stats')
-            ->post(route('admin.payment-mode.update'), [
-                'payment_mode' => 'pakasir',
-                'pakasir_checkout_flow' => 'hosted',
-                'confirm_provider_switch' => '1',
-            ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertSessionHasErrors([
-                'payment_mode' => 'Provider Pakasir belum bisa diaktifkan. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment.',
-            ], null, 'paymentMode');
-
-        $this->assertDatabaseCount('manual_payment_settings', 0);
-    }
-
-    public function test_invalid_pakasir_checkout_flow_blocks_pakasir_enable_with_validation_message(): void
-    {
-        config()->set('services.pakasir.slug', 'warung-ai');
-        config()->set('services.pakasir.api_key', 'pakasir-secret');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        config()->set('services.pakasir.checkout_flow', 'hosted');
-
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-
-        $this->from('/admin?tab=stats')
-            ->post(route('admin.payment-mode.update'), [
-                'payment_mode' => 'pakasir',
-                'pakasir_checkout_flow' => 'inline_qris',
-                'confirm_provider_switch' => '1',
-            ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertSessionHasErrors([
-                'pakasir_checkout_flow' => 'Jenis pembayaran Pakasir tidak valid.',
-            ], null, 'paymentMode');
-
-        $this->assertDatabaseCount('manual_payment_settings', 0);
-    }
 
     public function test_order_and_payment_policy_matrix_by_role(): void
     {

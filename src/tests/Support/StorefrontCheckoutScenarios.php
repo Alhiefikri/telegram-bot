@@ -2,32 +2,50 @@
 
 namespace Tests\Support;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 
 trait StorefrontCheckoutScenarios
 {
-    use PakasirNativeQrisScenarios;
     use StorefrontProductScenarios;
+
+    protected function manualPaymentModeIsActive(): void
+    {
+        ManualPaymentSetting::query()->create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
 
     protected function successfulNativeQrisCheckout(
         Product $product,
         int $quantity,
         string $buyerName,
-        string $paymentNumber,
-        ?int $fee = null,
         ?string $supportContactChannel = null,
         ?string $supportContactValue = null,
     ): array {
-        $this->pakasirNativeQrisIsReady();
-        $this->qrisRendererReturnsDeterministicPng();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: $product->price_amount * $quantity,
-            paymentNumber: $paymentNumber,
-            fee: $fee,
-        );
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::query()->create([
+            'payment_mode' => 'klikqris',
+            'is_active' => true,
+        ]);
+        Http::fake([
+            'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) {
+                $payment = new Payment([
+                    'merchant_ref' => (string) $request['order_id'],
+                    'amount' => (int) $request['amount'],
+                ]);
+
+                return Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
+                    'expired_at' => now()->addMinutes(15)->toISOString(),
+                ]));
+            },
+        ]);
 
         $response = $this->postStorefrontShopCheckout($product, $quantity, $buyerName, $supportContactChannel, $supportContactValue);
 

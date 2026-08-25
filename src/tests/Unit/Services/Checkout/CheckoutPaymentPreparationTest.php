@@ -55,7 +55,6 @@ final class CheckoutPaymentPreparationTest extends TestCase
     {
         $intents = [
             CheckoutPaymentIntents::manualQris(),
-            CheckoutPaymentIntents::pakasir(),
             CheckoutPaymentIntents::klikQris(),
             CheckoutPaymentIntents::binancePayId(),
             CheckoutPaymentIntents::usdtBep20(),

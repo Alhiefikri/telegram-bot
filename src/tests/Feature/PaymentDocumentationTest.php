@@ -6,17 +6,17 @@ use Tests\TestCase;
 
 class PaymentDocumentationTest extends TestCase
 {
-    public function test_operator_docs_describe_manual_default_and_pakasir_rollout_controls(): void
+    public function test_operator_docs_describe_manual_default_and_pakasir_retirement_controls(): void
     {
         $readme = file_get_contents(base_path('README.md'));
 
         $this->assertStringContainsString('Payment Provider Switch', $readme);
-        $this->assertStringContainsString('Pakasir hosted/native QRIS', $readme);
-        $this->assertStringContainsString('Pakasir adalah provider legacy', $readme);
-        $this->assertStringContainsString('Transaction Detail API', $readme);
-        $this->assertStringContainsString('rollback cepat dari dashboard', $readme);
+        $this->assertStringContainsString('Pakasir legacy settlement', $readme);
+        $this->assertStringContainsString('Pakasir is retired for new checkout', $readme);
+        $this->assertStringContainsString('Transaction Detail verification', $readme);
+        $this->assertStringContainsString('pakasir:retirement-status --json', $readme);
         $this->assertStringContainsString('Mode pembayaran', $readme);
-        $this->assertStringContainsString('pakasir:validate-native-qris', $readme);
+        $this->assertStringNotContainsString('pakasir:validate-native-qris', $readme);
         $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
     }
 

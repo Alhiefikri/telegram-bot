@@ -4,8 +4,6 @@ namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
-use App\Services\Pakasir\PakasirProviderReadiness;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -35,7 +33,6 @@ class UpdatePaymentModeRequest extends FormRequest
             'update_scope' => ['sometimes', 'string', Rule::in(['provider_switch', 'binance_settings', 'binance_verification', 'bsc_settings'])],
             'payment_mode' => ['required', 'string', Rule::in(PaymentProvider::allowed())],
             'payment_provider_version' => ['sometimes', 'integer', 'min:0'],
-            'pakasir_checkout_flow' => [Rule::requiredIf(fn (): bool => $this->input('payment_mode') === PaymentProvider::PAKASIR), 'nullable', 'string', Rule::in(PakasirCheckoutFlow::allowed())],
             'confirm_provider_switch' => $this->isProviderSwitch() ? ['required', 'accepted'] : ['sometimes'],
             'binance_pay_enabled' => ['sometimes', 'boolean'],
             'binance_verification_mode' => ['sometimes', 'string', Rule::in(['amount_unique', 'order_id'])],
@@ -57,8 +54,6 @@ class UpdatePaymentModeRequest extends FormRequest
         return [
             'payment_mode.required' => 'Pilih provider pembayaran.',
             'payment_mode.in' => 'Provider pembayaran tidak valid.',
-            'pakasir_checkout_flow.required' => 'Pilih jenis pembayaran Pakasir.',
-            'pakasir_checkout_flow.in' => 'Jenis pembayaran Pakasir tidak valid.',
             'confirm_provider_switch.required' => 'Konfirmasi perubahan provider sebelum melanjutkan.',
             'confirm_provider_switch.accepted' => 'Konfirmasi perubahan provider sebelum melanjutkan.',
             'binance_verification_mode.in' => 'Mode verifikasi Binance tidak valid.',
@@ -85,19 +80,6 @@ class UpdatePaymentModeRequest extends FormRequest
         return [
             function (ValidationValidator $validator): void {
                 if (! $this->isProviderSwitch()) {
-                    return;
-                }
-
-                if ($this->input('payment_mode') === PaymentProvider::PAKASIR) {
-                    $checkoutFlow = (string) ($this->input('pakasir_checkout_flow') ?: PakasirCheckoutFlow::HOSTED);
-                    $readiness = app(PakasirProviderReadiness::class)->checkout($checkoutFlow);
-                    if (! $readiness->isReady()) {
-                        $validator->errors()->add(
-                            'payment_mode',
-                            'Provider Pakasir belum bisa diaktifkan. '.$readiness->configurationMessage(),
-                        );
-                    }
-
                     return;
                 }
 

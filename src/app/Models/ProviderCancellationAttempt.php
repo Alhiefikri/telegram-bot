@@ -25,6 +25,16 @@ class ProviderCancellationAttempt extends Model
 
     public const STATE_TERMINAL_FAILURE = 'terminal_failure';
 
+    /** @return list<string> */
+    public static function dispatchableStates(): array
+    {
+        return [
+            self::STATE_PENDING,
+            self::STATE_PROCESSING,
+            self::STATE_RETRYABLE_FAILURE,
+        ];
+    }
+
     protected function casts(): array
     {
         return [

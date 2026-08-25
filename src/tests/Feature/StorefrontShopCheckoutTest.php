@@ -2,37 +2,29 @@
 
 namespace Tests\Feature;
 
-use App\Enums\CartStatus;
-use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
-use App\Models\AuditLog;
 use App\Models\CheckoutMaintenanceSetting;
-use App\Models\InventoryMovement;
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
-use App\Models\ProductStockItem;
 use App\Services\OrderStateMachine;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
-use App\Support\PakasirCheckoutFlow;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
-use PHPUnit\Framework\Attributes\Group;
-use Tests\Support\QrisTestPayload;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
@@ -95,6 +87,33 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertRedirect(route('storefront.shop.index'));
     }
 
+    public function test_new_checkout_rejects_retired_pakasir_setting_without_side_effects(): void
+    {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'price_amount' => 15000,
+            'stock' => 1,
+        ]);
+        Http::fake();
+
+        $this->expectException(InvalidCheckout::class);
+        try {
+            app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerName: 'Retired Provider Buyer',
+            ));
+        } finally {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, Customer::query()->count());
+            Http::assertNothingSent();
+        }
+    }
+
     public function test_checkout_module_stores_buyer_name_without_treating_it_as_contact_identity(): void
     {
         $cases = [
@@ -113,12 +132,7 @@ class StorefrontShopCheckoutTest extends TestCase
         ];
 
         foreach (array_values($cases) as $index => $data) {
-            $this->pakasirNativeQrisIsReady();
-            $this->providerQrisCreateSucceedsWithProviderTotal(
-                amount: 15000,
-                paymentNumber: '00020101021226610016ID.CO.QRIS.NORMALIZE'.$index,
-                fee: 103,
-            );
+            $this->manualPaymentModeIsActive();
             $product = $this->availableProduct([
                 'price_amount' => 15000,
                 'stock' => 1,
@@ -143,7 +157,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_checkout_module_rejects_products_that_are_not_available_products(): void
     {
-        $this->pakasirNativeQrisIsReady();
+        $this->manualPaymentModeIsActive();
         Http::fake();
 
         $cases = [
@@ -195,7 +209,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_shop_checkout_maps_missing_product_to_existing_validation_message(): void
     {
-        $this->pakasirNativeQrisIsReady();
+        $this->manualPaymentModeIsActive();
         Http::fake();
 
         $response = $this
@@ -354,151 +368,6 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('id="storefront-buyer-name-error"', false)
             ->assertSee('aria-invalid="true"', false)
             ->assertSee('aria-describedby="storefront-buyer-name-help storefront-buyer-name-error"', false);
-    }
-
-    #[Group('postgres-release')]
-    public function test_shop_checkout_creates_native_qris_order_from_provider_total(): void
-    {
-        Queue::fake([SendAdminOrderPendingNotification::class]);
-        $product = $this->availableProductWithCredentials(
-            secrets: [
-                'first-account@example.test|first-secret',
-                'second-account@example.test|second-secret',
-            ],
-            attributes: [
-                'name' => 'GPT Plus Native QRIS',
-                'price_amount' => 15000,
-                'stock' => 4,
-            ],
-        );
-        $paymentNumber = QrisTestPayload::forAmount(30_520);
-
-        [$response, $order, $payment] = $this->successfulNativeQrisCheckout(
-            product: $product,
-            quantity: 2,
-            buyerName: 'buyer_test',
-            paymentNumber: $paymentNumber,
-        );
-
-        $location = $response->headers->get('Location');
-        $this->assertIsString($location);
-        $this->assertStringContainsString('/shop/orders/', $location);
-        $this->assertStringContainsString('signature=', $location);
-        $this->assertSame('/shop/orders/'.$order->getKey(), parse_url($location, PHP_URL_PATH));
-        $this->assertTrue(URL::hasValidSignature(Request::create($location, 'GET'), false));
-
-        $this->assertDatabaseHas('customers', [
-            'id' => $order->customer_id,
-            'telegram_id' => null,
-            'username' => null,
-            'first_name' => 'buyer_test',
-        ]);
-        $this->assertSame(30000, $order->total_amount);
-        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
-        $this->assertSame(PaymentStatus::Pending, $order->payment_status);
-        $this->assertSame(CartStatus::CheckedOut, $order->cart?->status);
-        Queue::assertPushedOn('telegram-outbound', SendAdminOrderPendingNotification::class, fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id);
-
-        $this->assertDatabaseHas('payments', [
-            'id' => $payment->id,
-            'order_id' => $order->id,
-            'provider' => 'pakasir',
-            'method' => PakasirCheckoutFlow::API_QRIS,
-            'amount' => 30000,
-            'provider_fee' => 520,
-            'provider_total_payment' => 30520,
-            'provider_payment_method' => 'qris',
-        ]);
-        $this->assertSame($paymentNumber, $payment->provider_payment_number);
-        $this->assertSame(hash('sha256', $paymentNumber), $payment->provider_payment_number_hash);
-        $this->assertSame('lhie-test', data_get($payment->provider_payload, 'payment.project'));
-        $this->assertSame($payment->merchant_ref, data_get($payment->provider_payload, 'payment.order_id'));
-        $this->assertNull(data_get($payment->provider_payload, 'payment.payment_number'));
-        $this->assertSame(2, ProductStockItem::where('product_id', $product->id)->whereNotNull('order_item_id')->count());
-        $this->assertSame(2, $product->fresh()->reserved_stock);
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
-
-        $expectedQrDataUri = 'data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber);
-        $this->get($location)
-            ->assertOk()
-            ->assertSee('Total bayar QRIS')
-            ->assertSee('Rp30.520')
-            ->assertSee($expectedQrDataUri, false)
-            ->assertSee('Data akun aman sampai pembayaran masuk')
-            ->assertDontSee('first-account@example.test|first-secret', false)
-            ->assertDontSee('second-account@example.test|second-secret', false);
-
-        Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'POST'
-            && $request->url() === 'https://app.pakasir.test/api/transactioncreate/qris'
-            && $request['project'] === 'lhie-test'
-            && $request['order_id'] === $payment->merchant_ref
-            && $request['amount'] === 30000
-            && $request['api_key'] === 'secret-key');
-
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'storefront.checkout_opened',
-            'subject_type' => Product::class,
-            'subject_id' => (string) $product->id,
-        ]);
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'storefront.checkout_submitted',
-            'subject_type' => Order::class,
-            'subject_id' => (string) $order->id,
-        ]);
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'storefront.qris_created',
-            'subject_type' => Payment::class,
-            'subject_id' => (string) $payment->id,
-        ]);
-
-        $metadata = AuditLog::where('action', 'storefront.qris_created')->where('subject_id', (string) $payment->id)->firstOrFail()->new_values;
-        $this->assertSame($order->invoice_number, $metadata['invoice_number']);
-        $this->assertSame('pakasir', $metadata['provider']);
-        $this->assertSame('checkout_submit', $metadata['source']);
-        $this->assertArrayNotHasKey('buyer_name', $metadata);
-        $this->assertArrayNotHasKey('support_contact_value', $metadata);
-        $this->assertArrayNotHasKey('provider_payment_number', $metadata);
-        $this->assertStringNotContainsString($paymentNumber, json_encode($metadata, JSON_THROW_ON_ERROR));
-    }
-
-    public function test_explicit_qris_checkout_stays_on_the_active_provider_when_binance_is_available(): void
-    {
-        Queue::fake([SendAdminOrderPendingNotification::class]);
-        config()->set('services.binance.pay_id', '987654321');
-        $this->pakasirConfigIsReady();
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
-            'binance_pay_enabled' => true,
-            'binance_verification_mode' => 'order_id',
-            'binance_order_id_compatibility_ready_at' => now(),
-            'is_active' => true,
-        ]);
-        $product = $this->availableProduct([
-            'name' => 'QRIS First With Binance Available',
-            'price_amount' => 15000,
-            'usdt_price_amount' => 1000000,
-            'stock' => 1,
-        ]);
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: 15000,
-            paymentNumber: QrisTestPayload::forAmount(15310),
-        );
-
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
-            'quantity' => 1,
-            'buyer_name' => 'qris_first_buyer',
-            'payment_method' => 'qris',
-        ]);
-
-        $response->assertRedirect();
-        $payment = Payment::query()->sole();
-
-        $this->assertSame('pakasir', $payment->provider);
-        $this->assertSame(PakasirCheckoutFlow::API_QRIS, $payment->method);
-        $this->assertSame(PaymentStatus::Pending, $payment->status);
-        $this->assertSame(0, Payment::query()->where('method', 'BINANCE_PAY_ID')->count());
     }
 
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
@@ -702,19 +571,16 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
         $product = $this->availableProduct(['name' => 'Retryable Cancelled Checkout', 'price_amount' => 15000, 'stock' => 3]);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(15000, '00020101021226610016ID.CO.QRIS.RETRY99');
+        $this->manualPaymentModeIsActive();
         $payload = ['product_id' => $product->id, 'quantity' => 1, 'buyer_name' => 'buyer_test'];
         $session = ['storefront.checkout_client_key' => 'cancel-retry-session'];
 
         $first = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
         $old = Order::sole();
         $firstOrder = $old->id;
-        $this->providerTransactionDetailIsPending($old->payments()->firstOrFail());
         $this->post(app(StorefrontInvoiceUrl::class)->cancel($old));
         $old->refresh();
 
-        $this->providerQrisCreateSucceedsWithProviderTotal(15000, '00020101021226610016ID.CO.QRIS.RETRY100');
         $second = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
         $new = Order::whereKeyNot($old->id)->sole();
 
@@ -737,11 +603,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'price_amount' => 15000,
             'stock' => 2,
         ]);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: 15000,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.IDEMPOTENT99',
-        );
+        $this->manualPaymentModeIsActive();
 
         $payload = [
             'product_id' => $product->id,
@@ -771,11 +633,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'price_amount' => 15000,
             'stock' => 2,
         ]);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: 15000,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.COMPLETED99',
-        );
+        $this->manualPaymentModeIsActive();
 
         $payload = [
             'product_id' => $product->id,
@@ -818,7 +676,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'stock' => 0,
             'reserved_stock' => 0,
         ]);
-        $this->pakasirNativeQrisIsReady();
+        $this->manualPaymentModeIsActive();
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'version' => 1,
@@ -838,11 +696,6 @@ class StorefrontShopCheckoutTest extends TestCase
             'version' => 2,
             'activated_at' => null,
         ]);
-        $this->qrisRendererReturnsDeterministicPng();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: $product->price_amount,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.REOPENED99',
-        );
 
         $reopened = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
 
@@ -861,11 +714,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'price_amount' => 15000,
             'stock' => 2,
         ]);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateSucceedsWithProviderTotal(
-            amount: 15000,
-            paymentNumber: '00020101021226610016ID.CO.QRIS.CONTACTIDEMPOTENT99',
-        );
+        $this->manualPaymentModeIsActive();
 
         $session = ['storefront.checkout_client_key' => 'same-browser-support-contact-session'];
         $basePayload = [
@@ -896,82 +745,6 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
-    public function test_repeated_failed_qris_checkout_keeps_the_original_recovery_key_hash(): void
-    {
-        $product = $this->availableProduct([
-            'name' => 'Idempotent Failed QRIS Checkout',
-            'price_amount' => 15000,
-            'stock' => 2,
-        ]);
-        $this->pakasirNativeQrisIsReady();
-        $this->providerQrisCreateFails();
-        $payload = [
-            'product_id' => $product->id,
-            'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-        ];
-
-        $first = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
-            ->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), $payload);
-        $hash = Order::sole()->credential_access_key_hash;
-        $second = $this->withSession(['storefront.checkout_client_key' => 'same-failed-qris-browser-session'])
-            ->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), $payload);
-
-        $first->assertRedirect();
-        $second->assertRedirect($first->headers->get('Location'));
-        $this->assertNotEmpty($hash);
-        $this->assertSame($hash, Order::sole()->credential_access_key_hash);
-        $this->assertSame(1, Order::count());
-        $this->assertSame(1, Payment::count());
-    }
-
-    public function test_checkout_with_incomplete_provider_total_blocks_payment_and_reuses_original_order(): void
-    {
-        $product = $this->availableProduct([
-            'name' => 'Incomplete QRIS Total Checkout',
-            'price_amount' => 15000,
-            'stock' => 2,
-        ]);
-        $this->pakasirNativeQrisIsReady();
-        $paymentNumber = '00020101021226610016ID.CO.QRIS.INCOMPLETECREATE99';
-        $this->providerQrisCreateSucceedsWithoutProviderTotal(15000, $paymentNumber);
-        $payload = [
-            'product_id' => $product->id,
-            'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-        ];
-
-        $first = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
-            ->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), $payload);
-        $order = Order::with('payments')->sole();
-        $payment = $order->payments->sole();
-
-        $first->assertRedirect();
-        $this->assertSame('financial_integrity_failed', $payment->provider_create_state);
-        $this->assertNull($payment->provider_total_payment);
-        $this->assertNull($payment->provider_payment_number);
-
-        $this->providerTransactionDetailFails();
-        $second = $this->withSession(['storefront.checkout_client_key' => 'same-incomplete-qris-session'])
-            ->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), $payload);
-
-        $second->assertRedirect($first->headers->get('Location'));
-        $this->assertSame(1, Order::count());
-        $this->assertSame(1, Payment::count());
-        $this->assertSame(1, $product->fresh()->reserved_stock);
-
-        $this->get($first->headers->get('Location'))
-            ->assertOk()
-            ->assertSee('Total produk')
-            ->assertSee('Rp15.000')
-            ->assertSee('Gagal membuat QRIS')
-            ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false);
-    }
-
     public function test_shop_checkout_accepts_non_telegram_buyer_name(): void
     {
         $product = $this->availableProduct([
@@ -984,7 +757,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'Budi Store',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.BUDISTORE99',
         );
 
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
@@ -1010,7 +782,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'Guest Buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.GUESTNOCONTACT99',
         );
 
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
@@ -1037,7 +808,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'Guest Buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.GUESTCONTACT99',
             supportContactChannel: 'telegram',
             supportContactValue: ' @support_buyer ',
         );
@@ -1086,7 +856,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'proxy_buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.PROXYMISMATCH99',
         );
 
         $location = $response->headers->get('Location');
@@ -1114,7 +883,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'legacy_buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.LEGACYABSOLUTE99',
         );
 
         $legacyUrl = URL::signedRoute('storefront.shop.orders.show', $order);
@@ -1148,107 +916,6 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_checkout_routes_manual_and_hosted_provider_selections_without_native_qris_creation(): void
-    {
-        $message = 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.';
-
-        $this->pakasirNativeQrisHasMissingCredentials();
-        $unreadyProduct = $this->availableProduct(['stock' => 3]);
-        Http::fake();
-        $this->postStorefrontShopCheckout($unreadyProduct, 1, 'Web Buyer')
-            ->assertRedirect(route('storefront.products.show', ['product' => $unreadyProduct, 'checkout' => 1]))
-            ->assertInvalid(['product_id' => $message]);
-        $this->assertNoLocalCheckoutRowsCreated('missing pakasir credentials');
-        Http::assertNothingSent();
-
-        $this->pakasirPaymentSettingsStartEmpty();
-        $this->manualPaymentModeIsActive();
-        $manualProduct = $this->availableProduct(['stock' => 3]);
-        Http::fake();
-        $manualResponse = $this->postStorefrontShopCheckout($manualProduct, 1, 'Manual Web Buyer');
-        $manualResponse->assertRedirect();
-        $manualPayment = Order::latest('id')->firstOrFail()->payments()->sole();
-        $this->assertSame('manual', $manualPayment->provider);
-        $this->assertSame('QR_MANUAL', $manualPayment->method);
-        $this->get($manualResponse->headers->get('Location'))
-            ->assertOk()
-            ->assertSee('QR manual invoice')
-            ->assertSee('/qr-lhie.jpg', false)
-            ->assertDontSee('data-shop-payment-status', false);
-        Http::assertNothingSent();
-
-        $this->pakasirPaymentSettingsStartEmpty();
-        $this->pakasirHostedCheckoutIsActive();
-        $hostedProduct = $this->availableProduct(['stock' => 3]);
-        Http::fake();
-        $hostedResponse = $this->postStorefrontShopCheckout($hostedProduct, 1, 'Hosted Web Buyer');
-        $hostedResponse->assertRedirect();
-        $hostedPayment = Order::latest('id')->firstOrFail()->payments()->sole();
-        $this->assertSame('pakasir', $hostedPayment->provider);
-        $this->assertSame(PakasirCheckoutFlow::HOSTED, $hostedPayment->method);
-        $this->get($hostedResponse->headers->get('Location'))
-            ->assertOk()
-            ->assertSee('Bayar via Website Pakasir')
-            ->assertSee('data-shop-payment-status', false);
-        Http::assertNothingSent();
-    }
-
-    public function test_failed_native_qris_create_keeps_pending_reservation_for_safe_recovery(): void
-    {
-        $this->pakasirNativeQrisIsReady();
-        $product = $this->availableProductWithCredentials(
-            secrets: ['web-checkout@example.test|Secret-123'],
-            attributes: [
-                'name' => 'Credential Native QRIS',
-                'stock' => 1,
-                'price_amount' => 33000,
-            ],
-        );
-        $stockItem = ProductStockItem::where('product_id', $product->id)->firstOrFail();
-        $this->providerQrisCreateFails();
-
-        $response = $this->postStorefrontShopCheckout($product, 1, 'RetryBuyer');
-
-        $response->assertRedirect();
-
-        $order = Order::with(['payments', 'orderItems'])->firstOrFail();
-        $payment = $order->payments->first();
-
-        $this->assertSame(OrderStatus::PendingPayment, $order->order_status);
-        $this->assertSame(PaymentStatus::Pending, $order->payment_status);
-        $this->assertNotNull($payment);
-        $this->assertSame(PaymentStatus::Pending, $payment->status);
-        $this->assertSame('outcome_unknown', $payment->provider_create_state);
-        $this->assertSame(1, $product->fresh()->stock);
-        $this->assertSame(1, $product->fresh()->reserved_stock);
-        $this->assertNotNull($stockItem->fresh()->order_item_id);
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
-        $this->assertNotEmpty($order->credential_access_key_hash);
-        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
-
-        $location = $response->headers->get('Location');
-        $this->assertIsString($location);
-        $this->get($location)
-            ->assertOk()
-            ->assertSee('Simpan Recovery Key pesanan website ini.')
-            ->assertSee('Salin ke password manager atau catatan pribadi yang aman.')
-            ->assertSee('data-copy-status', false)
-            ->assertSee('LHIE-', false)
-            ->assertDontSee('Ambil screenshot atau salin', false)
-            ->assertDontSee('web-checkout@example.test|Secret-123', false);
-
-        app(OrderStateMachine::class)->markPaymentPaid($payment);
-        $this->flushSession();
-        $this->get($location)
-            ->assertOk()
-            ->assertSee('Data akun siap dibuka')
-            ->assertSee('Akses data pesanan')
-            ->assertDontSee('web-checkout@example.test|Secret-123', false);
-
-        Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'POST'
-            && $request->url() === 'https://app.pakasir.test/api/transactioncreate/qris');
-    }
-
     public function test_paid_shop_order_reveals_allocated_account_on_signed_order_page(): void
     {
         Queue::fake();
@@ -1267,7 +934,6 @@ class StorefrontShopCheckoutTest extends TestCase
             product: $product,
             quantity: 1,
             buyerName: 'paid_buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.PAIDREVEAL99',
         );
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
 
@@ -1301,44 +967,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame('/provider-lama/cara-pakai', $orderItem->usage_guide_url);
         $this->assertTrue($orderItem->usage_guide_snapshotted);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
-    }
-
-    public function test_shop_status_endpoint_reconciles_completed_pakasir_payment(): void
-    {
-        Queue::fake();
-        $product = $this->availableProduct([
-            'name' => 'Status Reconcile Product',
-            'price_amount' => 73000,
-            'stock' => 1,
-        ]);
-        [, $order, $payment] = $this->successfulNativeQrisCheckout(
-            product: $product,
-            quantity: 1,
-            buyerName: 'Status Buyer',
-            paymentNumber: '00020101021226610016ID.CO.QRIS.STATUSPAID99',
-            fee: 500,
-        );
-        $this->providerTransactionDetailCompletesPayment($payment);
-
-        $redirectUrl = app(StorefrontInvoiceUrl::class)->show($order);
-
-        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
-            ->assertOk()
-            ->assertJsonPath('ok', true)
-            ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
-            ->assertJsonPath('order_status', OrderStatus::Completed->value)
-            ->assertJsonPath('is_paid', true)
-            ->assertJsonPath('redirect_url', $redirectUrl);
-
-        $payment->refresh();
-        $order->refresh();
-        $this->assertSame(PaymentStatus::Paid, $payment->status);
-        $this->assertNotNull($payment->paid_at);
-        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame(OrderStatus::Completed, $order->order_status);
-        Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'GET'
-            && $request->url() === 'https://app.pakasir.test/api/transactiondetail?project=lhie-test&amount=73000&order_id='.$payment->merchant_ref.'&api_key=secret-key');
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
     }
 
     private function assertRouteContract(string $name, string $method, string $uri): \Illuminate\Routing\Route

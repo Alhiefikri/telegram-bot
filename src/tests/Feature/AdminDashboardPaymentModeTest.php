@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\User;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,12 +20,10 @@ class AdminDashboardPaymentModeTest extends TestCase
             'role' => UserRole::Owner,
         ]));
 
-        config()->set('services.pakasir.slug', 'sedulur-digital');
-        config()->set('services.pakasir.api_key', 'pakasir-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+        KlikQrisSandboxScenarios::configureReadySandbox();
 
         $setting = ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
+            'payment_mode' => 'klikqris',
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
         ]);
@@ -32,14 +31,14 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->get('/admin')
             ->assertOk()
             ->assertSee('Mode pembayaran')
-            ->assertSee('Pakasir hosted aktif')
+            ->assertSee('KlikQRIS aktif')
             ->assertSee('QR Manual')
-            ->assertSee('Hosted Pakasir')
-            ->assertSee('QR Native Pakasir')
+            ->assertSee('KlikQRIS')
             ->assertSee('name="payment_mode" value="manual"', false)
-            ->assertSee('name="payment_mode" value="pakasir"', false)
-            ->assertSee('name="pakasir_checkout_flow" value="hosted"', false)
-            ->assertSee('name="pakasir_checkout_flow" value="api_qris"', false);
+            ->assertSee('name="payment_mode" value="klikqris"', false)
+            ->assertDontSee('Hosted Pakasir')
+            ->assertDontSee('QR Native Pakasir')
+            ->assertDontSee('pakasir_checkout_flow', false);
 
         $this->post(route('admin.payment-mode.update'), [
             'payment_mode' => 'manual',
@@ -79,60 +78,17 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertDontSee('window.confirm', false);
     }
 
-    public function test_owner_can_switch_dashboard_to_native_qris_pakasir_flow(): void
+
+    public function test_owner_can_toggle_binance_pay_while_klikqris_mode_is_active(): void
     {
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
         ]));
 
-        config()->set('services.pakasir.slug', 'sedulur-digital');
-        config()->set('services.pakasir.api_key', 'pakasir-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
+        KlikQrisSandboxScenarios::configureReadySandbox();
 
         $setting = ManualPaymentSetting::create([
-            'payment_mode' => 'manual',
-            'pakasir_checkout_flow' => 'hosted',
-            'admin_telegram_chat_id' => '999',
-            'is_active' => true,
-        ]);
-
-        $this->post(route('admin.payment-mode.update'), [
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
-            'confirm_provider_switch' => '1',
-        ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
-
-        $this->assertDatabaseHas('manual_payment_settings', [
-            'id' => $setting->id,
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
-            'is_active' => true,
-        ]);
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'payment_provider.switched',
-            'subject_type' => ManualPaymentSetting::class,
-            'subject_id' => (string) $setting->id,
-        ]);
-
-        $this->get('/admin')
-            ->assertOk()
-            ->assertSee('Pakasir native QRIS aktif')
-            ->assertSee('Paid tetap diverifikasi melalui status provider');
-    }
-
-    public function test_owner_can_toggle_binance_pay_while_pakasir_mode_is_active(): void
-    {
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Owner,
-        ]));
-
-        config()->set('services.pakasir.slug', 'sedulur-digital');
-        config()->set('services.pakasir.api_key', 'pakasir-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-
-        $setting = ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
+            'payment_mode' => 'klikqris',
             'binance_pay_enabled' => false,
             'admin_telegram_chat_id' => '999',
             'is_active' => true,
@@ -141,15 +97,14 @@ class AdminDashboardPaymentModeTest extends TestCase
         $html = $this->get('/admin')->assertOk()->getContent();
 
         $this->assertMatchesRegularExpression(
-            '/<form[^>]*id="admin-binance-enabled-setting"[^>]*>[\s\S]*?name="payment_mode" value="pakasir"[\s\S]*?name="pakasir_checkout_flow" value="api_qris"[\s\S]*?name="binance_pay_enabled" value="1"[\s\S]*?<\/form>/',
+            '/<form[^>]*id="admin-binance-enabled-setting"[^>]*>[\s\S]*?name="payment_mode" value="klikqris"[\s\S]*?name="binance_pay_enabled" value="1"[\s\S]*?<\/form>/',
             $html,
         );
 
         $this->from('/admin?tab=stats')
             ->post(route('admin.payment-mode.update'), [
                 'update_scope' => 'binance_settings',
-                'payment_mode' => 'pakasir',
-                'pakasir_checkout_flow' => 'api_qris',
+                'payment_mode' => 'klikqris',
                 'binance_pay_enabled' => '1',
             ])
             ->assertRedirect('/admin?tab=stats#admin-payment-settings')
@@ -157,8 +112,7 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->assertDatabaseHas('manual_payment_settings', [
             'id' => $setting->id,
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
+            'payment_mode' => 'klikqris',
             'binance_pay_enabled' => true,
             'is_active' => true,
         ]);
@@ -244,14 +198,11 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->assertSame('amount_unique', $setting->fresh()->binance_verification_mode);
     }
 
-    public function test_order_id_rollback_does_not_depend_on_pakasir_readiness(): void
+    public function test_order_id_rollback_does_not_depend_on_qris_provider_readiness(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        config()->set('services.pakasir.slug', null);
-        config()->set('services.pakasir.api_key', null);
         $setting = ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
+            'payment_mode' => 'manual',
             'binance_verification_mode' => 'order_id',
             'binance_order_id_compatibility_ready_at' => now(),
             'is_active' => true,
@@ -259,16 +210,15 @@ class AdminDashboardPaymentModeTest extends TestCase
 
         $this->post(route('admin.payment-mode.update'), [
             'update_scope' => 'binance_verification',
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
+            'payment_mode' => 'manual',
             'binance_verification_mode' => 'amount_unique',
         ])->assertRedirect('/admin?tab=stats#admin-payment-settings');
 
         $setting->refresh();
         $this->assertSame('amount_unique', $setting->binance_verification_mode);
-        $this->assertSame('pakasir', $setting->payment_mode);
-        $this->assertSame('api_qris', $setting->pakasir_checkout_flow);
+        $this->assertSame('manual', $setting->payment_mode);
     }
+
 
     public function test_owner_can_update_payment_deadlines_from_dashboard(): void
     {
@@ -366,51 +316,6 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSessionHasErrors(['whatsapp_support_url', 'whatsapp_support_number'], null, 'supportSettings');
     }
 
-    public function test_saved_pakasir_mode_is_reported_unready_and_effectively_manual_when_config_missing(): void
-    {
-        config()->set('services.pakasir.slug', '');
-        config()->set('services.pakasir.api_key', '');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Owner,
-        ]));
-
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'is_active' => true,
-        ]);
-
-        $this->get('/admin')
-            ->assertOk()
-            ->assertSee('Mode tersimpan meminta Pakasir, tetapi checkout baru ditahan sampai readiness Pakasir pulih.')
-            ->assertSee('Provider Pakasir belum siap. Lengkapi PAKASIR_SLUG dan PAKASIR_API_KEY di environment.')
-            ->assertSee('PAKASIR BELUM SIAP')
-            ->assertDontSee('Pakasir hosted aktif');
-    }
-
-    public function test_invalid_pakasir_checkout_flow_is_explained_by_admin_dashboard(): void
-    {
-        config()->set('services.pakasir.slug', 'warung-ai');
-        config()->set('services.pakasir.api_key', 'pakasir-secret');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Admin,
-        ]));
-
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'inline_qris',
-            'is_active' => true,
-        ]);
-
-        $this->get('/admin')
-            ->assertOk()
-            ->assertSee('Mode tersimpan meminta Pakasir, tetapi checkout baru ditahan sampai readiness Pakasir pulih.')
-            ->assertSee('Provider Pakasir belum siap. pakasir_checkout_flow must be one of: hosted, api_qris.')
-            ->assertDontSee('Pakasir hosted aktif');
-    }
 
     public function test_payment_mode_toggle_creates_active_setting_when_none_exists(): void
     {
@@ -462,11 +367,12 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertOk()
             ->assertSee('Hanya owner/admin yang bisa mengubah mode pembayaran.');
 
-        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'pakasir'])
+        $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'klikqris'])
             ->assertForbidden();
 
-        $this->assertDatabaseMissing('manual_payment_settings', [
-            'payment_mode' => 'pakasir',
+        $this->assertDatabaseHas('manual_payment_settings', [
+            'payment_mode' => 'manual',
+            'is_active' => true,
         ]);
     }
 }

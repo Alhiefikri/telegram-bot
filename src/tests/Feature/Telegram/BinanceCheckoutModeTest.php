@@ -27,7 +27,6 @@ class BinanceCheckoutModeTest extends TestCase
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
         ManualPaymentSetting::create([
             'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => PakasirCheckoutFlow::API_QRIS,
             'is_active' => true,
         ]);
 

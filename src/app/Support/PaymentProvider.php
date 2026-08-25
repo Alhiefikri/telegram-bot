@@ -13,6 +13,12 @@ final class PaymentProvider
     /** @return list<string> */
     public static function allowed(): array
     {
+        return [self::MANUAL, self::KLIKQRIS];
+    }
+
+    /** @return list<string> */
+    public static function known(): array
+    {
         return [self::MANUAL, self::PAKASIR, self::KLIKQRIS];
     }
 
@@ -20,7 +26,7 @@ final class PaymentProvider
     {
         $provider = strtolower(trim((string) $provider));
 
-        return in_array($provider, self::allowed(), true) ? $provider : self::MANUAL;
+        return in_array($provider, self::known(), true) ? $provider : self::MANUAL;
     }
 
     public static function label(string $provider): string

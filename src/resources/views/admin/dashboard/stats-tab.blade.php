@@ -108,16 +108,8 @@
                         {{ $paymentControl['hint'] }}
                     </p>
 
-                    @if (! $paymentControl['is_pakasir_configured'])
-                        <x-admin-dashboard.notice tone="warning" class="mt-3 text-xs">
-                            {{ $paymentControl['pakasir_guard_message'] }}
-                        </x-admin-dashboard.notice>
-                    @endif
 
                     @error('payment_mode', 'paymentMode')
-                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                    @enderror
-                    @error('pakasir_checkout_flow', 'paymentMode')
                         <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                     @enderror
 
@@ -152,13 +144,6 @@
                         @endforeach
                     </div>
 
-                    <div class="mt-3 rounded-xl border-2 border-amber-700/30 bg-amber-50 p-3 text-[11px] font-semibold text-amber-950">
-                        <p class="font-black">Peringatan operasional Pakasir</p>
-                        <p class="mt-1">{{ $paymentControl['pakasir_cutoff']['message'] }}</p>
-                        @unless ($paymentControl['pakasir_cutoff']['is_past'])
-                            <p class="mt-1">Countdown: {{ $paymentControl['pakasir_cutoff']['days_remaining'] }} hari ({{ $paymentControl['pakasir_cutoff']['hours_remaining'] }} jam) hingga 15 Agustus 2026.</p>
-                        @endunless
-                    </div>
 
                     @if ($paymentControl['switch_audit'] !== [])
                         <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/70 p-3">
@@ -179,7 +164,7 @@
                         <p class="mt-3 text-[11px] font-semibold text-brand-muted">
                             Setiap perubahan meminta konfirmasi provider lama → baru dan hanya memengaruhi checkout baru.
                         </p>
-                        <div class="mt-3 grid gap-2 md:grid-cols-4">
+                        <div class="mt-3 grid gap-2 md:grid-cols-2">
                             <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Manual" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
@@ -190,17 +175,6 @@
                                     QR Manual
                                 </x-admin-dashboard.button>
                             </form>
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Pakasir hosted" x-on:submit.prevent="openPaymentProviderSwitch($event)">
-                                @csrf
-                                <input type="hidden" name="update_scope" value="provider_switch">
-                                <input type="hidden" name="payment_mode" value="pakasir">
-                                <input type="hidden" name="pakasir_checkout_flow" value="hosted">
-                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
-                                <input type="hidden" name="confirm_provider_switch" value="1">
-                                <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'hosted' ? 'primary' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_pakasir']" title="{{ $paymentControl['pakasir_guard_message'] }}">
-                                    Hosted Pakasir
-                                </x-admin-dashboard.button>
-                            </form>
                             <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="KlikQRIS" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
@@ -209,17 +183,6 @@
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'klikqris' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_klikqris']" title="{{ $paymentControl['klikqris_guard_message'] }}">
                                     KlikQRIS
-                                </x-admin-dashboard.button>
-                            </form>
-                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Pakasir native QRIS" x-on:submit.prevent="openPaymentProviderSwitch($event)">
-                                @csrf
-                                <input type="hidden" name="update_scope" value="provider_switch">
-                                <input type="hidden" name="payment_mode" value="pakasir">
-                                <input type="hidden" name="pakasir_checkout_flow" value="api_qris">
-                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
-                                <input type="hidden" name="confirm_provider_switch" value="1">
-                                <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'pakasir' && $paymentControl['requested_checkout_flow'] === 'api_qris' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_pakasir']" title="{{ $paymentControl['pakasir_guard_message'] }}">
-                                    QR Native Pakasir
                                 </x-admin-dashboard.button>
                             </form>
                         </div>
@@ -291,9 +254,6 @@
                             @csrf
                             <input type="hidden" name="update_scope" value="binance_settings">
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
-                            @if ($paymentControl['requested_mode'] === 'pakasir')
-                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
-                            @endif
                             <input type="hidden" name="binance_pay_enabled" value="{{ $paymentControl['binance_pay_enabled'] ? 0 : 1 }}">
                             <x-admin-dashboard.button type="submit" :variant="$paymentControl['binance_pay_enabled'] ? 'primary' : 'neutral'" size="sm" class="w-full text-[11px]">
                                 {{ $paymentControl['binance_pay_enabled'] ? 'Binance Pay USDT: Aktif' : 'Aktifkan Binance Pay USDT' }}
@@ -311,9 +271,6 @@
                                         @csrf
                                         <input type="hidden" name="update_scope" value="binance_verification">
                                         <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
-                                        @if ($paymentControl['requested_mode'] === 'pakasir')
-                                            <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
-                                        @endif
                                         <input type="hidden" name="binance_verification_mode" value="{{ $binanceMode }}">
                                         <x-admin-dashboard.button
                                             type="submit"
@@ -331,9 +288,6 @@
                             @csrf
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
                             <input type="hidden" name="update_scope" value="binance_settings">
-                            @if ($paymentControl['requested_mode'] === 'pakasir')
-                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
-                            @endif
                             <input type="hidden" name="binance_pay_enabled" value="{{ $paymentControl['binance_pay_enabled'] ? 1 : 0 }}">
                             <div class="grid gap-3 sm:grid-cols-2">
                                 <label class="block text-xs font-bold text-neo-ink">
@@ -365,7 +319,7 @@
                                     @enderror
                                 </label>
                             </div>
-                            <p class="text-[11px] font-semibold text-brand-muted">Berlaku untuk checkout baru. QRIS Pakasir tetap mengikuti batas waktu provider jika lebih cepat.</p>
+                            <p class="text-[11px] font-semibold text-brand-muted">Berlaku untuk checkout baru dan mengikuti readiness provider aktif.</p>
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
                                 Simpan batas waktu pembayaran
                             </x-admin-dashboard.button>
@@ -461,9 +415,6 @@
                             @csrf
                             <input type="hidden" name="update_scope" value="bsc_settings">
                             <input type="hidden" name="payment_mode" value="{{ $paymentControl['requested_mode'] }}">
-                            @if ($paymentControl['requested_mode'] === 'pakasir')
-                                <input type="hidden" name="pakasir_checkout_flow" value="{{ $paymentControl['requested_checkout_flow'] }}">
-                            @endif
                             <input type="hidden" name="bsc_payment_enabled" value="0">
                             <label class="flex items-center gap-2 text-xs font-black text-neo-ink">
                                 <input type="checkbox" name="bsc_payment_enabled" value="1" @checked($bsc['enabled'] ?? false) class="h-4 w-4 rounded border-2 border-neo-ink">

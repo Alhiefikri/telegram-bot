@@ -87,7 +87,6 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         config()->set('services.binance.pay_uid', null);
         ManualPaymentSetting::create([
             'payment_mode' => 'klikqris',
-            'pakasir_checkout_flow' => 'api_qris',
             'binance_pay_enabled' => false,
             'is_active' => true,
         ]);

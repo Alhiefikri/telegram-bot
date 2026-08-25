@@ -20,15 +20,15 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_requires_native_dashboard_setting_before_touching_payment_or_provider(): void
+    public function test_validates_legacy_configuration_before_touching_payment_or_provider(): void
     {
         config()->set('services.pakasir.slug', 'staging-store');
         config()->set('services.pakasir.api_key', 'pakasir-secret');
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
 
         $this->artisan('pakasir:validate-native-qris', ['payment' => 'missing-payment'])
-            ->expectsOutputToContain('FAIL dashboard payment_mode=pakasir - Configured dashboard value is manual.')
-            ->expectsOutputToContain('FAIL dashboard pakasir_checkout_flow=api_qris - Configured dashboard value is hosted.')
+            ->expectsOutputToContain('PASS legacy Pakasir validation only')
+            ->expectsOutputToContain('BLOCKED staging payment lookup - No payment matched the supplied UUID/merchant_ref.')
             ->doesntExpectOutputToContain('pakasir-secret')
             ->assertFailed();
 
@@ -225,11 +225,6 @@ class PakasirNativeQrisValidationCommandTest extends TestCase
         config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
         config()->set('services.pakasir.redirect_url', null);
 
-        ManualPaymentSetting::create([
-            'payment_mode' => 'pakasir',
-            'pakasir_checkout_flow' => 'api_qris',
-            'is_active' => true,
-        ]);
     }
 
     private function pendingPakasirPayment(int $amount, string $merchantRef): Payment

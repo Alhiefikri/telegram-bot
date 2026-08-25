@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -10,7 +9,6 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable([
     'payment_mode',
     'payment_provider_version',
-    'pakasir_checkout_flow',
     'admin_contact_url',
     'admin_username',
     'admin_telegram_chat_id',
@@ -67,13 +65,6 @@ class ManualPaymentSetting extends Model
     public function paymentProvider(): string
     {
         return PaymentProvider::normalize($this->payment_mode);
-    }
-
-    public function pakasirCheckoutFlow(): string
-    {
-        return PakasirCheckoutFlow::isAllowed($this->pakasir_checkout_flow)
-            ? $this->pakasir_checkout_flow
-            : PakasirCheckoutFlow::HOSTED;
     }
 
     public function qrisPaymentTtlMinutes(): int

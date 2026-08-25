@@ -14,11 +14,8 @@ use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
-use App\Services\Checkout\PakasirCheckoutPaymentPreparation;
 use App\Services\Checkout\PaymentPlan\KlikQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
-use App\Services\Checkout\PaymentPlan\PakasirCheckoutPaymentSnapshot;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,21 +29,13 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_resolver_registers_the_manual_pakasir_and_klikqris_adapters(): void
+    public function test_resolver_registers_the_manual_and_klikqris_adapters(): void
     {
         $resolver = app(CheckoutPaymentPreparationResolver::class);
 
         $this->assertInstanceOf(
             ManualQrisCheckoutPaymentPreparation::class,
             $resolver->for(CheckoutPaymentIntents::manualQris()),
-        );
-        $this->assertInstanceOf(
-            PakasirCheckoutPaymentPreparation::class,
-            $resolver->for(CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED)),
-        );
-        $this->assertInstanceOf(
-            PakasirCheckoutPaymentPreparation::class,
-            $resolver->for(CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS)),
         );
         $this->assertInstanceOf(
             KlikQrisCheckoutPaymentPreparation::class,
@@ -75,43 +64,6 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $this->assertInstanceOf(ManualQrisCheckoutPaymentSnapshot::class, $plan->rail());
     }
 
-    #[DataProvider('pakasirFlows')]
-    public function test_pakasir_plan_preserves_the_selected_flow_without_provider_http(string $flow): void
-    {
-        config()->set('services.pakasir.slug', 'preparation-store');
-        config()->set('services.pakasir.api_key', 'preparation-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        Http::fake();
-        $setting = ManualPaymentSetting::create([
-            'payment_mode' => PaymentProvider::PAKASIR,
-            'pakasir_checkout_flow' => $flow,
-            'is_active' => true,
-        ]);
-        $deadline = CarbonImmutable::parse('2030-03-04 05:06:07');
-        $product = Product::factory()->create(['price_amount' => 12_500]);
-
-        $plan = $this->prepare(
-            CheckoutPaymentIntents::pakasir($flow),
-            $setting,
-            $product,
-            $deadline,
-        );
-
-        $this->assertPlan($plan, PaymentProvider::PAKASIR, $flow, 25_000, $deadline);
-        $snapshot = $plan->rail();
-        $this->assertInstanceOf(PakasirCheckoutPaymentSnapshot::class, $snapshot);
-        $this->assertSame($flow, $snapshot->checkoutFlow());
-        Http::assertNothingSent();
-    }
-
-    /** @return array<string, array{string}> */
-    public static function pakasirFlows(): array
-    {
-        return [
-            'hosted' => [PakasirCheckoutFlow::HOSTED],
-            'native QRIS' => [PakasirCheckoutFlow::API_QRIS],
-        ];
-    }
 
     public function test_klikqris_plan_is_only_a_local_snapshot_without_qr_creation(): void
     {

@@ -2,26 +2,17 @@
 
 namespace App\Services\Checkout;
 
+use App\Exceptions\InvalidCheckout;
 use App\Models\ManualPaymentSetting;
-use App\Services\Pakasir\PakasirProviderReadiness;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 
 final readonly class PaymentProviderResolver
 {
-    public function __construct(
-        private PakasirProviderReadiness $pakasirReadiness,
-    ) {}
-
     public function resolve(?string $paymentMethod = null, ?ManualPaymentSetting $setting = null): PaymentProviderSelection
     {
         $setting ??= ManualPaymentSetting::current();
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
         $requestedProvider = $setting?->paymentProvider() ?? PaymentProvider::MANUAL;
-        $configuredPakasirCheckoutFlow = (string) ($setting?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
-        $pakasirCheckoutFlow = PakasirCheckoutFlow::isAllowed($configuredPakasirCheckoutFlow)
-            ? $configuredPakasirCheckoutFlow
-            : PakasirCheckoutFlow::HOSTED;
 
         $providerVersion = (int) ($setting?->payment_provider_version ?? 0);
         $settingId = $setting?->getKey();
@@ -33,29 +24,22 @@ final readonly class PaymentProviderResolver
             return new PaymentProviderSelection(
                 requestedProvider: $requestedProvider,
                 provider: PaymentProvider::MANUAL,
-                pakasirCheckoutFlow: $pakasirCheckoutFlow,
                 providerVersion: $providerVersion,
                 settingId: $settingId,
-                paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL, $pakasirCheckoutFlow),
+                paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL),
             );
+        }
+        if ($requestedProvider === PaymentProvider::PAKASIR) {
+            throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }
 
         $provider = $requestedProvider;
 
-        if ($requestedProvider === PaymentProvider::PAKASIR) {
-            $readiness = $this->pakasirReadiness->checkout($configuredPakasirCheckoutFlow);
-            $pakasirCheckoutFlow = $readiness->checkoutFlow();
-            if (! $readiness->isReady()) {
-                $provider = PaymentProvider::MANUAL;
-            }
-        }
-
-        $intent = $this->intentFor($paymentRail, $provider, $pakasirCheckoutFlow);
+        $intent = $this->intentFor($paymentRail, $provider);
 
         return new PaymentProviderSelection(
             requestedProvider: $requestedProvider,
             provider: $provider,
-            pakasirCheckoutFlow: $pakasirCheckoutFlow,
             providerVersion: $providerVersion,
             settingId: $settingId,
             paymentIntent: new ProviderBoundCheckoutPaymentIntent(
@@ -76,7 +60,7 @@ final readonly class PaymentProviderResolver
             && $intent->configuredProvider === ($setting?->paymentProvider() ?? PaymentProvider::MANUAL);
     }
 
-    private function intentFor(?string $paymentMethod, string $provider, string $pakasirCheckoutFlow): CheckoutPaymentIntent
+    private function intentFor(?string $paymentMethod, string $provider): CheckoutPaymentIntent
     {
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
 
@@ -88,7 +72,6 @@ final readonly class PaymentProviderResolver
         }
 
         return match ($provider) {
-            PaymentProvider::PAKASIR => CheckoutPaymentIntents::pakasir($pakasirCheckoutFlow),
             PaymentProvider::KLIKQRIS => CheckoutPaymentIntents::klikQris(),
             default => CheckoutPaymentIntents::manualQris(),
         };

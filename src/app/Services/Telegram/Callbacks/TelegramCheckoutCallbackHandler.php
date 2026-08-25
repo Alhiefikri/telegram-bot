@@ -580,7 +580,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             }
 
             $selection = $this->paymentIntentSelector->select($paymentRail);
-            $requestedPaymentMode = $selection->requestedPaymentMode;
             $paymentMode = $selection->paymentMode;
             $paymentIntent = $selection->paymentIntent;
             $this->assertSupportedPostCreationBehavior($paymentIntent->postCreationBehavior());
@@ -605,11 +604,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $payment = $order->payments()->latest('created_at')->firstOrFail();
-        if ($requestedPaymentMode === PaymentProvider::PAKASIR
-            && $payment->provider === PaymentProvider::MANUAL
-            && $payment->method === 'QR_MANUAL') {
-            $this->bot->sendMessage($context->chatId, $this->checkoutIntents->pakasirUnavailableCustomerMessage($context->customer));
-        }
 
         $this->dispatchCheckoutInstructions($order, $payment);
         $this->dispatchPendingAdminNotification($order);

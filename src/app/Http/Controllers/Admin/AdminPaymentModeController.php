@@ -12,7 +12,6 @@ use App\Services\Admin\AdminDashboardRedirector;
 use App\Services\Admin\PaymentProviderSwitcher;
 use App\Services\AuditLogger;
 use App\Services\Binance\BinanceVerificationModeManager;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -32,9 +31,6 @@ class AdminPaymentModeController extends Controller
         $updateScope = (string) ($validated['update_scope'] ?? 'provider_switch');
         $providerSwitch = ! in_array($updateScope, ['binance_settings', 'binance_verification', 'bsc_settings'], true);
         $mode = (string) $validated['payment_mode'];
-        $checkoutFlow = $mode === PaymentProvider::PAKASIR
-            ? (string) ($validated['pakasir_checkout_flow'] ?? PakasirCheckoutFlow::HOSTED)
-            : null;
 
         if ($providerSwitch) {
             $expectedVersion = array_key_exists('payment_provider_version', $validated)
@@ -44,7 +40,6 @@ class AdminPaymentModeController extends Controller
             try {
                 $result = $providerSwitcher->change(
                     provider: $mode,
-                    checkoutFlow: $checkoutFlow,
                     expectedVersion: $expectedVersion,
                     actor: $user instanceof User ? $user : null,
                     ip: $request->ip(),
@@ -57,11 +52,11 @@ class AdminPaymentModeController extends Controller
             }
 
             return $redirector->paymentSettings()
-                ->with('status', $this->providerSwitchStatus($result['setting'], $mode, $result['changed']));
+                ->with('status', $this->providerSwitchStatus($mode, $result['changed']));
         }
 
         try {
-            [$setting, $oldValues] = DB::transaction(function () use (&$mode, $checkoutFlow, $validated, $binanceModes, $providerSwitch, $updateScope): array {
+            [$setting, $oldValues] = DB::transaction(function () use (&$mode, $validated, $binanceModes, $providerSwitch, $updateScope): array {
                 $setting = ManualPaymentSetting::query()
                     ->where('is_active', true)
                     ->oldest('id')
@@ -79,11 +74,6 @@ class AdminPaymentModeController extends Controller
 
                 if ($providerSwitch) {
                     $setting->payment_mode = $mode;
-                    if ($checkoutFlow !== null) {
-                        $setting->pakasir_checkout_flow = $checkoutFlow;
-                    } elseif (! $setting->exists || blank($setting->pakasir_checkout_flow)) {
-                        $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
-                    }
                     $setting->is_active = true;
                 }
 
@@ -143,7 +133,7 @@ class AdminPaymentModeController extends Controller
             ->with('status', 'Pengaturan pembayaran diperbarui.');
     }
 
-    private function providerSwitchStatus(ManualPaymentSetting $setting, string $mode, bool $changed): string
+    private function providerSwitchStatus(string $mode, bool $changed): string
     {
         if (! $changed) {
             return 'Provider '.PaymentProvider::label($mode).' sudah aktif. Checkout baru tetap memakai provider ini; payment lama tetap memakai provider asal.';
@@ -151,9 +141,6 @@ class AdminPaymentModeController extends Controller
 
         return match ($mode) {
             PaymentProvider::KLIKQRIS => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
-            PaymentProvider::PAKASIR => $setting->pakasirCheckoutFlow() === PakasirCheckoutFlow::API_QRIS
-                ? 'Pakasir native QRIS diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.'
-                : 'Pakasir hosted diaktifkan. Checkout baru memakai Pakasir; payment lama tetap memakai provider asal.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',
         };
     }
@@ -164,7 +151,6 @@ class AdminPaymentModeController extends Controller
         return [
             'provider' => $setting->paymentProvider(),
             'payment_mode' => $setting->payment_mode,
-            'pakasir_checkout_flow' => $setting->pakasir_checkout_flow,
             'binance_pay_enabled' => $setting->binance_pay_enabled,
             'qris_payment_ttl_minutes' => $setting->qrisPaymentTtlMinutes(),
             'binance_payment_ttl_minutes' => $setting->binancePaymentTtlMinutes(),

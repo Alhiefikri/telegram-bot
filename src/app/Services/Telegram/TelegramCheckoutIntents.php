@@ -15,7 +15,6 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
-use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
@@ -29,7 +28,6 @@ class TelegramCheckoutIntents
         private TelegramBotClient $bot,
         private PakasirProviderAdapter $pakasir,
         private PakasirNativeQrisService $nativeQris,
-        private PakasirProviderReadiness $pakasirReadiness,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
         private KlikQrisNativeQrisService $klikQris,
@@ -278,14 +276,7 @@ class TelegramCheckoutIntents
         return DogfoodTiming::time('dogfood.telegram.checkout_step', $timingContext, $send);
     }
 
-    public function pakasirPaymentMethod(?string $checkoutFlow = null): string
-    {
-        return ($checkoutFlow ?? $this->pakasirCheckoutFlow()) === PakasirCheckoutFlow::API_QRIS
-            ? PakasirCheckoutFlow::API_QRIS
-            : PakasirCheckoutFlow::HOSTED;
-    }
-
-    /** @return array{requested: string, effective: string, pakasir_checkout_flow: string} */
+    /** @return array{requested: string, effective: string} */
     public function providerSelection(): array
     {
         $selection = $this->configuredProviderSelection();
@@ -293,7 +284,6 @@ class TelegramCheckoutIntents
         return [
             'requested' => $selection->requestedProvider,
             'effective' => $selection->provider,
-            'pakasir_checkout_flow' => $selection->pakasirCheckoutFlow,
         ];
     }
 
@@ -314,23 +304,6 @@ class TelegramCheckoutIntents
     public function requestedPaymentMode(): string
     {
         return $this->providerSelection()['requested'];
-    }
-
-    private function pakasirCheckoutFlow(): string
-    {
-        return $this->pakasirReadiness->checkout($this->requestedPakasirCheckoutFlow())->checkoutFlow();
-    }
-
-    private function requestedPakasirCheckoutFlow(): string
-    {
-        $settings = ManualPaymentSetting::current();
-
-        return (string) ($settings?->pakasir_checkout_flow ?: PakasirCheckoutFlow::HOSTED);
-    }
-
-    public function pakasirUnavailableCustomerMessage(Customer $customer): string
-    {
-        return $this->locale->translate($customer, 'payment.pakasir.unavailable_fallback');
     }
 
     public function manualPaymentMethod(): string

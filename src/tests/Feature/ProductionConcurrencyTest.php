@@ -384,7 +384,6 @@ class ProductionConcurrencyTest extends TestCase
         $results = $this->runConcurrently([
             fn () => app(PaymentProviderSwitcher::class)->change(
                 provider: PaymentProvider::KLIKQRIS,
-                checkoutFlow: null,
                 expectedVersion: 0,
                 actor: User::findOrFail($owner->id),
                 ip: null,

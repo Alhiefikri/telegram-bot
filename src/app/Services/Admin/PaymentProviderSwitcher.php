@@ -8,15 +8,12 @@ use App\Models\ManualPaymentSetting;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
-use App\Services\Pakasir\PakasirProviderReadiness;
-use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 
 final class PaymentProviderSwitcher
 {
     public function __construct(
-        private readonly PakasirProviderReadiness $pakasirReadiness,
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly AuditLogger $auditLogger,
     ) {}
@@ -26,17 +23,13 @@ final class PaymentProviderSwitcher
      */
     public function change(
         string $provider,
-        ?string $checkoutFlow,
         ?int $expectedVersion,
         ?User $actor,
         ?string $ip,
     ): array {
         $provider = PaymentProvider::normalize($provider);
-        $checkoutFlow = $provider === PaymentProvider::PAKASIR
-            ? ($checkoutFlow ?: PakasirCheckoutFlow::HOSTED)
-            : null;
 
-        return DB::transaction(function () use ($provider, $checkoutFlow, $expectedVersion, $actor, $ip): array {
+        return DB::transaction(function () use ($provider, $expectedVersion, $actor, $ip): array {
             $setting = $this->lockedSetting();
             $currentVersion = (int) ($setting->payment_provider_version ?? 0);
 
@@ -46,19 +39,14 @@ final class PaymentProviderSwitcher
                 );
             }
 
-            $this->assertReady($provider, $checkoutFlow);
+            $this->assertReady($provider);
 
             $wasActive = (bool) $setting->is_active;
             $oldProvider = $wasActive ? $setting->paymentProvider() : PaymentProvider::MANUAL;
-            $oldCheckoutFlow = $setting->pakasirCheckoutFlow();
-            $checkoutFlowChanged = $provider === PaymentProvider::PAKASIR
-                && $oldCheckoutFlow !== $checkoutFlow;
             $storedProvider = strtolower(trim((string) $setting->payment_mode));
             $changed = ! $wasActive
                 || $storedProvider !== $provider
-                || $oldProvider !== $provider
-                || $checkoutFlowChanged;
-
+                || $oldProvider !== $provider;
             if (! $changed) {
                 return [
                     'setting' => $setting,
@@ -69,11 +57,6 @@ final class PaymentProviderSwitcher
             }
 
             $setting->payment_mode = $provider;
-            if ($checkoutFlow !== null) {
-                $setting->pakasir_checkout_flow = $checkoutFlow;
-            } elseif (! $setting->exists || blank($setting->pakasir_checkout_flow)) {
-                $setting->pakasir_checkout_flow = PakasirCheckoutFlow::HOSTED;
-            }
             $setting->is_active = true;
             $setting->payment_provider_version = $currentVersion + 1;
             $setting->save();
@@ -116,26 +99,21 @@ final class PaymentProviderSwitcher
             ->first() ?? new ManualPaymentSetting;
     }
 
-    private function assertReady(string $provider, ?string $checkoutFlow): void
+    private function assertReady(string $provider): void
     {
-        if ($provider === PaymentProvider::PAKASIR) {
-            $readiness = $this->pakasirReadiness->checkout($checkoutFlow);
-            if (! $readiness->isReady()) {
-                throw new PaymentProviderNotReady(
-                    'Provider Pakasir belum bisa diaktifkan. '.$readiness->configurationMessage(),
-                );
-            }
+        if (! in_array($provider, PaymentProvider::allowed(), true)) {
+            throw new PaymentProviderNotReady('Provider '.$provider.' sudah dipensiunkan untuk checkout baru.');
+        }
 
+        if ($provider !== PaymentProvider::KLIKQRIS) {
             return;
         }
 
-        if ($provider === PaymentProvider::KLIKQRIS) {
-            $readiness = $this->klikQrisReadiness->checkout();
-            if (! $readiness->isReady()) {
-                throw new PaymentProviderNotReady(
-                    'Provider KlikQRIS belum bisa diaktifkan. '.$readiness->configurationMessage(),
-                );
-            }
+        $readiness = $this->klikQrisReadiness->checkout();
+        if (! $readiness->isReady()) {
+            throw new PaymentProviderNotReady(
+                'Provider KlikQRIS belum bisa diaktifkan. '.$readiness->configurationMessage(),
+            );
         }
     }
 }
