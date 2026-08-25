@@ -36,6 +36,14 @@ final class CheckoutPaymentPreparationResolver
         return $intent;
     }
 
+    public function hasAdapterFor(CheckoutPaymentIntent $intent): bool
+    {
+        return array_key_exists(
+            CheckoutPaymentPreparationIdentity::key($intent->provider(), $intent->method()),
+            $this->adapters,
+        );
+    }
+
     /**
      * @return list<string>
      */

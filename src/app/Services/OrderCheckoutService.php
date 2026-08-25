@@ -11,19 +11,17 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Models\PaymentBscDetail;
 use App\Services\Binance\BinancePayClient;
 use App\Services\Binance\BinanceUniquePaymentAmount;
-use App\Services\Bsc\BscPaymentReceiverPool;
-use App\Services\Bsc\BscPaymentReceiverSnapshot;
-use App\Services\Bsc\BscReadiness;
-use App\Services\Bsc\BscReadinessReport;
-use App\Services\Bsc\BscUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Checkout\CheckoutPaymentPlanWriter;
+use App\Services\Checkout\CheckoutPaymentPreflight;
+use App\Services\Checkout\CheckoutPaymentPreflightContext;
+use App\Services\Checkout\CheckoutPaymentPreparationContext;
+use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
-use App\Services\Checkout\UsdtBep20CheckoutIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\QueryException;
@@ -37,10 +35,9 @@ class OrderCheckoutService
         private readonly ProductCredentialAllocator $credentials,
         private readonly BinancePayClient $binance,
         private readonly BinanceUniquePaymentAmount $uniqueBinanceAmount,
-        private readonly BscPaymentReceiverPool $bscReceiverPool,
-        private readonly BscUniquePaymentAmount $uniqueBscAmount,
-        private readonly BscReadiness $bscReadiness,
         private readonly PaymentProviderResolver $providerResolver,
+        private readonly CheckoutPaymentPreparationResolver $paymentPreparations,
+        private readonly CheckoutPaymentPlanWriter $paymentPlanWriter,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
@@ -48,13 +45,18 @@ class OrderCheckoutService
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
     {
         $paymentIntent ??= CheckoutPaymentIntents::manualQris();
-        $bscReadiness = $this->preflightBscReadiness($paymentIntent);
+        $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
+        $preflight = $paymentPreparation->preflight(new CheckoutPaymentPreflightContext(
+            currentSetting: ManualPaymentSetting::current(),
+            requestedProvider: $paymentIntent->provider(),
+            requestedMethod: $paymentIntent->method(),
+        ));
 
         $order = null;
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $bscReadiness),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight),
                     5,
                 );
 
@@ -73,7 +75,7 @@ class OrderCheckoutService
         Cart $cart,
         CheckoutPaymentIntent $paymentIntent,
         ?string $checkoutKey,
-        ?BscReadinessReport $bscReadiness,
+        CheckoutPaymentPreflight $preflight,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
@@ -128,64 +130,61 @@ class OrderCheckoutService
             $paymentIntent = $this->providerResolver->resolve(setting: $activeSetting)->paymentIntent;
         }
 
-        if ($this->isBscPaymentIntent($paymentIntent)) {
-            $this->bscReadiness->assertCheckoutSnapshot($bscReadiness, $activeSetting);
+        $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
+        $usingPaymentPlan = $this->paymentPreparations->hasAdapterFor($paymentIntent);
+        if (! $usingPaymentPlan) {
+            $paymentIntent->assertReady($lockedCart, $items, $products, $activeSetting);
         }
-        $paymentIntent->assertReady($lockedCart, $items, $products, $activeSetting);
+
         $expiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
-
-        $paymentMode = $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
-            ? $paymentIntent->verificationMode($lockedCart, $activeSetting)
-            : 'amount_unique';
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
-        $basePaymentAmount = $paymentIntent->paymentAmount($items, $products);
-        $bscReceiverSnapshot = null;
-        $paymentAmount = $this->paymentAmountFor($paymentIntent, $items, $products, $paymentMode, $basePaymentAmount);
-        if ($paymentIntent->method() === UsdtBep20CheckoutIntent::METHOD) {
-            $bscReceiverSnapshot = $this->bscReceiverPool->selectSnapshot();
-            $paymentAmount = $this->uniqueBscAmount->allocate($basePaymentAmount, setting: $activeSetting);
+        $paymentPlan = null;
+        $paymentAmount = null;
+
+        if ($usingPaymentPlan) {
+            $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
+                cart: $lockedCart,
+                items: $items,
+                products: $products,
+                lockedSetting: $activeSetting,
+                preflight: $preflight,
+                requestedExpiresAt: $expiresAt,
+            ));
+        } else {
+            $paymentMode = $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
+                ? $paymentIntent->verificationMode($lockedCart, $activeSetting)
+                : 'amount_unique';
+            $paymentAmount = $this->paymentAmountFor($paymentIntent, $items, $products, $paymentMode);
         }
 
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentIntent->orderCurrency(), 'expires_at' => $expiresAt]);
-        $receiverType = null;
-        $receiverValue = null;
-        if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
-            $receiverType = filled(config('services.binance.pay_id')) ? 'pay_id' : 'uid';
-            $receiverValue = filled(config('services.binance.pay_id'))
-                ? (string) config('services.binance.pay_id')
-                : (string) config('services.binance.pay_uid');
-        }
-        $payment = Payment::create([
-            'order_id' => $order->id,
-            'provider' => $paymentIntent->provider(),
-            'merchant_ref' => $this->numbers->merchantReference(),
-            'method' => $paymentIntent->method(),
-            'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binance->configured(),
-            'binance_verification_mode' => $paymentMode,
-            'binance_receiver_type' => $receiverType,
-            'binance_receiver_value' => $receiverValue,
-            'binance_verification_status' => $paymentMode === 'order_id' ? 'awaiting_submission' : 'checking',
-            'amount' => $paymentAmount,
-            'currency' => $paymentIntent->paymentCurrency(),
-            'status' => PaymentStatus::Pending,
-            'expired_at' => $expiresAt,
-        ]);
+        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan?->orderCurrency() ?? $paymentIntent->orderCurrency(), 'expires_at' => $paymentPlan?->orderExpiresAt() ?? $expiresAt]);
 
-        if ($bscReceiverSnapshot instanceof BscPaymentReceiverSnapshot) {
-            PaymentBscDetail::create([
-                'payment_id' => $payment->getKey(),
-                'receiver_id' => $bscReceiverSnapshot->receiverId,
-                'receiver_address' => $bscReceiverSnapshot->address,
-                'chain_id' => $bscReceiverSnapshot->chainId,
-                'token_contract' => $bscReceiverSnapshot->tokenContract,
-                'token_decimals' => $bscReceiverSnapshot->tokenDecimals,
-                'base_amount_micro' => $basePaymentAmount,
-                'payable_amount_micro' => $paymentAmount,
-                'expected_token_units' => $this->uniqueBscAmount->expectedTokenUnits(
-                    $paymentAmount,
-                    $bscReceiverSnapshot->tokenDecimals,
-                ),
-                'verification_status' => PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+        if ($paymentPlan !== null) {
+            $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
+        } else {
+            $receiverType = null;
+            $receiverValue = null;
+            if ($paymentIntent->method() === 'BINANCE_PAY_ID') {
+                $receiverType = filled(config('services.binance.pay_id')) ? 'pay_id' : 'uid';
+                $receiverValue = filled(config('services.binance.pay_id'))
+                    ? (string) config('services.binance.pay_id')
+                    : (string) config('services.binance.pay_uid');
+            }
+
+            $payment = Payment::create([
+                'order_id' => $order->id,
+                'provider' => $paymentIntent->provider(),
+                'merchant_ref' => $this->numbers->merchantReference(),
+                'method' => $paymentIntent->method(),
+                'binance_auto_verification_enabled' => $paymentIntent->method() === 'BINANCE_PAY_ID' && $this->binance->configured(),
+                'binance_verification_mode' => $paymentMode,
+                'binance_receiver_type' => $receiverType,
+                'binance_receiver_value' => $receiverValue,
+                'binance_verification_status' => $paymentMode === 'order_id' ? 'awaiting_submission' : 'checking',
+                'amount' => $paymentAmount,
+                'currency' => $paymentIntent->paymentCurrency(),
+                'status' => PaymentStatus::Pending,
+                'expired_at' => $expiresAt,
             ]);
         }
 
@@ -204,31 +203,13 @@ class OrderCheckoutService
         return $order->fresh(['orderItems', 'payments']);
     }
 
-    private function preflightBscReadiness(CheckoutPaymentIntent $paymentIntent): ?BscReadinessReport
-    {
-        if (! $this->isBscPaymentIntent($paymentIntent)) {
-            return null;
-        }
-
-        // The report, including an unready result, is resolved before the
-        // transaction. The locked boundary rejects it without repeating RPC
-        // work, which preserves idempotent reuse of an existing checkout.
-        return $this->bscReadiness->check();
-    }
-
-    private function isBscPaymentIntent(CheckoutPaymentIntent $paymentIntent): bool
-    {
-        return $paymentIntent->method() === UsdtBep20CheckoutIntent::METHOD;
-    }
-
     private function paymentAmountFor(
         CheckoutPaymentIntent $paymentIntent,
         $items,
         $products,
         ?string $mode = null,
-        ?int $baseAmount = null,
     ): int {
-        $amount = $baseAmount ?? $paymentIntent->paymentAmount($items, $products);
+        $amount = $paymentIntent->paymentAmount($items, $products);
         $mode ??= $paymentIntent->method() === 'BINANCE_PAY_ID' && method_exists($paymentIntent, 'verificationMode')
             ? $paymentIntent->verificationMode()
             : null;

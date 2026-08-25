@@ -91,6 +91,7 @@ class BscPaymentAllocationTest extends TestCase
         $this->assertSame('USDT_BEP20', $payment->method);
         $this->assertSame('USDT', $payment->currency);
         $this->assertSame(2_500_000, $payment->amount);
+        $this->assertSame('checking', $payment->binance_verification_status);
         $this->assertSame($receiver->id, $detail->receiver_id);
         $this->assertSame($receiver->address_normalized, $detail->receiver_address);
         $this->assertSame(56, $detail->chain_id);

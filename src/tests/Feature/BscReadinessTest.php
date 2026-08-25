@@ -17,7 +17,9 @@ use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Checkout\BscCheckoutPaymentPreparation;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Storefront\StorefrontProductPresenter;
@@ -259,6 +261,15 @@ final class BscReadinessTest extends TestCase
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay'));
         $this->assertNull($presentation->checkoutChoice('website_usdt_bep20'));
         $this->assertStringNotContainsString('BSC', (string) $presentation->checkoutChoice('website_binance_pay')?->description);
+    }
+
+    public function test_bsc_checkout_uses_the_registered_preparation_adapter(): void
+    {
+        $resolver = app(CheckoutPaymentPreparationResolver::class);
+        $intent = CheckoutPaymentIntents::usdtBep20();
+
+        $this->assertTrue($resolver->hasAdapterFor($intent));
+        $this->assertInstanceOf(BscCheckoutPaymentPreparation::class, $resolver->for($intent));
     }
 
     public function test_bsc_checkout_does_not_call_rpc_while_checkout_locks_are_held(): void
