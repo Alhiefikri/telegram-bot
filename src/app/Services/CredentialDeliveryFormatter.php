@@ -12,7 +12,16 @@ class CredentialDeliveryFormatter
             return $credential;
         }
 
-        return "email : {$parts['email']}\npassword : {$parts['password']}\nMFA : {$parts['mfa']}";
+        $lines = [
+            "email : {$parts['email']}",
+            "password : {$parts['password']}",
+        ];
+
+        if ($parts['mfa'] !== null) {
+            $lines[] = "MFA : {$parts['mfa']}";
+        }
+
+        return implode("\n", $lines);
     }
 
     /**
@@ -78,20 +87,25 @@ class CredentialDeliveryFormatter
     }
 
     /**
-     * @return array{email: string, password: string, mfa: string}|null
+     * Accept the legacy email/password shape and its existing
+     * email/password/MFA extension. Values after the first separator remain
+     * copyable exactly as supplied; only the email envelope is normalized for
+     * validation and display.
+     *
+     * @return array{email: string, password: string, mfa: ?string}|null
      */
     public function parts(string $credential): ?array
     {
         $parts = explode('|', $credential);
         $email = trim((string) ($parts[0] ?? ''));
         $password = (string) ($parts[1] ?? '');
-        $mfa = (string) ($parts[2] ?? '');
+        $mfa = count($parts) === 3 ? (string) ($parts[2] ?? '') : null;
 
-        if (count($parts) !== 3
+        if (! in_array(count($parts), [2, 3], true)
             || filter_var($email, FILTER_VALIDATE_EMAIL) === false
             || trim($password) === ''
-            || trim($mfa) === ''
-            || strpbrk($email.$password.$mfa, "\r\n") !== false) {
+            || ($mfa !== null && trim($mfa) === '')
+            || strpbrk($email.$password.($mfa ?? ''), "\r\n") !== false) {
             return null;
         }
 

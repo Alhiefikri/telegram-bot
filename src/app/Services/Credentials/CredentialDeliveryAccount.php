@@ -15,7 +15,7 @@ use LogicException;
 final readonly class CredentialDeliveryAccount
 {
     /**
-     * @param  ?array{email: string, password: string, mfa: string}  $legacyParts
+     * @param  ?array{email: string, password: string, mfa: ?string}  $legacyParts
      */
     public function __construct(
         private int $number,
@@ -55,7 +55,7 @@ final readonly class CredentialDeliveryAccount
     }
 
     /**
-     * @return ?array{email: string, password: string, mfa: string}
+     * @return ?array{email: string, password: string, mfa: ?string}
      */
     public function legacyParts(): ?array
     {
@@ -63,7 +63,7 @@ final readonly class CredentialDeliveryAccount
     }
 
     /**
-     * @return ?array{email: string, password: string, mfa: string}
+     * @return ?array{email: string, password: string, mfa: ?string}
      */
     public function parts(): ?array
     {

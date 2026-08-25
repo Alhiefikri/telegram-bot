@@ -585,15 +585,22 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSeeInOrder([
                 'Data akun',
                 'Alpha Account',
-                'alpha-one@example.test|AlphaSecret1',
+                'email : alpha-one@example.test',
+                'password : AlphaSecret1',
                 'Ringkasan invoice',
             ], false)
             ->assertSee('Data akun')
             ->assertSee('Alpha Account')
-            ->assertSee('alpha-one@example.test|AlphaSecret1', false)
-            ->assertSee('alpha-two@example.test|AlphaSecret2', false)
+            ->assertSee('email : alpha-one@example.test', false)
+            ->assertSee('password : AlphaSecret1', false)
+            ->assertSee('email : alpha-two@example.test', false)
+            ->assertSee('password : AlphaSecret2', false)
             ->assertSee('Beta Account')
-            ->assertSee('beta@example.test|BetaSecret', false)
+            ->assertSee('email : beta@example.test', false)
+            ->assertSee('password : BetaSecret', false)
+            ->assertDontSee('alpha-one@example.test|AlphaSecret1', false)
+            ->assertDontSee('alpha-two@example.test|AlphaSecret2', false)
+            ->assertDontSee('beta@example.test|BetaSecret', false)
             ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertDontSee('Panduan login & keamanan')
             ->assertDontSee('Pembayaran QRIS');

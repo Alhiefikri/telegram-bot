@@ -65,8 +65,44 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
         $this->assertCount(3, $orderDetail[0]['entities'] ?? []);
     }
 
-    private function legacyPaidOrder(Customer $customer): Order
+    public function test_legacy_two_part_receipt_and_order_detail_are_labeled_without_mfa(): void
     {
+        $customer = Customer::factory()->create(['telegram_id' => 445567, 'locale' => 'id']);
+        $order = $this->legacyPaidOrder($customer, 'legacy-two-part@example.test|Legacy-password');
+
+        $this->fakeTelegramHttp();
+
+        $rendered = app(TelegramReceiptNotifier::class)->render($order->fresh());
+        $credentialUnit = collect($rendered['units'])->first(
+            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'email : legacy-two-part@example.test'),
+        );
+
+        $this->assertInstanceOf(TelegramMessageUnit::class, $credentialUnit);
+        $this->assertStringContainsString('password : Legacy-password', $credentialUnit->text());
+        $this->assertStringNotContainsString('legacy-two-part@example.test|Legacy-password', $credentialUnit->text());
+        $this->assertCount(2, $credentialUnit->entities());
+
+        app(TelegramOrderIntents::class)->sendOrderDetail(
+            $customer,
+            (string) $customer->telegram_id,
+            $order->invoice_number,
+        );
+
+        $orderDetail = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '445567'
+            && str_contains((string) ($request['text'] ?? ''), 'email : legacy-two-part@example.test'))
+            ->last();
+
+        $this->assertNotNull($orderDetail);
+        $this->assertStringContainsString('password : Legacy-password', (string) ($orderDetail[0]['text'] ?? ''));
+        $this->assertStringNotContainsString('legacy-two-part@example.test|Legacy-password', (string) ($orderDetail[0]['text'] ?? ''));
+        $this->assertCount(2, $orderDetail[0]['entities'] ?? []);
+    }
+
+    private function legacyPaidOrder(
+        Customer $customer,
+        string $secret = 'legacy@example.test|Legacy-password|Legacy-mfa',
+    ): Order {
         $product = Product::factory()->create([
             'name' => 'Legacy Bundle',
             'delivery_note' => 'Auth Token : tutorial text',
@@ -82,7 +118,7 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
         ProductStockItem::create([
             'product_id' => $product->id,
             'order_item_id' => $item->id,
-            'secret' => 'legacy@example.test|Legacy-password|Legacy-mfa',
+            'secret' => $secret,
         ]);
         Payment::factory()->for($order)->create([
             'status' => PaymentStatus::Paid,

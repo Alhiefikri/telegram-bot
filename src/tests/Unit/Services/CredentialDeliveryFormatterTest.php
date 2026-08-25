@@ -14,11 +14,25 @@ class CredentialDeliveryFormatterTest extends TestCase
         $this->assertSame("email : premium@example.test\npassword : Password-123\nMFA : ABCD EFGH", (new CredentialDeliveryFormatter)->format($credential));
     }
 
+    public function test_it_formats_an_email_and_password_without_mfa(): void
+    {
+        $credential = 'premium@example.test|Password-123';
+
+        $this->assertSame(
+            "email : premium@example.test\npassword : Password-123",
+            (new CredentialDeliveryFormatter)->format($credential),
+        );
+        $this->assertSame([
+            'email' => 'premium@example.test',
+            'password' => 'Password-123',
+            'mfa' => null,
+        ], (new CredentialDeliveryFormatter)->parts($credential));
+    }
+
     public function test_it_leaves_non_matching_credentials_unchanged(): void
     {
         $formatter = new CredentialDeliveryFormatter;
 
-        $this->assertSame('premium@example.test|Password-123', $formatter->format('premium@example.test|Password-123'));
         $this->assertSame('username|Password-123|MFA|extra', $formatter->format('username|Password-123|MFA|extra'));
         $this->assertSame('not-an-email|Password-123|MFA', $formatter->format('not-an-email|Password-123|MFA'));
         $this->assertSame('premium@example.test||MFA', $formatter->format('premium@example.test||MFA'));

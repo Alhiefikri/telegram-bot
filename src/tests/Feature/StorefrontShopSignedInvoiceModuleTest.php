@@ -96,16 +96,20 @@ class StorefrontShopSignedInvoiceModuleTest extends TestCase
                 'usage_guide' => null,
                 'secrets' => [
                     [
-                        'text' => 'paid-account@example.test|Visible',
-                        'parts' => null,
+                        'text' => "email : paid-account@example.test\npassword : Visible",
+                        'parts' => [
+                            'email' => 'paid-account@example.test',
+                            'password' => 'Visible',
+                            'mfa' => null,
+                        ],
                         'label' => 'Data akun 1',
                     ],
                 ],
-                'copy_text' => "1.\npaid-account@example.test|Visible",
+                'copy_text' => "1.\nemail : paid-account@example.test\npassword : Visible",
             ],
         ], $paidInvoice->accountGroups);
         $this->assertSame([], $paidInvoice->usageGuides);
-        $this->assertSame("Module Secret Product\n1.\npaid-account@example.test|Visible", $paidInvoice->accountCopyText);
+        $this->assertSame("Module Secret Product\n1.\nemail : paid-account@example.test\npassword : Visible", $paidInvoice->accountCopyText);
         $this->assertSame('automatic_available', $paidInvoice->paidDeliveryType);
         $this->assertSame('processing', $paidInvoice->manualFulfillmentStatus);
     }

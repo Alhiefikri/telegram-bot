@@ -120,6 +120,31 @@ class CredentialDeliveryPresentationTest extends TestCase
         $this->assertSame('Second tutorial', $groups[0]->defaultTutorial());
     }
 
+    public function test_paid_two_part_legacy_credentials_are_presented_without_an_mfa_field(): void
+    {
+        [$order, $item] = $this->paidOrderWithItem();
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'secret' => 'two-part@example.test|@Prime12345',
+        ]);
+
+        $account = app(CredentialDeliveryPresentation::class)
+            ->forOrder($order->fresh())
+            ->groups()[0]
+            ->accounts()[0];
+
+        $this->assertSame(
+            "email : two-part@example.test\npassword : @Prime12345",
+            $account->text(),
+        );
+        $this->assertSame([
+            'email' => 'two-part@example.test',
+            'password' => '@Prime12345',
+            'mfa' => null,
+        ], $account->legacyParts());
+    }
+
     public function test_structured_and_legacy_items_share_ordered_groups_and_effective_tutorials(): void
     {
         [$order, $item] = $this->paidOrderWithItem([

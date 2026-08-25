@@ -129,15 +129,24 @@
                                     </div>
                                     <pre class="mt-3 overflow-x-auto whitespace-pre-wrap font-mono text-sm font-bold leading-6">{{ $secret['text'] }}</pre>
                                     @if ($secret['parts'] !== null)
-                                        <dl class="mt-4 grid gap-2 sm:grid-cols-3">
-                                            @foreach (['email' => 'Email', 'password' => 'Password', 'mfa' => 'MFA Secret'] as $key => $label)
+                                        @php
+                                            $legacyFields = [
+                                                ['key' => 'email', 'label' => 'Email'],
+                                                ['key' => 'password', 'label' => 'Password'],
+                                            ];
+                                            if (($secret['parts']['mfa'] ?? null) !== null) {
+                                                $legacyFields[] = ['key' => 'mfa', 'label' => 'MFA Secret'];
+                                            }
+                                        @endphp
+                                        <dl class="mt-4 grid gap-2 {{ count($legacyFields) === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2' }}">
+                                            @foreach ($legacyFields as $field)
                                                 <div class="rounded-md border-2 border-white/30 p-2">
-                                                    <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">{{ $label }}</dt>
-                                                    <dd class="mt-1 min-w-0 break-all font-mono text-xs font-bold">{{ $secret['parts'][$key] }}</dd>
+                                                    <dt class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">{{ $field['label'] }}</dt>
+                                                    <dd class="mt-1 min-w-0 break-all font-mono text-xs font-bold">{{ $secret['parts'][$field['key']] }}</dd>
                                                     <button type="button"
                                                             class="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-white px-2 text-[11px] font-black text-[var(--sf-ink)]"
-                                                            data-copy-text="{{ $secret['parts'][$key] }}"
-                                                            data-copy-success="{{ $label }} tersalin.">
+                                                            data-copy-text="{{ $secret['parts'][$field['key']] }}"
+                                                            data-copy-success="{{ $field['label'] }} tersalin.">
                                                         Salin
                                                     </button>
                                                 </div>
