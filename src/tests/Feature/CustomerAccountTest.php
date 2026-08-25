@@ -371,8 +371,11 @@ class CustomerAccountTest extends TestCase
         $this->actingAs($customer, 'customer')->get(route('customer.orders.show', $order))
             ->assertOk()
             ->assertSee('Data akun siap digunakan')
-            ->assertSee($secret, false)
-            ->assertSee('data-copy-text="'.$secret.'"', false);
+            ->assertSee('email : paid-account@example.test', false)
+            ->assertSee('password : KeepThisCredential', false)
+            ->assertDontSee($secret, false)
+            ->assertSee('data-copy-text="email : paid-account@example.test', false)
+            ->assertSee('password : KeepThisCredential"', false);
     }
 
     public function test_paid_customer_order_detail_renders_structured_account_fields_and_safe_otp_action(): void

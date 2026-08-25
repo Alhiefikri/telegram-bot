@@ -62,7 +62,9 @@ class StorefrontOrderAccessTest extends TestCase
 
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
-            ->assertSee($secret, false)
+            ->assertSee('email : customer@example.test', false)
+            ->assertSee('password : PasswordAman123', false)
+            ->assertDontSee($secret, false)
             ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
@@ -141,12 +143,16 @@ class StorefrontOrderAccessTest extends TestCase
         $this->travel(29)->minutes();
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
-            ->assertSee($secret, false);
+            ->assertSee('email : customer@example.test', false)
+            ->assertSee('password : PasswordAman123', false)
+            ->assertDontSee($secret, false);
 
         $this->travel(2)->minutes();
         $this->get(route('storefront.order-access.show', $order))
             ->assertForbidden()
-            ->assertDontSee($secret, false);
+            ->assertDontSee($secret, false)
+            ->assertDontSee('email : customer@example.test', false)
+            ->assertDontSee('password : PasswordAman123', false);
     }
 
     public function test_access_key_is_only_stored_as_a_hash_on_the_order(): void

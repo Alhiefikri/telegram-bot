@@ -1980,7 +1980,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && (string) $r['chat_id'] === '778')
             ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
             ->implode("\n");
-        $this->assertStringContainsString('legacy@example.test|Password', $receiptText);
+        $this->assertStringContainsString('email : legacy@example.test', $receiptText);
+        $this->assertStringContainsString('password : Password', $receiptText);
+        $this->assertStringNotContainsString('legacy@example.test|Password', $receiptText);
         $this->assertStringContainsString('Catatan fallback untuk order lama.', $receiptText);
     }
 
