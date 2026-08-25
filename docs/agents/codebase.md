@@ -7,7 +7,7 @@ Dokumen ini adalah peta implementasi aktual repository. Gunakan bersama [CONTEXT
 Sebelum mengubah behavior:
 
 1. Baca istilah yang relevan di [`CONTEXT.md`](../../CONTEXT.md).
-2. Baca ADR yang menyentuh area perubahan. Untuk pembayaran KlikQRIS/Pakasir, mulai dari [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md); untuk checkout Telegram, [ADR-0002](../adr/0002-telegram-direct-checkout-idempotency.md).
+2. Baca ADR yang menyentuh area perubahan. Untuk pembayaran KlikQRIS/Pakasir, mulai dari [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md); untuk checkout Telegram, [ADR-0002](../adr/0002-telegram-direct-checkout-idempotency.md). Untuk assembly payment checkout, gunakan [accepted Checkout Payment Assembly Architecture](../superpowers/specs/2026-08-25-checkout-payment-assembly-architecture.md) sebagai spesifikasi seam dan invariant.
 3. Cari entry point dari tabel file di bagian akhir, lalu ikuti service yang memiliki ownership atas aturan tersebut.
 4. Ubah boundary service dan test behavior-nya; jangan menyalin aturan bisnis ke controller, view, job, atau adapter channel.
 
@@ -100,18 +100,30 @@ creates an Order, Payment, inventory movement, or durable Sales Proof effect.
 
 ## 3. Ownership aturan bisnis
 
-| Aturan                                   | Pemilik canonical                                                                                                                                                                  | Adapter/caller yang tidak boleh mengambil alih         |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| membuat Order/Payment dan reservasi stok | [`OrderCheckoutService`](../../src/app/Services/OrderCheckoutService.php)                                                                                                          | controller, Telegram router, storefront view           |
-| positive stock intake + identity claim  | [`ProductStockIntake`](../../src/app/Services/ProductStockIntake.php), [`CredentialIdentity`](../../src/app/Models/CredentialIdentity.php)                                    | admin controller, model caller, browser adapter         |
-| transisi paid/cancel/expiry/refund       | [`OrderLifecycle`](../../src/app/Services/OrderLifecycle.php) dan [`OrderStateMachine`](../../src/app/Services/OrderStateMachine.php)                                              | callback controller, provider client                   |
-| provider baru untuk checkout             | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php) | channel-specific provider selection                    |
-| reservation/sale/release stock           | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                    | model/controller langsung mengubah stock               |
-| KlikQRIS create/recovery/payability      | [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php)                                                                                       | Store Bot/Storefront mengklasifikasi persistence state |
-| provider status verification             | callback processor + provider adapter masing-masing                                                                                                                                | callback payload langsung menandai paid                |
-| customer order access                    | [`StorefrontOrderAccess`](../../src/app/Storefront/StorefrontOrderAccess.php)                                                                                                      | controller menyimpan plaintext Recovery Key            |
-| customer-facing copy                     | Telegram/Storefront presentation adapter                                                                                                                                           | domain service mengirim pesan channel                  |
-| paid credential projection              | [`CredentialDeliveryPresentation`](../../src/app/Services/Credentials/CredentialDeliveryPresentation.php)                                                                         | Telegram/Web adapter parsing encrypted payloads         |
+| Aturan                                                        | Pemilik canonical                                                                                                                                                                                                 | Adapter/caller yang tidak boleh mengambil alih                         |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| shared checkout transaction, idempotency, dan side-effect orchestration | [`OrderCheckoutService`](../../src/app/Services/OrderCheckoutService.php)                                                                                                                                        | controller, Telegram router, storefront view, payment rail adapter     |
+| rail-specific Payment assembly dan preflight/prepare           | adapter [`CheckoutPaymentPreparation`](../../src/app/Services/Checkout/CheckoutPaymentPreparation.php) yang dipilih oleh [`CheckoutPaymentPreparationResolver`](../../src/app/Services/Checkout/CheckoutPaymentPreparationResolver.php) | `OrderCheckoutService`, provider resolver, channel adapter              |
+| generic Payment plan persistence                                | [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php)                                                                                                                      | rail adapter menulis Payment langsung                                 |
+| positive stock intake + identity claim                          | [`ProductStockIntake`](../../src/app/Services/ProductStockIntake.php), [`CredentialIdentity`](../../src/app/Models/CredentialIdentity.php)                                                                       | admin controller, model caller, browser adapter                         |
+| transisi paid/cancel/expiry/refund                              | [`OrderLifecycle`](../../src/app/Services/OrderLifecycle.php) dan [`OrderStateMachine`](../../src/app/Services/OrderStateMachine.php)                                                                            | callback controller, provider client                                   |
+| provider baru untuk checkout                                    | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php)                              | channel-specific provider selection                                    |
+| reservation/sale/release stock                                  | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                                                    | model/controller langsung mengubah stock                               |
+| KlikQRIS create/recovery/payability                             | [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php)                                                                                                                     | Store Bot/Storefront mengklasifikasi persistence state                  |
+| provider status verification                                    | callback processor + provider adapter masing-masing                                                                                                                                                               | callback payload langsung menandai paid                                |
+| Telegram outbound effect state dan delivery ledger              | [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) dan service materialization-nya                                                                  | checkout caller, queue job, channel adapter                              |
+| customer order access                                           | [`StorefrontOrderAccess`](../../src/app/Storefront/StorefrontOrderAccess.php)                                                                                                                                      | controller menyimpan plaintext Recovery Key                             |
+| customer-facing copy                                            | Telegram/Storefront presentation adapter                                                                                                                                                                            | domain service mengirim pesan channel                                   |
+| paid credential projection                                      | [`CredentialDeliveryPresentation`](../../src/app/Services/Credentials/CredentialDeliveryPresentation.php)                                                                                                         | Telegram/Web adapter parsing encrypted payloads                         |
+
+`CheckoutPaymentPreparation` adalah seam dua fase: `preflight()` berjalan sebelum
+checkout memperoleh lock dan boleh melakukan bounded readiness I/O; `prepare()`
+berjalan setelah lock checkout lengkap dan hanya boleh melakukan allocation atau
+snapshot work yang transaction-local. `prepare()` tidak boleh memanggil RPC,
+provider HTTP, Telegram, atau queue. Hasilnya adalah immutable
+`CheckoutPaymentPlan` yang dikonsumsi oleh `OrderCheckoutService`. Payment
+Verification, `OrderLifecycle`, `InventoryLedger`, dan Telegram Outbound Effect
+Ledger mempertahankan ownership yang sudah ada.
 
 Aturan praktis: service domain mengembalikan outcome/DTO; adapter menerjemahkan outcome menjadi Telegram message, HTTP response, view, atau admin alert.
 
@@ -196,7 +208,7 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1�
 
 `CheckoutMaintenance` adalah owner canonical untuk state **Checkout Maintenance** melalui [`CheckoutMaintenance::current()`](../../src/app/Services/CheckoutMaintenance/CheckoutMaintenance.php), `change()`, dan `guardNewOrder()`. `AdminCheckoutMaintenanceController` hanya mengorkestrasi request; role predicate `UserRole::canManageStoreOperations()` membatasi mutasi ke Owner/Admin, sedangkan `AdminDashboardStatsData` menyajikan status untuk semua role admin. `change()` mengunci row singleton `checkout_maintenance_settings`, memeriksa optimistic `version`, menormalkan note, mendeteksi no-op, lalu menulis setting dan `AuditLogger` dalam transaksi yang sama. Perubahan nyata menaikkan version dan menyimpan activation timestamp; deactivation selalu menghapus public note, sementara nilai lama tetap berada di audit.
 
-`OrderCheckoutService` adalah cutoff authoritative. Setelah reuse `checkout_key`, lock cart, reuse Order dari cart `checked_out`, dan validasi cart, checkout mengunci row maintenance sebelum item/product dan `ManualPaymentSetting`: urutannya `cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`. Karena `guardNewOrder()` berjalan di transaksi yang sama dan mutation admin memakai row lock yang sama, commit order menentukan race: checkout lebih dulu menghasilkan satu Order yang sah; activation lebih dulu menghasilkan tidak ada efek checkout baru. Order, Payment, reservation, credential allocation, notification, callback, reconciliation, expiry, cancellation, fulfillment, receipt, dan Sales Proof Post yang sudah ada tidak membaca state maintenance.
+`OrderCheckoutService` adalah owner transaksi checkout yang authoritative. Setelah reuse `checkout_key`, lock cart, reuse Order dari cart `checked_out`, dan validasi cart, ia mempertahankan urutan lock `cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`. `CheckoutPaymentPreparation::preflight()` sudah dijalankan sebelum transaksi dan lock; setelah lock serta validasi snapshot setting, `prepare()` membentuk immutable `CheckoutPaymentPlan` tanpa external I/O. `OrderCheckoutService` hanya mempersist plan generik lalu mengorkestrasi Order, reservation melalui `InventoryLedger`, credential allocation, Telegram Outbound Effect materialization, dan Cart transition. Karena `guardNewOrder()` berjalan di transaksi yang sama dan mutation admin memakai row lock yang sama, commit order menentukan race: checkout lebih dulu menghasilkan satu Order yang sah; activation lebih dulu menghasilkan tidak ada efek checkout baru. Order, Payment, reservation, credential allocation, notification, callback, reconciliation, expiry, cancellation, fulfillment, receipt, dan Sales Proof Post yang sudah ada tidak membaca state maintenance.
 
 Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
 
@@ -218,13 +230,16 @@ Reporting memakai cache singkat yang memasukkan environment dan seluruh paramete
 
 `PaymentProvider::allowed()` saat ini adalah `manual`, `pakasir`, dan `klikqris`. `ManualPaymentSetting` menyimpan provider aktif, versi setting, TTL, dan flow Pakasir. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent`:
 
-| Rail                 | `Payment.provider` | `Payment.method` | Intent/service utama                         |
-| -------------------- | ------------------ | ---------------- | -------------------------------------------- |
-| QR Manual            | `manual`           | `QR_MANUAL`      | `ManualQrisCheckoutIntent`, admin completion |
-| Pakasir hosted       | `pakasir`          | `hosted`         | `PakasirCheckoutIntent`, hosted URL          |
-| Pakasir Native QRIS  | `pakasir`          | `api_qris`       | `PakasirNativeQrisService`                   |
-| KlikQRIS Native QRIS | `klikqris`         | `qris`           | `KlikQrisNativeQrisService`                  |
-| Binance Pay          | `manual`           | `BINANCE_PAY_ID` | `BinancePaymentVerification`                 |
+`CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
+
+| Rail                 | `Payment.provider` | `Payment.method` | Intent/preparation/verification utama                                                                                             |
+| -------------------- | ------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| QR Manual            | `manual`           | `QR_MANUAL`      | `ManualQrisCheckoutIntent` + `ManualQrisCheckoutPaymentPreparation`, admin completion                                           |
+| Pakasir hosted       | `pakasir`          | `hosted`         | `PakasirCheckoutIntent` + `PakasirCheckoutPaymentPreparation`, hosted URL                                                       |
+| Pakasir Native QRIS  | `pakasir`          | `api_qris`       | `PakasirCheckoutPaymentPreparation` + `PakasirNativeQrisService`                                                               |
+| KlikQRIS Native QRIS | `klikqris`          | `qris`            | `KlikQrisCheckoutPaymentPreparation` + `KlikQrisNativeQrisService`                                                             |
+| Binance Pay          | `manual`           | `BINANCE_PAY_ID` | `BinanceCheckoutPaymentPreparation` + `BinancePaymentVerification`                                                             |
+| USDT BEP20/BSC       | `manual`           | `USDT_BEP20`     | `BscCheckoutPaymentPreparation` + `BscPaymentVerification`                                                                     |
 
 Binance memakai `provider=manual` karena ia adalah metode di jalur payment manual yang berbeda dari provider QRIS; identifikasi Binance harus memakai `method`, bukan provider saja.
 
@@ -234,18 +249,20 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 
 `OrderCheckoutService::checkout()` membungkus pembuatan checkout dalam database transaction dan retry conflict unique reference. Ia:
 
-1. dedupe berdasarkan `checkout_key` bila ada;
-2. lock Cart dan reuse Order yang sudah ada untuk Cart `checked_out`;
-3. validasi Cart aktif dan belum kedaluwarsa;
-4. memanggil `CheckoutMaintenance::guardNewOrder()` sebelum side effect checkout baru;
-5. lock CartItem/Product/provider setting lalu validasi intent dan readiness;
-6. membuat Order + Payment pending;
-7. membuat OrderItem dengan snapshot delivery/usage guide;
-8. mengalokasikan credential stock bila relevan;
-9. merekam reservation inventory;
-10. menandai Cart `checked_out`.
+1. menormalisasi intent, memilih adapter `CheckoutPaymentPreparation`, dan menjalankan `preflight()` sebelum transaksi/checkout locks;
+2. dedupe berdasarkan `checkout_key` bila ada;
+3. lock Cart dan reuse Order yang sudah ada untuk Cart `checked_out`;
+4. validasi Cart aktif dan belum kedaluwarsa, lalu memanggil `CheckoutMaintenance::guardNewOrder()`;
+5. lock CartItem/Product dan `ManualPaymentSetting` dalam urutan canonical;
+6. memvalidasi ulang selected provider-setting snapshot serta preflight identity di dalam transaksi;
+7. memanggil `prepare()` setelah seluruh checkout lock tersedia; fase ini hanya melakukan validation, allocation, dan snapshot work yang transaction-local;
+8. membuat Order dan meminta [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php) mempersist Payment plan generik;
+9. membuat OrderItem dengan snapshot delivery/usage guide;
+10. mengalokasikan credential stock bila relevan;
+11. merekam reservation inventory melalui `InventoryLedger`;
+12. mematerialisasi Telegram Outbound Effects dan menandai Cart `checked_out`.
 
-Payment amount untuk Binance `amount_unique` dialokasikan oleh `BinanceUniquePaymentAmount`; nominal IDR QRIS tidak boleh diperlakukan sebagai floating point.
+OrderCheckoutService tidak memetakan rail, menghitung field Binance/BSC, atau melakukan external I/O dari fase `prepare()`. Aturan amount/receiver/verification rail tetap berada pada preparation adapter dan service verification masing-masing.
 
 ### 5.3 Pakasir
 
@@ -285,7 +302,9 @@ Tidak ada automatic fallback KlikQRIS ke Manual dan tidak ada Payment kedua. Sto
 
 ### 5.5 Binance Pay
 
-Binance diverifikasi oleh [`BinancePaymentVerification`](../../src/app/Services/Binance/BinancePaymentVerification.php), bukan oleh controller atau Telegram copy. Ada dua mode:
+Binance Pay ID memakai [`BinanceCheckoutPaymentPreparation`](../../src/app/Services/Checkout/BinanceCheckoutPaymentPreparation.php) untuk membentuk snapshot verification mode, base/unique amount, auto-verification setting, receiver type/value, dan initial verification status. Adapter itu tidak melakukan history read atau transaksi verification. [`BinancePaymentVerification`](../../src/app/Services/Binance/BinancePaymentVerification.php) tetap menjadi owner matching evidence, attempt/grace policy, manual review, dan `OrderLifecycle` delegation; queue jobs tetap transport adapter.
+
+Ada dua mode:
 
 - `amount_unique`: matching berdasarkan nominal USDT unik dan receiver;
 - `order_id`: customer mengirim Binance Order ID, dibatasi jumlah attempt dan punya retry/grace window.
@@ -298,7 +317,7 @@ USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Sma
 
 `BscConfirmationGrace` is the expiry guard. It accepts a grace timestamp only when matching successful evidence is stored with an inclusion block between Payment creation and the original deadline. `orders:expire-pending` therefore cannot be bypassed by a fabricated future timestamp. If a terminal Order later receives an exact transfer, BSC records evidence, marks the financially valid Payment paid through `OrderLifecycle`, creates `ManualFulfillmentReview`, and leaves the Order terminal.
 
-`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, bounded `eth_getLogs` support (or an explicitly configured indexed source), and active verified receiver count. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. `OrderCheckoutService` resolves that result before its checkout transaction and re-checks only the locked setting/configuration/receiver snapshot inside the transaction; no BSC RPC call may run while checkout locks are held. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
+`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, bounded `eth_getLogs` support (or an explicitly configured indexed source), and active verified receiver count. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. [`BscCheckoutPaymentPreparation`](../../src/app/Services/Checkout/BscCheckoutPaymentPreparation.php) runs `preflight()` before checkout locks, then `prepare()` revalidates only the locked setting/configuration/receiver snapshot, selects the receiver, allocates the unique amount, calculates expected token units, and builds the `PaymentBscDetail` snapshot. `prepare()` performs no BSC RPC or other external I/O; `OrderCheckoutService` consumes only the resulting plan. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
 
 ## 6. Order lifecycle dan inventory invariant
 
@@ -395,6 +414,7 @@ Data boundary:
 | routes          | [`src/routes/web.php`](../../src/routes/web.php), [`src/routes/api.php`](../../src/routes/api.php), [`src/routes/console.php`](../../src/routes/console.php)                                                                               |
 | domain model    | [`src/app/Models/`](../../src/app/Models/), [`src/app/Enums/`](../../src/app/Enums/)                                                                                                                                                       |
 | checkout        | [`OrderCheckoutService`](../../src/app/Services/OrderCheckoutService.php), [`Services/Checkout/`](../../src/app/Services/Checkout/)                                                                                                        |
+| checkout payment preparation | [`CheckoutPaymentPreparation`](../../src/app/Services/Checkout/CheckoutPaymentPreparation.php), [`CheckoutPaymentPreparationResolver`](../../src/app/Services/Checkout/CheckoutPaymentPreparationResolver.php), [`CheckoutPaymentPlan`](../../src/app/Services/Checkout/CheckoutPaymentPlan.php) |
 | order/inventory | [`OrderStateMachine`](../../src/app/Services/OrderStateMachine.php), [`InventoryLedger`](../../src/app/Services/InventoryLedger.php), [`Services/Product*`](../../src/app/Services/)                                                       |
 | Telegram        | [`TelegramWebhookIngress`](../../src/app/Services/Telegram/TelegramWebhookIngress.php), [`TelegramUpdateProcessor`](../../src/app/Services/Telegram/TelegramUpdateProcessor.php), [`Services/Telegram/`](../../src/app/Services/Telegram/) |
 | Storefront      | [`src/app/Storefront/`](../../src/app/Storefront/), [`StorefrontShopCheckout`](../../src/app/Storefront/StorefrontShopCheckout.php)                                                                                                        |
@@ -450,6 +470,7 @@ Sebelum membuka patch:
 - [ ] Istilah baru cocok dengan `CONTEXT.md`.
 - [ ] ADR relevan sudah dibaca; keputusan provider/Recovery Key/Telegram idempotency tidak dilanggar.
 - [ ] Business rule ditempatkan di service owner, bukan di controller/view/job adapter.
+- [ ] Rail-specific Payment assembly stays behind `CheckoutPaymentPreparation`; `preflight()` runs before checkout locks and `prepare()` runs after locks without external I/O.
 - [ ] Payment lama tidak berubah provider dan callback tidak langsung menandai paid.
 - [ ] KlikQRIS tidak membuat Payment/fallback baru; recovery memakai Payment yang sama.
 - [ ] Inventory reservation/sale/release tetap melalui `InventoryLedger`.

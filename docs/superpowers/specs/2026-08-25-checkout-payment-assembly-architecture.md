@@ -1,7 +1,7 @@
 # Checkout Payment Assembly Architecture
 
 - **Date:** 2026-08-25
-- **Status:** Proposed — architecture and behavior agreed; implementation spec ready for review
+- **Status:** Accepted — 2026-08-25; implementation cutover complete through #360, with final documentation and verification tracked by #361
 - **Scope:** Shared Order checkout used by the Web Storefront and Store Bot
 - **Primary seam:** rail-specific Payment preparation
 - **Owner after implementation:** OrderCheckoutService remains the canonical Order checkout module
@@ -734,6 +734,19 @@ composer test:concurrency-gate
 
 Run browser/build checks only if implementation changes Storefront assets or
 presentation. This architecture change should not need npm run build.
+
+### Final verification record (#361)
+
+| Gate | Result |
+| --- | --- |
+| Full SQLite suite (`cd src && composer test`) | PASS — 1,857 tests, 1,812 passed, 45 skipped, 13,441 assertions |
+| PostgreSQL concurrency gate (default artifact path) | BLOCKED before PHPUnit — repository artifact directory is not writable |
+| PostgreSQL concurrency gate (writable temporary artifact path) | BLOCKED before PHPUnit — PHP CLI is missing `pdo_pgsql` |
+| Documentation link targets and whitespace | PASS — referenced spec/preparation files exist and `git diff --check` is clean |
+| Changed-path/config review | PASS — only the codebase guide and accepted spec changed; no Railway file or command was introduced |
+
+The PostgreSQL gate fails closed during preflight, so no PHPUnit concurrency
+tests executed in this environment.
 
 ## Acceptance criteria
 
