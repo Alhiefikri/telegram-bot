@@ -691,7 +691,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->requireConcurrencyLane();
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
-        $order = $this->pakasirReadyOrder(stock: 2, quantity: 1, expiresAt: now()->addHour());
+        $order = $this->pakasirReadyOrder(stock: 2, quantity: 1);
         $payment = $order->payments()->firstOrFail();
         $payload = $this->pakasirPayload($payment);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
@@ -726,8 +726,10 @@ class ProductionConcurrencyTest extends TestCase
         $this->requireConcurrencyLane();
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
-        $order = $this->pakasirReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());
+        $order = $this->pakasirReadyOrder(stock: 1, quantity: 1);
         $payment = $order->payments()->firstOrFail();
+        $order->update(['expires_at' => now()->subSecond()]);
+        $payment->update(['expired_at' => now()->subSecond()]);
         $payload = $this->pakasirPayload($payment);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
 
@@ -770,7 +772,7 @@ class ProductionConcurrencyTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
 
-        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $order = $this->klikQrisReadyOrder();
         $order->update(['expires_at' => now()->subSecond()]);
         $payment = $order->payments()->sole();
         $payment->update(['expired_at' => now()->subSecond()]);
@@ -796,7 +798,7 @@ class ProductionConcurrencyTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
 
-        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $order = $this->klikQrisReadyOrder();
         $payment = $order->payments()->sole();
 
         $results = $this->runConcurrently([
@@ -819,7 +821,7 @@ class ProductionConcurrencyTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter(successfulStatus: true));
 
-        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $order = $this->klikQrisReadyOrder();
         $payment = $order->payments()->sole();
         $payment->update([
             'provider_total_payment' => $payment->amount + 16,
@@ -870,7 +872,7 @@ class ProductionConcurrencyTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
         app()->bind(KlikQrisProviderAdapter::class, fn () => new ProductionConcurrencyKlikQrisAdapter);
 
-        $order = $this->klikQrisReadyOrder(now()->addHour());
+        $order = $this->klikQrisReadyOrder();
         $payment = $order->payments()->sole();
 
         $results = $this->runConcurrently([
@@ -926,8 +928,9 @@ class ProductionConcurrencyTest extends TestCase
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
         $user = User::factory()->create();
-        $order = $this->manualReadyOrder(stock: 1, quantity: 1, expiresAt: now()->subMinute());
-
+        $order = $this->manualReadyOrder(stock: 1, quantity: 1);
+        $order->update(['expires_at' => now()->subSecond()]);
+        $order->payments()->sole()->update(['expired_at' => now()->subSecond()]);
         $this->runConcurrently([
             fn () => app(AdminOrderOperations::class)->completeManualOrder(Order::findOrFail($order->id), User::findOrFail($user->id), '127.0.0.1')->id,
             fn () => app(OrderStateMachine::class)->expirePendingOrder(Order::findOrFail($order->id))?->id,
@@ -1095,7 +1098,7 @@ class ProductionConcurrencyTest extends TestCase
     {
         $this->requireConcurrencyLane();
 
-        $order = $this->credentialReadyOrder(stock: 1, quantity: 1, expiresAt: now()->addHour());
+        $order = $this->credentialReadyOrder(stock: 1, quantity: 1);
         $product = Product::firstOrFail();
         $user = User::factory()->create();
 
@@ -1430,7 +1433,7 @@ class ProductionConcurrencyTest extends TestCase
         return $cart;
     }
 
-    private function credentialReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
+    private function credentialReadyOrder(int $stock, int $quantity): Order
     {
         $product = Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0, 'price_amount' => 10000]);
         for ($i = 1; $i <= $stock; $i++) {
@@ -1438,23 +1441,23 @@ class ProductionConcurrencyTest extends TestCase
         }
         $cart = $this->cartForProduct($product, $quantity);
 
-        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($expiresAt));
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     }
 
-    private function manualReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
+    private function manualReadyOrder(int $stock, int $quantity): Order
     {
         $product = Product::factory()->create(['stock' => $stock, 'reserved_stock' => 0, 'price_amount' => 10000]);
         $cart = $this->cartForProduct($product, $quantity);
 
-        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($expiresAt));
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     }
 
-    private function klikQrisReadyOrder(mixed $expiresAt): Order
+    private function klikQrisReadyOrder(): Order
     {
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'price_amount' => 10000]);
         $cart = $this->cartForProduct($product);
 
-        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::klikQris($expiresAt));
+        return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::klikQris());
     }
 
     private function useDatabaseLocks(): void
@@ -1470,9 +1473,9 @@ class ProductionConcurrencyTest extends TestCase
         app()->forgetInstance(RateLimiter::class);
     }
 
-    private function pakasirReadyOrder(int $stock, int $quantity, mixed $expiresAt): Order
+    private function pakasirReadyOrder(int $stock, int $quantity): Order
     {
-        $order = $this->manualReadyOrder($stock, $quantity, $expiresAt);
+        $order = $this->manualReadyOrder($stock, $quantity);
         $order->payments()->firstOrFail()->update(['provider' => 'pakasir', 'method' => 'hosted']);
 
         return $order->fresh(['payments']);

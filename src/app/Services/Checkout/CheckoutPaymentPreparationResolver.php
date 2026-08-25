@@ -23,39 +23,7 @@ final class CheckoutPaymentPreparationResolver
     {
         $identity = CheckoutPaymentPreparationIdentity::key($intent->provider(), $intent->method());
 
-        if (! in_array($identity, self::supportedIdentities(), true)) {
-            throw new InvalidArgumentException('Unsupported checkout payment rail identity.');
-        }
-
-        if (isset($this->adapters[$identity])) {
-            return $this->adapters[$identity];
-        }
-
-        // Built-in rails are registered by AppServiceProvider. Keep the
-        // intent bridge for legacy and test-only preparation objects.
-        return $intent;
-    }
-
-    public function hasAdapterFor(CheckoutPaymentIntent $intent): bool
-    {
-        return array_key_exists(
-            CheckoutPaymentPreparationIdentity::key($intent->provider(), $intent->method()),
-            $this->adapters,
-        );
-    }
-
-    /**
-     * @return list<string>
-     */
-    public static function supportedIdentities(): array
-    {
-        return [
-            CheckoutPaymentPreparationIdentity::key('manual', 'QR_MANUAL'),
-            CheckoutPaymentPreparationIdentity::key('pakasir', 'hosted'),
-            CheckoutPaymentPreparationIdentity::key('pakasir', 'api_qris'),
-            CheckoutPaymentPreparationIdentity::key('klikqris', 'QRIS'),
-            CheckoutPaymentPreparationIdentity::key('manual', 'BINANCE_PAY_ID'),
-            CheckoutPaymentPreparationIdentity::key('manual', 'USDT_BEP20'),
-        ];
+        return $this->adapters[$identity]
+            ?? throw new InvalidArgumentException("No checkout payment preparation is registered for [$identity].");
     }
 }

@@ -45,7 +45,7 @@ class KlikQrisNativeQrisTest extends TestCase
 
     public function test_lifecycle_creates_persists_sanitized_payable_and_shortens_deadline(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000), CheckoutPaymentIntents::klikQris(now()->addMinutes(30)));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000), CheckoutPaymentIntents::klikQris());
         $payment = $order->payments()->sole();
 
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
@@ -425,7 +425,7 @@ class KlikQrisNativeQrisTest extends TestCase
         config()->set('services.telegram.token', null);
         $startedAt = now()->startOfMinute();
         $this->travelTo($startedAt);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000, stock: 1), CheckoutPaymentIntents::klikQris($startedAt->copy()->addMinutes(30)));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000, stock: 1), CheckoutPaymentIntents::klikQris());
         $payment = $order->payments()->sole();
         Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
             'expired_at' => $startedAt->copy()->addMinutes(15)->toAtomString(),

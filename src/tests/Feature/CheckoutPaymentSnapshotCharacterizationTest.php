@@ -55,11 +55,17 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $cart = $this->cartForProduct($product, quantity: 2);
+        $this->travelTo($deadline->copy()->subMinutes($rail === 'klikqris' ? 15 : 10));
+        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
 
-        $order = app(OrderCheckoutService::class)->checkout(
-            $cart,
-            $this->idrIntent($rail, $deadline),
-        );
+        try {
+            $order = app(OrderCheckoutService::class)->checkout(
+                $cart,
+                $this->idrIntent($rail),
+            );
+        } finally {
+            $this->travelBack();
+        }
 
         $this->assertCheckoutSnapshot(
             order: $order,
@@ -73,6 +79,108 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             deadline: $deadline,
             effectType: $effectType,
         );
+    }
+
+    #[DataProvider('binanceModes')]
+    public function test_binance_pay_id_modes_keep_the_payment_snapshot_contract(
+        string $mode,
+        string $verificationStatus,
+    ): void {
+        config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'read-only-key');
+        config()->set('services.binance.api_secret', 'read-only-secret');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'binance_verification_mode' => $mode,
+            'is_active' => true,
+        ]);
+
+        $deadline = CarbonImmutable::parse('2030-02-03 04:05:06', config('app.timezone'));
+        $product = Product::factory()->create([
+            'price_amount' => 20_000,
+            'usdt_price_amount' => 3_250_000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product);
+        $this->travelTo($deadline->copy()->subMinutes(20));
+        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout(
+                $cart,
+                CheckoutPaymentIntents::binancePayId(),
+            );
+        } finally {
+            $this->travelBack();
+        }
+
+        $payment = $this->assertCheckoutSnapshot(
+            order: $order,
+            product: $product,
+            quantity: 1,
+            provider: 'manual',
+            method: 'BINANCE_PAY_ID',
+            paymentCurrency: 'USDT',
+            paymentAmount: 3_250_000,
+            orderTotal: 20_000,
+            deadline: $deadline,
+            effectType: TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+        );
+
+        $this->assertTrue($payment->binance_auto_verification_enabled);
+        $this->assertSame($mode, $payment->binance_verification_mode);
+        $this->assertSame('pay_id', $payment->binance_receiver_type);
+        $this->assertSame('987654321', $payment->binance_receiver_value);
+        $this->assertSame($verificationStatus, $payment->binance_verification_status);
+    }
+
+    public function test_bsc_checkout_keeps_the_receiver_amount_detail_and_effect_snapshots(): void
+    {
+        $this->configureBscRail();
+        $receiver = $this->activeBscReceiver('0x1111111111111111111111111111111111111111');
+        $deadline = CarbonImmutable::parse('2030-03-04 05:06:07', config('app.timezone'));
+        $product = Product::factory()->create([
+            'price_amount' => 25_000,
+            'usdt_price_amount' => 2_500_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $this->travelTo($deadline->copy()->subMinutes(30));
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout(
+                $this->cartForProduct($product),
+                CheckoutPaymentIntents::usdtBep20(),
+            );
+        } finally {
+            $this->travelBack();
+        }
+
+        $payment = $this->assertCheckoutSnapshot(
+            order: $order,
+            product: $product,
+            quantity: 1,
+            provider: 'manual',
+            method: 'USDT_BEP20',
+            paymentCurrency: 'USDT',
+            paymentAmount: 2_500_000,
+            orderTotal: 25_000,
+            deadline: $deadline,
+            effectType: TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+        );
+        $detail = $payment->bscDetail()->sole();
+
+        $this->assertSame($receiver->id, $detail->receiver_id);
+        $this->assertSame($receiver->address_normalized, $detail->receiver_address);
+        $this->assertSame(56, $detail->chain_id);
+        $this->assertSame(self::BSC_CONTRACT, $detail->token_contract);
+        $this->assertSame(18, $detail->token_decimals);
+        $this->assertSame(2_500_000, $detail->base_amount_micro);
+        $this->assertSame(2_500_000, $detail->payable_amount_micro);
+        $this->assertSame('2500000000000000000', (string) $detail->expected_token_units);
+        $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $detail->verification_status);
     }
 
     public static function idrRails(): array
@@ -105,103 +213,12 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         ];
     }
 
-    #[DataProvider('binanceModes')]
-    public function test_binance_pay_id_modes_keep_the_payment_snapshot_contract(
-        string $mode,
-        string $verificationStatus,
-    ): void {
-        config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.binance.api_key', 'read-only-key');
-        config()->set('services.binance.api_secret', 'read-only-secret');
-        ManualPaymentSetting::create([
-            'payment_mode' => 'manual',
-            'binance_pay_enabled' => true,
-            'binance_verification_mode' => $mode,
-            'is_active' => true,
-        ]);
-
-        $deadline = CarbonImmutable::parse('2030-02-03 04:05:06', config('app.timezone'));
-        $product = Product::factory()->create([
-            'price_amount' => 20_000,
-            'usdt_price_amount' => 3_250_000,
-            'stock' => 3,
-            'reserved_stock' => 0,
-        ]);
-        $cart = $this->cartForProduct($product);
-
-        $order = app(OrderCheckoutService::class)->checkout(
-            $cart,
-            CheckoutPaymentIntents::binancePayId($deadline),
-        );
-
-        $payment = $this->assertCheckoutSnapshot(
-            order: $order,
-            product: $product,
-            quantity: 1,
-            provider: 'manual',
-            method: 'BINANCE_PAY_ID',
-            paymentCurrency: 'USDT',
-            paymentAmount: 3_250_000,
-            orderTotal: 20_000,
-            deadline: $deadline,
-            effectType: TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
-        );
-
-        $this->assertTrue($payment->binance_auto_verification_enabled);
-        $this->assertSame($mode, $payment->binance_verification_mode);
-        $this->assertSame('pay_id', $payment->binance_receiver_type);
-        $this->assertSame('987654321', $payment->binance_receiver_value);
-        $this->assertSame($verificationStatus, $payment->binance_verification_status);
-    }
-
     public static function binanceModes(): array
     {
         return [
             'amount unique' => ['amount_unique', 'checking'],
             'order id' => ['order_id', 'awaiting_submission'],
         ];
-    }
-
-    public function test_bsc_checkout_keeps_the_receiver_amount_detail_and_effect_snapshots(): void
-    {
-        $this->configureBscRail();
-        $receiver = $this->activeBscReceiver('0x1111111111111111111111111111111111111111');
-        $deadline = CarbonImmutable::parse('2030-03-04 05:06:07', config('app.timezone'));
-        $product = Product::factory()->create([
-            'price_amount' => 25_000,
-            'usdt_price_amount' => 2_500_000,
-            'stock' => 2,
-            'reserved_stock' => 0,
-        ]);
-
-        $order = app(OrderCheckoutService::class)->checkout(
-            $this->cartForProduct($product),
-            CheckoutPaymentIntents::usdtBep20($deadline),
-        );
-
-        $payment = $this->assertCheckoutSnapshot(
-            order: $order,
-            product: $product,
-            quantity: 1,
-            provider: 'manual',
-            method: 'USDT_BEP20',
-            paymentCurrency: 'USDT',
-            paymentAmount: 2_500_000,
-            orderTotal: 25_000,
-            deadline: $deadline,
-            effectType: TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
-        );
-        $detail = $payment->bscDetail()->sole();
-
-        $this->assertSame($receiver->id, $detail->receiver_id);
-        $this->assertSame($receiver->address_normalized, $detail->receiver_address);
-        $this->assertSame(56, $detail->chain_id);
-        $this->assertSame(self::BSC_CONTRACT, $detail->token_contract);
-        $this->assertSame(18, $detail->token_decimals);
-        $this->assertSame(2_500_000, $detail->base_amount_micro);
-        $this->assertSame(2_500_000, $detail->payable_amount_micro);
-        $this->assertSame('2500000000000000000', (string) $detail->expected_token_units);
-        $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $detail->verification_status);
     }
 
     public function test_bsc_readiness_finishes_before_the_checkout_transaction_begins(): void
@@ -266,7 +283,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
     public function test_duplicate_checkout_key_reuses_one_order_payment_reservation_and_effect(): void
     {
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
-        $deadline = CarbonImmutable::parse('2030-04-05 06:07:08', config('app.timezone'));
         $product = Product::factory()->create([
             'price_amount' => 18_000,
             'stock' => 2,
@@ -275,8 +291,8 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         $cart = $this->cartForProduct($product);
         $service = app(OrderCheckoutService::class);
 
-        $first = $service->checkout($cart, CheckoutPaymentIntents::manualQris($deadline), 'characterization-key');
-        $second = $service->checkout($cart->fresh(), CheckoutPaymentIntents::manualQris($deadline), 'characterization-key');
+        $first = $service->checkout($cart, CheckoutPaymentIntents::manualQris(), 'characterization-key');
+        $second = $service->checkout($cart->fresh(), CheckoutPaymentIntents::manualQris(), 'characterization-key');
 
         $this->assertSame($first->id, $second->id);
         $this->assertSame(1, Order::query()->count());
@@ -364,13 +380,13 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         ]);
     }
 
-    private function idrIntent(string $rail, CarbonInterface $deadline): CheckoutPaymentIntent
+    private function idrIntent(string $rail): CheckoutPaymentIntent
     {
         return match ($rail) {
-            'manual' => CheckoutPaymentIntents::manualQris($deadline),
-            'pakasir_hosted' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, $deadline),
-            'pakasir_native_qris' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS, $deadline),
-            'klikqris' => CheckoutPaymentIntents::klikQris($deadline),
+            'manual' => CheckoutPaymentIntents::manualQris(),
+            'pakasir_hosted' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED),
+            'pakasir_native_qris' => CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS),
+            'klikqris' => CheckoutPaymentIntents::klikQris(),
             default => throw new \InvalidArgumentException('Unknown characterization rail: '.$rail),
         };
     }

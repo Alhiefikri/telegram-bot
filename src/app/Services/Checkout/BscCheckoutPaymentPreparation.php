@@ -47,12 +47,12 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
         $this->readiness->assertCheckoutSnapshot($report, $context->lockedSetting);
 
         $baseAmount = $this->baseAmount($context->items, $context->products);
-        $expiresAt = $context->requestedExpiresAt
-            ?? now()->addMinutes(
-                $context->lockedSetting?->bscPaymentTtlMinutes()
-                    ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES,
-            );
+        $expiresAt = now()->addMinutes(
+            $context->lockedSetting?->bscPaymentTtlMinutes()
+                ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES,
+        );
         $receiver = $this->receiverPool->selectSnapshot();
+
         $payableAmount = $this->uniqueAmount->allocate(
             $baseAmount,
             setting: $context->lockedSetting,

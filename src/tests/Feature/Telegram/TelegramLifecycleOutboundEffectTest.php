@@ -217,7 +217,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->configureAdminTarget();
         Queue::fake();
 
-        $order = $this->checkoutOrder(CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $order = $this->checkoutOrder();
+        $order->forceFill(['expires_at' => now()->subMinute()])->save();
+        $order->payments()->sole()->update(['expired_at' => now()->subMinute()]);
         $first = app(OrderStateMachine::class)->applyPendingExpiry($order);
         $replay = app(OrderStateMachine::class)->applyPendingExpiry($order->fresh());
         $effect = app(TelegramOutboundEffectService::class)

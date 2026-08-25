@@ -3,14 +3,12 @@
 namespace Tests\Unit\Services\Checkout;
 
 use App\Exceptions\InvalidCheckout;
-use App\Models\Cart;
 use App\Models\ManualPaymentSetting;
 use App\Services\Bsc\BscPaymentReceiverSnapshot;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlan;
 use App\Services\Checkout\CheckoutPaymentPreflight;
 use App\Services\Checkout\CheckoutPaymentPreflightContext;
-use App\Services\Checkout\CheckoutPaymentPreparationContext;
 use App\Services\Checkout\CheckoutPaymentPreparationIdentity;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
@@ -20,7 +18,6 @@ use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
@@ -54,35 +51,45 @@ final class CheckoutPaymentPreparationTest extends TestCase
         $preflight->assertMatches($staleContext);
     }
 
-    public function test_legacy_manual_intent_can_bridge_to_a_typed_plan(): void
+    public function test_intents_no_longer_expose_legacy_payment_assembly_methods(): void
     {
-        $deadline = CarbonImmutable::parse('2030-02-03 04:05:06');
-        $intent = CheckoutPaymentIntents::manualQris($deadline);
-        $context = new CheckoutPaymentPreparationContext(
-            cart: new Cart,
-            items: new Collection([(object) ['product_id' => 1, 'quantity' => 2]]),
-            products: new Collection([1 => (object) ['price_amount' => 15000]]),
-            lockedSetting: null,
-            preflight: CheckoutPaymentPreflight::none(
-                new CheckoutPaymentPreflightContext(null, 'manual', 'QR_MANUAL'),
-            ),
-        );
+        $intents = [
+            CheckoutPaymentIntents::manualQris(),
+            CheckoutPaymentIntents::pakasir(),
+            CheckoutPaymentIntents::klikQris(),
+            CheckoutPaymentIntents::binancePayId(),
+            CheckoutPaymentIntents::usdtBep20(),
+        ];
 
-        $plan = $intent->prepare($context);
-
-        $this->assertInstanceOf(CheckoutPaymentPlan::class, $plan);
-        $this->assertInstanceOf(ManualQrisCheckoutPaymentSnapshot::class, $plan->rail());
-        $this->assertSame(30000, $plan->amount);
-        $this->assertSame($deadline->timestamp, $plan->expiresAt()->timestamp);
+        foreach ($intents as $intent) {
+            foreach (['paymentAmount', 'paymentCurrency', 'orderCurrency', 'expiresAt', 'assertReady'] as $method) {
+                $this->assertFalse(is_callable([$intent, $method]), $intent::class.' exposes '.$method.'.');
+            }
+        }
     }
 
-    public function test_provider_bound_intent_forwards_the_preparation_contract(): void
+    public function test_resolver_rejects_unregistered_intent_without_a_legacy_bridge(): void
     {
-        $intent = CheckoutPaymentIntents::manualQris(CarbonImmutable::parse('2030-03-04 05:06:07'));
-        $bound = new ProviderBoundCheckoutPaymentIntent($intent, 'manual', 2, 5);
-        $context = new CheckoutPaymentPreflightContext(null, 'manual', 'QR_MANUAL');
+        $this->expectException(InvalidArgumentException::class);
 
-        $this->assertTrue($bound->preflight($context)->matches($context));
+        (new CheckoutPaymentPreparationResolver)->for(CheckoutPaymentIntents::manualQris());
+    }
+
+    public function test_provider_bound_intent_preserves_selection_and_provider_setting_snapshot(): void
+    {
+        $bound = new ProviderBoundCheckoutPaymentIntent(
+            CheckoutPaymentIntents::manualQris(),
+            'manual',
+            2,
+            5,
+        );
+
+        $this->assertSame('manual', $bound->provider());
+        $this->assertSame('QR_MANUAL', $bound->method());
+        $this->assertSame(CheckoutPostCreationBehavior::ManualQrisInstructions, $bound->postCreationBehavior());
+        $this->assertSame('manual', $bound->configuredProvider);
+        $this->assertSame(2, $bound->providerVersion);
+        $this->assertSame(5, $bound->settingId);
     }
 
     public function test_resolver_can_select_a_test_adapter_by_normalized_identity(): void

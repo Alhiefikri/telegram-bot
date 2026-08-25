@@ -43,8 +43,8 @@ final readonly class KlikQrisCheckoutPaymentPreparation implements CheckoutPayme
             );
         }
 
-        $expiresAt = $context->requestedExpiresAt
-            ?? now()->addMinutes((int) config('services.klikqris.qris_ttl_minutes', 15));
+        $expiresAt = now()->addMinutes((int) config('services.klikqris.qris_ttl_minutes', 15));
+
         $amount = $this->baseAmount($context->items, $context->products);
         $snapshot = new KlikQrisCheckoutPaymentSnapshot(
             provider: PaymentProvider::KLIKQRIS,

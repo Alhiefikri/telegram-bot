@@ -268,7 +268,6 @@ final class BscReadinessTest extends TestCase
         $resolver = app(CheckoutPaymentPreparationResolver::class);
         $intent = CheckoutPaymentIntents::usdtBep20();
 
-        $this->assertTrue($resolver->hasAdapterFor($intent));
         $this->assertInstanceOf(BscCheckoutPaymentPreparation::class, $resolver->for($intent));
     }
 

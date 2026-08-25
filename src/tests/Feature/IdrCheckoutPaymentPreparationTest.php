@@ -54,7 +54,7 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         );
     }
 
-    public function test_manual_qris_plan_uses_the_product_total_and_requested_expiry(): void
+    public function test_manual_qris_plan_uses_the_product_total_and_configured_expiry(): void
     {
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::MANUAL,
@@ -65,9 +65,10 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $product = Product::factory()->create(['price_amount' => 15_000]);
 
         $plan = $this->prepare(
-            CheckoutPaymentIntents::manualQris($deadline),
+            CheckoutPaymentIntents::manualQris(),
             $setting,
             $product,
+            $deadline,
         );
 
         $this->assertPlan($plan, 'manual', 'QR_MANUAL', 30_000, $deadline);
@@ -90,9 +91,10 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $product = Product::factory()->create(['price_amount' => 12_500]);
 
         $plan = $this->prepare(
-            CheckoutPaymentIntents::pakasir($flow, $deadline),
+            CheckoutPaymentIntents::pakasir($flow),
             $setting,
             $product,
+            $deadline,
         );
 
         $this->assertPlan($plan, PaymentProvider::PAKASIR, $flow, 25_000, $deadline);
@@ -123,9 +125,10 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $product = Product::factory()->create(['price_amount' => 20_000]);
 
         $plan = $this->prepare(
-            CheckoutPaymentIntents::klikQris($deadline),
+            CheckoutPaymentIntents::klikQris(),
             $setting,
             $product,
+            $deadline,
         );
 
         $this->assertPlan($plan, PaymentProvider::KLIKQRIS, 'QRIS', 40_000, $deadline);
@@ -137,22 +140,31 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         CheckoutPaymentIntent $intent,
         ManualPaymentSetting $setting,
         Product $product,
+        CarbonImmutable $deadline,
     ): CheckoutPaymentPlan {
         $preparation = app(CheckoutPaymentPreparationResolver::class)->for($intent);
-        $preflightContext = new CheckoutPaymentPreflightContext(
-            currentSetting: $setting,
-            requestedProvider: $intent->provider(),
-            requestedMethod: $intent->method(),
-        );
+        $ttl = $intent->provider() === PaymentProvider::KLIKQRIS
+            ? (int) config('services.klikqris.qris_ttl_minutes', 15)
+            : $setting->qrisPaymentTtlMinutes();
+        $this->travelTo($deadline->copy()->subMinutes($ttl));
 
-        return $preparation->prepare(new CheckoutPaymentPreparationContext(
-            cart: Cart::factory()->create(),
-            items: new Collection([(object) ['product_id' => $product->id, 'quantity' => 2]]),
-            products: new Collection([$product->id => $product]),
-            lockedSetting: $setting,
-            preflight: $preparation->preflight($preflightContext),
-            requestedExpiresAt: $intent->expiresAt(setting: $setting),
-        ));
+        try {
+            $preflightContext = new CheckoutPaymentPreflightContext(
+                currentSetting: $setting,
+                requestedProvider: $intent->provider(),
+                requestedMethod: $intent->method(),
+            );
+
+            return $preparation->prepare(new CheckoutPaymentPreparationContext(
+                cart: Cart::factory()->create(),
+                items: new Collection([(object) ['product_id' => $product->id, 'quantity' => 2]]),
+                products: new Collection([$product->id => $product]),
+                lockedSetting: $setting,
+                preflight: $preparation->preflight($preflightContext),
+            ));
+        } finally {
+            $this->travelBack();
+        }
     }
 
     private function assertPlan(

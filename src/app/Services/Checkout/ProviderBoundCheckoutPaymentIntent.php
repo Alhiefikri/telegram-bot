@@ -2,11 +2,10 @@
 
 namespace App\Services\Checkout;
 
-use App\Models\Cart;
-use App\Models\ManualPaymentSetting;
-use Carbon\CarbonInterface;
-use Illuminate\Support\Collection;
-
+/**
+ * Compatibility adapter that snapshots the provider-setting identity selected
+ * for a checkout. It does not assemble rail-specific Payment data.
+ */
 final readonly class ProviderBoundCheckoutPaymentIntent implements CheckoutPaymentIntent
 {
     public function __construct(
@@ -16,21 +15,6 @@ final readonly class ProviderBoundCheckoutPaymentIntent implements CheckoutPayme
         public ?int $settingId,
     ) {}
 
-    public function inner(): CheckoutPaymentIntent
-    {
-        return $this->intent;
-    }
-
-    public function preflight(CheckoutPaymentPreflightContext $context): CheckoutPaymentPreflight
-    {
-        return $this->intent->preflight($context);
-    }
-
-    public function prepare(CheckoutPaymentPreparationContext $context): CheckoutPaymentPlan
-    {
-        return $this->intent->prepare($context);
-    }
-
     public function provider(): string
     {
         return $this->intent->provider();
@@ -39,37 +23,6 @@ final readonly class ProviderBoundCheckoutPaymentIntent implements CheckoutPayme
     public function method(): string
     {
         return $this->intent->method();
-    }
-
-    public function orderCurrency(): string
-    {
-        return $this->intent->orderCurrency();
-    }
-
-    public function paymentAmount(Collection $items, Collection $products): int
-    {
-        return $this->intent->paymentAmount($items, $products);
-    }
-
-    public function paymentCurrency(): string
-    {
-        return $this->intent->paymentCurrency();
-    }
-
-    public function expiresAt(
-        ?CarbonInterface $requested = null,
-        ?ManualPaymentSetting $setting = null,
-    ): CarbonInterface {
-        return $this->intent->expiresAt($requested, $setting);
-    }
-
-    public function assertReady(
-        Cart $cart,
-        Collection $items,
-        Collection $products,
-        ?ManualPaymentSetting $setting = null,
-    ): void {
-        $this->intent->assertReady($cart, $items, $products, $setting);
     }
 
     public function postCreationBehavior(): CheckoutPostCreationBehavior

@@ -71,57 +71,21 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(2_500_000, $order->payments()->sole()->amount);
     }
 
-    public function test_checkout_payment_intents_own_provider_amount_currency_deadline_and_post_creation_behavior(): void
+    public function test_checkout_payment_intents_expose_selection_and_presentation_facts(): void
     {
-        config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.pakasir.slug', 'lhie-store');
-        config()->set('services.pakasir.api_key', 'pakasir-key');
-        config()->set('services.pakasir.base_url', 'https://app.pakasir.test');
-        ManualPaymentSetting::create([
-            'binance_pay_enabled' => true,
-            'qris_payment_ttl_minutes' => 9,
-            'binance_payment_ttl_minutes' => 19,
-            'is_active' => true,
-        ]);
+        $cases = [
+            [CheckoutPaymentIntents::manualQris(), 'manual', 'QR_MANUAL', CheckoutPostCreationBehavior::ManualQrisInstructions],
+            [CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS), 'pakasir', PakasirCheckoutFlow::API_QRIS, CheckoutPostCreationBehavior::PakasirInstructions],
+            [CheckoutPaymentIntents::klikQris(), 'klikqris', 'QRIS', CheckoutPostCreationBehavior::KlikQrisInstructions],
+            [CheckoutPaymentIntents::binancePay(), 'manual', 'BINANCE_PAY_ID', CheckoutPostCreationBehavior::BinancePayInstructions],
+            [CheckoutPaymentIntents::usdtBep20(), 'manual', 'USDT_BEP20', CheckoutPostCreationBehavior::BscInstructions],
+        ];
 
-        $pakasirIntent = CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS);
-        $pakasirOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), $pakasirIntent);
-        $pakasirPayment = $pakasirOrder->payments()->sole();
-
-        $this->assertSame('pakasir', $pakasirPayment->provider);
-        $this->assertSame(PakasirCheckoutFlow::API_QRIS, $pakasirPayment->method);
-        $this->assertSame('IDR', $pakasirPayment->currency);
-        $this->assertSame($pakasirOrder->total_amount, $pakasirPayment->amount);
-        $this->assertTrue($pakasirPayment->expired_at->between(now()->addMinutes(8), now()->addMinutes(10)));
-        $this->assertSame(CheckoutPostCreationBehavior::PakasirInstructions, $pakasirIntent->postCreationBehavior());
-
-        $binanceIntent = CheckoutPaymentIntents::binancePay();
-        $binanceProduct = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'usdt_price_amount' => 3_250_000]);
-        $binanceOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($binanceProduct, quantity: 2), $binanceIntent);
-        $binancePayment = $binanceOrder->payments()->sole();
-
-        $this->assertSame('manual', $binancePayment->provider);
-        $this->assertSame('BINANCE_PAY_ID', $binancePayment->method);
-        $this->assertSame('USDT', $binancePayment->currency);
-        $this->assertSame(6_500_000, $binancePayment->amount);
-        $this->assertTrue($binancePayment->expired_at->between(now()->addMinutes(18), now()->addMinutes(20)));
-        $this->assertSame(CheckoutPostCreationBehavior::BinancePayInstructions, $binanceIntent->postCreationBehavior());
-    }
-
-    public function test_klik_qris_checkout_intent_owns_provider_currency_deadline_and_post_creation_behavior(): void
-    {
-        $deadline = now()->addMinutes(12);
-
-        $intent = CheckoutPaymentIntents::klikQris($deadline);
-
-        $this->assertSame('klikqris', $intent->provider());
-        $this->assertSame('QRIS', $intent->method());
-        $this->assertSame('IDR', $intent->orderCurrency());
-        $this->assertSame('IDR', $intent->paymentCurrency());
-        $this->assertTrue($intent->expiresAt()->equalTo($deadline));
-        $requestedDeadline = now()->addMinutes(3);
-        $this->assertTrue($intent->expiresAt($requestedDeadline)->equalTo($requestedDeadline));
-        $this->assertSame(CheckoutPostCreationBehavior::KlikQrisInstructions, $intent->postCreationBehavior());
+        foreach ($cases as [$intent, $provider, $method, $postCreationBehavior]) {
+            $this->assertSame($provider, $intent->provider());
+            $this->assertSame($method, $intent->method());
+            $this->assertSame($postCreationBehavior, $intent->postCreationBehavior());
+        }
     }
 
     public function test_klik_qris_checkout_persists_idr_payment_for_current_product_total_with_default_deadline(): void
@@ -308,10 +272,7 @@ class OrderCartDomainTest extends TestCase
 
     public function test_expiry_and_cancel_release_once(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout(
-            $this->cartWithProduct(stock: 2),
-            CheckoutPaymentIntents::manualQris(now()->subMinute()),
-        );
+        $order = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
 
         $expired = app(OrderStateMachine::class)->applyPendingExpiry($order);
         $expiredReplay = app(OrderStateMachine::class)->applyPendingExpiry($order->fresh());
@@ -336,7 +297,7 @@ class OrderCartDomainTest extends TestCase
     public function test_expiring_pending_order_dispatches_private_admin_expired_notification_once(): void
     {
         Queue::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $order = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
 
         app(OrderStateMachine::class)->expirePendingOrder($order);
         app(OrderStateMachine::class)->expirePendingOrder($order->fresh());
@@ -407,7 +368,7 @@ class OrderCartDomainTest extends TestCase
 
     public function test_paid_after_expired_records_payment_without_mutating_stock(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 1), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $order = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 1));
         app(OrderStateMachine::class)->expirePendingOrder($order);
 
         $latePaid = app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->first());
@@ -559,7 +520,7 @@ class OrderCartDomainTest extends TestCase
 
         $this->assertTrue($ledger->hasSaleProof($items, InventoryMovement::where('order_id', $order->id)->get()));
 
-        $releaseOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $releaseOrder = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
         app(OrderStateMachine::class)->expirePendingOrder($releaseOrder);
 
         $this->assertTrue($ledger->hasReleaseProof($releaseOrder->orderItems()->get(), InventoryMovement::where('order_id', $releaseOrder->id)->get()));
@@ -570,9 +531,9 @@ class OrderCartDomainTest extends TestCase
         config(['services.telegram.token' => null]);
 
         $orders = collect([
-            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2))),
-            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2))),
-            app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2))),
+            $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2)),
+            $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2)),
+            $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2)),
         ]);
 
         $this->artisan('orders:expire-pending', ['--chunk' => 1])
@@ -588,7 +549,7 @@ class OrderCartDomainTest extends TestCase
         config(['services.telegram.token' => null]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
         $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'expiry@example.test|pass']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), CheckoutPaymentIntents::manualQris(now()->subMinutes(2)));
+        $order = $this->checkoutWithExpiredManual($this->cartWithProduct($product));
 
         $this->artisan('orders:expire-pending')->assertSuccessful();
 
@@ -603,8 +564,8 @@ class OrderCartDomainTest extends TestCase
     {
         config(['services.telegram.token' => null]);
 
-        $skipped = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2)));
-        $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2)));
+        $skipped = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
+        $processed = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
         $this->app->instance(OrderLifecycle::class, new class($skipped->id) extends OrderStateMachine
         {
             public function __construct(private readonly string $skippedOrderId)
@@ -634,8 +595,8 @@ class OrderCartDomainTest extends TestCase
     {
         config(['services.telegram.token' => null]);
 
-        $failed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2)));
-        $processed = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinutes(2)));
+        $failed = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
+        $processed = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
         $this->app->instance(OrderLifecycle::class, new class($failed->id) extends OrderStateMachine
         {
             public function __construct(private readonly string $failedOrderId)
@@ -673,7 +634,7 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(2, $product->fresh()->stock);
 
         $product2 = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
-        $expiredOrder = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product2), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $expiredOrder = $this->checkoutWithExpiredManual($this->cartWithProduct($product2));
         $product2->delete();
 
         app(OrderStateMachine::class)->expirePendingOrder($expiredOrder);
@@ -699,7 +660,7 @@ class OrderCartDomainTest extends TestCase
 
     public function test_release_requires_matching_reservation_and_does_not_mutate_stock(): void
     {
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $order = $this->checkoutWithExpiredManual($this->cartWithProduct(stock: 2));
         InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Reservation)->delete();
         $before = Product::first()->only(['stock', 'reserved_stock']);
 
@@ -723,6 +684,17 @@ class OrderCartDomainTest extends TestCase
 
         $this->assertTrue($first->is($second));
         $this->assertSame(1, Cart::where('customer_id', $customer->id)->where('status', CartStatus::Active)->count());
+    }
+
+    private function checkoutWithExpiredManual(Cart $cart): Order
+    {
+        $this->travelTo(now()->subMinutes(11));
+
+        try {
+            return app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        } finally {
+            $this->travelBack();
+        }
     }
 
     private function cartWithProduct(?Product $product = null, int $stock = 10, int $quantity = 1): Cart

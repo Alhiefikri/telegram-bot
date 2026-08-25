@@ -27,12 +27,11 @@ final readonly class ManualQrisCheckoutPaymentPreparation implements CheckoutPay
             requestedProvider: PaymentProvider::MANUAL,
             requestedMethod: self::METHOD,
         ));
+        $expiresAt = now()->addMinutes(
+            $context->lockedSetting?->qrisPaymentTtlMinutes()
+                ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
+        );
 
-        $expiresAt = $context->requestedExpiresAt
-            ?? now()->addMinutes(
-                $context->lockedSetting?->qrisPaymentTtlMinutes()
-                    ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
-            );
         $amount = $this->baseAmount($context->items, $context->products);
         $snapshot = new ManualQrisCheckoutPaymentSnapshot(
             provider: PaymentProvider::MANUAL,

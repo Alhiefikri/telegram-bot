@@ -44,8 +44,8 @@ final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymen
         [$receiverType, $receiverValue] = $this->receiverSnapshot();
         $mode = $this->verificationMode($setting);
         $baseAmount = $this->baseAmount($context->items, $context->products);
-        $expiresAt = $context->requestedExpiresAt
-            ?? now()->addMinutes($setting->binancePaymentTtlMinutes());
+        $expiresAt = now()->addMinutes($setting->binancePaymentTtlMinutes());
+
         $amount = $mode === 'amount_unique'
             ? $this->uniqueAmount->allocate($baseAmount)
             : $baseAmount;

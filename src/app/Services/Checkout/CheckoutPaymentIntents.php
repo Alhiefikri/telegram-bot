@@ -3,7 +3,6 @@
 namespace App\Services\Checkout;
 
 use App\Support\PakasirCheckoutFlow;
-use Carbon\CarbonInterface;
 
 final class CheckoutPaymentIntents
 {
@@ -64,33 +63,33 @@ final class CheckoutPaymentIntents
         ], true);
     }
 
-    public static function manualQris(?CarbonInterface $deadline = null): ManualQrisCheckoutIntent
+    public static function manualQris(): ManualQrisCheckoutIntent
     {
-        return new ManualQrisCheckoutIntent($deadline);
+        return new ManualQrisCheckoutIntent;
     }
 
-    public static function binancePayId(?CarbonInterface $deadline = null): BinancePayCheckoutIntent
+    public static function binancePayId(): BinancePayCheckoutIntent
     {
-        return new BinancePayCheckoutIntent($deadline);
+        return new BinancePayCheckoutIntent;
     }
 
-    public static function binancePay(?CarbonInterface $deadline = null): BinancePayCheckoutIntent
+    public static function binancePay(): BinancePayCheckoutIntent
     {
-        return self::binancePayId($deadline);
+        return self::binancePayId();
     }
 
-    public static function usdtBep20(?CarbonInterface $deadline = null): UsdtBep20CheckoutIntent
+    public static function usdtBep20(): UsdtBep20CheckoutIntent
     {
-        return new UsdtBep20CheckoutIntent($deadline);
+        return new UsdtBep20CheckoutIntent;
     }
 
-    public static function pakasir(string $checkoutFlow = PakasirCheckoutFlow::HOSTED, ?CarbonInterface $deadline = null): PakasirCheckoutIntent
+    public static function pakasir(string $checkoutFlow = PakasirCheckoutFlow::HOSTED): PakasirCheckoutIntent
     {
-        return new PakasirCheckoutIntent($checkoutFlow, $deadline);
+        return new PakasirCheckoutIntent($checkoutFlow);
     }
 
-    public static function klikQris(?CarbonInterface $deadline = null): KlikQrisCheckoutIntent
+    public static function klikQris(): KlikQrisCheckoutIntent
     {
-        return new KlikQrisCheckoutIntent($deadline);
+        return new KlikQrisCheckoutIntent;
     }
 }

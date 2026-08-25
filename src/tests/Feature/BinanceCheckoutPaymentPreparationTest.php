@@ -15,7 +15,6 @@ use App\Services\Checkout\CheckoutPaymentPreparationContext;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\PaymentPlan\BinancePayCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
-use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Tests\TestCase;
@@ -29,7 +28,6 @@ final class BinanceCheckoutPaymentPreparationTest extends TestCase
         $intent = CheckoutPaymentIntents::binancePayId();
         $resolver = app(CheckoutPaymentPreparationResolver::class);
 
-        $this->assertTrue($resolver->hasAdapterFor($intent));
         $this->assertInstanceOf(BinanceCheckoutPaymentPreparation::class, $resolver->for($intent));
     }
 
@@ -56,7 +54,7 @@ final class BinanceCheckoutPaymentPreparationTest extends TestCase
             'binance_auto_verification_enabled' => true,
         ]);
 
-        $plan = $this->prepare($setting, $product, CarbonImmutable::parse('2030-02-03 04:05:06'));
+        $plan = $this->prepare($setting, $product);
         $snapshot = $plan->rail();
 
         $this->assertInstanceOf(CheckoutPaymentPlan::class, $plan);
@@ -84,7 +82,7 @@ final class BinanceCheckoutPaymentPreparationTest extends TestCase
         ]);
         $product = Product::factory()->create(['usdt_price_amount' => 3_250_000]);
 
-        $plan = $this->prepare($setting, $product, CarbonImmutable::parse('2030-02-03 04:05:06'));
+        $plan = $this->prepare($setting, $product);
         $snapshot = $plan->rail();
 
         $this->assertInstanceOf(CheckoutPaymentPlan::class, $plan);
@@ -100,7 +98,6 @@ final class BinanceCheckoutPaymentPreparationTest extends TestCase
     private function prepare(
         ManualPaymentSetting $setting,
         Product $product,
-        CarbonImmutable $deadline,
     ): CheckoutPaymentPlan {
         $preparation = app(BinanceCheckoutPaymentPreparation::class);
         $preflightContext = new CheckoutPaymentPreflightContext(
@@ -115,7 +112,6 @@ final class BinanceCheckoutPaymentPreparationTest extends TestCase
             products: new Collection([$product->id => $product]),
             lockedSetting: $setting,
             preflight: $preparation->preflight($preflightContext),
-            requestedExpiresAt: $deadline,
         ));
     }
 }

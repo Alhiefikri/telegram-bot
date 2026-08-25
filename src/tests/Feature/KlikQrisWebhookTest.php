@@ -158,7 +158,7 @@ class KlikQrisWebhookTest extends TestCase
         Queue::fake([SendTelegramReceipt::class]);
         $order = app(OrderCheckoutService::class)->checkout(
             $this->cartWithProduct(price: 10000, stock: 1),
-            CheckoutPaymentIntents::klikQris(now()->addMinutes(10)),
+            CheckoutPaymentIntents::klikQris(),
         );
         $payment = $order->payments()->sole();
         $payment->update([
@@ -444,7 +444,7 @@ class KlikQrisWebhookTest extends TestCase
     {
         Queue::fake([SendTelegramReceipt::class]);
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 10000, stock: 1), CheckoutPaymentIntents::klikQris(now()->addMinutes(10)));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 10000, stock: 1), CheckoutPaymentIntents::klikQris());
         $payment = $order->payments()->sole();
         $payment->update([
             'provider_total_payment' => 10016,
@@ -454,6 +454,7 @@ class KlikQrisWebhookTest extends TestCase
             'expired_at' => now()->addMinutes(10),
             'provider_payload' => KlikQrisSandboxScenarios::createPayload($payment),
         ]);
+        $order->update(['expires_at' => now()->addMinutes(10)]);
         $product = Product::firstOrFail();
 
         $this->travelTo(now()->addMinutes(11));

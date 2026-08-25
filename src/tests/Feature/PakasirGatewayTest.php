@@ -10,6 +10,8 @@ use App\Jobs\ProcessProviderCancellationAttempt;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
@@ -22,6 +24,7 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\PakasirCheckoutFlow;
+use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -112,7 +115,7 @@ class PakasirGatewayTest extends TestCase
         config()->set('services.telegram.token', null);
         Queue::fake();
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
+        $order = $this->checkoutExpired($this->cartWithProduct(), PakasirCheckoutFlow::HOSTED);
         $payment = $order->payments()->firstOrFail();
 
         $this->artisan('orders:expire-pending')
@@ -131,7 +134,7 @@ class PakasirGatewayTest extends TestCase
     {
         config()->set('services.telegram.token', null);
         Http::fake();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::manualQris(now()->subMinute()));
+        $order = $this->checkoutExpired($this->cartWithProduct());
 
         $this->artisan('orders:expire-pending')->assertSuccessful();
 
@@ -376,6 +379,11 @@ class PakasirGatewayTest extends TestCase
 
     public function test_native_qris_provider_expiry_tightens_local_order_expiry(): void
     {
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::PAKASIR,
+            'qris_payment_ttl_minutes' => 20,
+            'is_active' => true,
+        ]);
         $providerExpiry = now()->addMinutes(15)->startOfSecond();
         $paymentNumber = QrisTestPayload::forAmount(10_380);
         Http::fake(fn ($request) => Http::response([
@@ -390,7 +398,7 @@ class PakasirGatewayTest extends TestCase
                 'expired_at' => $providerExpiry->utc()->toAtomString(),
             ],
         ], 200));
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->addHour()));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED));
         $payment = $order->payments()->firstOrFail();
 
         app(PakasirNativeQrisService::class)->ensureCreated($payment);
@@ -659,6 +667,21 @@ class PakasirGatewayTest extends TestCase
         $this->assertSame('QR_MANUAL', $payment->method);
         $this->assertNull($payment->provider_reference);
         Http::assertNothingSent();
+    }
+
+    private function checkoutExpired(Cart $cart, ?string $pakasirFlow = null): Order
+    {
+        $this->travelTo(now()->subMinutes(11));
+
+        try {
+            $intent = $pakasirFlow === null
+                ? CheckoutPaymentIntents::manualQris()
+                : CheckoutPaymentIntents::pakasir($pakasirFlow);
+
+            return app(OrderCheckoutService::class)->checkout($cart, $intent);
+        } finally {
+            $this->travelBack();
+        }
     }
 
     private function cartWithProduct(int $stock = 10, int $quantity = 1): Cart

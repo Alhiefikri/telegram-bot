@@ -145,7 +145,15 @@ class ManualFulfillmentReviewTest extends TestCase
     {
         $cart = app(CartService::class)->activeCartFor(Customer::factory()->create());
         app(CartService::class)->addItem($cart, $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris(now()->subMinute()));
+
+        $this->travelTo(now()->subMinutes(11));
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        } finally {
+            $this->travelBack();
+        }
+
         app(OrderLifecycle::class)->applyPendingExpiry($order);
         app(OrderLifecycle::class)->applyPaymentPaid($order->payments()->sole());
 

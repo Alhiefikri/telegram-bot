@@ -119,7 +119,7 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         Queue::fake();
         $order = app(OrderCheckoutService::class)->checkout(
             $this->cartWithProduct(price: 30103),
-            CheckoutPaymentIntents::klikQris(now()->addMinutes(30))
+            CheckoutPaymentIntents::klikQris()
         );
         $payment = $order->payments()->sole();
         $payment->update(['merchant_ref' => 'INV-KLIKQRIS-SANDBOX-11']);

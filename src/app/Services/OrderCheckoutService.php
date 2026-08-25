@@ -140,7 +140,6 @@ class OrderCheckoutService
             $preflight = CheckoutPaymentPreflight::none($preflightContext);
         }
 
-        $requestedExpiresAt = $paymentIntent->expiresAt(setting: $activeSetting);
         $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
         $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
             cart: $lockedCart,
@@ -148,7 +147,6 @@ class OrderCheckoutService
             products: $products,
             lockedSetting: $activeSetting,
             preflight: $preflight,
-            requestedExpiresAt: $requestedExpiresAt,
         ));
 
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);

@@ -45,11 +45,11 @@ final readonly class PakasirCheckoutPaymentPreparation implements CheckoutPaymen
             throw new InvalidCheckout(trim('Pakasir payment rail is not ready. '.$readiness->configurationMessage()));
         }
 
-        $expiresAt = $context->requestedExpiresAt
-            ?? now()->addMinutes(
-                $context->lockedSetting?->qrisPaymentTtlMinutes()
-                    ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
-            );
+        $expiresAt = now()->addMinutes(
+            $context->lockedSetting?->qrisPaymentTtlMinutes()
+                ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
+        );
+
         $amount = $this->baseAmount($context->items, $context->products);
         $snapshot = new PakasirCheckoutPaymentSnapshot(
             provider: PaymentProvider::PAKASIR,

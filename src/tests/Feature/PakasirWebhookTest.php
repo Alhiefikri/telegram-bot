@@ -16,6 +16,7 @@ use App\Models\CartItem;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
@@ -148,7 +149,7 @@ class PakasirWebhookTest extends TestCase
     {
         Queue::fake();
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
+        $order = $this->checkoutExpiredPakasir($this->cartWithProduct(stock: 2));
         $payment = $order->payments()->firstOrFail();
 
         app(OrderStateMachine::class)->expirePendingOrder($order);
@@ -741,7 +742,7 @@ class PakasirWebhookTest extends TestCase
     {
         config()->set('services.telegram.token', 'bot-token');
         $providerExpiry = now()->subMinute()->startOfSecond();
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->addHour()));
+        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(stock: 2), CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED));
         $payment = $order->payments()->firstOrFail();
         $payment->update(['provider_payment_method' => 'qris']);
         $this->fakeDetail($payment->merchant_ref, $payment->amount, [
@@ -851,7 +852,7 @@ class PakasirWebhookTest extends TestCase
         $product = Product::factory()->create(['name' => 'Ready API KEY', 'stock' => 2, 'reserved_stock' => 0, 'price_amount' => 7000]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => now()->addHour()]);
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
-        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED, now()->subMinute()));
+        $order = $this->checkoutExpiredPakasir($cart);
 
         $this->artisan('orders:expire-pending')->assertSuccessful();
 
@@ -948,6 +949,20 @@ class PakasirWebhookTest extends TestCase
             'negative integer' => -$expectedAmount,
             'negative string' => '-'.$expectedAmount,
         ];
+    }
+
+    private function checkoutExpiredPakasir(Cart $cart): Order
+    {
+        $this->travelTo(now()->subMinutes(11));
+
+        try {
+            return app(OrderCheckoutService::class)->checkout(
+                $cart,
+                CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::HOSTED),
+            );
+        } finally {
+            $this->travelBack();
+        }
     }
 
     private function cartWithProduct(int $stock = 10, int $quantity = 1): Cart

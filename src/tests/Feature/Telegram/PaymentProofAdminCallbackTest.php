@@ -210,18 +210,18 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_pending_manual_proof_keeps_original_deadline_and_releases_stock_after_expiry(): void
     {
         $this->fakeTelegramHttp();
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'qris_payment_ttl_minutes' => 1, 'is_active' => true]);
 
         $startedAt = now()->startOfMinute();
         Carbon::setTestNow($startedAt);
+        $deadline = $startedAt->copy()->addMinute();
 
         try {
             $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
             $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
             $cart = app(CartService::class)->activeCartFor($customer);
             app(CartService::class)->addItem($cart, $product, 1);
-            $deadline = $startedAt->copy()->addMinute();
-            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris($deadline));
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
 
             $this->postTelegramWebhook($this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']))->assertOk();
 
