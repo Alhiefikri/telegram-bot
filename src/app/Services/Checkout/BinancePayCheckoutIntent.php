@@ -10,6 +10,8 @@ use Illuminate\Support\Collection;
 
 final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 {
+    use CheckoutPaymentPreparationCompatibility;
+
     public const METHOD = 'BINANCE_PAY_ID';
 
     public function __construct(private ?CarbonInterface $deadline = null) {}

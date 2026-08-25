@@ -7,7 +7,7 @@ use App\Models\ManualPaymentSetting;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
-interface CheckoutPaymentIntent
+interface CheckoutPaymentIntent extends CheckoutPaymentPreparation
 {
     public function provider(): string;
 

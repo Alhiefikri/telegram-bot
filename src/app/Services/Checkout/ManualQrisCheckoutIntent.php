@@ -10,6 +10,8 @@ use Illuminate\Support\Collection;
 
 final readonly class ManualQrisCheckoutIntent implements CheckoutPaymentIntent
 {
+    use CheckoutPaymentPreparationCompatibility;
+
     public function __construct(private ?CarbonInterface $deadline = null) {}
 
     public function provider(): string

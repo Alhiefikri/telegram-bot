@@ -13,6 +13,8 @@ use RuntimeException;
 
 final readonly class KlikQrisCheckoutIntent implements CheckoutPaymentIntent
 {
+    use CheckoutPaymentPreparationCompatibility;
+
     public function __construct(private ?CarbonInterface $deadline = null) {}
 
     public function provider(): string

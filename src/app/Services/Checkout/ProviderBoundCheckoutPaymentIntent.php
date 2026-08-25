@@ -21,6 +21,16 @@ final readonly class ProviderBoundCheckoutPaymentIntent implements CheckoutPayme
         return $this->intent;
     }
 
+    public function preflight(CheckoutPaymentPreflightContext $context): CheckoutPaymentPreflight
+    {
+        return $this->intent->preflight($context);
+    }
+
+    public function prepare(CheckoutPaymentPreparationContext $context): CheckoutPaymentPlan
+    {
+        return $this->intent->prepare($context);
+    }
+
     public function provider(): string
     {
         return $this->intent->provider();

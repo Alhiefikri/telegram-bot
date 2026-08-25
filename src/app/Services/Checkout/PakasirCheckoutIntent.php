@@ -13,6 +13,8 @@ use Illuminate\Support\Collection;
 
 final readonly class PakasirCheckoutIntent implements CheckoutPaymentIntent
 {
+    use CheckoutPaymentPreparationCompatibility;
+
     public function __construct(
         private string $checkoutFlow,
         private ?CarbonInterface $deadline = null,

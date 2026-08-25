@@ -20,6 +20,8 @@ use App\Services\Bsc\BscVerificationRpcClientAdapter;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Bsc\BscWalletOwnershipVerifier;
 use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
+use App\Services\Checkout\CheckoutPaymentPlanWriter;
+use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -76,6 +78,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
+        $this->app->singleton(CheckoutPaymentPreparationResolver::class);
+        $this->app->bind(CheckoutPaymentPlanWriter::class);
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
         $this->app->singleton(PaidInvoiceRenderer::class);
         $this->app->singleton(TelegramCallbackAckState::class);

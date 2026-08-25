@@ -11,6 +11,8 @@ use Illuminate\Support\Collection;
 
 final readonly class UsdtBep20CheckoutIntent implements CheckoutPaymentIntent
 {
+    use CheckoutPaymentPreparationCompatibility;
+
     public const METHOD = 'USDT_BEP20';
 
     public function __construct(private ?CarbonInterface $deadline = null) {}
