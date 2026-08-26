@@ -16,6 +16,9 @@ use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
+use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
@@ -24,6 +27,9 @@ use Throwable;
 class StorefrontShopPaymentStatusRefresh
 {
     public function __construct(
+        private readonly PakasirProviderAdapter $pakasir,
+        private readonly PakasirNativeQrisService $nativeQris,
+        private readonly PakasirCallbackProcessor $processor,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
@@ -278,7 +284,8 @@ class StorefrontShopPaymentStatusRefresh
             return false;
         }
 
-        return $this->isNativeQrisPayable($payment);
+        return ($this->isPakasirPayment($payment) && $payment->method === 'hosted')
+            || $this->isNativeQrisPayable($payment);
     }
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
@@ -290,7 +297,12 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isAutomaticQrisPayment(?Payment $payment): bool
     {
-        return $this->isKlikQrisPayment($payment);
+        return $this->isPakasirPayment($payment) || $this->isKlikQrisPayment($payment);
+    }
+
+    private function isPakasirPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === PaymentProvider::PAKASIR;
     }
 
     private function isKlikQrisPayment(?Payment $payment): bool
@@ -300,7 +312,8 @@ class StorefrontShopPaymentStatusRefresh
 
     private function hasNativeQrisRail(?Payment $payment): bool
     {
-        return $this->isKlikQrisPayment($payment);
+        return $this->isKlikQrisPayment($payment)
+            || ($this->isPakasirPayment($payment) && $payment?->method === 'api_qris');
     }
 
     private function isBinancePayment(?Payment $payment): bool
@@ -342,10 +355,23 @@ class StorefrontShopPaymentStatusRefresh
             && ($verificationStatus->mode === 'amount_unique' || $verificationStatus->submitted);
     }
 
+    private function hasPayableNativeQris(?Payment $payment): bool
+    {
+        return $payment?->isPayableNativePakasirQris() === true;
+    }
+
+    /**
+     * Whether the currently persisted state is payable. KlikQRIS payments are
+     * classified by the KlikQRIS lifecycle outcome; Pakasir keeps its legacy
+     * model-level readiness check.
+     */
     private function isNativeQrisPayable(?Payment $payment): bool
     {
-        return $this->isKlikQrisPayment($payment)
-            && $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        if ($this->isKlikQrisPayment($payment)) {
+            return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        return $this->hasPayableNativeQris($payment);
     }
 
     private function isPayableOutcome(?KlikQrisNativeQrisOutcome $outcome, Payment $payment): bool
@@ -363,12 +389,22 @@ class StorefrontShopPaymentStatusRefresh
             return $this->klikQrisNativeQris->lifecycle($payment)->outcome();
         }
 
+        if ($this->isPakasirPayment($payment) && $payment->method === 'api_qris') {
+            $this->nativeQris->ensureCreated($payment);
+        }
+
         return null;
     }
 
     private function processProviderReconciliation(Payment $payment): void
     {
-        $this->klikQrisProcessor->reconcilePayment($payment);
+        if ($this->isKlikQrisPayment($payment)) {
+            $this->klikQrisProcessor->reconcilePayment($payment);
+
+            return;
+        }
+
+        $this->processor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
     }
 
     private function state(OrderLifecycleProjection $projection): StorefrontShopSignedInvoiceState
@@ -409,6 +445,15 @@ class StorefrontShopPaymentStatusRefresh
             };
         }
 
-        return ['state' => 'archived', 'title' => 'Instruksi pembayaran sudah tidak aktif', 'message' => 'Invoice historis ini tetap tersedia sebagai catatan, tetapi provider lama tidak lagi diperiksa.'];
+        if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {
+            return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
+        }
+
+        if ($this->isPakasirPayment($payment)
+            && in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
+            return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
+        }
+
+        return ['state' => 'creating', 'title' => 'Sedang membuat QRIS', 'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.'];
     }
 }

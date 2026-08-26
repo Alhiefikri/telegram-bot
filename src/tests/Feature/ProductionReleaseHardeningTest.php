@@ -114,6 +114,7 @@ class ProductionReleaseHardeningTest extends TestCase
         $productionCompose = file_get_contents(base_path('../docker-compose.yml'));
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
         $perfScript = file_get_contents(base_path('scripts/perf-dogfood.php'));
+        $productionBenchmark = file_get_contents(base_path('../scripts/benchmark-production.mjs'));
         $services = file_get_contents(config_path('services.php'));
 
         $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}', $compose);
@@ -131,6 +132,8 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringContainsString("'run_mode' => [", $perfScript);
         $this->assertStringContainsString("'blocked_scenarios' => \$blockedScenarios", $perfScript);
         $this->assertStringContainsString("'final_queue_state' => [", $perfScript);
+        $this->assertStringNotContainsString('pakasir:reconcile', $perfScript);
+        $this->assertStringNotContainsString('pakasir:reconcile', $productionBenchmark);
         $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 
@@ -910,7 +913,6 @@ SH);
             'tests/Feature/Telegram/WebhookIngressTest.php',
             'tests/Feature/ProductInventoryRaceTest.php',
             'tests/Feature/StorefrontProductCheckoutTest.php',
-            'tests/Feature/PakasirWebhookTest.php',
             'tests/Feature/Telegram/CartCheckoutTest.php',
             'tests/Feature/Telegram/PaymentProofAdminCallbackTest.php',
             'tests/Feature/AdminOrderPaymentOperationsTest.php',

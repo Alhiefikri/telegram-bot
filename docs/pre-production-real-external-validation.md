@@ -1,6 +1,6 @@
 # Real External Pre-Production Validation
 
-Use this runbook when a release needs proof against live external services. The synthetic Docker gate covers the app's production-like Docker/Nginx/PostgreSQL/Supervisor topology; this validation covers the parts that cannot be faked safely: Telegram delivery, real Telegram identities, the Store Channel, and optional Pakasir fixtures.
+Use this runbook when a release needs proof against live external services. The synthetic Docker gate covers the app's production-like Docker/Nginx/PostgreSQL/Supervisor topology; this validation covers the parts that cannot be faked safely: Telegram delivery, real Telegram identities, the Store Channel, and optional legacy Pakasir settlement verification.
 
 Do not commit or paste secrets, private chat IDs, private user IDs, Telegram file IDs, Pakasir API keys, or private URLs into reports. Use configured/missing flags, redacted correlation IDs, and pass/fail notes instead.
 
@@ -22,11 +22,6 @@ Do not commit or paste secrets, private chat IDs, private user IDs, Telegram fil
 - Dogfood admin web credentials:
   - `DOGFOOD_ADMIN_EMAIL`
   - `DOGFOOD_ADMIN_PASSWORD`
-- Pakasir fixtures only when Pakasir mode is in release scope:
-  - `PAKASIR_SLUG`
-  - `PAKASIR_API_KEY`
-  - `DOGFOOD_PAKASIR_PENDING_ORDER_ID`
-  - `DOGFOOD_PAKASIR_PENDING_AMOUNT`
 
 ## Secret Output Guard
 
@@ -87,7 +82,7 @@ Record pass/fail for each row in the run report.
 | Buyer Telegram | `/start`, `/menu`, catalog browse, product detail, `/cari keyword`, add to cart, checkout, `/status` or `/pesanan`, `/batal`, empty-cart checkout/cancel behavior, and payment proof photo forwarding with `/payment INVOICE`. |
 | Admin Telegram | Admin dashboard button visibility, checkout notification to admin, `/broadcast ...` only when scoped to disposable recipients, Store Channel test send, Sales Proof Post publish, and Sales Proof Post retry when in release scope. |
 | Store Channel | Community Gate allows the member identity and blocks/prompts the non-member identity. |
-| Pakasir | If release scope uses Pakasir, run reconcile/webhook/payment-detail against the pending Pakasir fixture. If release scope is manual payment only, mark Pakasir out of scope. |
+| Pakasir legacy settlement | If the compatibility lane is in release scope, run reconcile/webhook/payment-detail only against an existing historical Payment fixture; never create a new Pakasir checkout. |
 | Final operations | `jobs` queue depth is `0`, `failed_jobs` is `0`, and Docker logs show no unexplained Telegram/Pakasir errors from the run window. |
 
 ## Harness Commands

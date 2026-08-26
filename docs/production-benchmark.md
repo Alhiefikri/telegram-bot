@@ -66,7 +66,7 @@ The benchmark covers:
 - Telegram webhook invalid secret, unsupported update, valid update, and duplicate update paths.
 - Telegram handler product, quantity, and checkout happy paths through the real webhook, database queue, and Supervisor worker.
 - Manual checkout queue behavior across the `default` update worker, `telegram-outbound` checkout-instruction worker, and independent `notifications` worker, including the timing events emitted for order checkout, QR file read, customer `sendPhoto`, admin `sendMessage`, receipt, and Sales Proof work.
-- Operational commands: `ops:health --db --queue-schema --queue-depth --supervisor`, scheduler heartbeat health, `orders:expire-pending`, `pakasir:reconcile --chunk=5`, and `ops:check-failed-jobs --max=0`.
+- Operational commands: `ops:health --db --queue-schema --queue-depth --supervisor`, scheduler heartbeat health, `orders:expire-pending`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
 
 The Docker default uses Laravel's encrypted cookie session driver for admin web sessions. This keeps login/logout and CSRF behavior stateful for the browser while avoiding database writes for anonymous `/admin/login` page requests under concurrency. Set `SESSION_DRIVER=database` before running the benchmark if you need to compare the older database-backed session path.
@@ -87,9 +87,8 @@ Synthetic Telegram handler scenarios set `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` b
 
 The benchmark does not fake inbound webhook validation. It still posts JSON updates to `POST /api/webhook/telegram` with the configured webhook secret through Nginx.
 
-Pakasir reconciliation is run as an operational command. With the default manual payment mode and no Pakasir fixtures, it measures the empty/safe command path. Real Pakasir transaction-detail benchmarking still requires the external fixtures documented in `src/README.md` and should use `src/scripts/perf-dogfood.php` for those fixture-specific claims.
 
-Use this benchmark as the default synthetic Docker release gate. Use `src/scripts/perf-dogfood.php` for the broader dogfood scenario matrix: with `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` it reports `run_mode.mode=synthetic`, uses fake Telegram outbound, blocks absent real-external fixtures, and includes `final_queue_state` for `jobs` depth and failed-job checks. With fake outbound disabled, that script is a real-external harness and should only be run with disposable real Telegram, Store Channel, callback, photo, and Pakasir fixtures.
+Use this benchmark as the default synthetic Docker release gate. Use `src/scripts/perf-dogfood.php` for the broader dogfood scenario matrix: with `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` it reports `run_mode.mode=synthetic`, uses fake Telegram outbound, blocks absent real-external fixtures, and includes `final_queue_state` for `jobs` depth and failed-job checks. With fake outbound disabled, that script is a real-external harness and should only be run with disposable real Telegram, Store Channel, callback, and photo fixtures.
 
 ## Budgets
 

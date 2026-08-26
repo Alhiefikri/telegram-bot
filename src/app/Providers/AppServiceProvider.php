@@ -32,6 +32,8 @@ use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
+use App\Services\Pakasir\PakasirClient;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBinanceVerifyCallbackHandler;
@@ -77,6 +79,7 @@ class AppServiceProvider extends ServiceProvider
                 : new BscVerificationRpcClientAdapter($client);
         });
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
+        $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([

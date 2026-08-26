@@ -7,7 +7,6 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Support\PaymentProvider;
 use App\Services\PaymentReceiptReport;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -146,18 +145,13 @@ final class PaidInvoiceOrderPresentationAdapter
 
     private function paymentMethod(Payment $payment): string
     {
-        // Pakasir remains a provenance label for immutable historical Payments.
-        if (PaymentProvider::normalize($payment->provider) === PaymentProvider::PAKASIR) {
-            return 'Pakasir';
-        }
-
         $method = strtolower(trim((string) $payment->method));
         $label = trim((string) $payment->payment_method_label);
 
         $label = match ($method) {
             'api_qris', 'qris' => 'QRIS',
             'binance_pay_id' => 'Binance Pay',
-            'hosted' => 'Hosted payment',
+            'hosted' => 'Pakasir',
             'qr_manual' => 'QR Manual',
             default => $label !== '' ? $label : $method,
         };

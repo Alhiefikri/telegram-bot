@@ -91,6 +91,33 @@ return [
         ],
     ],
 
+    'pakasir' => [
+        'slug' => env('PAKASIR_SLUG'),
+        'api_key' => env('PAKASIR_API_KEY'),
+        'base_url' => env('PAKASIR_BASE_URL', 'https://app.pakasir.com'),
+        'http_timeout_seconds' => (float) env('PAKASIR_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('PAKASIR_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
+        'transaction_detail_max_attempts' => (int) env('PAKASIR_TRANSACTION_DETAIL_MAX_ATTEMPTS', 3),
+        'transaction_detail_retry_delay_ms' => (int) env('PAKASIR_TRANSACTION_DETAIL_RETRY_DELAY_MS', 250),
+        'transaction_detail_retry_max_delay_ms' => (int) env('PAKASIR_TRANSACTION_DETAIL_RETRY_MAX_DELAY_MS', 1000),
+        'reconcile_released_lookback_hours' => (int) env('PAKASIR_RECONCILE_RELEASED_LOOKBACK_HOURS', 72),
+        'redirect_url' => env('PAKASIR_REDIRECT_URL'),
+        'webhook_rate_limit_per_minute' => env('PAKASIR_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
+        'status_refresh_rate_limit_per_minute' => env('PAKASIR_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+        'status_refresh_lock_lease_seconds' => (int) env('PAKASIR_STATUS_REFRESH_LOCK_LEASE_SECONDS', 15),
+        'status_refresh_single_flight_window_seconds' => (int) env('PAKASIR_STATUS_REFRESH_SINGLE_FLIGHT_WINDOW_SECONDS', 5),
+        'status_refresh_in_progress_retry_after_seconds' => (int) env('PAKASIR_STATUS_REFRESH_IN_PROGRESS_RETRY_AFTER_SECONDS', 3),
+        'qris_fee' => [
+            // Official Pakasir pricing published 2026-07-21.
+            'payer' => env('PAKASIR_QRIS_FEE_PAYER', 'customer'),
+            'threshold' => (int) env('PAKASIR_QRIS_FEE_THRESHOLD', 105000),
+            'low_bps' => (int) env('PAKASIR_QRIS_FEE_LOW_BPS', 70),
+            'low_fixed' => (int) env('PAKASIR_QRIS_FEE_LOW_FIXED', 310),
+            'high_bps' => (int) env('PAKASIR_QRIS_FEE_HIGH_BPS', 100),
+            'high_fixed' => (int) env('PAKASIR_QRIS_FEE_HIGH_FIXED', 0),
+        ],
+    ],
+
     'klikqris' => [
         'sandbox_enabled' => (bool) env('KLIKQRIS_SANDBOX_ENABLED', false),
         'sandbox_base_url' => env('KLIKQRIS_SANDBOX_BASE_URL', 'https://klikqris.com/api/sandbox'),

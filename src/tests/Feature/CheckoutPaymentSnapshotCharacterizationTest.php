@@ -343,7 +343,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         };
     }
 
-
     private function configureKlikQris(): void
     {
         KlikQrisSandboxScenarios::configureReadySandbox();

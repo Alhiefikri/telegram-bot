@@ -4,7 +4,6 @@ namespace App\Services\Admin;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
@@ -154,19 +153,23 @@ final class AdminDashboardStatsData
         $isKlikQrisConfigured = $klikQrisReadiness->isReady();
         $isKlikQrisEnabled = $requestedMode === PaymentProvider::KLIKQRIS && $isKlikQrisConfigured;
         $isKlikQrisRequestedButUnavailable = $requestedMode === PaymentProvider::KLIKQRIS && ! $isKlikQrisConfigured;
+        $isPakasirRequested = $requestedMode === PaymentProvider::PAKASIR;
         $effectiveMode = $requestedMode;
 
         $label = match (true) {
+            $isPakasirRequested => 'Pakasir retired — checkout blocked',
             $isKlikQrisEnabled => 'KlikQRIS aktif',
             $isKlikQrisRequestedButUnavailable => 'KlikQRIS aktif — belum siap',
             default => 'Manual /payment aktif',
         };
         $hint = match (true) {
+            $isPakasirRequested => 'Setting lama Pakasir dipertahankan tanpa fallback. Selesaikan cutover provider sebelum membuka checkout baru.',
             $isKlikQrisEnabled => 'Provider KlikQRIS untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
             $isKlikQrisRequestedButUnavailable => 'KlikQRIS tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
             default => 'Provider Manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
         };
         $statusBadge = match (true) {
+            $isPakasirRequested => 'PAKASIR RETIRED',
             $isKlikQrisEnabled => 'KLIKQRIS',
             $isKlikQrisRequestedButUnavailable => 'KLIKQRIS BELUM SIAP',
             default => 'MANUAL',
@@ -213,7 +216,8 @@ final class AdminDashboardStatsData
             'switch_audit' => $this->switchAudits(),
             'label' => $label,
             'hint' => $hint,
-            'tone' => $isKlikQrisEnabled ? 'purple' : 'amber',
+            'tone' => $isPakasirRequested ? 'rose' : ($isKlikQrisEnabled ? 'purple' : 'amber'),
+            'is_pakasir_retired' => $isPakasirRequested,
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'can_switch_provider' => (bool) $user->role?->canSwitchPaymentProvider(),

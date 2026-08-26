@@ -54,8 +54,15 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('klikqris:production-webhook:source:'.$source);
         });
 
+        $this->rateLimiter->for('pakasir-webhook', function (Request $request) {
+            $limit = (int) $this->config->get('services.pakasir.webhook_rate_limit_per_minute', 30);
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
+        });
+
         $statusRefreshLimiter = function (Request $request, string $bucketPrefix = 'automatic-payment') {
-            $limit = max(1, (int) $this->config->get('services.klikqris.status_refresh_rate_limit_per_minute', 3));
+            $limit = max(1, (int) $this->config->get('services.pakasir.status_refresh_rate_limit_per_minute', 3));
             $routeOrder = $request->route('order');
             $identity = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
                 ? (string) $routeOrder->getKey()
@@ -79,6 +86,7 @@ class ApplicationRateLimiterRegistrar
         };
 
         $this->rateLimiter->for('automatic-payment-status-refresh', $statusRefreshLimiter);
+        $this->rateLimiter->for('pakasir-status-refresh', fn (Request $request) => $statusRefreshLimiter($request, 'pakasir'));
 
         $this->rateLimiter->for('storefront-checkout', function (Request $request) {
             $limit = max(1, (int) $this->config->get('services.storefront.checkout_rate_limit_per_minute', 5));

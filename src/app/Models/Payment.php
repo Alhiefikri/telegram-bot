@@ -6,6 +6,8 @@ use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
 use App\Services\KlikQris\KlikQrisAmount;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\Pakasir\PakasirQrisFeePolicy;
+use App\Services\Pakasir\QrisEmvPayload;
 use App\Support\PaymentProvider;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -124,6 +126,51 @@ class Payment extends Model
                 default => $this->localPaymentMethodLabel(),
             },
         );
+    }
+
+    public function isNativePakasirQris(): bool
+    {
+        if ($this->providerName() !== PaymentProvider::PAKASIR || $this->providerPaymentMethodName() !== 'qris') {
+            return false;
+        }
+
+        return filled($this->provider_payment_number_hash)
+            || $this->provider_created_at !== null
+            || filled($this->provider_payment_number);
+    }
+
+    public function isPayableNativePakasirQris(): bool
+    {
+        $candidate = $this->status === PaymentStatus::Pending
+            && $this->providerName() === PaymentProvider::PAKASIR
+            && $this->providerPaymentMethodName() === 'qris'
+            && filled($this->provider_payment_number)
+            && $this->provider_fee !== null
+            && $this->provider_total_payment !== null
+            && $this->amount > 0;
+
+        if (! $candidate) {
+            return false;
+        }
+
+        if (($this->expired_at !== null && ! $this->expired_at->isFuture())
+            || ($this->provider_expires_at !== null && ! $this->provider_expires_at->isFuture())) {
+            return false;
+        }
+
+        try {
+            PakasirQrisFeePolicy::fromConfig()->assertValid(
+                (int) $this->amount,
+                (int) $this->provider_fee,
+                (int) $this->provider_total_payment,
+            );
+            QrisEmvPayload::parse((string) $this->provider_payment_number)
+                ->assertMatchesIdrAmount((int) $this->provider_total_payment);
+        } catch (\UnexpectedValueException) {
+            return false;
+        }
+
+        return true;
     }
 
     public function isNativeKlikQris(): bool

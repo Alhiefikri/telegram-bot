@@ -612,7 +612,10 @@ test("prioritizes invoice content by state without mobile overflow", async ({
       page.getByRole("heading", { name: "Data akun" })
     ).toBeVisible();
     await expect(
-      page.getByText("browser-paid@example.test|BrowserPaidSecret")
+      page.getByText("browser-paid@example.test", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("BrowserPaidSecret", { exact: true })
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "QRIS invoice" })
@@ -808,6 +811,12 @@ test("renders the compact admin dashboard at desktop width", async ({
     page.getByRole("region", { name: "Mode pembayaran" })
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Hosted Pakasir" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "QR Native Pakasir" })
+  ).toHaveCount(0);
   await expectStoreLinkCopyAndShare(page);
 
   await expectNoDocumentOverflow(page);
@@ -816,6 +825,28 @@ test("renders the compact admin dashboard at desktop width", async ({
   await page.goto(`${baseUrl}/admin?tab=produk`);
   await exerciseProductManagementModals(page);
   await expectNoDocumentOverflow(page);
+});
+
+test("hides retired Pakasir controls from provider switch", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+
+  const paymentRegion = page.getByRole("region", { name: "Mode pembayaran" });
+  await expect(paymentRegion).toBeVisible();
+  await expect(
+    paymentRegion.getByRole("button", { name: "QR Manual" })
+  ).toBeVisible();
+  await expect(
+    paymentRegion.getByRole("button", { name: "KlikQRIS" })
+  ).toBeVisible();
+  await expect(
+    paymentRegion.getByRole("button", { name: "Hosted Pakasir" })
+  ).toHaveCount(0);
+  await expect(
+    paymentRegion.getByRole("button", { name: "QR Native Pakasir" })
+  ).toHaveCount(0);
 });
 test("uses a compact sticky shell header on internal admin tabs", async ({
   page,
@@ -1182,6 +1213,12 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
     .getByRole("region", { name: "Mode pembayaran" })
     .scrollIntoViewIfNeeded();
   await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Hosted Pakasir" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "QR Native Pakasir" })
+  ).toHaveCount(0);
 
   await expect(page.getByRole("region", { name: "Link toko" })).toBeVisible();
   await expect(
@@ -2350,7 +2387,7 @@ $qrisPayload = QrisTestPayload::forAmount($qrisTotal, 'BROWSERPENDING');
 
 Payment::factory()->create([
     'order_id' => $qrisOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => $qrisPayload,
@@ -2373,7 +2410,7 @@ $missingProviderTotalOrder = Order::factory()->create([
 
 Payment::factory()->create([
     'order_id' => $missingProviderTotalOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERNOFINAL99',
@@ -2395,7 +2432,7 @@ $statusPendingOrder = Order::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $statusPendingOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERSTATUSPENDING99',
@@ -2436,7 +2473,7 @@ ProductStockItem::create([
 ]);
 Payment::factory()->create([
     'order_id' => $paidInvoiceOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 65000,
@@ -2461,7 +2498,7 @@ OrderItem::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $expiredInvoiceOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 55000,
@@ -2485,7 +2522,7 @@ OrderItem::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $cancelledInvoiceOrder->id,
-    'provider' => 'klikqris',
+    'provider' => 'pakasir',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 56000,

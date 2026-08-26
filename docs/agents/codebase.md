@@ -228,7 +228,7 @@ Reporting memakai cache singkat yang memasukkan environment dan seluruh paramete
 
 ### 5.1 Provider selection
 
-`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; migration retirement memindahkan setting aktif Pakasir ke KlikQRIS dan menghapus checkout flow-nya. Historical Payment hanya dibaca dari snapshot persisten; tidak ada callback, reconciliation, cancellation, atau provider lookup Pakasir.
+`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; expand migration memindahkan setting Pakasir aktif ke KlikQRIS, sementara kolom checkout flow dipertahankan sampai contract release gated. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent` dan menolak Pakasir untuk checkout baru.
 
 `CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
 
@@ -262,7 +262,14 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 
 OrderCheckoutService tidak memetakan rail, menghitung field Binance/BSC, atau melakukan external I/O dari fase `prepare()`. Aturan amount/receiver/verification rail tetap berada pada preparation adapter dan service verification masing-masing.
 
-### 5.3 KlikQRIS Native QRIS
+### 5.3 Pakasir legacy settlement
+
+Pakasir tidak lagi tersedia untuk checkout baru. Payment lama dengan `provider=pakasir` tetap immutable dan diproses melalui compatibility lane sampai retirement gate lulus. `PakasirCallbackProcessor` mencocokkan project/slug, merchant reference, amount, method, dan status; callback paid tetap melakukan Transaction Detail API verification sebelum memanggil `OrderLifecycle`.
+
+`pakasir:reconcile` memproses Payment lama yang masih pending atau baru dilepas, dan provider cancellation attempt tetap idempotent. `pakasir:retirement-status --json` melaporkan settlement, legacy queue, dan owner-approval readiness; ketika `gate=awaiting_owner_approval`, owner dapat merekam approval dengan `php artisan pakasir:retirement-approve <owner-id-or-email>`. Contract migration tidak berada di expand path dan hanya boleh dijalankan setelah report menunjukkan `gate=ready_for_contract`.
+
+Jangan membuat hosted checkout atau Native QRIS Pakasir baru, dan jangan memindahkan logic legacy ini ke KlikQRIS.
+### 5.4 KlikQRIS Native QRIS
 
 KlikQRIS adalah module yang memiliki boundary sendiri sesuai [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md). [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php) adalah satu-satunya tempat untuk:
 
@@ -345,7 +352,6 @@ Perbedaan subtle: paid Pakasir secara default memproyeksikan Order ke `completed
 | `POST /api/webhook/pakasir`          | `PakasirWebhookController`            | callback untrusted, Transaction Detail verification             |
 | `POST /api/webhook/klikqris/sandbox` | `KlikQrisSandboxWebhookController`    | sandbox secret/readiness dan authoritative status               |
 | `POST /api/webhook/klikqris`         | `KlikQrisProductionWebhookController` | production secret/readiness dan authoritative status            |
-| `POST /api/webhook/pakasir`          | `PakasirWebhookController`            | legacy callback intake; Transaction Detail verification             |
 Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown status, dan provider outage. Provider event/payload harus melalui sanitizer sebelum disimpan atau ditampilkan.
 
 ### Scheduler
@@ -356,7 +362,6 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
-- `pakasir:reconcile --chunk=100` tiap menit hanya untuk Payment legacy sampai retirement gate passed;
 - recovery Telegram updates/outbound dan payment proofs tiap menit; `telegram:recover-outbound` mengubah lease kadaluarsa menjadi `unknown`, lalu hanya mengirim effect `pending`/`failed` yang dispatchable;
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
@@ -367,9 +372,8 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 
 - `default` — Telegram update processing.
 - `telegram-outbound` — checkout instructions dan pending-order admin notification.
-- `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert.
+- `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
 - `telegram-broadcast` — broadcast dan price/stock notification batches.
-- `binance-verification` — Binance Pay ID and USDT BEP20 verification jobs; BSC does not add another worker.
 
 Jobs yang mengirim efek eksternal memakai unique/claim markers agar retry tidak mengirim efek ganda. Queue job bukan tempat menaruh business transition baru; job memanggil service owner lalu dapat retry bila dependency eksternal gagal.
 
@@ -416,6 +420,10 @@ Data boundary:
 | background work | [`src/app/Jobs/`](../../src/app/Jobs/), [`src/app/Console/Commands/`](../../src/app/Console/Commands/)                                                                                                                                     |
 | config          | [`src/config/services.php`](../../src/config/services.php), [`src/config/storefront.php`](../../src/config/storefront.php), [`src/.env.example`](../../src/.env.example)                                                                   |
 | schema          | [`src/database/migrations/`](../../src/database/migrations/)                                                                                                                                                                               |
+Contract schema changes such as Pakasir column removal live under
+`src/database/contract-migrations/` and are run only after the retirement
+report is `ready_for_contract`; normal expand migration startup does not load
+that directory.
 
 ## 10. Test map dan command
 

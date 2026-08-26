@@ -10,6 +10,7 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\CartService;
@@ -191,7 +192,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && ! $this->requestBodyContainsAny($r, $sensitiveValues));
     }
 
-    public function test_historical_pakasir_payment_detail_is_read_without_provider_network_access(): void
+    public function test_order_detail_names_pakasir_payment_as_generic_qris_instead_of_raw_hosted_method(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
@@ -215,9 +216,36 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Pembayaran: QRIS (Menunggu pembayaran)')
             && ! str_contains($r['text'], 'Pembayaran: hosted')
             && ! str_contains($r['text'], 'Pakasir'));
-        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'pakasir'));
     }
 
+    public function test_order_detail_refreshes_pending_pakasir_payment_from_transaction_detail(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = $this->legacyPakasirOrder($customer->carts()->first());
+        $payment = $order->payments()->firstOrFail();
+        $payment->update(['provider_payment_method' => 'qris']);
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => [
+                'project' => 'sedulur-digital',
+                'order_id' => $payment->merchant_ref,
+                'amount' => $payment->amount,
+                'status' => 'completed',
+                'payment_method' => 'qris',
+            ]]),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(211, '/order '.$order->invoice_number))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertNotNull(PaymentEvent::firstOrFail()->processed_at);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Detail Pesanan')
+            && str_contains($r['text'], 'Pembayaran sudah diterima'));
+    }
 
     #[DataProvider('manualPaymentLocaleCases')]
     public function test_order_detail_localizes_qr_manual_payment_method(string $locale, int $chatId, string $label): void
@@ -255,6 +283,31 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         ];
     }
 
+    public function test_order_detail_status_refresh_is_rate_limited_per_payment(): void
+    {
+        config()->set('services.pakasir.status_refresh_rate_limit_per_minute', 1);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'price_amount' => 10000]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        $order = $this->legacyPakasirOrder($customer->carts()->first());
+        $payment = $order->payments()->firstOrFail();
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => [
+                'project' => 'sedulur-digital',
+                'order_id' => $payment->merchant_ref,
+                'amount' => $payment->amount,
+                'status' => 'pending',
+            ]]),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(212, '/order '.$order->invoice_number))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(213, '/order '.$order->invoice_number))->assertOk();
+
+        $this->assertCount(1, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
+        $this->assertSame(1, PaymentEvent::count());
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
+            && str_contains($r['text'], 'Baru bisa cek status pembayaran lagi'));
+    }
 
     public function test_order_cannot_access_other_customer_order(): void
     {
@@ -572,7 +625,85 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($copy['otherCancelStaleMessage'], $messageText);
     }
 
+    #[DataProvider('cancellationFailureLocaleCases')]
+    public function test_buyer_cancel_verification_failure_is_localized(array $copy): void
+    {
+        Queue::fake([ReconcileCustomerCancellationPayment::class]);
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => function () use (&$payment) {
+                return Http::response(['transaction' => [
+                    'project' => 'unexpected-project',
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'payment_method' => 'qris',
+                    'status' => 'pending',
+                ]]);
+            },
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-VERIFY-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'provider_payment_number_hash' => hash('sha256', 'verify-'.$copy['locale']),
+            'provider_created_at' => now(),
+        ]);
 
+        $callbackId = 'cancel-verify-'.$copy['locale'];
+        $this->postTelegramWebhook($this->callbackUpdate(310, $callbackId, 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->assertSame($copy['verificationAnswer'], $this->callbackAnswerText($callbackId));
+        $message = $this->sentMessageRequestContaining($copy['verificationDetail']);
+        $this->assertStringNotContainsString($copy['otherVerificationDetail'], (string) $message['text']);
+    }
+
+    #[DataProvider('cancellationFailureLocaleCases')]
+    public function test_buyer_cancel_paid_provider_outcome_is_localized(array $copy): void
+    {
+        $payment = null;
+        $this->fakeTelegramHttp([
+            'https://app.pakasir.test/api/transactiondetail*' => function () use (&$payment) {
+                return Http::response(['transaction' => [
+                    'project' => 'sedulur-digital',
+                    'amount' => $payment->amount,
+                    'order_id' => $payment->merchant_ref,
+                    'payment_method' => 'qris',
+                    'status' => 'completed',
+                ]]);
+            },
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-CANCEL-PAID-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'provider_payment_number_hash' => hash('sha256', 'paid-'.$copy['locale']),
+            'provider_created_at' => now(),
+        ]);
+
+        $callbackId = 'cancel-paid-'.$copy['locale'];
+        $this->postTelegramWebhook($this->callbackUpdate(311, $callbackId, 'buyer:cancel-pending:'.$order->id))->assertOk();
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame($copy['paidAnswer'], $this->callbackAnswerText($callbackId));
+        $message = $this->sentMessageRequestContaining($copy['paidDetail']);
+        $this->assertStringNotContainsString($copy['otherPaidDetail'], (string) $message['text']);
+    }
 
     #[DataProvider('cancellationFailureLocaleCases')]
     public function test_buyer_cancel_processed_outcome_is_localized(array $copy): void

@@ -57,6 +57,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains('storefront.signed', $showRoute->middleware());
         $this->assertContains('storefront.signed', $statusRoute->middleware());
         $this->assertContains('throttle:automatic-payment-status-refresh', $statusRoute->middleware());
+        $this->assertNotNull(app(RateLimiter::class)->limiter('pakasir-status-refresh'));
 
         $orderIdRoute = $this->assertRouteContract('storefront.shop.orders.binance-order-id', 'POST', 'shop/orders/{order}/binance-order-id');
         $this->assertContains('storefront.signed', $orderIdRoute->middleware());
@@ -86,6 +87,32 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertRedirect(route('storefront.shop.index'));
     }
 
+    public function test_new_checkout_rejects_retired_pakasir_setting_without_side_effects(): void
+    {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'price_amount' => 15000,
+            'stock' => 1,
+        ]);
+        Http::fake();
+
+        $this->expectException(InvalidCheckout::class);
+        try {
+            app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerName: 'Retired Provider Buyer',
+            ));
+        } finally {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, Customer::query()->count());
+            Http::assertNothingSent();
+        }
+    }
 
     public function test_checkout_module_stores_buyer_name_without_treating_it_as_contact_identity(): void
     {

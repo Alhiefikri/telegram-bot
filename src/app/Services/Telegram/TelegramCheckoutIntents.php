@@ -13,7 +13,11 @@ use App\Services\Checkout\PaymentProviderSelection;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
+use App\Services\Pakasir\PakasirNativeQrisService;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
+use App\Support\PakasirCheckoutFlow;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
@@ -22,6 +26,8 @@ class TelegramCheckoutIntents
 {
     public function __construct(
         private TelegramBotClient $bot,
+        private PakasirProviderAdapter $pakasir,
+        private PakasirNativeQrisService $nativeQris,
         private TelegramPaymentInstructionRenderer $paymentInstructions,
         private TelegramLocale $locale,
         private KlikQrisNativeQrisService $klikQris,
@@ -47,6 +53,28 @@ class TelegramCheckoutIntents
             'order_correlation_id' => DogfoodTiming::correlation($order->id),
             'qr_image_bytes' => strlen($instruction->photoContents),
         ]);
+    }
+
+    public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): array
+    {
+        $order->loadMissing('customer');
+        $locale = $this->locale->code($order->customer);
+        if ($payment->method === PakasirCheckoutFlow::API_QRIS) {
+            try {
+                $transaction = $this->nativeQris->ensureCreated($payment);
+            } catch (Throwable $e) {
+                report($e);
+
+                return $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale, true);
+
+            }
+
+            $payment->refresh();
+
+            return $this->sendNativePakasirPaymentInstructions($chatId, $order, $payment, $transaction, $locale);
+        }
+
+        return $this->sendHostedPakasirPaymentInstructions($chatId, $order, $payment, $locale);
     }
 
     public function sendKlikQrisPaymentInstructions(string $chatId, Order $order, Payment $payment): array
@@ -201,6 +229,34 @@ class TelegramCheckoutIntents
     private function utf16Length(string $value): int
     {
         return intdiv(strlen(mb_convert_encoding($value, 'UTF-16LE', 'UTF-8')), 2);
+    }
+
+    private function sendHostedPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, string $locale, bool $fallback = false): array
+    {
+        return $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->hostedPakasir(
+                $order,
+                $payment,
+                $this->pakasir->hostedPaymentUrl($payment),
+                $fallback,
+                $locale,
+            ),
+        );
+    }
+
+    private function sendNativePakasirPaymentInstructions(string $chatId, Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $locale): array
+    {
+        return $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->nativePakasir(
+                $order,
+                $payment,
+                $transaction,
+                $this->pakasir->hostedPaymentUrl($payment),
+                $locale,
+            ),
+        );
     }
 
     private function sendPaymentInstruction(string $chatId, TelegramPaymentInstruction $instruction, array $timingContext = []): array

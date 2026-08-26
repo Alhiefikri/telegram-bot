@@ -8,6 +8,8 @@ use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
+use App\Services\Pakasir\PakasirQrisFeePolicy;
+use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
 
@@ -134,6 +136,81 @@ class TelegramPaymentInstructionRenderer
         ];
     }
 
+    public function hostedPakasir(Order $order, Payment $payment, string $paymentUrl, bool $fallback = false, string $locale = 'id'): TelegramPaymentInstruction
+    {
+        $order->loadMissing('orderItems');
+        $lines = [];
+
+        if ($fallback) {
+            $lines = [
+                $this->text($locale, 'payment.pakasir.fallback.title'),
+                $this->text($locale, 'payment.pakasir.fallback.explanation'),
+                $this->text($locale, 'payment.pakasir.fallback.continue'),
+                '',
+            ];
+        }
+
+        $lines = array_merge($lines, $this->pakasirOrderHeaderLines($order, $locale), [
+            $this->text($locale, 'payment.total', ['amount' => $this->formatRupiah($order->total_amount)]),
+            '',
+            $this->text($locale, 'payment.pakasir.exact_amount'),
+        ]);
+
+        if ($order->expires_at) {
+            $lines[] = $this->text($locale, 'payment.pakasir.order_active_until', ['date' => $this->formatDate($order->expires_at, $locale)]);
+        }
+
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.pakasir.scan_hosted');
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.auto_delivery');
+        $lines[] = $this->text($locale, 'payment.check_if_missing');
+
+        return new TelegramPaymentInstruction(
+            photoContents: $this->qrCodes->png($paymentUrl),
+            filename: 'qris-checkout-'.$payment->merchant_ref.'.png',
+            captionLines: $lines,
+            replyMarkup: $this->paymentActions($order, $paymentUrl, $locale),
+        );
+    }
+
+    public function nativePakasir(Order $order, Payment $payment, PakasirQrisTransaction $transaction, string $paymentUrl, string $locale = 'id'): TelegramPaymentInstruction
+    {
+        $order->loadMissing('orderItems');
+        $payableAmount = $transaction->totalPayment() ?? $payment->amount;
+        $expiry = $this->earliestDate($transaction->expiresAt(), $payment->provider_expires_at, $payment->expired_at, $order->expires_at);
+        $customerPaysFee = PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer';
+        $fee = $transaction->fee() === null
+            ? $this->text($locale, 'payment.qris_fee_unavailable')
+            : $this->formatRupiah($transaction->fee());
+
+        $lines = array_merge($this->pakasirOrderHeaderLines($order, $locale), [
+            $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
+            $this->text($locale, 'payment.qris_fee', ['fee' => $fee]),
+            $this->text($locale, 'payment.qris_total', ['amount' => $this->formatRupiah($payableAmount)]),
+            $this->text($locale, $customerPaysFee ? 'payment.qris_fee_customer' : 'payment.qris_fee_store'),
+        ]);
+
+        if ($expiry) {
+            $lines[] = $this->text($locale, 'payment.qris_deadline', ['date' => $this->formatDate($expiry, $locale)]);
+            $lines[] = $this->text($locale, 'payment.qris_deadline_guidance');
+        }
+
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.pakasir.scan_native');
+        $lines[] = $this->text($locale, 'payment.pakasir.website_fallback');
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.auto_delivery');
+        $lines[] = $this->text($locale, 'payment.check_if_missing');
+
+        return new TelegramPaymentInstruction(
+            photoContents: $this->qrCodes->png($transaction->paymentNumber()),
+            filename: 'qris-'.$payment->merchant_ref.'.png',
+            captionLines: $lines,
+            replyMarkup: $this->paymentActions($order, $paymentUrl, $locale),
+        );
+    }
+
     public function klikQris(Order $order, KlikQrisPayableNativeQris $payable, string $photoContents, string $locale = 'id'): TelegramPaymentInstruction
     {
         $order->loadMissing('orderItems');
@@ -202,6 +279,19 @@ class TelegramPaymentInstructionRenderer
             '',
             $this->text($locale, 'payment.klikqris.retry.'.$keySuffix.'_body'),
         ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function pakasirOrderHeaderLines(Order $order, string $locale): array
+    {
+        return [
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.products', ['items' => $this->orderItemsSummary($order)]),
+            $this->text($locale, 'payment.quantity', ['quantity' => $order->orderItems->sum('quantity')]),
+        ];
     }
 
     private function manualQrPhotoContents(Order $order): string

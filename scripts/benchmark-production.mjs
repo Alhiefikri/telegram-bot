@@ -432,7 +432,6 @@ async function main() {
   const handlerDrain = await waitForQueueEmpty();
 
   timedCommand('orders:expire-pending', ['php', 'artisan', 'orders:expire-pending']);
-  timedCommand('pakasir:reconcile --chunk=5', ['php', 'artisan', 'pakasir:reconcile', '--chunk=5']);
   timedCommand('ops:check-failed-jobs --max=0', ['php', 'artisan', 'ops:check-failed-jobs', '--max=0']);
 
   const finalState = state();
@@ -480,7 +479,6 @@ async function main() {
     synthetic_fixtures: {
       fake_telegram_outbound: env.DOGFOOD_FAKE_TELEGRAM_OUTBOUND === 'true',
       real_external_telegram_messages: false,
-      real_pakasir: env.TELEGRAM_PAYMENT_MODE === 'pakasir',
     },
     health: { ok: true },
     summaries,

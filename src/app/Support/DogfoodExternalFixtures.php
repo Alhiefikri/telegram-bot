@@ -12,7 +12,6 @@ class DogfoodExternalFixtures
 
     public const SALES_PROOF_POST = 'sales_proof_post';
 
-
     public const CALLBACK_ANSWER = 'callback_answer';
 
     public const ADMIN_AUTHENTICATED_SESSION = 'admin_authenticated_session';
@@ -116,7 +115,6 @@ class DogfoodExternalFixtures
     {
         return $this->string('telegram_callback_query_id');
     }
-
 
     public function summary(): array
     {

@@ -21,6 +21,7 @@ use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -39,7 +40,10 @@ class OrderCheckoutService
 
     public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
     {
-        $paymentIntent ??= CheckoutPaymentIntents::manualQris();
+        $paymentIntent ??= $this->providerResolver->resolve()->paymentIntent;
+        if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::PAKASIR) {
+            throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
+        }
         $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
         $preflight = $paymentPreparation->preflight(new CheckoutPaymentPreflightContext(
             currentSetting: ManualPaymentSetting::current(),

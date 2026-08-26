@@ -6,24 +6,34 @@ use Tests\TestCase;
 
 class PaymentDocumentationTest extends TestCase
 {
-    public function test_operator_docs_describe_supported_checkout_rails_and_historical_provider_provenance(): void
+    public function test_operator_docs_describe_manual_default_and_pakasir_retirement_controls(): void
     {
         $readme = file_get_contents(base_path('README.md'));
 
         $this->assertStringContainsString('Payment Provider Switch', $readme);
-        $this->assertStringContainsString('KlikQRIS Native QRIS', $readme);
-        $this->assertStringContainsString('provenance historis immutable', $readme);
-        $this->assertStringNotContainsString('pakasir:reconcile', $readme);
-        $this->assertStringNotContainsString('/api/webhook/pakasir', $readme);
+        $this->assertStringContainsString('Pakasir legacy settlement', $readme);
+        $this->assertStringContainsString('Pakasir is retired for new checkout', $readme);
+        $this->assertStringContainsString('Transaction Detail verification', $readme);
+        $this->assertStringContainsString('pakasir:retirement-status --json', $readme);
+        $this->assertStringContainsString('Mode pembayaran', $readme);
+        $this->assertStringNotContainsString('pakasir:validate-native-qris', $readme);
+        $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
     }
 
-    public function test_env_examples_exclude_retired_provider_configuration(): void
+    public function test_env_examples_keep_pakasir_credentials_without_mode_or_flow_switches(): void
     {
         $rootEnvExample = file_get_contents(base_path('../.env.example'));
         $appEnvExample = file_get_contents(base_path('.env.example'));
 
         foreach ([$rootEnvExample, $appEnvExample] as $envExample) {
-            $this->assertStringNotContainsString('PAKASIR_', $envExample);
+            $this->assertStringNotContainsString('TELEGRAM_PAYMENT_MODE=', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_QRIS_ONLY=', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_CHECKOUT_FLOW=', $envExample);
+            $this->assertStringContainsString('PAKASIR_SLUG=', $envExample);
+            $this->assertStringContainsString('PAKASIR_API_KEY=', $envExample);
+            $this->assertMatchesRegularExpression('/^PAKASIR_REDIRECT_URL=$/m', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=https://example.com/thanks', $envExample);
+            $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=${APP_URL}', $envExample);
         }
     }
 

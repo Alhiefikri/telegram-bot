@@ -4,9 +4,11 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -16,6 +18,7 @@ use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
+use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use Illuminate\Http\Client\Request;
@@ -48,9 +51,21 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(CheckoutPostCreationBehavior::KlikQrisInstructions, $selection->paymentIntent->postCreationBehavior());
         SendKlikQrisCheckoutInstructions::dispatch($order->id)->onQueue('telegram-outbound');
         Queue::assertPushedOn('telegram-outbound', SendKlikQrisCheckoutInstructions::class);
+        Queue::assertNotPushed(SendPakasirCheckoutInstructions::class);
         Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
+    public function test_new_selector_rejects_retired_pakasir_setting(): void
+    {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'pakasir',
+            'is_active' => true,
+        ]);
+
+        $this->expectException(InvalidCheckout::class);
+
+        app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+    }
 
     public function test_klikqris_job_dedupes_confirmed_successful_send_but_keeps_at_least_once_retry_semantics(): void
     {
@@ -378,9 +393,12 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
-    public function test_telegram_order_detail_refreshes_klikqris_success_before_rendering(): void
+    public function test_telegram_order_detail_refreshes_klikqris_success_before_rendering_without_calling_pakasir(): void
     {
         KlikQrisSandboxScenarios::configureReadySandbox();
+        $this->mock(PakasirProviderAdapter::class)
+            ->shouldReceive('transactionDetail')
+            ->never();
         $this->fakeTelegramHttp([
             'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-DETAIL' => Http::response(['data' => [
                 'order_id' => 'INV-KLIK-DETAIL',
@@ -433,6 +451,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
     {
         KlikQrisSandboxScenarios::configureReadySandbox();
         config()->set('services.klikqris.status_refresh_rate_limit_per_minute', 1);
+        $this->mock(PakasirProviderAdapter::class)
+            ->shouldReceive('transactionDetail')
+            ->never();
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654321]]),
             'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-PENDING' => Http::sequence()

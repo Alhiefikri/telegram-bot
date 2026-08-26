@@ -13,9 +13,13 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Checkout\CheckoutPostCreationBehavior;
+use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
+use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
@@ -58,7 +62,105 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $audit->new_values['provider']);
     }
 
+    public function test_pakasir_is_not_available_for_new_provider_switches(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        KlikQrisSandboxScenarios::configureReadySandbox();
 
+        $this->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'provider_switch',
+                'payment_mode' => 'pakasir',
+                'confirm_provider_switch' => '1',
+            ])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertSessionHasErrors([
+                'payment_mode' => 'Provider pembayaran tidak valid.',
+            ], null, 'paymentMode');
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('KlikQRIS')
+            ->assertDontSee('Hosted Pakasir')
+            ->assertDontSee('QR Native Pakasir')
+            ->assertDontSee('pakasir_checkout_flow', false);
+    }
+
+    public function test_pakasir_setting_is_rejected_by_new_checkout_selector(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+
+        $this->expectException(InvalidCheckout::class);
+
+        app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
+    }
+
+    public function test_pakasir_setting_fails_closed_for_qris_without_affecting_binance_rail_identity(): void
+    {
+        $setting = ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+        $resolver = app(PaymentProviderResolver::class);
+
+        $binance = $resolver->resolve('binance_pay_id', $setting);
+        $this->assertSame('pakasir', $binance->requestedProvider);
+        $this->assertSame('manual', $binance->provider);
+        $this->assertSame('BINANCE_PAY_ID', $binance->paymentIntent->method());
+
+        $this->expectException(InvalidCheckout::class);
+        $resolver->resolve('qris', $setting);
+    }
+
+    public function test_default_checkout_resolution_rejects_stale_pakasir_setting_instead_of_using_manual(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create();
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+
+        $this->expectException(InvalidCheckout::class);
+
+        try {
+            app(OrderCheckoutService::class)->checkout($cart);
+        } finally {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+        }
+    }
+
+    public function test_direct_pakasir_checkout_intent_is_rejected_without_creating_an_order(): void
+    {
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create();
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->setItemQuantity($cart, $product, 1);
+        $intent = new class implements CheckoutPaymentIntent
+        {
+            public function provider(): string
+            {
+                return PaymentProvider::PAKASIR;
+            }
+
+            public function method(): string
+            {
+                return 'hosted';
+            }
+
+            public function postCreationBehavior(): CheckoutPostCreationBehavior
+            {
+                return CheckoutPostCreationBehavior::ManualQrisInstructions;
+            }
+        };
+
+        $this->expectException(InvalidCheckout::class);
+
+        try {
+            app(OrderCheckoutService::class)->checkout($cart, $intent);
+        } finally {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+        }
+    }
 
     public function test_provider_switch_requires_explicit_confirmation(): void
     {
@@ -84,7 +186,7 @@ class PaymentProviderSwitchTest extends TestCase
     public function test_readiness_failure_rejects_klikqris_switch_and_preserves_old_provider(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
         KlikQrisSandboxScenarios::configureReadySandbox();
         config()->set('services.klikqris.sandbox_enabled', false);
 
@@ -99,7 +201,7 @@ class PaymentProviderSwitchTest extends TestCase
             ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
 
         $this->assertDatabaseHas('manual_payment_settings', [
-            'payment_mode' => 'manual',
+            'payment_mode' => 'pakasir',
             'is_active' => true,
         ]);
         $this->assertDatabaseMissing('audit_logs', ['action' => 'payment_provider.switched']);

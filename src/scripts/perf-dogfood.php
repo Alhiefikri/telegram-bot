@@ -3,8 +3,6 @@
 declare(strict_types=1);
 
 use App\Enums\CartStatus;
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\PublishSalesProofPost;
 use App\Models\Cart;
@@ -13,7 +11,6 @@ use App\Models\Category;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
-use App\Models\Payment;
 use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -501,7 +498,6 @@ $makeFixtureCart = function (int $telegramUserId, Product $cartProduct, int $qua
 
     return $cart;
 };
-
 
 $runScenario('startup/cold boot', 'artisan kernel already booted baseline', 'script boot + app bootstrap', 0, fn () => true);
 

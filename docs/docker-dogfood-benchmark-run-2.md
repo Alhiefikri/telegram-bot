@@ -74,7 +74,6 @@ Key timings:
 | Manual checkout QR happy path | `ok` | 4,874.293 ms | 4,368.479 ms | 4,874.293 ms |
 | Manual checkout empty cart | `ok` | 2,563.075 ms | 2,512.540 ms | 2,563.075 ms |
 | `orders:expire-pending` | `0` | 13.246 ms | 6.249 ms | 13.246 ms |
-| `pakasir:reconcile --chunk=5` | `0` | 9.889 ms | 5.388 ms | 9.889 ms |
 | `ops:health --db --queue-schema` | `0` | 17.239 ms | 12.695 ms | 17.239 ms |
 | Burst: 10 sequential `/menu` updates | `ok` | n/a | 1,319.937 ms/update | n/a |
 
@@ -134,7 +133,6 @@ The following real-network scenarios were intentionally marked blocked rather th
 - manual payment proof photo: missing `DOGFOOD_TELEGRAM_PHOTO_FILE_ID`;
 - Store Channel send and Community Gate: missing Store Channel fixture variables;
 - Sales Proof Post publish/retry: missing Store Channel fixture variables;
-- Pakasir transaction-detail: missing `DOGFOOD_PAKASIR_PENDING_ORDER_ID` and `DOGFOOD_PAKASIR_PENDING_AMOUNT`;
 - real Telegram callback-answer: missing `DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID`.
 
 ## Artifacts

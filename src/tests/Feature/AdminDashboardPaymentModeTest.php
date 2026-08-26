@@ -6,8 +6,8 @@ use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\ManualPaymentSetting;
 use App\Models\User;
-use Tests\Support\KlikQrisSandboxScenarios;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
 class AdminDashboardPaymentModeTest extends TestCase
@@ -63,6 +63,20 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('QR manual LHIE STORE');
     }
 
+    public function test_stale_pakasir_setting_is_rendered_as_blocked_without_manual_reclassification(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+
+        $this->get('/admin')
+            ->assertOk()
+            ->assertSee('Pakasir retired — checkout blocked')
+            ->assertSee('PAKASIR RETIRED')
+            ->assertSee('requested / effective')
+            ->assertSee('Pakasir')
+            ->assertDontSee('Manual /payment aktif');
+    }
+
     public function test_owner_provider_controls_use_an_accessible_confirmation_dialog(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
@@ -77,7 +91,6 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertSee('payment_provider_version', false)
             ->assertDontSee('window.confirm', false);
     }
-
 
     public function test_owner_can_toggle_binance_pay_while_klikqris_mode_is_active(): void
     {
@@ -219,7 +232,6 @@ class AdminDashboardPaymentModeTest extends TestCase
         $this->assertSame('manual', $setting->payment_mode);
     }
 
-
     public function test_owner_can_update_payment_deadlines_from_dashboard(): void
     {
         $this->actingAs(User::factory()->create([
@@ -315,7 +327,6 @@ class AdminDashboardPaymentModeTest extends TestCase
             ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
             ->assertSessionHasErrors(['whatsapp_support_url', 'whatsapp_support_number'], null, 'supportSettings');
     }
-
 
     public function test_payment_mode_toggle_creates_active_setting_when_none_exists(): void
     {

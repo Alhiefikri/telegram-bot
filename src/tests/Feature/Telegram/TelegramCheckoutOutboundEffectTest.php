@@ -7,6 +7,7 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
+use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -45,6 +46,7 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $orders = [
             'manual' => $this->checkout(CheckoutPaymentIntents::manualQris()),
             'klikqris' => $this->checkout(CheckoutPaymentIntents::klikQris()),
+            'pakasir' => $this->legacyPakasirCheckout(),
             'binance' => $this->checkout(CheckoutPaymentIntents::binancePay(), usdt: true),
         ];
 
@@ -52,10 +54,11 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $expected = [
             'manual' => TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
             'klikqris' => TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            'pakasir' => TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
             'binance' => TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         ];
 
-        $this->assertCount(3, $effects);
+        $this->assertCount(4, $effects);
         foreach ($expected as $rail => $effectType) {
             $effect = $effects->get($effectType);
             $this->assertNotNull($effect, $rail);
@@ -172,20 +175,23 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $orders = [
             'manual' => $this->checkout(CheckoutPaymentIntents::manualQris()),
             'klikqris' => $this->checkout(CheckoutPaymentIntents::klikQris()),
+            'pakasir' => $this->legacyPakasirCheckout(),
             'binance' => $this->checkout(CheckoutPaymentIntents::binancePay(), usdt: true),
         ];
         $intents = $this->mock(TelegramCheckoutIntents::class);
         $response = ['ok' => true, 'result' => ['message_id' => 654321]];
         $intents->shouldReceive('sendPaymentInstructions')->once()->andReturn($response);
         $intents->shouldReceive('sendKlikQrisPaymentInstructions')->once()->andReturn($response);
+        $intents->shouldReceive('sendPakasirPaymentInstructions')->once()->andReturn($response);
         $intents->shouldReceive('sendBinancePaymentInstructions')->once()->andReturn($response);
 
         (new SendManualCheckoutNotifications($orders['manual']->id))->handle($intents);
         (new SendKlikQrisCheckoutInstructions($orders['klikqris']->id))->handle($intents);
+        (new SendPakasirCheckoutInstructions($orders['pakasir']->id))->handle($intents);
         (new SendBinanceCheckoutInstructions($orders['binance']->id))->handle($intents);
 
-        $this->assertCount(3, TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent->value)->get());
-        $this->assertSame(3, TelegramOutboundEffect::query()->whereNotNull('telegram_message_id')->count());
+        $this->assertCount(4, TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent->value)->get());
+        $this->assertSame(4, TelegramOutboundEffect::query()->whereNotNull('telegram_message_id')->count());
         foreach ($orders as $order) {
             $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         }
@@ -257,6 +263,26 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         }
     }
 
+    private function legacyPakasirCheckout(): Order
+    {
+        $customer = Customer::factory()->create(['telegram_id' => fake()->unique()->numberBetween(10000, 99999)]);
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'price_amount' => 10000,
+        ]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = $this->legacyPakasirOrder($cart);
+        TelegramOutboundEffect::query()
+            ->where('source_id', $order->id)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT)
+            ->delete();
+        app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $order->payments()->sole());
+
+        return $order;
+    }
+
     private function checkout(CheckoutPaymentIntent $intent, bool $usdt = false): Order
     {
         $customer = Customer::factory()->create(['telegram_id' => fake()->unique()->numberBetween(10000, 99999)]);
@@ -271,5 +297,4 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
 
         return app(OrderCheckoutService::class)->checkout($cart, $intent);
     }
-
 }

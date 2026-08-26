@@ -21,7 +21,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
@@ -63,7 +62,6 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $this->assertPlan($plan, 'manual', 'QR_MANUAL', 30_000, $deadline);
         $this->assertInstanceOf(ManualQrisCheckoutPaymentSnapshot::class, $plan->rail());
     }
-
 
     public function test_klikqris_plan_is_only_a_local_snapshot_without_qr_creation(): void
     {
@@ -135,7 +133,6 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
         $this->assertTrue($plan->paymentExpiresAt()->equalTo($deadline));
         $this->assertSame(
             match ($provider) {
-                PaymentProvider::PAKASIR => CheckoutPostCreationBehavior::PakasirInstructions,
                 PaymentProvider::KLIKQRIS => CheckoutPostCreationBehavior::KlikQrisInstructions,
                 default => CheckoutPostCreationBehavior::ManualQrisInstructions,
             },

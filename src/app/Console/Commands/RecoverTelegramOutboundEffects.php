@@ -39,6 +39,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->whereIn('effect_type', [
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
                 TelegramOutboundEffectService::TYPE_ADMIN_PENDING,

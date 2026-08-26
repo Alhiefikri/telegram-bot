@@ -28,7 +28,13 @@ class DogfoodExternalFixturesTest extends TestCase
             $fixtures->missingFor(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF),
         );
         $this->assertSame(
-            ['DOGFOOD_STORE_CHANNEL_CHAT_ID', 'DOGFOOD_STORE_CHANNEL_USERNAME', 'DOGFOOD_STORE_CHANNEL_LINK', 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID', 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID'],
+            [
+                'DOGFOOD_STORE_CHANNEL_CHAT_ID',
+                'DOGFOOD_STORE_CHANNEL_USERNAME',
+                'DOGFOOD_STORE_CHANNEL_LINK',
+                'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID',
+                'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID',
+            ],
             $fixtures->missingFor(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE),
         );
         $this->assertSame(

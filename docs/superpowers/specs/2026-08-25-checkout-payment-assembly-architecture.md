@@ -437,15 +437,17 @@ payment seam.
 - Manual instructions continue through the existing Telegram Outbound Effect
   family.
 
-### Pakasir
+### Pakasir legacy compatibility
 
-- preserve the existing PakasirCheckoutFlow;
-- preserve provider readiness and fallback behavior owned by
-  PaymentProviderResolver and Pakasir readiness modules;
-- prepare creates the same Payment snapshot;
-- Native QRIS creation remains after checkout in
-  PakasirNativeQrisService; the preparation adapter must not create a
-  provider transaction.
+- Pakasir is not a checkout preparation adapter and is absent from new
+  checkout resolution;
+- `PaymentProviderResolver` rejects a stale Pakasir QRIS setting with
+  `InvalidCheckout` rather than selecting Manual;
+- existing callback, status, reconciliation, cancellation, receipt, and
+  queue handlers remain outside the new checkout seam until the retirement
+  gate passes;
+- native QRIS creation remains available only for an already-created
+  historical Pakasir Payment.
 
 ### KlikQRIS
 
@@ -574,7 +576,6 @@ interface remains explicit and no raw field bag is introduced.
 - src/app/Services/Checkout/PaymentProviderResolver.php only if selection
   wiring needs the new resolver
 - src/app/Services/Checkout/ManualQrisCheckoutIntent.php
-- src/app/Services/Checkout/PakasirCheckoutIntent.php
 - src/app/Services/Checkout/KlikQrisCheckoutIntent.php
 - src/app/Services/Checkout/BinancePayCheckoutIntent.php
 - src/app/Services/Checkout/UsdtBep20CheckoutIntent.php
@@ -600,7 +601,8 @@ Add or strengthen tests that capture the current Payment row and side-effect
 contract for:
 
 - Manual QRIS;
-- Pakasir hosted and native modes;
+- historical Pakasir payments are covered by the compatibility/lifecycle
+  tests, not by a new checkout preparation adapter;
 - KlikQRIS;
 - Binance Pay ID amount-unique and Order ID modes;
 - USDT BEP20/BSC.
@@ -632,10 +634,11 @@ Move the newest, highest-friction rail logic first:
 Remove the corresponding BSC/Binance branches and dependencies from
 OrderCheckoutService.
 
-### Slice 3 — Manual, Pakasir, and KlikQRIS adapters
+### Slice 3 — Manual and KlikQRIS adapters
 
-Move the remaining Payment amount/currency/expiry/readiness assembly behind
-the same preparation seam. Preserve native QRIS creation outside checkout.
+Move the remaining new-checkout Payment amount/currency/expiry/readiness
+assembly behind the same preparation seam. Preserve native QRIS creation
+outside checkout; Pakasir remains a separate compatibility lane.
 
 ### Slice 4 — legacy interface cleanup
 

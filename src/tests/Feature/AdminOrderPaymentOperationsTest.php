@@ -21,6 +21,7 @@ use App\Services\Admin\AdminPaymentOperations;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Pakasir\PakasirClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -44,9 +45,6 @@ class AdminOrderPaymentOperationsTest extends TestCase
             ->assertSee('INV-OPS')
             ->assertSee('IDR');
     }
-
-
-
 
     public function test_order_and_payment_policy_matrix_by_role(): void
     {
@@ -89,7 +87,7 @@ class AdminOrderPaymentOperationsTest extends TestCase
         $customer = Customer::factory()->create(['telegram_id' => 123]);
         $manualOrder = Order::factory()->create(['customer_id' => $customer->id]);
         $paidOrder = Order::factory()->create(['customer_id' => $customer->id, 'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
-        $payment = Payment::factory()->create(['provider' => 'klikqris', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'KQR-ACTION']);
+        $payment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-ACTION']);
 
         $orderPolicy = new OrderPolicy;
         $paymentPolicy = new PaymentPolicy;
@@ -277,6 +275,43 @@ class AdminOrderPaymentOperationsTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
     }
 
+    public function test_manual_reconciliation_fetches_pakasir_detail_processes_and_audits(): void
+    {
+        Queue::fake();
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $user = User::factory()->create(['role' => UserRole::Finance]);
+        $payment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-777', 'amount' => 10000]);
+        $this->mock(PakasirClient::class, function ($mock) use ($payment): void {
+            $mock->shouldReceive('transactionDetail')->once()->with($payment)->andReturn(['transaction' => ['project' => 'warung-ai', 'order_id' => 'PKS-777', 'amount' => 10000, 'status' => 'completed']]);
+        });
+
+        $event = app(AdminPaymentOperations::class)->reconcile($payment, $user, '127.0.0.1');
+
+        $this->assertTrue($event->fresh()->processed_at !== null);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'payment.manually_reconciled', 'subject_id' => (string) $payment->id]);
+    }
+
+    public function test_manual_pakasir_reconciliation_api_failure_does_not_mutate_or_audit(): void
+    {
+        config()->set('services.pakasir.slug', 'warung-ai');
+        config()->set('services.pakasir.api_key', 'pakasir-secret');
+        $user = User::factory()->create(['role' => UserRole::Finance]);
+        $payment = Payment::factory()->create(['provider' => 'pakasir', 'status' => PaymentStatus::Pending, 'merchant_ref' => 'PKS-FAIL', 'amount' => 10000]);
+        $this->mock(PakasirClient::class, function ($mock) use ($payment): void {
+            $mock->shouldReceive('transactionDetail')->once()->with($payment)->andThrow(new \RuntimeException('Pakasir unavailable'));
+        });
+
+        try {
+            app(AdminPaymentOperations::class)->reconcile($payment, $user, '127.0.0.1');
+            $this->fail('Expected Pakasir API failure to fail safely.');
+        } catch (\RuntimeException) {
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+            $this->assertSame(0, PaymentEvent::count());
+            $this->assertSame(0, AuditLog::where('action', 'payment.manually_reconciled')->count());
+        }
+    }
 
     public function test_audit_logs_are_related_to_operations_records(): void
     {

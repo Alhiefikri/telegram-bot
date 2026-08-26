@@ -10,7 +10,6 @@
             <file>tests/Feature/ProductInventoryRaceTest.php</file>
             <file>tests/Feature/StorefrontProductCheckoutTest.php</file>
             <file>tests/Feature/StorefrontShopCheckoutTest.php</file>
-            <file>tests/Feature/PakasirWebhookTest.php</file>
             <file>tests/Feature/Telegram/CartCheckoutTest.php</file>
             <file>tests/Feature/Telegram/PaymentProofAdminCallbackTest.php</file>
             <file>tests/Feature/AdminOrderPaymentOperationsTest.php</file>

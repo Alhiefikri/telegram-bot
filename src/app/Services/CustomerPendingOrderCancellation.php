@@ -9,13 +9,17 @@ use App\Jobs\ReconcileCustomerCancellationPayment;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirTransaction;
 use App\Support\PaymentProvider;
+use RuntimeException;
 use Throwable;
 
 final readonly class CustomerPendingOrderCancellation
 {
     public function __construct(
         private OrderLifecycle $orders,
+        private PakasirProviderAdapter $pakasir,
         private KlikQrisProviderAdapter $klikQris,
     ) {}
 
@@ -81,14 +85,35 @@ final readonly class CustomerPendingOrderCancellation
     private function providerReportsPaid(Payment $payment): bool
     {
         return match ($payment->provider) {
+            PaymentProvider::PAKASIR => $payment->isNativePakasirQris() && $this->pakasirReportsPaid($payment),
             PaymentProvider::KLIKQRIS => $this->klikQris->transactionStatus($payment)->isSuccess(),
             default => false,
         };
     }
 
+    private function pakasirReportsPaid(Payment $payment): bool
+    {
+        $transaction = PakasirTransaction::fromPayload($this->pakasir->transactionDetail($payment));
+        if ($transaction === null
+            || $transaction->project() !== config('services.pakasir.slug')
+            || $transaction->amount() !== $payment->amount
+            || $transaction->orderId() !== $payment->merchant_ref
+            || ($payment->provider_payment_method !== null && $transaction->paymentMethod() !== strtolower($payment->provider_payment_method))) {
+            throw new RuntimeException('Pakasir verification mismatch.');
+        }
+
+        $status = strtolower(trim((string) $transaction->status()));
+        if (! in_array($status, ['completed', 'pending', 'expired', 'cancelled'], true)) {
+            throw new RuntimeException('Pakasir verification status is ambiguous.');
+        }
+
+        return $transaction->isCompleted();
+    }
+
     private function requiresProviderVerification(Payment $payment): bool
     {
-        return $payment->provider === PaymentProvider::KLIKQRIS;
+        return $payment->provider === PaymentProvider::KLIKQRIS
+            || ($payment->provider === PaymentProvider::PAKASIR && $payment->isNativePakasirQris());
     }
 
     private function scheduleReconciliation(Payment $payment): void

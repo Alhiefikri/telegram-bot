@@ -40,6 +40,23 @@ class PaymentReceiptReportTest extends TestCase
         $this->assertSame(34773, app(PaymentReceiptReport::class)->netAmount($payment));
     }
 
+    public function test_configured_pakasir_fee_payer_is_used_when_provider_total_is_missing(): void
+    {
+        $payment = Payment::factory()->make([
+            'provider' => 'pakasir',
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'amount' => 35000,
+            'provider_fee' => 227,
+            'provider_total_payment' => null,
+        ]);
+
+        config()->set('services.pakasir.qris_fee.payer', 'customer');
+        $this->assertSame(35000, app(PaymentReceiptReport::class)->netAmount($payment));
+
+        config()->set('services.pakasir.qris_fee.payer', 'merchant');
+        $this->assertSame(34773, app(PaymentReceiptReport::class)->netAmount($payment));
+    }
 
     public function test_sql_canonical_earning_projection_matches_hydrated_projection(): void
     {
@@ -80,4 +97,26 @@ class PaymentReceiptReportTest extends TestCase
         $this->assertSame(69773, $report->idrNetTotalCanonical());
     }
 
+    public function test_sql_projection_uses_configured_pakasir_fee_payer_without_provider_total(): void
+    {
+        $order = Order::factory()->create(['payment_status' => PaymentStatus::Paid]);
+        Payment::factory()->for($order)->create([
+            'provider' => 'pakasir',
+            'method' => 'api_qris',
+            'provider_payment_method' => 'qris',
+            'amount' => 35000,
+            'provider_fee' => 227,
+            'provider_total_payment' => null,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        $report = app(PaymentReceiptReport::class);
+
+        config()->set('services.pakasir.qris_fee.payer', 'customer');
+        $this->assertSame(35000, $report->idrNetTotalCanonical());
+
+        config()->set('services.pakasir.qris_fee.payer', 'merchant');
+        $this->assertSame(34773, $report->idrNetTotalCanonical());
+    }
 }

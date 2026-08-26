@@ -14,6 +14,9 @@ use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\Pakasir\PakasirCallbackProcessor;
+use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
@@ -22,6 +25,9 @@ class TelegramOrderIntents
 {
     public function __construct(
         private TelegramBotClient $bot,
+        private PakasirProviderAdapter $pakasir,
+        private PakasirCallbackProcessor $pakasirProcessor,
+        private PakasirProviderReadiness $pakasirReadiness,
         private KlikQrisNativeQrisService $klikQrisNativeQris,
         private KlikQrisCallbackProcessor $klikQrisProcessor,
         private KlikQrisProviderReadiness $klikQrisReadiness,
@@ -269,6 +275,7 @@ class TelegramOrderIntents
     {
         return match (strtolower(trim((string) $payment?->provider))) {
             PaymentProvider::KLIKQRIS => $this->refreshEligibleKlikQrisPayment($customer, $order, $payment),
+            PaymentProvider::PAKASIR => $this->refreshPendingPakasirPayment($customer, $order, $payment),
             default => null,
         };
     }
@@ -315,6 +322,42 @@ class TelegramOrderIntents
         }
 
         if ($event?->processed_at !== null) {
+            return $this->locale->translate($customer, 'order.refresh.verified');
+        }
+
+        return $this->locale->translate($customer, 'order.refresh.not_paid');
+    }
+
+    private function refreshPendingPakasirPayment(Customer $customer, Order $order, ?Payment $payment): ?string
+    {
+        if (! $payment
+            || $payment->provider !== PaymentProvider::PAKASIR
+            || $payment->status !== PaymentStatus::Pending
+            || $order->order_status !== OrderStatus::PendingPayment
+            || blank($payment->merchant_ref)
+            || ! $this->pakasirReadiness->verification()->isReady()) {
+            return null;
+        }
+
+        $key = 'pakasir:status-refresh:'.$customer->id.':'.$payment->id;
+        $maxAttempts = max(1, (int) config('services.pakasir.status_refresh_rate_limit_per_minute', 3));
+        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+            $seconds = RateLimiter::availableIn($key);
+
+            return $this->locale->translate($customer, 'order.refresh.pakasir_rate_limited', ['seconds' => $seconds]);
+        }
+
+        RateLimiter::hit($key, 60);
+
+        try {
+            $event = $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasir->transactionDetail($payment));
+        } catch (Throwable $e) {
+            report($e);
+
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
+        }
+
+        if ($event->processed_at !== null) {
             return $this->locale->translate($customer, 'order.refresh.verified');
         }
 

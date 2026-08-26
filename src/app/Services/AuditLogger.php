@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\KlikQris\KlikQrisPayloadSanitizer;
+use App\Services\Pakasir\PakasirPayloadSanitizer;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 
@@ -31,8 +32,8 @@ class AuditLogger
             'action' => $action,
             'subject_type' => $subject ? $subject::class : null,
             'subject_id' => $subject ? (string) $subject->getKey() : null,
-            'old_values' => $old === null ? null : KlikQrisPayloadSanitizer::sanitize($old),
-            'new_values' => $new === null ? null : KlikQrisPayloadSanitizer::sanitize($new),
+            'old_values' => $old === null ? null : KlikQrisPayloadSanitizer::sanitize(PakasirPayloadSanitizer::sanitize($old)),
+            'new_values' => $new === null ? null : KlikQrisPayloadSanitizer::sanitize(PakasirPayloadSanitizer::sanitize($new)),
             'ip_address' => $ip,
             'created_at' => now(),
         ]);

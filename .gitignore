@@ -9,6 +9,8 @@ dist/
 node_modules/
 vendor/
 *.log
+.production-mutation.lock
+.release-gate-artifacts/
 *.sql
 *.sql.gz
 *.dump

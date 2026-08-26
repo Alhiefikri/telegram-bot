@@ -80,6 +80,13 @@ class ProductionConcurrencyTest extends TestCase
             'api_base_url' => 'https://api.telegram.org',
             'default_payment_method' => 'BRIVA',
         ]);
+        config()->set('services.pakasir', [
+            'slug' => 'warung-ai',
+            'api_key' => 'pakasir-secret',
+            'base_url' => 'https://pakasir.test',
+            'redirect_url' => 'https://example.test/thanks',
+            'qris_only' => false,
+        ]);
         config()->set('queue.default', 'sync');
 
         if (! $this->shouldRunConcurrencyLane()) {
@@ -678,7 +685,84 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertManagedInventoryInvariants($product);
     }
 
+    public function test_concurrent_duplicate_paid_callbacks_create_one_sale_and_one_receipt(): void
+    {
+        $this->requireConcurrencyLane();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
 
+        $order = $this->pakasirReadyOrder(stock: 2, quantity: 1);
+        $payment = $order->payments()->firstOrFail();
+        $payload = $this->pakasirPayload($payment);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
+
+        $results = $this->runConcurrently([
+            fn () => $this->processPakasirCallback($payload),
+            fn () => $this->processPakasirCallback($payload),
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results));
+        $this->assertSame([], $this->failedResultClasses($results));
+
+        $order->refresh();
+        $payment->refresh();
+        $product = Product::firstOrFail();
+
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(1, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $processedCallbackEvent = PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->sole();
+        $this->assertGreaterThanOrEqual(2, $processedCallbackEvent->received_count);
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    public function test_paid_callback_racing_expiry_preserves_single_valid_inventory_outcome(): void
+    {
+        $this->requireConcurrencyLane();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]])]);
+
+        $order = $this->pakasirReadyOrder(stock: 1, quantity: 1);
+        $payment = $order->payments()->firstOrFail();
+        $order->update(['expires_at' => now()->subSecond()]);
+        $payment->update(['expired_at' => now()->subSecond()]);
+        $payload = $this->pakasirPayload($payment);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 77]]), 'https://pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload])]);
+
+        $this->runConcurrently([
+            fn () => $this->processPakasirCallback($payload),
+            fn () => app(OrderStateMachine::class)->expirePendingOrder(Order::findOrFail($order->id))?->id,
+        ]);
+
+        $order->refresh();
+        $payment->refresh();
+        $product = Product::firstOrFail();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(1, PaymentEvent::where('event_type', PaymentEventType::Callback)->whereNotNull('processed_at')->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
+
+        if ($order->order_status === OrderStatus::Completed) {
+            $this->assertSame(0, $product->stock);
+            $this->assertSame(0, $product->reserved_stock);
+            $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+            $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+            $this->assertNotNull($order->telegram_receipt_sent_at);
+
+            return;
+        }
+
+        $this->assertSame(OrderStatus::Expired, $order->order_status);
+        $this->assertSame(1, $product->stock);
+        $this->assertSame(0, $product->reserved_stock);
+        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Release)->count());
+        $this->assertNull($order->telegram_receipt_sent_at);
+    }
 
     public function test_native_qris_creation_racing_expiry_never_persists_a_payable_qr_on_an_expired_order(): void
     {
@@ -1388,8 +1472,32 @@ class ProductionConcurrencyTest extends TestCase
         app()->forgetInstance(RateLimiter::class);
     }
 
+    private function pakasirReadyOrder(int $stock, int $quantity): Order
+    {
+        $order = $this->manualReadyOrder($stock, $quantity);
+        $order->payments()->firstOrFail()->update(['provider' => 'pakasir', 'method' => 'hosted']);
 
+        return $order->fresh(['payments']);
+    }
 
+    private function pakasirPayload(Payment $payment): array
+    {
+        return [
+            'project' => 'warung-ai',
+            'order_id' => $payment->merchant_ref,
+            'amount' => $payment->amount,
+            'status' => 'completed',
+        ];
+    }
+
+    private function processPakasirCallback(array $payload): int
+    {
+        $response = $this->postJson('/api/webhook/pakasir', $payload);
+
+        $response->assertOk();
+
+        return $response->getStatusCode();
+    }
 }
 
 final class ProductionConcurrencyKlikQrisAdapter implements KlikQrisProviderAdapter

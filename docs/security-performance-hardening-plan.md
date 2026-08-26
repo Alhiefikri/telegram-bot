@@ -54,14 +54,13 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
 
 ### B2 — Late payments capture money with nothing delivered (HIGH) — **money**
 
-> **⚠️ UPDATE 2026-07-26 — attempted and reverted.** Wiring the canceller into the release path **breaks `PakasirGatewayTest::test_expire_pending_orders_releases_local_pakasir_order_without_provider_cancel`** — a named test asserting that local expiry deliberately does **not** cancel at the provider. The team relies on Pakasir's own QR TTL (tightened via `pakasir:reconcile`), so the "dead" canceller is intentionally unwired. This is **not a safe autonomous fix** — it reverses a tested design decision. Do NOT re-apply without a product owner confirming the change and updating/removing that test. An additive admin *alert* on late payment (a new `SendAdminLatePaymentNotification` from `markLatePaymentPaid`) contradicts no test and is the low-risk option if you only want faster visibility.
+> **UPDATE 2026-08-26:** the retirement lane now records provider cancellation work in `ProviderCancellationAttempts`, dispatches the compatibility job on the supervised `notifications` queue, and blocks the retirement contract until every dispatchable/retryable attempt is terminal.
 
 - **Where / evidence:**
-  - `src/app/Services/Pakasir/PakasirReleasedPaymentCanceller.php` — `cancelReleasedOrder(Order): int` (line 24) exists but has **zero callers** (verified by grep). It targets Expired/Failed payment statuses and voids the transaction at Pakasir.
   - Release happens in `OrderStateMachine::applyReleaseTransition` (line 340; releases reservations + credentials at 364-365), reached from `orders:expire-pending` (`routes/console.php`), `AdminOrderCancelReleaseController`, and Telegram buyer cancel.
   - A late payment on the still-live QR lands in `OrderStateMachine::markLatePaymentPaid` (line 296) → payment becomes `Paid` on an Expired/Cancelled order, **no goods, no admin notification** (only `DeleteAdminPendingOrderNotification`; surfaced only by a passive dashboard badge).
 - **Fix:**
-  1. After a release transition commits (expiry, admin cancel, buyer cancel), call `PakasirReleasedPaymentCanceller::cancelReleasedOrder($order)` via `DB::afterCommit(...)` so the provider QR is voided and can't be paid late.
+  1. Keep `ProviderCancellationAttempts::schedule()` in the release transaction and process the durable attempt through the compatibility job; do not delete that lane until the retirement gate is satisfied.
   2. In `markLatePaymentPaid`, when the transition is newly applied, dispatch an admin notification (a late-payment needs a human) instead of relying on the badge.
 - **Verify:** feature test — create order → expire → simulate a Pakasir "completed" callback → assert (a) no credentials delivered, (b) admin notified, (c) if the cancel was called, the provider cancel path was invoked. Use the existing `FakeTelegramBotClient` and Pakasir test doubles.
 - **Related (do together):** B3-credentials and the Telegram verify-before-cancel gap (see C-list).

@@ -12,6 +12,9 @@ final readonly class PaymentProviderResolver
     {
         $setting ??= ManualPaymentSetting::current();
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
+        if (! CheckoutPaymentIntents::isSupportedPaymentRail($paymentRail)) {
+            throw new InvalidCheckout('Metode pembayaran tidak tersedia.');
+        }
         $requestedProvider = $setting?->paymentProvider() ?? PaymentProvider::MANUAL;
 
         $providerVersion = (int) ($setting?->payment_provider_version ?? 0);
@@ -28,6 +31,9 @@ final readonly class PaymentProviderResolver
                 settingId: $settingId,
                 paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL),
             );
+        }
+        if ($requestedProvider === PaymentProvider::PAKASIR) {
+            throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }
 
         $provider = $requestedProvider;

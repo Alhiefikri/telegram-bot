@@ -23,6 +23,7 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
         (new ApplicationRateLimiterRegistrar($this->rateLimiter, new ConfigRepository([
             'services' => [
                 'telegram' => ['webhook_secret' => 'telegram-secret', 'webhook_rate_limit_per_minute' => 17],
+                'pakasir' => ['webhook_rate_limit_per_minute' => 23, 'status_refresh_rate_limit_per_minute' => 4],
                 'storefront' => ['checkout_rate_limit_per_minute' => 6, 'credential_access_rate_limit_per_minute' => 7],
             ],
         ])))->register();
@@ -32,6 +33,8 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
     {
         foreach ([
             'telegram',
+            'pakasir-webhook',
+            'pakasir-status-refresh',
             'storefront-binance-order-id',
             'storefront-checkout',
             'storefront-order-access',
@@ -56,7 +59,40 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
         $this->assertLimit($untrusted, 17, 60, 'telegram:webhook:bad-secret:source:203.0.113.25');
     }
 
+    public function test_pakasir_webhook_policy_preserves_source_bucket(): void
+    {
+        $limit = $this->limit('pakasir-webhook', Request::create('/', 'POST', [], [], [], [
+            'REMOTE_ADDR' => '203.0.113.30',
+        ]));
 
+        $this->assertLimit($limit, 23, 60, 'pakasir:webhook:source:203.0.113.30');
+    }
+
+    public function test_pakasir_status_refresh_policy_preserves_order_bucket_and_custom_response(): void
+    {
+        $request = Request::create('/', 'POST');
+        $request->setRouteResolver(fn () => new class
+        {
+            public function parameter(string $name): object
+            {
+                return new class
+                {
+                    public function getKey(): int
+                    {
+                        return 456;
+                    }
+                };
+            }
+        });
+
+        $limits = $this->limits('pakasir-status-refresh', $request);
+
+        $this->assertCount(2, $limits);
+        $this->assertLimit($limits[0], 4, 60, 'pakasir:status-refresh:order:456');
+        $this->assertLimit($limits[1], 4, 60, 'pakasir:status-refresh:source:127.0.0.1');
+        $this->assertIsCallable($limits[0]->responseCallback);
+
+    }
 
     public function test_binance_order_id_policy_has_order_and_ip_buckets(): void
     {
