@@ -58,39 +58,7 @@ class PaymentProviderSwitchTest extends TestCase
         $this->assertSame('klikqris', $audit->new_values['provider']);
     }
 
-    public function test_pakasir_is_not_available_for_new_provider_switches(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
-        KlikQrisSandboxScenarios::configureReadySandbox();
 
-        $this->actingAs($owner)
-            ->post(route('admin.payment-mode.update'), [
-                'update_scope' => 'provider_switch',
-                'payment_mode' => 'pakasir',
-                'confirm_provider_switch' => '1',
-            ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertSessionHasErrors([
-                'payment_mode' => 'Provider pembayaran tidak valid.',
-            ], null, 'paymentMode');
-
-        $this->get('/admin')
-            ->assertOk()
-            ->assertSee('KlikQRIS')
-            ->assertDontSee('Hosted Pakasir')
-            ->assertDontSee('QR Native Pakasir')
-            ->assertDontSee('pakasir_checkout_flow', false);
-    }
-
-    public function test_pakasir_setting_is_rejected_by_new_checkout_selector(): void
-    {
-        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
-
-        $this->expectException(InvalidCheckout::class);
-
-        app(TelegramCheckoutPaymentIntentSelector::class)->select(false);
-    }
 
     public function test_provider_switch_requires_explicit_confirmation(): void
     {
@@ -116,7 +84,7 @@ class PaymentProviderSwitchTest extends TestCase
     public function test_readiness_failure_rejects_klikqris_switch_and_preserves_old_provider(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
-        ManualPaymentSetting::create(['payment_mode' => 'pakasir', 'is_active' => true]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
         KlikQrisSandboxScenarios::configureReadySandbox();
         config()->set('services.klikqris.sandbox_enabled', false);
 
@@ -131,7 +99,7 @@ class PaymentProviderSwitchTest extends TestCase
             ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
 
         $this->assertDatabaseHas('manual_payment_settings', [
-            'payment_mode' => 'pakasir',
+            'payment_mode' => 'manual',
             'is_active' => true,
         ]);
         $this->assertDatabaseMissing('audit_logs', ['action' => 'payment_provider.switched']);

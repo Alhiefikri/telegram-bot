@@ -8,7 +8,6 @@ use App\Services\Checkout\PaymentPlan\BscCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\CheckoutPaymentRailSnapshot;
 use App\Services\Checkout\PaymentPlan\KlikQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
-use App\Services\Checkout\PaymentPlan\PakasirCheckoutPaymentSnapshot;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use InvalidArgumentException;
@@ -55,8 +54,6 @@ final readonly class CheckoutPaymentPlan
 
         $expectedSnapshot = match (CheckoutPaymentPreparationIdentity::key($provider, $method)) {
             CheckoutPaymentPreparationIdentity::key('manual', 'QR_MANUAL') => ManualQrisCheckoutPaymentSnapshot::class,
-            CheckoutPaymentPreparationIdentity::key('pakasir', 'hosted'),
-            CheckoutPaymentPreparationIdentity::key('pakasir', 'api_qris') => PakasirCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('klikqris', 'QRIS') => KlikQrisCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('manual', 'BINANCE_PAY_ID') => BinancePayCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('manual', 'USDT_BEP20') => BscCheckoutPaymentSnapshot::class,

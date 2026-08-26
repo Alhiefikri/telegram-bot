@@ -233,20 +233,4 @@ class KlikQrisProviderReadinessTest extends TestCase
         ]))->isPayableNativeKlikQris());
     }
 
-    public function test_pakasir_native_qris_behavior_is_unchanged(): void
-    {
-        $payment = Payment::factory()->make([
-            'provider' => 'pakasir',
-            'provider_payment_method' => 'qris',
-            'provider_payment_number' => QrisTestPayload::forAmount(10_380),
-            'provider_payment_number_hash' => hash('sha256', QrisTestPayload::forAmount(10_380)),
-            'provider_fee' => 380,
-            'amount' => 10_000,
-            'provider_total_payment' => 10_380,
-            'status' => PaymentStatus::Pending,
-        ]);
-
-        $this->assertTrue($payment->isNativePakasirQris());
-        $this->assertTrue($payment->isPayableNativePakasirQris());
-    }
 }

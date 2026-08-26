@@ -28,31 +28,31 @@ class StorefrontShopPaymentRefreshCoordinator
 
     public function retryAfterSeconds(): int
     {
-        return max(1, (int) config('services.pakasir.status_refresh_in_progress_retry_after_seconds', 3));
+        return 3;
     }
 
     public function lockKey(Payment $payment): string
     {
-        return 'pakasir:status-refresh:single-flight:payment:'.$this->paymentIdentity($payment);
+        return 'automatic-payment:status-refresh:single-flight:payment:'.$this->paymentIdentity($payment);
     }
 
     private function recentKey(Payment $payment): string
     {
-        return 'pakasir:status-refresh:recent:payment:'.$this->paymentIdentity($payment);
+        return 'automatic-payment:status-refresh:recent:payment:'.$this->paymentIdentity($payment);
     }
 
     private function leaseSeconds(): int
     {
         return max(
             1,
-            (int) config('services.pakasir.status_refresh_lock_lease_seconds', 15),
+            15,
             ProviderVerificationProfiles::requiredLeaseSeconds(),
         );
     }
 
     private function windowSeconds(): int
     {
-        return max(1, (int) config('services.pakasir.status_refresh_single_flight_window_seconds', 5));
+        return 5;
     }
 
     private function paymentIdentity(Payment $payment): string

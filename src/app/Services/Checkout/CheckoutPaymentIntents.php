@@ -2,8 +2,6 @@
 
 namespace App\Services\Checkout;
 
-use App\Support\PakasirCheckoutFlow;
-
 final class CheckoutPaymentIntents
 {
     public const RAIL_QRIS = 'qris';
@@ -81,11 +79,6 @@ final class CheckoutPaymentIntents
     public static function usdtBep20(): UsdtBep20CheckoutIntent
     {
         return new UsdtBep20CheckoutIntent;
-    }
-
-    public static function pakasir(string $checkoutFlow = PakasirCheckoutFlow::HOSTED): PakasirCheckoutIntent
-    {
-        return new PakasirCheckoutIntent($checkoutFlow);
     }
 
     public static function klikQris(): KlikQrisCheckoutIntent

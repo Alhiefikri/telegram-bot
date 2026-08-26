@@ -73,7 +73,6 @@ class StorefrontShopOrderPresenter
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
-            'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),
             'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)
@@ -140,7 +139,7 @@ class StorefrontShopOrderPresenter
     }
 
     /**
-     * Deadline shown for non-KlikQRIS rails (manual QR, Pakasir). KlikQRIS
+     * Deadline shown for non-KlikQRIS rails. KlikQRIS
      * deadlines always come from the lifecycle Payable outcome, so a
      * non-payable KlikQRIS Payment never exposes a provider deadline.
      */

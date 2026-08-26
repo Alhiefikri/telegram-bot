@@ -10,7 +10,7 @@ use App\Services\KlikQris\KlikQrisHistoryItem;
 use App\Services\KlikQris\KlikQrisReportingException;
 use App\Services\KlikQris\KlikQrisWithdrawalItem;
 use App\Services\KlikQris\KlikQrisWithdrawalQuery;
-use App\Services\Pakasir\PakasirPayloadSanitizer;
+use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
@@ -504,7 +504,12 @@ final class AdminDashboardReportingData
             return '-';
         }
 
-        $note = PakasirPayloadSanitizer::redactText(trim($note));
+        $note = TelegramBotApiRedactor::redactText(trim($note));
+        $note = preg_replace(
+            '/\b(api[_-]?key|token|secret|signature|password)\s*=\s*[^\s&]+/i',
+            '$1=[redacted-secret]',
+            $note,
+        ) ?? $note;
         $note = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $note) ?? $note;
 
         return mb_strimwidth($note, 0, 160, '...', 'UTF-8');

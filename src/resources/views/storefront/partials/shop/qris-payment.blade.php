@@ -1,21 +1,17 @@
 @php
     $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageSource ?? $qrisImageDataUri);
     $isManualQris = $isManualQris ?? false;
-    $isHostedPakasir = $isHostedPakasir ?? false;
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
-    $customerPaysQrisFee = config('services.pakasir.qris_fee.payer', 'customer') === 'customer';
 @endphp
 
 <x-storefront.panel as="section" class="mt-5" aria-label="Pembayaran QRIS">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">{{ $isManualQris ? 'Pembayaran manual' : ($isHostedPakasir ? 'Pembayaran Pakasir' : 'Pembayaran QRIS') }}</p>
-            <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ $isManualQris ? 'QR manual invoice' : ($isHostedPakasir ? 'Pakasir invoice' : 'QRIS invoice') }}</h2>
+            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">{{ $isManualQris ? 'Pembayaran manual' : 'Pembayaran QRIS' }}</p>
+            <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ $isManualQris ? 'QR manual invoice' : 'QRIS invoice' }}</h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
                 @if ($isManualQris)
                     Scan QR manual dan bayar tepat sesuai total produk. Setelah membayar, hubungi admin dengan nomor invoice ini.
-                @elseif ($isHostedPakasir)
-                    Buka halaman Pakasir untuk membayar invoice ini. Jangan membuat checkout baru selama pembayaran sedang diproses.
                 @elseif ($isQrisPayable)
                     Bayar sesuai total QRIS final. Jangan memakai total produk sebagai total final jika biaya QRIS belum muncul.
                 @else
@@ -35,7 +31,7 @@
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $storefront->idr($order->total_amount) }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4">
-            <dt class="text-[var(--sf-muted)]">{{ $isManualQris ? 'Biaya pembayaran' : 'Biaya QRIS ('.($customerPaysQrisFee ? 'dibayar pelanggan' : 'ditanggung toko').')' }}</dt>
+            <dt class="text-[var(--sf-muted)]">{{ $isManualQris ? 'Biaya pembayaran' : 'Biaya QRIS' }}</dt>
             <dd class="text-right font-black text-[var(--sf-ink)]">{{ $payment?->provider_fee !== null ? $storefront->idr($payment->provider_fee) : '-' }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 border-t-[3px] border-[var(--sf-border)] pt-4 text-lg">
@@ -48,7 +44,7 @@
         </div>
     </dl>
 
-    @if (! $isQrisPayable && ! $isManualQris && ! $isHostedPakasir)
+    @if (! $isQrisPayable && ! $isManualQris)
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
             {{ $qrisReadinessTitle }}. {{ $qrisReadinessMessage }}
         </p>
@@ -82,8 +78,6 @@
                 <div class="payment-qris-corners" aria-hidden="true"></div>
             </div>
         </div>
-    @elseif ($isHostedPakasir && $isPendingPayment && filled($hostedPaymentUrl))
-        <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noreferrer" class="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">Bayar via Website Pakasir</a>
     @elseif ($isPendingPayment && ! $isManualQris)
         <p class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
             {{ $qrisReadinessMessage }}

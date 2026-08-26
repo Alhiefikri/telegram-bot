@@ -2006,35 +2006,6 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
 
-    public function test_pakasir_paid_callback_sends_telegram_receipt_once_on_duplicate_callback(): void
-    {
-        $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 888, 'locale' => 'id']);
-        $product = Product::factory()->create(['stock' => 5]);
-        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
-        $order = app(OrderCheckoutService::class)->checkout($customer->carts()->first(), CheckoutPaymentIntents::pakasir());
-        $payment = $order->payments()->first();
-        $payload = ['project' => 'sedulur-digital', 'order_id' => $payment->merchant_ref, 'amount' => $payment->amount, 'status' => 'completed'];
-        $this->fakeTelegramHttp([
-            'https://app.pakasir.test/api/transactiondetail*' => Http::response(['transaction' => $payload]),
-        ]);
-
-        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
-        $this->postJson('/api/webhook/pakasir', $payload)->assertOk();
-
-        $sent = 0;
-        Http::assertSent(function ($r) use (&$sent) {
-            if (str_ends_with($r->url(), '/sendPhoto')
-                && (string) $this->telegramRequestField($r, 'chat_id') === '888'
-                && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Pembayaran diterima')) {
-                $sent++;
-            }
-
-            return true;
-        });
-        $this->assertSame(1, $sent);
-        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
-    }
 
     private function paidOrderWithSaleProof(Customer $customer, Product $product, string $productName): Order
     {

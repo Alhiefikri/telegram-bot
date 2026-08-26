@@ -20,7 +20,9 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\InventoryLedger;
@@ -29,18 +31,15 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleResult;
 use App\Services\OrderStateMachine;
-use App\Support\PakasirCheckoutFlow;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\KlikQrisSandboxScenarios;
-use Tests\Support\PakasirNativeQrisScenarios;
 use Tests\TestCase;
 
 class OrderCartDomainTest extends TestCase
 {
-    use PakasirNativeQrisScenarios;
     use RefreshDatabase;
 
     public function test_duplicate_checkout_returns_existing_order(): void
@@ -75,7 +74,6 @@ class OrderCartDomainTest extends TestCase
     {
         $cases = [
             [CheckoutPaymentIntents::manualQris(), 'manual', 'QR_MANUAL', CheckoutPostCreationBehavior::ManualQrisInstructions],
-            [CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS), 'pakasir', PakasirCheckoutFlow::API_QRIS, CheckoutPostCreationBehavior::PakasirInstructions],
             [CheckoutPaymentIntents::klikQris(), 'klikqris', 'QRIS', CheckoutPostCreationBehavior::KlikQrisInstructions],
             [CheckoutPaymentIntents::binancePay(), 'manual', 'BINANCE_PAY_ID', CheckoutPostCreationBehavior::BinancePayInstructions],
             [CheckoutPaymentIntents::usdtBep20(), 'manual', 'USDT_BEP20', CheckoutPostCreationBehavior::BscInstructions],
@@ -133,28 +131,6 @@ class OrderCartDomainTest extends TestCase
         }
 
         $this->assertSame(0, Order::count());
-        $this->assertSame(0, ProductStockItem::query()->whereNotNull('order_item_id')->count());
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-    }
-
-    public function test_unready_pakasir_intent_fails_before_order_payment_or_stock_reservation(): void
-    {
-        config()->set('services.pakasir.slug', null);
-        config()->set('services.pakasir.api_key', null);
-        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
-
-        try {
-            app(OrderCheckoutService::class)->checkout(
-                $this->cartWithProduct($product),
-                CheckoutPaymentIntents::pakasir(PakasirCheckoutFlow::API_QRIS),
-            );
-            $this->fail('Expected unready Pakasir rail to fail.');
-        } catch (InvalidCheckout $exception) {
-            $this->assertStringStartsWith('Pakasir payment rail is not ready.', $exception->getMessage());
-        }
-
-        $this->assertSame(0, Order::count());
-        $this->assertSame(0, Payment::count());
         $this->assertSame(0, ProductStockItem::query()->whereNotNull('order_item_id')->count());
         $this->assertSame(0, $product->fresh()->reserved_stock);
     }
@@ -421,27 +397,6 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(0, $product->fresh()->reserved_stock);
-        $this->assertNotNull($stockItem->fresh()->order_item_id);
-        $this->assertNotNull($stockItem->fresh()->retired_at);
-        $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
-        $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Release)->count());
-    }
-
-    public function test_completed_refund_keeps_order_completed_and_releases_credential(): void
-    {
-        $this->pakasirConfigIsReady();
-        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
-        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'completed@example.test|pass']);
-        $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct($product), CheckoutPaymentIntents::pakasir());
-        $payment = $order->payments()->first();
-        app(OrderStateMachine::class)->markPaymentPaid($payment);
-
-        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
-        app(OrderStateMachine::class)->markPaymentRefunded($payment->fresh());
-
-        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
-        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
-        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertNotNull($stockItem->fresh()->order_item_id);
         $this->assertNotNull($stockItem->fresh()->retired_at);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());

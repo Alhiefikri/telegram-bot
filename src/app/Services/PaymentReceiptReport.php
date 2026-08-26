@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Services\Pakasir\PakasirQrisFeePolicy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -147,10 +146,6 @@ class PaymentReceiptReport
             return max(0, (int) $payment->provider_total_payment - $fee);
         }
 
-        if ($this->usesCustomerPaidPakasirQris($payment)) {
-            return max(0, $amount);
-        }
-
         return max(0, $amount - $fee);
     }
 
@@ -159,32 +154,11 @@ class PaymentReceiptReport
         return strtoupper((string) $payment->currency ?: 'IDR');
     }
 
-    private function usesCustomerPaidPakasirQris(Payment $payment): bool
-    {
-        return $this->isPakasirQris($payment)
-            && PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer';
-    }
-
-    private function isPakasirQris(Payment $payment): bool
-    {
-        $provider = strtolower(trim((string) $payment->provider));
-        $method = strtolower(trim((string) $payment->method));
-        $providerPaymentMethod = strtolower(trim((string) $payment->provider_payment_method));
-
-        return $provider === 'pakasir'
-            && ($method === 'api_qris' || $providerPaymentMethod === 'qris');
-    }
-
     private function netAmountSql(string $table): string
     {
         $amount = $table.'.amount';
         $fee = 'COALESCE('.$table.'.provider_fee, 0)';
         $providerTotal = $table.'.provider_total_payment';
-        $isPakasirQris = "(LOWER(COALESCE({$table}.provider, '')) = 'pakasir' AND (LOWER(COALESCE({$table}.method, '')) = 'api_qris' OR LOWER(COALESCE({$table}.provider_payment_method, '')) = 'qris'))";
-        $fallback = PakasirQrisFeePolicy::fromConfig()->feePayer() === 'customer'
-            ? "CASE WHEN {$isPakasirQris} THEN {$amount} ELSE {$amount} - {$fee} END"
-            : "{$amount} - {$fee}";
-
-        return "CASE WHEN {$providerTotal} IS NOT NULL THEN {$providerTotal} - {$fee} ELSE {$fallback} END";
+        return "CASE WHEN {$providerTotal} IS NOT NULL THEN {$providerTotal} - {$fee} ELSE {$amount} - {$fee} END";
     }
 }

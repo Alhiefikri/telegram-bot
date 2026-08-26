@@ -28,7 +28,6 @@ final class CheckoutInstructionDeliveryPipeline
     private const EFFECT_TYPES = [
         TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
         TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
-        TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
         TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
     ];
@@ -165,10 +164,6 @@ final class CheckoutInstructionDeliveryPipeline
                 ->where('provider', PaymentProvider::KLIKQRIS)
                 ->latest('created_at')
                 ->first(),
-            TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => $order->payments()
-                ->where('provider', PaymentProvider::PAKASIR)
-                ->latest('created_at')
-                ->first(),
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => $order->payments()
                 ->where('provider', PaymentProvider::MANUAL)
                 ->where('method', 'BINANCE_PAY_ID')
@@ -199,11 +194,6 @@ final class CheckoutInstructionDeliveryPipeline
                 $order,
                 $payment,
             ),
-            TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => $checkoutIntents->sendPakasirPaymentInstructions(
-                (string) $effect->telegram_chat_id,
-                $order,
-                $payment,
-            ),
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => $checkoutIntents->sendBinancePaymentInstructions(
                 (string) $effect->telegram_chat_id,
                 $order,
@@ -225,7 +215,6 @@ final class CheckoutInstructionDeliveryPipeline
         return match ($effect->effect_type) {
             TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT => 'manual_payment_instructions',
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => 'klikqris_payment_instructions',
-            TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => 'pakasir_payment_instructions',
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance_payment_instructions',
             TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc_payment_instructions',
             default => 'checkout_payment_instructions',
@@ -237,7 +226,6 @@ final class CheckoutInstructionDeliveryPipeline
         return match ($effect->effect_type) {
             TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT => PaymentProvider::MANUAL,
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => PaymentProvider::KLIKQRIS,
-            TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => PaymentProvider::PAKASIR,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance',
             TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc',
             default => 'unknown',

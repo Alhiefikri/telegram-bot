@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\PublishSalesProofPost;
 use App\Models\Cart;
@@ -11,6 +13,7 @@ use App\Models\Category;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -499,29 +502,6 @@ $makeFixtureCart = function (int $telegramUserId, Product $cartProduct, int $qua
     return $cart;
 };
 
-$makePakasirFixtureProduct = function () use ($fixtures, $category): Product {
-    $amount = $fixtures->pakasirPendingAmount();
-    $pakasirProduct = Product::query()->firstOrCreate(
-        ['name' => 'Perf Dogfood Pakasir Fixture '.$amount],
-        [
-            'category_id' => $category->id,
-            'description' => 'Pakasir dogfood transaction-detail fixture',
-            'price_amount' => $amount,
-            'currency' => 'IDR',
-            'image_path' => null,
-            'is_active' => true,
-        ],
-    );
-    $pakasirProduct->forceFill([
-        'category_id' => $category->id,
-        'price_amount' => $amount,
-        'stock' => 50,
-        'reserved_stock' => 0,
-        'is_active' => true,
-    ])->save();
-
-    return $pakasirProduct;
-};
 
 $runScenario('startup/cold boot', 'artisan kernel already booted baseline', 'script boot + app bootstrap', 0, fn () => true);
 
@@ -708,27 +688,12 @@ $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post
 
     $app->call([new PublishSalesProofPost($paidOrder->id, true, now()->toISOString()), 'handle']);
 });
-$runFixtureScenario(DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'Pakasir transaction-detail', 'reconcile real pending transaction fixture', 'pakasir:reconcile against DOGFOOD_PAKASIR_PENDING_ORDER_ID', 1, function () use ($app, $adminUserId, $fixtures, $makeFixtureCart, $makePakasirFixtureProduct) {
-    $cart = $makeFixtureCart((int) $adminUserId, $makePakasirFixtureProduct());
-    $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::pakasir());
-    $payment = $order->payments()->latest()->firstOrFail();
-    $payment->update([
-        'merchant_ref' => $fixtures->pakasirPendingOrderId(),
-        'amount' => $fixtures->pakasirPendingAmount(),
-    ]);
-    $order->update(['total_amount' => $fixtures->pakasirPendingAmount()]);
-
-    return ['status' => $app->make(ConsoleKernel::class)->call('pakasir:reconcile', ['--chunk' => 5])];
-});
 $runFixtureScenario(DogfoodExternalFixtures::CALLBACK_ANSWER, 'Telegram callback-answer', 'real callback query happy path', 'DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID from live Telegram tap', 0, function () use ($fixtures, $callbackPayload, $processPayload) {
     $processPayload($callbackPayload('status', $fixtures->telegramCallbackQueryId()));
 });
 
 $runScenario('scheduled job orders:expire-pending', 'artisan command', 'orders:expire-pending', 1, function () use ($app) {
     return ['status' => $app->make(ConsoleKernel::class)->call('orders:expire-pending')];
-});
-$runFixtureScenario(DogfoodExternalFixtures::PAKASIR_RECONCILIATION, 'scheduled job pakasir:reconcile', 'artisan command against real pending fixture', 'pakasir:reconcile --chunk=5', 1, function () use ($app) {
-    return ['status' => $app->make(ConsoleKernel::class)->call('pakasir:reconcile', ['--chunk' => 5])];
 });
 $runScenario('health check', 'artisan command', 'ops:health --db --queue-schema', 1, function () use ($app) {
     return ['status' => $app->make(ConsoleKernel::class)->call('ops:health', ['--db' => true, '--queue-schema' => true])];

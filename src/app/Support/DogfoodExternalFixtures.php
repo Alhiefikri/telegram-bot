@@ -12,7 +12,6 @@ class DogfoodExternalFixtures
 
     public const SALES_PROOF_POST = 'sales_proof_post';
 
-    public const PAKASIR_RECONCILIATION = 'pakasir_reconciliation';
 
     public const CALLBACK_ANSWER = 'callback_answer';
 
@@ -28,10 +27,6 @@ class DogfoodExternalFixtures
         'store_channel_member_user_id' => 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID',
         'store_channel_non_member_user_id' => 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID',
         'telegram_callback_query_id' => 'DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID',
-        'pakasir_pending_order_id' => 'DOGFOOD_PAKASIR_PENDING_ORDER_ID',
-        'pakasir_pending_amount' => 'DOGFOOD_PAKASIR_PENDING_AMOUNT',
-        'pakasir_slug_configured' => 'PAKASIR_SLUG',
-        'pakasir_api_key_configured' => 'PAKASIR_API_KEY',
     ];
 
     public function __construct(private readonly array $values) {}
@@ -48,10 +43,6 @@ class DogfoodExternalFixtures
             'store_channel_member_user_id' => config('services.dogfood_fixtures.store_channel_member_user_id'),
             'store_channel_non_member_user_id' => config('services.dogfood_fixtures.store_channel_non_member_user_id'),
             'telegram_callback_query_id' => config('services.dogfood_fixtures.telegram_callback_query_id'),
-            'pakasir_pending_order_id' => config('services.dogfood_fixtures.pakasir_pending_order_id'),
-            'pakasir_pending_amount' => config('services.dogfood_fixtures.pakasir_pending_amount'),
-            'pakasir_slug_configured' => filled(config('services.pakasir.slug')),
-            'pakasir_api_key_configured' => filled(config('services.pakasir.api_key')),
         ]);
     }
 
@@ -61,7 +52,6 @@ class DogfoodExternalFixtures
             self::MANUAL_PAYMENT_PROOF => $this->missing(['telegram_photo_file_id']),
             self::STORE_CHANNEL_MEMBER_GATE => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link', 'store_channel_member_user_id', 'store_channel_non_member_user_id']),
             self::STORE_CHANNEL_SEND, self::SALES_PROOF_POST => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link']),
-            self::PAKASIR_RECONCILIATION => $this->missing(['pakasir_pending_order_id', 'pakasir_pending_amount', 'pakasir_slug_configured', 'pakasir_api_key_configured']),
             self::CALLBACK_ANSWER => $this->missing(['telegram_callback_query_id']),
             self::ADMIN_AUTHENTICATED_SESSION => $this->missing(['admin_email', 'admin_password']),
             default => [],
@@ -127,15 +117,6 @@ class DogfoodExternalFixtures
         return $this->string('telegram_callback_query_id');
     }
 
-    public function pakasirPendingOrderId(): string
-    {
-        return $this->string('pakasir_pending_order_id');
-    }
-
-    public function pakasirPendingAmount(): int
-    {
-        return (int) $this->string('pakasir_pending_amount');
-    }
 
     public function summary(): array
     {
@@ -149,10 +130,6 @@ class DogfoodExternalFixtures
             'store_channel_member_user_id' => $this->redactedValue('store_channel_member_user_id'),
             'store_channel_non_member_user_id' => $this->redactedValue('store_channel_non_member_user_id'),
             'telegram_callback_query_id' => $this->redactedValue('telegram_callback_query_id'),
-            'pakasir_pending_order_id' => $this->redactedValue('pakasir_pending_order_id'),
-            'pakasir_pending_amount_configured' => $this->string('pakasir_pending_amount') !== '',
-            'pakasir_slug_configured' => (bool) ($this->values['pakasir_slug_configured'] ?? false),
-            'pakasir_api_key_configured' => (bool) ($this->values['pakasir_api_key_configured'] ?? false),
         ];
     }
 

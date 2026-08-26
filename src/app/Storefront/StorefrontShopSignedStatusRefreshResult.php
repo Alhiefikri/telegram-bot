@@ -7,7 +7,7 @@ use App\Enums\PaymentStatus;
 
 class StorefrontShopSignedStatusRefreshResult
 {
-    private const PAKASIR_NOT_FOUND = 'Pembayaran QRIS tidak ditemukan.';
+    private const UNSUPPORTED_PAYMENT = 'Pembayaran ini tidak dapat diperiksa secara otomatis.';
 
     private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.';
 
@@ -39,7 +39,7 @@ class StorefrontShopSignedStatusRefreshResult
             ok: false,
             statusCode: 422,
             status: 'unsupported_payment',
-            message: self::PAKASIR_NOT_FOUND,
+            message: self::UNSUPPORTED_PAYMENT,
         );
     }
 

@@ -24,13 +24,6 @@ abstract class TelegramBotTestSupport extends TestCase
             'community_gate_cache_seconds' => 15,
             'default_payment_method' => 'BRIVA',
         ]);
-        config()->set('services.pakasir', [
-            'slug' => 'sedulur-digital',
-            'api_key' => 'pakasir-key',
-            'base_url' => 'https://app.pakasir.test',
-            'redirect_url' => null,
-            'qris_only' => false,
-        ]);
         config()->set('queue.default', 'sync');
     }
 

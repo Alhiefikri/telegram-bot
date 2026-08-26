@@ -173,7 +173,6 @@ class KlikQrisStorefrontTest extends TestCase
 
         $this->assertContains('throttle:automatic-payment-status-refresh', $statusRoute->middleware());
         $this->assertNotNull(app(RateLimiter::class)->limiter('automatic-payment-status-refresh'));
-        $this->assertNotNull(app(RateLimiter::class)->limiter('pakasir-status-refresh'));
     }
 
     public function test_klikqris_pending_status_refresh_marks_paid_and_single_flight_skips_duplicate_provider_requests(): void

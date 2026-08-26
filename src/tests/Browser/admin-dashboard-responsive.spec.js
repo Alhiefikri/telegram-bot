@@ -808,12 +808,6 @@ test("renders the compact admin dashboard at desktop width", async ({
     page.getByRole("region", { name: "Mode pembayaran" })
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Hosted Pakasir" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "QR Native Pakasir" })
-  ).toBeVisible();
   await expectStoreLinkCopyAndShare(page);
 
   await expectNoDocumentOverflow(page);
@@ -1188,12 +1182,6 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
     .getByRole("region", { name: "Mode pembayaran" })
     .scrollIntoViewIfNeeded();
   await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Hosted Pakasir" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "QR Native Pakasir" })
-  ).toBeVisible();
 
   await expect(page.getByRole("region", { name: "Link toko" })).toBeVisible();
   await expect(
@@ -2362,7 +2350,7 @@ $qrisPayload = QrisTestPayload::forAmount($qrisTotal, 'BROWSERPENDING');
 
 Payment::factory()->create([
     'order_id' => $qrisOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => $qrisPayload,
@@ -2385,7 +2373,7 @@ $missingProviderTotalOrder = Order::factory()->create([
 
 Payment::factory()->create([
     'order_id' => $missingProviderTotalOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERNOFINAL99',
@@ -2407,7 +2395,7 @@ $statusPendingOrder = Order::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $statusPendingOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'qris',
     'provider_payment_method' => 'qris',
     'provider_payment_number' => '00020101021226610016ID.CO.QRIS.BROWSERSTATUSPENDING99',
@@ -2448,7 +2436,7 @@ ProductStockItem::create([
 ]);
 Payment::factory()->create([
     'order_id' => $paidInvoiceOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 65000,
@@ -2473,7 +2461,7 @@ OrderItem::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $expiredInvoiceOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 55000,
@@ -2497,7 +2485,7 @@ OrderItem::factory()->create([
 ]);
 Payment::factory()->create([
     'order_id' => $cancelledInvoiceOrder->id,
-    'provider' => 'pakasir',
+    'provider' => 'klikqris',
     'method' => 'api_qris',
     'provider_payment_method' => 'qris',
     'amount' => 56000,

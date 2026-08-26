@@ -24,7 +24,6 @@ class OrderStateMachine implements OrderLifecycle
     public function __construct(
         private readonly InventoryLedger $inventory,
         private readonly ?ProductCredentialAllocator $credentials = null,
-        private readonly ?ProviderCancellationAttempts $providerCancellationAttempts = null,
         private readonly ?TelegramOutboundEffectService $outboundEffects = null,
         private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
         private readonly ?BscConfirmationGrace $bscConfirmationGrace = null,
@@ -313,9 +312,7 @@ class OrderStateMachine implements OrderLifecycle
 
     private function paidOrderStatus(Payment $payment): OrderStatus
     {
-        return strtolower((string) $payment->provider) === 'pakasir'
-            ? OrderStatus::Completed
-            : OrderStatus::Processing;
+        return OrderStatus::Processing;
     }
 
     private function markLatePaymentPaid(Payment $payment, Order $order): OrderLifecycleResult
@@ -431,7 +428,6 @@ class OrderStateMachine implements OrderLifecycle
                     'last_verified_at' => now(),
                 ]);
             }
-            $this->providerCancellationAttempts()->schedule($payment);
         }
         $order->update([
             'order_status' => $orderStatus,
@@ -475,11 +471,6 @@ class OrderStateMachine implements OrderLifecycle
     private function credentials(): ProductCredentialAllocator
     {
         return $this->credentials ?? app(ProductCredentialAllocator::class);
-    }
-
-    private function providerCancellationAttempts(): ProviderCancellationAttempts
-    {
-        return $this->providerCancellationAttempts ?? app(ProviderCancellationAttempts::class);
     }
 
     private function bscConfirmationGrace(): BscConfirmationGrace

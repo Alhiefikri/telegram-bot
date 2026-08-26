@@ -37,28 +37,6 @@ class ProductionConfigurationValidator
             throw new RuntimeException('APP_DEBUG must be false in production.');
         }
 
-        $pakasirBaseUrl = (string) $this->config->get('services.pakasir.base_url', '');
-        if (! blank($pakasirBaseUrl) && ! str_starts_with($pakasirBaseUrl, 'https://')) {
-            throw new RuntimeException('PAKASIR_BASE_URL must use HTTPS in production.');
-        }
-
-        $pakasirFeePayer = (string) $this->config->get('services.pakasir.qris_fee.payer', 'customer');
-        if (! in_array($pakasirFeePayer, ['customer', 'merchant'], true)) {
-            throw new RuntimeException('PAKASIR_QRIS_FEE_PAYER must be customer or merchant.');
-        }
-        if ((int) $this->config->get('services.pakasir.qris_fee.threshold', 105_000) <= 0) {
-            throw new RuntimeException('PAKASIR_QRIS_FEE_THRESHOLD must be a positive integer.');
-        }
-        foreach (['low_bps' => 70, 'low_fixed' => 310, 'high_bps' => 100, 'high_fixed' => 0] as $key => $default) {
-            $value = $this->config->get('services.pakasir.qris_fee.'.$key, $default);
-            if (! is_int($value) || $value < 0) {
-                throw new RuntimeException('Pakasir QRIS fee configuration values must be non-negative integers.');
-            }
-            if ($value > 10_000) {
-                throw new RuntimeException('Pakasir QRIS fee configuration exceeds production safety limits.');
-            }
-        }
-
         $binanceBaseUrl = (string) $this->config->get('services.binance.base_url', '');
         if (! blank($binanceBaseUrl) && ! str_starts_with($binanceBaseUrl, 'https://')) {
             throw new RuntimeException('BINANCE_API_BASE_URL must use HTTPS in production.');

@@ -19,21 +19,13 @@ class DogfoodExternalFixturesTest extends TestCase
             'store_channel_member_user_id' => '',
             'store_channel_non_member_user_id' => '',
             'telegram_callback_query_id' => '',
-            'pakasir_pending_order_id' => '',
-            'pakasir_pending_amount' => '',
         ]);
-        config()->set('services.pakasir.slug', '');
-        config()->set('services.pakasir.api_key', '');
 
         $fixtures = DogfoodExternalFixtures::fromConfig();
 
         $this->assertSame(
             ['DOGFOOD_TELEGRAM_PHOTO_FILE_ID'],
             $fixtures->missingFor(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF),
-        );
-        $this->assertSame(
-            ['DOGFOOD_PAKASIR_PENDING_ORDER_ID', 'DOGFOOD_PAKASIR_PENDING_AMOUNT', 'PAKASIR_SLUG', 'PAKASIR_API_KEY'],
-            $fixtures->missingFor(DogfoodExternalFixtures::PAKASIR_RECONCILIATION),
         );
         $this->assertSame(
             ['DOGFOOD_STORE_CHANNEL_CHAT_ID', 'DOGFOOD_STORE_CHANNEL_USERNAME', 'DOGFOOD_STORE_CHANNEL_LINK', 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID', 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID'],
@@ -60,17 +52,12 @@ class DogfoodExternalFixturesTest extends TestCase
             'store_channel_member_user_id' => '111222333',
             'store_channel_non_member_user_id' => '444555666',
             'telegram_callback_query_id' => '1234567890123456789',
-            'pakasir_pending_order_id' => 'INV-DOGFOOD-1',
-            'pakasir_pending_amount' => '35000',
         ]);
-        config()->set('services.pakasir.slug', 'dogfood-store');
-        config()->set('services.pakasir.api_key', 'pakasir-secret');
 
         $fixtures = DogfoodExternalFixtures::fromConfig();
 
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF));
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE));
-        $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::PAKASIR_RECONCILIATION));
         $this->assertSame([], $fixtures->missingFor(DogfoodExternalFixtures::ADMIN_AUTHENTICATED_SESSION));
         $this->assertSame('owner@example.test', $fixtures->adminEmail());
         $this->assertSame('secret-password', $fixtures->adminPassword());
@@ -82,7 +69,6 @@ class DogfoodExternalFixturesTest extends TestCase
         $this->assertStringNotContainsString('AgAC-real-photo-file-id', $summary);
         $this->assertStringNotContainsString('-100123456789', $summary);
         $this->assertStringNotContainsString('111222333', $summary);
-        $this->assertStringNotContainsString('pakasir-secret', $summary);
         $this->assertStringContainsString('"configured":true', $summary);
     }
 }

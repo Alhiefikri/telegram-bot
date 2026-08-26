@@ -228,7 +228,7 @@ Reporting memakai cache singkat yang memasukkan environment dan seluruh paramete
 
 ### 5.1 Provider selection
 
-`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; setting Pakasir aktif dimigrasikan ke KlikQRIS dan tidak lagi menyimpan checkout flow Pakasir. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent` dan menolak Pakasir untuk checkout baru.
+`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; migration retirement memindahkan setting aktif Pakasir ke KlikQRIS dan menghapus checkout flow-nya. Historical Payment hanya dibaca dari snapshot persisten; tidak ada callback, reconciliation, cancellation, atau provider lookup Pakasir.
 
 `CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
 
@@ -262,14 +262,7 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 
 OrderCheckoutService tidak memetakan rail, menghitung field Binance/BSC, atau melakukan external I/O dari fase `prepare()`. Aturan amount/receiver/verification rail tetap berada pada preparation adapter dan service verification masing-masing.
 
-### 5.3 Pakasir legacy settlement
-
-Pakasir tidak lagi tersedia untuk checkout baru. Payment lama dengan `provider=pakasir` tetap immutable dan diproses melalui compatibility lane sampai retirement gate lulus. `PakasirCallbackProcessor` mencocokkan project/slug, merchant reference, amount, method, dan status; callback paid tetap melakukan Transaction Detail API verification sebelum memanggil `OrderLifecycle`.
-
-`pakasir:reconcile` memproses Payment lama yang masih pending atau baru dilepas, dan provider cancellation attempt tetap idempotent. `pakasir:retirement-status --json` melaporkan settlement readiness; ketika `gate=awaiting_owner_approval`, owner harus merekam approval sebelum compatibility lane dihapus.
-
-Jangan membuat hosted checkout atau Native QRIS Pakasir baru, dan jangan memindahkan logic legacy ini ke KlikQRIS.
-### 5.4 KlikQRIS Native QRIS
+### 5.3 KlikQRIS Native QRIS
 
 KlikQRIS adalah module yang memiliki boundary sendiri sesuai [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md). [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php) adalah satu-satunya tempat untuk:
 

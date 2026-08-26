@@ -11,7 +11,6 @@ use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
-use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
@@ -626,7 +625,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => SendBscCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::KLIKQRIS => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
-            $payment->provider === PaymentProvider::PAKASIR => SendPakasirCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             default => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString()),
         };
 
@@ -655,7 +653,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             CheckoutPostCreationBehavior::BinancePayInstructions,
             CheckoutPostCreationBehavior::BscInstructions,
-            CheckoutPostCreationBehavior::PakasirInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions => null,
         };

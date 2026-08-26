@@ -15,11 +15,11 @@ Komponen utama:
 - **Store Bot**: antarmuka Telegram untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
 - **Web Storefront**: katalog publik dan guest checkout melalui `/shop`, signed invoice, dan Recovery Key; tidak bergantung pada Telegram.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
-- **Payment Provider Switch**: owner memilih `Manual` atau `KlikQRIS` untuk checkout baru. Setting Pakasir aktif dimigrasikan ke KlikQRIS; Payment lama tetap memakai provider asal.
-- **Payment rails**: Manual QR, KlikQRIS Native QRIS, Binance Pay ID, dan USDT BEP20 pada BNB Smart Chain. Pakasir hanya menjadi compatibility lane untuk Payment lama sampai retirement gate lulus.
-- **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
+- **Payment Provider Switch**: owner memilih `Manual` atau `KlikQRIS` untuk checkout baru. `Payment.provider=pakasir` tetap dipertahankan hanya sebagai provenance historis immutable.
+- **Payment rails**: Manual QR, KlikQRIS Native QRIS, Binance Pay ID, dan USDT BEP20 pada BNB Smart Chain.
+- **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual dan resend receipt.
 - **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance/BSC pada queue terpisah yang sama.
-- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir legacy/Binance/BSC, recovery Telegram, cleanup, dan statistik harian.
+- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Binance/BSC, recovery Telegram, cleanup, dan statistik harian.
 
 Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail implementasi, schema database, dan API internal sebaiknya dibaca langsung dari codebase/test.
 
@@ -114,19 +114,6 @@ Pada jalur manual:
 
 Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order atau order kedaluwarsa/dibatalkan oleh proses lain.
 
-### 3.4 Pakasir legacy settlement
-
-Pakasir is retired for new checkout. It is no longer available in the Payment Provider Switch, and neither Store Bot nor Web Storefront may create a new Pakasir Payment. Existing `provider=pakasir` Payments remain immutable historical records.
-
-Until the retirement gate passes, the compatibility lane may process an existing pending Pakasir Payment. Callback/webhook input remains untrusted; paid is applied only after Transaction Detail verification matches the stored merchant reference, amount, project, completed status, and payment method when available.
-
-- `PAID`: the existing Payment goes through `OrderLifecycle`, inventory sale, receipt, and any eligible Sales Proof Post exactly once.
-- `EXPIRED`/`FAILED`: the existing Order is released through the normal lifecycle and inventory reservation rules.
-- provider cancellation attempts remain idempotent and sanitized.
-- `php artisan pakasir:retirement-status --json` reports whether all Pakasir Payments are terminal and no cancellation work is dispatchable.
-
-Do not relabel historical Pakasir Payments as KlikQRIS or Manual. Do not use this compatibility lane to create hosted checkout or Native QRIS transactions.
-
 ### 3.5 KlikQRIS Native QRIS
 
 KlikQRIS dipilih melalui Payment Provider Switch dan hanya berlaku untuk checkout baru. Lifecycle terpusat di `App\Services\KlikQris\KlikQrisNativeQrisService`, yang mengurus create, recovery, persistence, expiry, payability, safe outcome, dan single-flight lock per Payment.
@@ -197,7 +184,7 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam sta
 
 The production Docker image runs pending Laravel migrations before Supervisor starts PHP-FPM and the queue worker. This keeps first boot from failing healthchecks because tables such as `cache` or `jobs` do not exist yet. Set `APP_AUTO_MIGRATE=false` if an environment requires manual migration orchestration.
 
-After migrations, the Docker entrypoint runs `php artisan optimize` by default. This creates Laravel's production cache artifacts for the live container environment: cached config, routes, events, and compiled Blade views. The command is intentionally run at container startup rather than during `docker build`, because the cached config file contains runtime values such as `APP_KEY`, database credentials, Telegram credentials, and Pakasir credentials. Do not bake `bootstrap/cache/config.php` into the image.
+After migrations, the Docker entrypoint runs `php artisan optimize` by default. This creates Laravel's production cache artifacts for the live container environment: cached config, routes, events, and compiled Blade views. The command is intentionally run at container startup rather than during `docker build`, because the cached config file contains runtime values such as `APP_KEY`, database credentials, and Telegram credentials. Do not bake `bootstrap/cache/config.php` into the image.
 
 Set `APP_OPTIMIZE=false` to skip startup optimization for one-off debugging. When runtime environment variables change, recreate the app and scheduler containers so the entrypoint rebuilds the cache from the new environment. Use `php artisan optimize` after manual runtime config changes, and use targeted clears such as `php artisan config:clear`, `php artisan route:clear`, `php artisan event:clear`, or `php artisan view:clear` when intentionally invalidating one artifact. Avoid routine `php artisan optimize:clear` on production boot because Laravel also clears keys from the default cache driver.
 
@@ -242,9 +229,9 @@ php scripts/perf-dogfood.php > storage/logs/perf-dogfood.json
 
 Use `./scripts/benchmark-production.sh` as the default repeatable synthetic Docker release gate. It owns its fixtures, starts the Docker/Nginx/PostgreSQL/Supervisor topology, uses fake Telegram outbound by default, enforces budgets, and fails on non-zero final queue depth or failed jobs.
 
-Use `php scripts/perf-dogfood.php` when you need the broader scenario matrix and per-scenario timing JSON. With `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`, the broad harness runs in `synthetic` mode: Telegram outbound goes through `FakeTelegramBotClient`, and fixture-dependent real-external scenarios are reported under `blocked_scenarios` when their fixtures are absent. With fake outbound disabled, the harness runs in `real-external` mode and only real disposable Telegram, Store Channel, callback, photo, and Pakasir fixtures should be supplied.
+Use `php scripts/perf-dogfood.php` when you need the broader scenario matrix and per-scenario timing JSON. With `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`, the broad harness runs in `synthetic` mode: Telegram outbound goes through `FakeTelegramBotClient`, and fixture-dependent real-external scenarios are reported under `blocked_scenarios` when their fixtures are absent. With fake outbound disabled, the harness runs in `real-external` mode and only real disposable Telegram, Store Channel, callback, and photo fixtures are used.
 
-External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` before queue work starts instead of using fake Telegram or Pakasir data. Its JSON output includes `run_mode`, `blocked_scenarios`, and `final_queue_state`; after a synthetic run, `final_queue_state.jobs_depth` should be `0` and `final_queue_state.passes_ops_check_failed_jobs_max_0` should be `true`.
+External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` before queue work starts instead of using fake Telegram data. Its JSON output includes `run_mode`, `blocked_scenarios`, and `final_queue_state`; after a synthetic run, `final_queue_state.jobs_depth` should be `0` and `final_queue_state.passes_ops_check_failed_jobs_max_0` should be `true`.
 
 Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for production-like Docker runs, and the broad perf script should be executed with `docker compose exec --user laravel app`. The perf script also forces its own Laravel logger to `stderr`. This keeps benchmark instrumentation in Docker logs instead of writing additional timing records to `storage/logs`, so a CLI timing run cannot make PHP-FPM or the Supervisor queue worker lose write access to Laravel's file logs.
 
@@ -253,7 +240,6 @@ Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for productio
 - `DOGFOOD_STORE_CHANNEL_CHAT_ID`, `DOGFOOD_STORE_CHANNEL_USERNAME`, `DOGFOOD_STORE_CHANNEL_LINK`: disposable Store Channel target where the bot can post.
 - `DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID`, `DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID`: Telegram identities used to measure Community Gate member/non-member paths.
 - `DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID`: fresh callback query ID from a real Telegram tap; it expires quickly, so set it only for that run.
-- `DOGFOOD_PAKASIR_PENDING_ORDER_ID`, `DOGFOOD_PAKASIR_PENDING_AMOUNT`: pending Pakasir transaction fixture that matches the configured `PAKASIR_SLUG` and `PAKASIR_API_KEY`.
 
 Run `./scripts/dogfood-volume-preflight.sh` before a production-like performance run. It lists Docker volumes for the `telegram-bot-dogfood` Compose project by the `com.docker.compose.project` label and exits non-zero when existing dogfood volumes are present. Existing dogfood volumes can preserve old PostgreSQL roles/databases and make a fresh build look unhealthy for reasons unrelated to current code.
 
@@ -329,29 +315,6 @@ Jika secret Telegram tidak dikonfigurasi di production, aplikasi dirancang untuk
 
 ### 5.2 Webhook dan validasi pembayaran otomatis
 
-#### Pakasir
-
-Endpoint aplikasi:
-
-```text
-POST /api/webhook/pakasir
-```
-
-Hal penting:
-
-- gunakan HTTPS di staging/production;
-- callback Pakasir adalah intake tidak tepercaya; paid hanya diterapkan setelah Transaction Detail API cocok dengan `merchant_ref`, amount, project, status `completed`, dan payment method bila tersedia;
-- endpoint memiliki rate limiter `pakasir-webhook`; callback Pakasir valid yang identik tidak disimpan tanpa batas, tetapi di-coalesce berdasarkan hash payload ter-sanitasi;
-- jangan menaruh API key, bot token, chat ID privat, URL privat, atau raw `payment_number` QRIS di komentar issue, log, screenshot, atau payload admin.
-
-Untuk compatibility lane Payment Pakasir lama, verifikasi callback tetap berjalan melalui Transaction Detail dan reconciliation. Sebelum menghapus lane legacy, jalankan report redacted:
-
-```bash
-php artisan pakasir:retirement-status --json
-```
-
-Report harus menunjukkan `gate=awaiting_owner_approval`, `settlement_ready=true`, `non_terminal_payments=0`, dan `dispatchable_cancellation_work=0`. Owner harus merekam persetujuan sebelum menghapus compatibility lane. Jangan membuat transaksi Pakasir baru untuk menguji provider.
-
 #### KlikQRIS
 
 Endpoint aplikasi:
@@ -415,7 +378,6 @@ Scheduler menjalankan command periodik dari `routes/console.php`:
 
 ```text
 klikqris:reconcile --chunk=100 setiap menit jika environment aktif
-pakasir:reconcile --chunk=100  setiap menit hanya untuk Payment legacy sampai retirement gate passed
 binance:reconcile --chunk=100  setiap menit
 orders:expire-pending           setiap menit
 telegram:recover-updates        setiap menit
@@ -486,21 +448,6 @@ Fungsi:
 - mengubah payment pending menjadi `expired`;
 - melepas reservasi stok.
 
-### 5.7 Reconcile Pakasir
-
-Command manual:
-
-```bash
-php artisan pakasir:reconcile --chunk=100
-```
-
-Fungsi:
-
-- mengambil Transaction Detail untuk payment Pakasir pending;
-- memverifikasi project, `merchant_ref`, amount original, status, dan payment method bila tersedia;
-- menerapkan status paid hanya setelah detail Pakasir valid;
-- menyinkronkan expiry provider bila Transaction Detail mengirim `expired_at`.
-
 ### 5.8 Reconcile KlikQRIS
 
 Command manual:
@@ -552,8 +499,6 @@ Sebelum production, cek minimal:
 - [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
 - [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
 - [ ] Provider checkout baru dipilih owner melalui panel "Mode pembayaran" di `/admin`: QR Manual atau KlikQRIS. Payment lama tidak ikut berpindah provider.
-- [ ] Pakasir hanya dipertahankan untuk settlement Payment lama sampai `pakasir:retirement-status --json` menunjukkan `settlement_ready=true`.
-- [ ] Owner telah merekam approval setelah settlement ready sebelum compatibility lane, credential Pakasir, atau endpoint legacy dihapus.
 - [ ] Credential KlikQRIS sandbox/production dipisahkan; aktifkan environment sesuai readiness dan approval rollout. KlikQRIS tidak fallback otomatis ke Manual.
 - [ ] Batas waktu checkout QRIS dan Binance Pay disesuaikan melalui dashboard admin bila diperlukan.
 - [ ] HTTPS aktif untuk semua webhook.
@@ -601,21 +546,6 @@ Langkah cek:
 - cek secret yang didaftarkan di Telegram;
 - cek error log Laravel;
 - cek koneksi database dengan `php artisan ops:health --db`.
-
-### Pakasir tidak sinkron / belum paid
-
-Kemungkinan penyebab:
-
-- `PAKASIR_SLUG` atau `PAKASIR_API_KEY` salah/kosong sehingga Transaction Detail API tidak bisa memverifikasi payment.
-- Payment Pakasir legacy tidak lagi memiliki checkout flow baru; gunakan `pakasir:retirement-status --json` untuk memeriksa kapan compatibility lane boleh dihapus.
-- `order_id`/`merchant_ref`, nominal, project/slug, status, atau payment method dari callback/detail tidak cocok dengan payment internal.
-- callback ditolak oleh throttle `pakasir-webhook`, shape gate, atau replay cache payload gagal.
-
-Langkah cek:
-
-- cek payment event yang masuk dan status payment internal;
-- cek log untuk pesan validasi callback/reconciliation;
-- jalankan reconcile manual hanya setelah credential Pakasir benar, karena paid tetap harus dikonfirmasi Transaction Detail API.
 
 ### KlikQRIS tidak menampilkan QR / belum paid
 
@@ -679,7 +609,7 @@ Kemungkinan penyebab:
 - worker hanya memproses queue tertentu dan melewatkan queue penting;
 - database queue table belum tersedia;
 - timeout atau koneksi eksternal bermasalah.
-- real Telegram/Pakasir outbound lambat dan memperpanjang durasi handler, walaupun queue wait masih rendah.
+- real Telegram outbound lambat dan memperpanjang durasi handler, walaupun queue wait masih rendah.
 
 Langkah cek:
 
@@ -711,7 +641,7 @@ Langkah cek:
 
 - `../docs/agents/codebase.md` — peta implementasi untuk agent/AI: ownership service, aggregate, flow Telegram/Web Storefront/Admin, payment rails, invariant, dan test map.
 - `../CONTEXT.md` — glossary domain canonical.
-- `../docs/adr/0006-klikqris-native-qris-and-pakasir-retirement.md` — keputusan KlikQRIS Native QRIS dan retirement Pakasir.
+- `../docs/adr/0006-klikqris-native-qris-and-pakasir-retirement.md` — keputusan KlikQRIS Native QRIS dan retirement provider historis.
 - `src/app/Http/Controllers/TelegramWebhookController.php` — validasi secret Telegram, filter payload, simpan update, dispatch job pemrosesan update.
 - `src/app/Services/Telegram/TelegramUpdateProcessor.php` — command Telegram, katalog, cart, checkout manual, instruksi pembayaran, dan notifikasi admin manual order.
 - `src/app/Services/Telegram/TelegramCheckoutIntents.php` — adapter yang mengubah Payment rail/outcome menjadi instruksi Telegram; tidak memiliki ownership transition Order.
@@ -719,7 +649,6 @@ Langkah cek:
 - `src/app/Services/Admin/PaymentProviderSwitcher.php` — owner-only provider switch, readiness, version conflict, dan audit.
 - `src/app/Services/KlikQris/KlikQrisNativeQrisService.php` — lifecycle KlikQRIS Native QRIS dan safe outcomes.
 - `src/app/Services/KlikQris/KlikQrisCallbackProcessor.php` — callback signal + authoritative status verification.
-- `src/app/Services/Pakasir/PakasirNativeQrisService.php` — legacy Pakasir native QRIS create/recovery.
 - `src/app/Services/Binance/BinancePaymentVerification.php` — Binance verification workflow.
 - `src/app/Services/Bsc/BscPaymentVerification.php` — authoritative BSC Payment verification and atomic claim/manual-review workflow.
 - `src/app/Services/Bsc/BscReadiness.php` — DB activation, RPC/token metadata, and active receiver readiness.
@@ -733,7 +662,6 @@ Langkah cek:
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileKlikQrisPayments.php` — command `klikqris:reconcile {--chunk=100}`.
-- `src/app/Console/Commands/ReconcilePakasirPayments.php` — command `pakasir:reconcile {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileBinancePayments.php` — command `binance:reconcile {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.
 - `src/config/orders.php` — konfigurasi TTL pending payment.

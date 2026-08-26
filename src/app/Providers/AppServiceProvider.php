@@ -25,7 +25,6 @@ use App\Services\Checkout\BscCheckoutPaymentPreparation;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
-use App\Services\Checkout\PakasirCheckoutPaymentPreparation;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -33,8 +32,6 @@ use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
-use App\Services\Pakasir\PakasirClient;
-use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBinanceVerifyCallbackHandler;
@@ -80,15 +77,10 @@ class AppServiceProvider extends ServiceProvider
                 : new BscVerificationRpcClientAdapter($client);
         });
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
-        $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
-            $pakasir = $app->make(PakasirCheckoutPaymentPreparation::class);
-
             return new CheckoutPaymentPreparationResolver([
                 ManualQrisCheckoutPaymentPreparation::IDENTITY => $app->make(ManualQrisCheckoutPaymentPreparation::class),
-                PakasirCheckoutPaymentPreparation::HOSTED_IDENTITY => $pakasir,
-                PakasirCheckoutPaymentPreparation::API_QRIS_IDENTITY => $pakasir,
                 KlikQrisCheckoutPaymentPreparation::IDENTITY => $app->make(KlikQrisCheckoutPaymentPreparation::class),
                 BinanceCheckoutPaymentPreparation::IDENTITY => $app->make(BinanceCheckoutPaymentPreparation::class),
                 BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),

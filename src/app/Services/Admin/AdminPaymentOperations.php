@@ -10,9 +10,6 @@ use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
-use App\Services\Pakasir\PakasirCallbackProcessor;
-use App\Services\Pakasir\PakasirProviderAdapter;
-use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Support\PaymentProvider;
 use InvalidArgumentException;
 
@@ -26,9 +23,6 @@ class AdminPaymentOperations
 
     public function __construct(
         private readonly AuditLogger $audit,
-        private readonly PakasirProviderAdapter $pakasirClient,
-        private readonly PakasirCallbackProcessor $pakasirProcessor,
-        private readonly PakasirProviderReadiness $pakasirReadiness,
         private readonly KlikQrisProviderAdapter $klikQrisClient,
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
@@ -41,11 +35,8 @@ class AdminPaymentOperations
             return false;
         }
 
-        return match ($payment->provider) {
-            PaymentProvider::PAKASIR => $this->pakasirReadiness->verification()->isReady(),
-            PaymentProvider::KLIKQRIS => $this->klikQrisReadiness->checkout()->isReady(),
-            default => false,
-        };
+        return $payment->provider === PaymentProvider::KLIKQRIS
+            && $this->klikQrisReadiness->checkout()->isReady();
     }
 
     public function reconcile(Payment $payment, ?User $user = null, ?string $ip = null): PaymentEvent
@@ -54,11 +45,10 @@ class AdminPaymentOperations
             throw new InvalidArgumentException('Only supported payment providers with provider identifiers can be reconciled.');
         }
 
-        $event = match ($payment->provider) {
-            PaymentProvider::PAKASIR => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
-            PaymentProvider::KLIKQRIS => $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQrisClient->transactionStatus($payment)),
-            default => throw new InvalidArgumentException('Only supported payment providers with provider identifiers can be reconciled.'),
-        };
+        $event = $this->klikQrisProcessor->processReconciliationForPayment(
+            $payment,
+            $this->klikQrisClient->transactionStatus($payment),
+        );
         $this->audit->log('payment.manually_reconciled', $payment, null, ['payment_event_id' => $event->id], $user, $ip);
 
         return $event;

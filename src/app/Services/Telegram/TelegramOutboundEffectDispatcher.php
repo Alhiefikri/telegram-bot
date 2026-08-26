@@ -12,7 +12,6 @@ use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
-use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendProductStockNotifications;
 use App\Jobs\SendTelegramBroadcastBatch;
@@ -50,11 +49,6 @@ final class TelegramOutboundEffectDispatcher
                 (string) $effect->getKey(),
             ),
             TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value => SendKlikQrisCheckoutInstructions::dispatch(
-                (string) $effect->source_id,
-                $jobEnqueuedAt,
-                (string) $effect->getKey(),
-            ),
-            TelegramOutboundEffectType::PakasirCheckoutInstructions->value => SendPakasirCheckoutInstructions::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),

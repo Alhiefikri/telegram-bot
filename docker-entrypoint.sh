@@ -73,17 +73,6 @@ if [ "${APP_ENV:-production}" = "production" ]; then
         is_truthy "${APP_ALLOW_DOGFOOD_RUNTIME:-false}" || fail_startup "Dogfood runtime flags are not allowed in production Docker."
     fi
 
-    if [ "${TELEGRAM_PAYMENT_MODE:-manual}" = "pakasir" ]; then
-        require_env PAKASIR_SLUG
-        require_env PAKASIR_API_KEY
-        reject_placeholder_env PAKASIR_SLUG
-        reject_placeholder_env PAKASIR_API_KEY
-
-        case "${PAKASIR_BASE_URL:-}" in
-            https://*) ;;
-            *) fail_startup "PAKASIR_BASE_URL must use https:// in production." ;;
-        esac
-    fi
 fi
 
 if [ "$(id -u)" = "0" ]; then

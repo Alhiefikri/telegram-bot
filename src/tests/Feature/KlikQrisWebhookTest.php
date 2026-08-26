@@ -631,7 +631,7 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_rate_limit_uses_configured_klikqris_sandbox_limiter_without_changing_pakasir_route(): void
+    public function test_rate_limit_uses_configured_klikqris_sandbox_limiter(): void
     {
         config()->set('services.klikqris.webhook_rate_limit_per_minute', 1);
         $payment = $this->payableKlikQrisPayment();
@@ -640,7 +640,6 @@ class KlikQrisWebhookTest extends TestCase
         $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertOk();
         $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertTooManyRequests();
 
-        $this->assertNotNull(collect(app('router')->getRoutes())->first(fn ($route) => $route->uri() === 'api/webhook/pakasir'));
     }
 
     private function payableKlikQrisPayment()

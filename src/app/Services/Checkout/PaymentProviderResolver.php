@@ -19,7 +19,7 @@ final readonly class PaymentProviderResolver
 
         // Binance rails are customer-selected payment rails, not values of the
         // active QRIS provider switch. Resolve them directly and do not let a
-        // Pakasir/KlikQRIS switch or readiness result rewrite the rail.
+        // provider readiness result rewrite the rail.
         if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)) {
             return new PaymentProviderSelection(
                 requestedProvider: $requestedProvider,
@@ -28,9 +28,6 @@ final readonly class PaymentProviderResolver
                 settingId: $settingId,
                 paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL),
             );
-        }
-        if ($requestedProvider === PaymentProvider::PAKASIR) {
-            throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }
 
         $provider = $requestedProvider;

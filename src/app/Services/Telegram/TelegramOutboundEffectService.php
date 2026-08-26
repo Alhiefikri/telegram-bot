@@ -39,8 +39,6 @@ class TelegramOutboundEffectService
 
     public const TYPE_KLIKQRIS_CHECKOUT = TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value;
 
-    public const TYPE_PAKASIR_CHECKOUT = TelegramOutboundEffectType::PakasirCheckoutInstructions->value;
-
     public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
 
     public const TYPE_BSC_CHECKOUT = TelegramOutboundEffectType::BscCheckoutInstructions->value;
@@ -89,8 +87,6 @@ class TelegramOutboundEffectService
     public const TEMPLATE_MANUAL_CHECKOUT = 'manual-payment-v1';
 
     public const TEMPLATE_KLIKQRIS_CHECKOUT = 'klikqris-payment-v1';
-
-    public const TEMPLATE_PAKASIR_CHECKOUT = 'pakasir-payment-v1';
 
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
 
@@ -145,7 +141,6 @@ class TelegramOutboundEffectService
     private const CHECKOUT_EFFECT_TYPES = [
         self::TYPE_MANUAL_CHECKOUT,
         self::TYPE_KLIKQRIS_CHECKOUT,
-        self::TYPE_PAKASIR_CHECKOUT,
         self::TYPE_BINANCE_CHECKOUT,
         self::TYPE_BSC_CHECKOUT,
     ];
@@ -876,7 +871,6 @@ class TelegramOutboundEffectService
         return match (true) {
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'QR_MANUAL' => self::TYPE_MANUAL_CHECKOUT,
             $payment->provider === PaymentProvider::KLIKQRIS => self::TYPE_KLIKQRIS_CHECKOUT,
-            $payment->provider === PaymentProvider::PAKASIR => self::TYPE_PAKASIR_CHECKOUT,
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => self::TYPE_BINANCE_CHECKOUT,
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => self::TYPE_BSC_CHECKOUT,
             default => null,
@@ -1700,7 +1694,6 @@ class TelegramOutboundEffectService
         return match ($effectType) {
             self::TYPE_MANUAL_CHECKOUT => self::TEMPLATE_MANUAL_CHECKOUT,
             self::TYPE_KLIKQRIS_CHECKOUT => self::TEMPLATE_KLIKQRIS_CHECKOUT,
-            self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
