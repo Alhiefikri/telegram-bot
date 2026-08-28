@@ -280,7 +280,7 @@ final class AdminDashboardProductsData
             return 'RETIRED';
         }
 
-        if (! $order) {
+        if (!$order) {
             return 'TERSEDIA';
         }
 
@@ -305,7 +305,7 @@ final class AdminDashboardProductsData
             return 'payload rusak · read-only';
         }
 
-        if (! $order) {
+        if (!$order) {
             return null;
         }
 
