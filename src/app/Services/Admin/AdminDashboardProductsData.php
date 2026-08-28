@@ -8,8 +8,8 @@ use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
-use App\Storefront\StorefrontProductPlaceholder;
 use App\Services\Credentials\StructuredCredentialPayload;
+use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
 use Illuminate\Support\Collection;
 use Throwable;
@@ -280,7 +280,7 @@ final class AdminDashboardProductsData
             return 'RETIRED';
         }
 
-        if (!$order) {
+        if (! $order) {
             return 'TERSEDIA';
         }
 
@@ -305,7 +305,7 @@ final class AdminDashboardProductsData
             return 'payload rusak · read-only';
         }
 
-        if (!$order) {
+        if (! $order) {
             return null;
         }
 
