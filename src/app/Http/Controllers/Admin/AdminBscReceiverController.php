@@ -9,119 +9,167 @@ use App\Http\Requests\Admin\BscReceiverVerifyRequest;
 use App\Models\BscPaymentReceiver;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardRedirector;
-use App\Services\Bsc\BscReceiverManager;
+use App\Services\Admin\BscReceiverMutationExecutor;
+use App\Services\Admin\BscReceiverMutationResult;
+use App\Services\Admin\BscReceiverPendingMutation;
+use App\Services\Admin\BscReceiverPendingMutationStore;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use InvalidArgumentException;
-use RuntimeException;
 
 class AdminBscReceiverController extends Controller
 {
     public function store(
         BscReceiverStoreRequest $request,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
     ): RedirectResponse {
         $actor = $this->actor($request);
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_STORE,
+            [
+                'label' => (string) $request->validated('label'),
+                'address' => (string) $request->validated('address'),
+            ],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
+        }
 
-        try {
-            $manager->add(
+        return $this->respond(
+            $executor->add(
                 (string) $request->validated('label'),
                 (string) $request->validated('address'),
                 $actor,
                 $request->ip(),
-            );
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
-        }
-
-        return $redirector->bscSettings()->with('status', 'BSC receiver ditambahkan sebagai pending verification. Challenge ownership tersedia di dashboard.');
+            ),
+            $redirector,
+        );
     }
 
     public function verify(
         BscReceiverVerifyRequest $request,
         BscPaymentReceiver $receiver,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
     ): RedirectResponse {
         $actor = $this->actor($request);
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_VERIFY,
+            [
+                'receiver_id' => (int) $receiver->getKey(),
+                'challenge_id' => (string) $request->validated('challenge_id'),
+                'wallet_type' => (string) $request->validated('wallet_type'),
+                'signature' => (string) $request->validated('signature'),
+            ],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
+        }
 
-        try {
-            $manager->verify(
+        return $this->respond(
+            $executor->verify(
                 $receiver,
                 (string) $request->validated('challenge_id'),
                 (string) $request->validated('wallet_type'),
                 (string) $request->validated('signature'),
                 $actor,
                 $request->ip(),
-            );
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
-        }
-
-        return $redirector->bscSettings()->with('status', 'Ownership BSC receiver berhasil diverifikasi. Aktifkan receiver jika siap menerima pembayaran.');
+            ),
+            $redirector,
+        );
     }
 
     public function challenge(
         Request $request,
         BscPaymentReceiver $receiver,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
     ): RedirectResponse {
-        try {
-            $manager->renewChallenge($receiver, $this->actor($request), $request->ip());
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
+        $actor = $this->actor($request);
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_CHALLENGE,
+            ['receiver_id' => (int) $receiver->getKey()],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
         }
 
-        return $redirector->bscSettings()->with('status', 'Ownership challenge baru dibuat. Challenge sebelumnya sudah tidak berlaku.');
+        return $this->respond($executor->renewChallenge($receiver, $actor, $request->ip()), $redirector);
     }
 
     public function manualVerify(
         BscReceiverManualVerifyRequest $request,
         BscPaymentReceiver $receiver,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
     ): RedirectResponse {
         $actor = $this->actor($request);
-
-        try {
-            $manager->manualVerify($receiver, true, $actor, $request->ip());
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_MANUAL_VERIFY,
+            [
+                'receiver_id' => (int) $receiver->getKey(),
+                'high_risk_ack' => true,
+            ],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
         }
 
-        return $redirector->bscSettings()->with('status', 'Receiver ditandai manual_verified. Jalur ini high risk; aktifkan hanya setelah review Owner.');
+        return $this->respond($executor->manualVerify($receiver, $actor, $request->ip()), $redirector);
     }
 
     public function activate(
         BscPaymentReceiver $receiver,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
         Request $request,
     ): RedirectResponse {
-        try {
-            $manager->activate($receiver, $this->actor($request), $request->ip());
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
+        $actor = $this->actor($request);
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_ACTIVATE,
+            ['receiver_id' => (int) $receiver->getKey()],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
         }
 
-        return $redirector->bscSettings()->with('status', 'BSC receiver diaktifkan untuk checkout baru.');
+        return $this->respond($executor->activate($receiver, $actor, $request->ip()), $redirector);
     }
 
     public function deactivate(
         BscPaymentReceiver $receiver,
-        BscReceiverManager $manager,
+        BscReceiverMutationExecutor $executor,
+        BscReceiverPendingMutationStore $pendingMutations,
         AdminDashboardRedirector $redirector,
         Request $request,
     ): RedirectResponse {
-        try {
-            $manager->deactivate($receiver, $this->actor($request), $request->ip());
-        } catch (InvalidArgumentException|RuntimeException $exception) {
-            return $this->error($redirector, $exception->getMessage());
+        $actor = $this->actor($request);
+        $pendingRedirect = $pendingMutations->redirectIfRequired(
+            $request,
+            $actor,
+            BscReceiverPendingMutation::ACTION_DEACTIVATE,
+            ['receiver_id' => (int) $receiver->getKey()],
+        );
+        if ($pendingRedirect !== null) {
+            return $pendingRedirect;
         }
 
-        return $redirector->bscSettings()->with('status', 'BSC receiver dinonaktifkan. Payment existing tidak berubah.');
+        return $this->respond($executor->deactivate($receiver, $actor, $request->ip()), $redirector);
     }
 
     private function actor(Request $request): User
@@ -132,8 +180,12 @@ class AdminBscReceiverController extends Controller
         return $actor;
     }
 
-    private function error(AdminDashboardRedirector $redirector, string $message): RedirectResponse
+    private function respond(BscReceiverMutationResult $result, AdminDashboardRedirector $redirector): RedirectResponse
     {
-        return $redirector->bscSettings()->withErrors(['receiver' => $message], 'bsc');
+        if (! $result->success) {
+            return $redirector->bscSettings()->withErrors(['receiver' => $result->message], 'bsc');
+        }
+
+        return $redirector->bscSettings()->with('status', $result->message);
     }
 }

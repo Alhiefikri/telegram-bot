@@ -114,7 +114,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
-            Route::prefix('bsc')->name('bsc.')->middleware(['admin.bsc-owner', 'password.confirm:password.confirm,900'])->group(function (): void {
+            // BSC controllers persist validated pending mutations because password redirects cannot replay POST bodies.
+            Route::prefix('bsc')->name('bsc.')->middleware('admin.bsc-owner')->group(function (): void {
                 Route::post('receivers', [AdminBscReceiverController::class, 'store'])->name('receivers.store');
                 Route::post('receivers/{receiver}/challenge', [AdminBscReceiverController::class, 'challenge'])->name('receivers.challenge');
                 Route::post('receivers/{receiver}/verify', [AdminBscReceiverController::class, 'verify'])->name('receivers.verify');

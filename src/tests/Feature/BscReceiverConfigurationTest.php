@@ -14,6 +14,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\User;
+use App\Services\Admin\BscReceiverPendingMutationStore;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
@@ -21,7 +22,10 @@ use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -63,18 +67,267 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertDatabaseCount('bsc_payment_receivers', 0);
     }
 
-    public function test_owner_must_reauthenticate_before_adding_a_receiver(): void
+    public function test_invalid_receiver_address_is_rejected_before_password_confirmation(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
 
         $this->actingAs($owner)
             ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet invalid',
+                'address' => 'not-an-evm-address',
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+            ->assertSessionHasErrorsIn('bsc', 'address');
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+        $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+    }
+
+    public function test_owner_can_add_receiver_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $address = '0xf43f918727e621ba6abc31c2bca292dc46d8e038';
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.store'), [
                 'label' => 'Wallet utama',
-                'address' => '0x2222222222222222222222222222222222222222',
+                'address' => $address,
             ])
             ->assertRedirect(route('password.confirm'));
 
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertDatabaseHas('bsc_payment_receivers', [
+            'label' => 'Wallet utama',
+            'address_normalized' => $address,
+        ]);
+        $this->assertDatabaseCount('bsc_receiver_ownership_challenges', 1);
+        $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+        Queue::assertPushed(SendBscReceiverMutationNotification::class);
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect(route('admin.dashboard'));
+        $this->assertDatabaseCount('bsc_payment_receivers', 1);
+        Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
+    }
+
+    public function test_wrong_password_keeps_pending_receiver_mutation_for_retry(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $address = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet retry',
+                'address' => $address,
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors('password');
+
         $this->assertDatabaseCount('bsc_payment_receivers', 0);
+        $this->assertTrue(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertDatabaseHas('bsc_payment_receivers', [
+            'label' => 'Wallet retry',
+            'address_normalized' => $address,
+        ]);
+    }
+
+    public function test_expired_pending_receiver_mutation_is_discarded(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet expired',
+                'address' => '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        Carbon::setTestNow(now()->addSeconds(BscReceiverPendingMutationStore::PENDING_ACTION_TTL_SECONDS + 1));
+        try {
+            $this->post(route('admin.password.confirm.store'), [
+                'password' => 'password',
+            ])->assertRedirect(route('admin.dashboard'));
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+        $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+    }
+
+    public function test_pending_receiver_mutation_cannot_be_consumed_by_another_owner(): void
+    {
+        $originalOwner = User::factory()->create(['role' => UserRole::Owner]);
+        $otherOwner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($originalOwner)
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet isolated',
+                'address' => '0xdddddddddddddddddddddddddddddddddddddddd',
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->actingAs($otherOwner)
+            ->post(route('admin.password.confirm.store'), [
+                'password' => 'password',
+            ])->assertRedirect(route('admin.dashboard'));
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+        $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+    }
+
+    public function test_malformed_pending_receiver_mutation_is_ignored(): void
+    {
+        $owner = User::factory()->make();
+        $owner->forceFill(['id' => 1]);
+        $this->withSession([
+            BscReceiverPendingMutationStore::SESSION_KEY => Crypt::encryptString(json_encode([
+                'action' => 'store',
+                'actor_id' => [],
+                'payload' => [],
+                'nonce' => 'nonce',
+                'expires_at' => now()->addMinute()->timestamp,
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $request = Request::create('/admin/confirm-password', 'POST');
+        $request->setLaravelSession(app('session')->driver());
+
+        $this->assertNull(app(BscReceiverPendingMutationStore::class)->consume($request, $owner));
+        $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+    }
+
+    public function test_owner_can_renew_challenge_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $registration = app(BscReceiverManager::class)->add(
+            'Wallet challenge',
+            '0x3333333333333333333333333333333333333333',
+            $owner,
+        );
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.challenge', $registration->receiver))
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $renewed = BscReceiverOwnershipChallenge::query()
+            ->where('receiver_id', $registration->receiver->getKey())
+            ->latest('created_at')
+            ->firstOrFail();
+
+        $this->assertNotSame((string) $registration->challenge->getKey(), (string) $renewed->getKey());
+        $this->assertNotNull($registration->challenge->fresh()->used_at);
+    }
+
+    public function test_owner_can_verify_receiver_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->useOwnershipVerifier(true);
+        $registration = app(BscReceiverManager::class)->add(
+            'Wallet verify',
+            '0x4444444444444444444444444444444444444444',
+            $owner,
+        );
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.verify', $registration->receiver), [
+                'challenge_id' => (string) $registration->challenge->getKey(),
+                'wallet_type' => 'eoa',
+                'signature' => '0x'.str_repeat('1', 130),
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertSame(
+            BscReceiverVerificationStatus::Verified,
+            $registration->receiver->fresh()->verification_status,
+        );
+        $this->assertNotNull($registration->challenge->fresh()->used_at);
+    }
+
+    public function test_owner_can_manually_verify_receiver_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $registration = app(BscReceiverManager::class)->add(
+            'Custodial wallet',
+            '0x5555555555555555555555555555555555555555',
+            $owner,
+        );
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.manual-verify', $registration->receiver), [
+                'high_risk_ack' => '1',
+            ])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertSame(
+            BscReceiverVerificationStatus::ManualVerified,
+            $registration->receiver->fresh()->verification_status,
+        );
+    }
+
+    public function test_owner_can_activate_receiver_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $receiver = BscPaymentReceiver::factory()->verified()->create([
+            'token_contract' => self::CONTRACT,
+        ]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.activate', $receiver))
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertTrue($receiver->fresh()->is_active);
+    }
+
+    public function test_owner_can_deactivate_receiver_after_password_confirmation(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $receiver = BscPaymentReceiver::factory()->verified()->active()->create([
+            'token_contract' => self::CONTRACT,
+        ]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.bsc.receivers.deactivate', $receiver))
+            ->assertRedirect(route('password.confirm'));
+
+        $this->post(route('admin.password.confirm.store'), [
+            'password' => 'password',
+        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+
+        $this->assertFalse($receiver->fresh()->is_active);
     }
 
     public function test_owner_add_creates_pending_receiver_and_one_time_challenge(): void
