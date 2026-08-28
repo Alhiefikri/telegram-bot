@@ -1137,6 +1137,9 @@ export function storefrontModal() {
       window.setTimeout(focusTarget, 300);
     },
     handleModalKeydown(event) {
+      if (!this.productModalOpen) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         this.closeProductModal();

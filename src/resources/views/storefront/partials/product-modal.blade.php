@@ -16,7 +16,7 @@
         ?? ($checkoutMaintenanceState ? \App\Storefront\StorefrontCheckoutMaintenanceCopy::notice($checkoutMaintenanceState) : '');
 @endphp
 
-<div class="relative z-50" x-show="productModalOpen" x-cloak>
+<div class="relative z-50" x-show="productModalOpen" x-cloak @keydown.window="if (productModalOpen && $event.key === 'Escape' && !$event.defaultPrevented) { $event.preventDefault(); closeProductModal(); }">
     <div x-show="productModalOpen"
          x-transition:enter="ease-out duration-300"
          x-transition:enter-start="opacity-0"

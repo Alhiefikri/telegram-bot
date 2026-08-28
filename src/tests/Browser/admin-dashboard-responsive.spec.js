@@ -83,6 +83,7 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
 
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(productCard).toBeFocused();
