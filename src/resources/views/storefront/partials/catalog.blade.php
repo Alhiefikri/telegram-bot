@@ -1,6 +1,6 @@
 <section id="products" class="relative border-y-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] py-20">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
-    <div class="relative z-10 mx-auto max-w-6xl px-5 sm:px-6">
+    <div class="relative z-10 mx-auto max-w-7xl px-5 sm:px-6">
         <div class="mx-auto mb-12 max-w-2xl text-center">
             <div class="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
                 <span class="neo-spin-slow inline-block" aria-hidden="true">✦</span>
@@ -55,8 +55,7 @@
 
     <div id="storefront-product-grid" @class([
         'storefront-popular-card storefront-product-grid',
-        'mx-auto max-w-xs grid-cols-1' => $catalogPage->productCount() === 1,
-        'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' => $catalogPage->productCount() !== 1,
+        'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
     ])>
         @forelse ($catalogPage->products as $catalogProduct)
             @include('storefront.components.product-card', [

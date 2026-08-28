@@ -17,6 +17,8 @@ return [
         'telegram_bot_url' => env('STOREFRONT_TELEGRAM_BOT_URL', 'https://t.me/lhiestore_bot?start=landing'),
     ],
 
+    'product_placeholder' => '/assets/product-placeholder.svg',
+
     'guide_catalog' => [
         [
             'eyebrow' => 'ChatGPT',

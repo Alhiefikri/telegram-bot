@@ -243,7 +243,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Rp125.000')
             ->assertSee('Akses desain premium untuk kebutuhan konten harian.')
             ->assertSee('Terjual: 0')
-            ->assertSee('Gambar produk menyusul')
+            ->assertSee('/assets/product-placeholder.svg', false)
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
             ->assertDontSee('Produk Dari Kategori Nonaktif')

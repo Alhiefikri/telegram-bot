@@ -99,6 +99,11 @@ class AdminDashboardAccessTest extends TestCase
                 'methods' => ['POST'],
                 'middleware' => ['web', 'admin.no-cache', 'admin.access'],
             ],
+            'admin.storefront-placeholder.update' => [
+                'uri' => 'admin/storefront-placeholder',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
             'admin.store-channel.test' => [
                 'uri' => 'admin/store-channel/test',
                 'methods' => ['POST'],

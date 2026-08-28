@@ -21,6 +21,7 @@
             $paymentControl = $statsTab['paymentControl'] ?? [];
             $checkoutMaintenance = $statsTab['checkoutMaintenance'] ?? [];
             $canManageProducts = $productsTab['canManage'];
+            $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];
             $productsPagination = $productsTab['pagination'];
             $categoryOptions = $productsTab['categoryOptions'];

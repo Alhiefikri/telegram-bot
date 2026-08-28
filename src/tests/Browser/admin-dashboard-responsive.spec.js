@@ -80,6 +80,12 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   await expect(
     dialog.locator('input[type="radio"][name="payment_choice"]').first()
   ).toBeAttached();
+  await expect(
+    dialog.locator("[data-storefront-qris-mark]").first()
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Bayar dengan QRIS", { exact: true })
+  ).toBeVisible();
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
 
@@ -668,7 +674,7 @@ test("prioritizes invoice content by state without mobile overflow", async ({
   }
 });
 
-test("stacks shop cards and keeps focus on the active filter at mobile width", async ({
+test("uses a compact two-column shop grid and keeps focus on the active filter at mobile width", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
@@ -684,7 +690,7 @@ test("stacks shop cards and keeps focus on the active filter at mobile width", a
     .filter({ hasText: "Browser QA Produk B" })
     .first();
   await page.waitForTimeout(700);
-  await expectOneColumn(productA, productB);
+  await expectTwoColumns(productA, productB);
 
   await productB.focus();
   await expect(productB).toBeFocused();
@@ -696,6 +702,58 @@ test("stacks shop cards and keeps focus on the active filter at mobile width", a
   await firstCategory.evaluate((button) => button.click());
   await expect(firstCategory).toBeFocused();
   await expect(productB).toBeHidden();
+  await expectNoDocumentOverflow(page);
+});
+
+test("balances product columns across storefront breakpoints", async ({
+  page,
+}) => {
+  for (const [width, expectedColumns] of [
+    [320, 2],
+    [390, 2],
+    [768, 3],
+    [1024, 4],
+    [1280, 5],
+  ]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+    const metrics = await page
+      .locator("#storefront-product-grid")
+      .evaluate((grid) => ({
+        columns: getComputedStyle(grid)
+          .gridTemplateColumns.trim()
+          .split(/\s+/)
+          .filter(Boolean).length,
+        overflow:
+          document.documentElement.scrollWidth >
+          document.documentElement.clientWidth,
+      }));
+
+    expect(metrics.columns).toBe(expectedColumns);
+    expect(metrics.overflow).toBe(false);
+  }
+});
+
+test("shows the catalog placeholder controls in the admin product tab", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const placeholder = page.locator("#admin-product-placeholder");
+  await expect(placeholder).toBeVisible();
+  await expect(placeholder.getByText("Gambar default katalog")).toBeVisible();
+  await expect(placeholder.getByText("Default bawaan aktif")).toBeVisible();
+  await expect(
+    placeholder.locator("#product-placeholder-image")
+  ).toBeAttached();
+  await expect(
+    placeholder.getByRole("button", { name: "Simpan default" })
+  ).toBeVisible();
   await expectNoDocumentOverflow(page);
 });
 
@@ -2063,6 +2121,16 @@ async function expectOneColumn(firstLocator, secondLocator) {
   expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
 }
 
+async function expectTwoColumns(firstLocator, secondLocator) {
+  const first = await firstLocator.boundingBox();
+  const second = await secondLocator.boundingBox();
+
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(Math.abs(first.y - second.y)).toBeLessThanOrEqual(2);
+  expect(second.x).toBeGreaterThanOrEqual(first.x + first.width - 2);
+}
+
 async function expectBefore(firstLocator, secondLocator) {
   const [first, second] = await Promise.all([
     firstLocator.first().boundingBox(),
@@ -2247,7 +2315,7 @@ async function waitForServer(url) {
 }
 
 // Test data setup: create one owner plus enough product and order data to measure
-// mobile card layout as a real one-column stack rather than inferred from CSS.
+// mobile card layout as a real two-column grid rather than inferred from CSS.
 const responsiveSeedScript = String.raw`
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;

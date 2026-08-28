@@ -182,7 +182,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
-            ->assertSee('grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false)
+            ->assertSee('storefront-product-grid', false)
             ->assertSee('id="featured-offer"', false)
             ->assertDontSee('Katalog produk digital siap pakai');
     }
@@ -194,7 +194,7 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('id="storefront-product-grid"', false)
-            ->assertSee('mx-auto max-w-xs grid-cols-1', false)
+            ->assertSee('storefront-product-grid--single mx-auto max-w-xs', false)
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 

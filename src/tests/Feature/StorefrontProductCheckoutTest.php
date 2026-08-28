@@ -34,6 +34,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('line-through', false)
             ->assertSee('Stok: 8')
             ->assertSee('Bayar QRIS di Website')
+            ->assertSee('data-storefront-qris-mark', false)
+            ->assertSee('Bayar dengan QRIS', false)
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('&amp;quot;', false)
             ->assertSee('Habis');
@@ -50,7 +52,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('id="storefront-product-grid"', false)
-            ->assertSee('mx-auto max-w-xs grid-cols-1', false)
+            ->assertSee('storefront-product-grid--single mx-auto max-w-xs', false)
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 

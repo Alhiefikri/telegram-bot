@@ -37,7 +37,47 @@
                     <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
                 </x-admin-dashboard.notice>
 
-                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <section id="admin-product-placeholder" class="rounded-[1.125rem] border-[3px] border-neo-ink bg-white/80 p-4 shadow-[4px_4px_0_#111827] sm:p-5" aria-labelledby="admin-product-placeholder-title">
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                            <h3 id="admin-product-placeholder-title" class="font-display text-base font-black uppercase tracking-wide text-neo-ink">🖼️ Gambar default katalog</h3>
+                            <p class="mt-1 max-w-2xl text-xs font-semibold leading-5 text-brand-muted">Gambar ini tampil otomatis pada produk yang belum memiliki gambar khusus. Atur sekali di sini agar katalog tetap terlihat rapi.</p>
+                            <span @class([
+                                'mt-3 inline-flex rounded-full border-2 border-neo-ink px-2.5 py-1 text-[10px] font-black uppercase tracking-wide shadow-[2px_2px_0_#111827]',
+                                'bg-neo-green text-neo-ink' => $productPlaceholder['is_custom'],
+                                'bg-neo-yellow text-neo-ink' => ! $productPlaceholder['is_custom'],
+                            ])>
+                                {{ $productPlaceholder['is_custom'] ? 'Default custom aktif' : 'Default bawaan aktif' }}
+                            </span>
+                        </div>
+                        <div class="h-20 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]">
+                            <img src="{{ $productPlaceholder['image_url'] }}" alt="Preview gambar default katalog" class="h-full w-full object-cover" loading="lazy" decoding="async">
+                        </div>
+                    </div>
+
+                    @if ($canManageProducts)
+                        <form method="POST" action="{{ $productPlaceholder['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: 'Belum ada file yang dipilih' }" class="mt-4 flex flex-col gap-3 rounded-xl border-2 border-dashed border-neo-ink/40 bg-neo-admin-paper/60 p-3 sm:flex-row sm:items-end">
+                            @csrf
+                            <div class="min-w-0 flex-1">
+                                <label for="product-placeholder-image" class="text-[11px] font-black uppercase tracking-wide text-neo-ink">Ganti gambar default</label>
+                                <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2 shadow-[2px_2px_0_#050505]">
+                                    <label for="product-placeholder-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
+                                    <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="fileName">Belum ada file yang dipilih</span>
+                                </div>
+                                <input type="file" id="product-placeholder-image" name="image" accept="image/jpeg,image/png,image/webp" required class="sr-only" x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'">
+                                <p class="mt-2 text-[10px] font-bold text-neo-ink/60">JPG, PNG, atau WebP. Maksimal 5 MB; otomatis dikompresi menjadi WebP maksimal 1600px.</p>
+                            </div>
+                            <x-admin-dashboard.button type="submit" variant="purple" size="sm" class="w-full shrink-0 sm:w-auto">Simpan default</x-admin-dashboard.button>
+                        </form>
+                        @error('image', 'productPlaceholder')
+                            <x-admin-dashboard.field-error class="mt-2">{{ $message }}</x-admin-dashboard.field-error>
+                        @enderror
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Role ini hanya bisa melihat gambar default. Owner/Admin dapat menggantinya dari sini.</x-admin-dashboard.notice>
+                    @endif
+                </section>
+
+                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     @forelse ($products as $product)
 
                         @include('admin.dashboard.product-card')

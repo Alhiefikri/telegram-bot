@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title description">
+  <title id="title">Lhie Store product placeholder</title>
+  <desc id="description">Default artwork for a product without a custom image.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef4ff"/>
+      <stop offset="1" stop-color="#dce8ff"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#005cff"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#0b1220" stroke-opacity=".1" stroke-width="3"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#background)"/>
+  <rect width="1200" height="1200" fill="url(#grid)"/>
+  <circle cx="1030" cy="180" r="92" fill="#ffe45c" stroke="#0b1220" stroke-width="16"/>
+  <path d="M1030 124v112M974 180h112" stroke="#0b1220" stroke-width="18" stroke-linecap="round"/>
+  <rect x="142" y="142" width="916" height="916" rx="72" fill="#fffdf8" stroke="#0b1220" stroke-width="20"/>
+  <rect x="206" y="206" width="788" height="788" rx="52" fill="url(#card)" stroke="#0b1220" stroke-width="16"/>
+  <path d="M206 730h788v264H206z" fill="#0b1220" fill-opacity=".22"/>
+  <circle cx="600" cy="480" r="154" fill="#fffdf8" stroke="#0b1220" stroke-width="18"/>
+  <path d="M600 382v196M502 480h196" stroke="#005cff" stroke-width="30" stroke-linecap="round"/>
+  <text x="600" y="816" fill="#fffdf8" font-family="Arial, Helvetica, sans-serif" font-size="84" font-weight="900" letter-spacing="8" text-anchor="middle">LHIE STORE</text>
+  <text x="600" y="894" fill="#ffe45c" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" letter-spacing="8" text-anchor="middle">PRODUK DIGITAL</text>
+  <rect x="206" y="206" width="788" height="788" rx="52" fill="none" stroke="#fffdf8" stroke-opacity=".18" stroke-width="8"/>
+</svg>

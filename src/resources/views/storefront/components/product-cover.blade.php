@@ -12,7 +12,7 @@
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $context === 'featured' ? 'eager' : 'lazy' }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-4 text-center">
                 <div class="{{ $coverTheme['accent'] }}">
@@ -25,7 +25,7 @@
         @if (!$imageUrl)
             <span class="absolute left-3 top-3 z-10 rounded-md border-2 border-[var(--sf-border)] {{ $coverTheme['badge_bg'] }} px-2 py-0.5 text-[8px] font-black uppercase tracking-widest shadow-[3px_3px_0_var(--sf-shadow)]">{{ $coverTheme['badge'] }}</span>
         @endif
-        <span class="sr-only">Gambar produk menyusul</span>
+        <span class="sr-only">Gambar produk</span>
     </div>
 @else
     <div class="relative flex aspect-square w-full flex-col items-center justify-center overflow-hidden bg-white text-white">
@@ -33,7 +33,7 @@
         <div class="absolute inset-0 {{ $coverTheme['bg'] }} opacity-15"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $context === 'featured' ? 'eager' : 'lazy' }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center transition-transform duration-500 ease-out group-hover:scale-[1.05]">
                 <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
@@ -42,7 +42,7 @@
                 <div class="{{ $coverTheme['accent'] }} rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[8px] font-black uppercase tracking-widest text-[var(--sf-ink)]">{{ $coverTheme['desc'] }}</div>
             </div>
             <div class="absolute bottom-2 left-3 text-[7px] font-black uppercase tracking-widest text-[var(--sf-muted)] opacity-70">LHIE STORE</div>
-            <span class="sr-only">Gambar produk menyusul</span>
+            <span class="sr-only">Gambar default produk</span>
         @endif
 
         <div class="absolute left-2.5 right-2.5 top-2.5 z-10 flex items-start justify-between gap-2 {{ $imageUrl ? 'justify-end' : '' }}">

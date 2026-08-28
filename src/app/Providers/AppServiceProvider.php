@@ -8,6 +8,7 @@ use App\Models\BscPaymentReceiver;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
 use App\Models\Product;
+use App\Models\StorefrontSetting;
 use App\Observers\ProductAuditObserver;
 use App\Observers\StorefrontCacheInvalidationObserver;
 use App\Services\Admin\AdminAccessAuthorizer;
@@ -124,6 +125,7 @@ class AppServiceProvider extends ServiceProvider
         Category::observe(StorefrontCacheInvalidationObserver::class);
         ManualPaymentSetting::observe(StorefrontCacheInvalidationObserver::class);
         BscPaymentReceiver::observe(StorefrontCacheInvalidationObserver::class);
+        StorefrontSetting::observe(StorefrontCacheInvalidationObserver::class);
 
         DB::listen(fn ($query) => DogfoodTiming::recordQuery($query));
 

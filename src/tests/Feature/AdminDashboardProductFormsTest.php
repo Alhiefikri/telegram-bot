@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\StorefrontSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -53,8 +54,78 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertOk()
             ->assertSee('Pilih gambar')
             ->assertSee('productImageFileName', false)
+            ->assertSee('Gambar default katalog')
+            ->assertSee('admin-product-placeholder', false)
+            ->assertSee('Default bawaan aktif')
             ->assertSee('sr-only', false)
             ->assertDontSee('file:mr-3', false);
+    }
+
+    public function test_admin_can_change_default_catalog_image_from_dashboard(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Uses Dashboard Placeholder',
+            'image_path' => null,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.storefront-placeholder.update'), [
+                'image' => UploadedFile::fake()->image('placeholder-one.png', 900, 1200),
+            ])
+            ->assertRedirect('/admin?tab=produk#admin-section-products')
+            ->assertSessionHas('status', 'Gambar default katalog berhasil diperbarui.');
+
+        $setting = StorefrontSetting::query()->firstOrFail();
+        $firstPath = $setting->product_placeholder_image_path;
+
+        $this->assertStringStartsWith('storefront/placeholders/', $firstPath);
+        $this->assertStringEndsWith('.webp', $firstPath);
+        Storage::disk('public')->assertExists($firstPath);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'storefront.product_placeholder.updated',
+            'subject_type' => StorefrontSetting::class,
+            'subject_id' => (string) $setting->id,
+        ]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('/storage/'.$firstPath, false)
+            ->assertSee('Uses Dashboard Placeholder');
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('/storage/'.$firstPath, false)
+            ->assertSee('Default custom aktif');
+
+        $this->actingAs($admin)
+            ->post(route('admin.storefront-placeholder.update'), [
+                'image' => UploadedFile::fake()->image('placeholder-two.png', 600, 600),
+            ])
+            ->assertRedirect('/admin?tab=produk#admin-section-products');
+
+        $secondPath = $setting->refresh()->product_placeholder_image_path;
+
+        $this->assertNotSame($firstPath, $secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+        Storage::disk('public')->assertExists($secondPath);
+    }
+
+    public function test_non_manager_cannot_change_default_catalog_image(): void
+    {
+        Storage::fake('public');
+        $support = User::factory()->create(['role' => UserRole::Support]);
+
+        $this->actingAs($support)
+            ->post(route('admin.storefront-placeholder.update'), [
+                'image' => UploadedFile::fake()->image('not-allowed.png'),
+            ])
+            ->assertForbidden();
+
+        $this->assertNull(StorefrontSetting::query()->firstOrFail()->product_placeholder_image_path);
+        $this->assertSame([], Storage::disk('public')->allFiles());
     }
 
     public function test_admin_can_create_product_from_dashboard_modal(): void
@@ -107,7 +178,8 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSeeInOrder(['Stok', '0'])
             ->assertSeeInOrder(['Tersedia', '0'])
             ->assertSeeInOrder(['Dipesan', '0'])
-            ->assertSee('Akses Canva Pro siap pakai.');
+            ->assertSee('Akses Canva Pro siap pakai.')
+            ->assertSee('/assets/product-placeholder.svg', false);
     }
 
     public function test_admin_can_upload_product_image_as_optimized_webp(): void

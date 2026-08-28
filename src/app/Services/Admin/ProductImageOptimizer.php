@@ -11,11 +11,23 @@ final class ProductImageOptimizer
 {
     private const DIRECTORY = 'products';
 
+    private const PLACEHOLDER_DIRECTORY = 'storefront/placeholders';
+
     private const MAX_DIMENSION = 1600;
 
     private const WEBP_QUALITY = 84;
 
     public function store(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::DIRECTORY);
+    }
+
+    public function storePlaceholder(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::PLACEHOLDER_DIRECTORY);
+    }
+
+    private function storeInDirectory(UploadedFile $image, string $directory): string
     {
         $source = $this->createImageResource($image);
         $sourceWidth = imagesx($source);
@@ -33,9 +45,9 @@ final class ProductImageOptimizer
         $target = $this->resizePreservingTransparency($source, $targetWidth, $targetHeight);
         imagedestroy($source);
 
-        $path = self::DIRECTORY.'/'.Str::uuid()->toString().'.webp';
+        $path = $directory.'/'.Str::uuid()->toString().'.webp';
         $disk = Storage::disk('public');
-        $disk->makeDirectory(self::DIRECTORY);
+        $disk->makeDirectory($directory);
 
         $absolutePath = $disk->path($path);
         if (! imagewebp($target, $absolutePath, self::WEBP_QUALITY)) {
@@ -114,7 +126,9 @@ final class ProductImageOptimizer
 
     public function deleteManagedImage(?string $path): void
     {
-        if (! $path || ! str_starts_with($path, self::DIRECTORY.'/')) {
+        if (! $path
+            || (! str_starts_with($path, self::DIRECTORY.'/')
+                && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/'))) {
             return;
         }
 

@@ -100,6 +100,7 @@ final class AdminDashboardData
             'productsTab' => [
                 'canManage' => $canManageProducts,
                 'productStoreUrl' => route('admin.products.store'),
+                'placeholder' => [],
                 'products' => [],
                 'pagination' => [],
                 'categoryOptions' => [],

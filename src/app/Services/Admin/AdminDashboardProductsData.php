@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Storefront\StorefrontProductPlaceholder;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Support\Money;
 use Illuminate\Support\Collection;
@@ -15,7 +16,10 @@ use Throwable;
 
 final class AdminDashboardProductsData
 {
-    public function __construct(private readonly ProductImageOptimizer $images) {}
+    public function __construct(
+        private readonly ProductImageOptimizer $images,
+        private readonly StorefrontProductPlaceholder $placeholder,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -29,6 +33,11 @@ final class AdminDashboardProductsData
             'productStoreUrl' => route('admin.products.store'),
             'products' => $productPage['products'],
             'pagination' => $productPage['pagination'],
+            'placeholder' => [
+                'image_url' => $this->placeholder->imageUrl(),
+                'is_custom' => $this->placeholder->isCustom(),
+                'update_url' => route('admin.storefront-placeholder.update'),
+            ],
             'categoryOptions' => $this->categoryOptions(),
             'categoryManagement' => [
                 'createUrl' => route('admin.categories.store'),
@@ -69,8 +78,9 @@ final class AdminDashboardProductsData
             $this->loadOrderedStockItems($products);
         }
 
+        $placeholderUrl = $this->placeholder->imageUrl();
         $productPayloads = $products
-            ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems): array {
+            ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $placeholderUrl): array {
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
@@ -87,6 +97,7 @@ final class AdminDashboardProductsData
                 $stockAccountsReviewUrl = route('admin.products.stock.accounts.review', ['product' => $product]);
                 $stockReturnUrl = route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id;
                 $updateUrl = route('admin.products.update', ['product' => $product]);
+                $imageUrl = $this->images->publicUrl($product->image_path) ?? $placeholderUrl;
 
                 return [
                     'id' => $product->id,
@@ -112,7 +123,7 @@ final class AdminDashboardProductsData
                     'visibility_label' => $product->is_active ? '● Tampil di toko' : '○ Tidak tampil',
                     'visibility_color' => $product->is_active ? '#7BD10A' : '#ef4444',
                     'image_path' => $product->image_path,
-                    'image_url' => $this->images->publicUrl($product->image_path),
+                    'image_url' => $imageUrl,
                     'visibility_action_label' => $product->is_active ? '⏸ Pause' : '▶ Play',
                     'update_url' => $updateUrl,
                     'delete_url' => route('admin.products.destroy', ['product' => $product]),
@@ -143,7 +154,7 @@ final class AdminDashboardProductsData
                         'usageGuideTitle' => $product->usage_guide_title,
                         'usageGuideUrl' => $product->usage_guide_url,
                         'isActive' => $product->is_active,
-                        'imageUrl' => $this->images->publicUrl($product->image_path),
+                        'imageUrl' => $imageUrl,
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,
                         'stockAccountsUrl' => $stockAccountsUrl,

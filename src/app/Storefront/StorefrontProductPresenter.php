@@ -25,6 +25,7 @@ class StorefrontProductPresenter
         private readonly StorefrontSupport $support,
         private readonly CheckoutMaintenance $maintenance,
         private readonly BscReadiness $bscReadiness,
+        private readonly StorefrontProductPlaceholder $placeholder,
     ) {}
 
     public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null, ?CheckoutMaintenanceState $maintenanceState = null): StorefrontProductPresentation
@@ -67,7 +68,7 @@ class StorefrontProductPresenter
             productUrl: route('storefront.products.show', $product),
             cover: new StorefrontProductCoverPresentation(
                 theme: $this->coverForName($product->name),
-                imageUrl: $this->publicStorageUrl($product->image_path),
+                imageUrl: $this->publicStorageUrl($product->image_path) ?? $this->defaultProductImageUrl(),
             ),
             checkoutChoices: $isBuyable ? $this->checkoutChoices($product, $copy) : [],
             support: $this->support->prePurchase($product),
@@ -109,6 +110,11 @@ class StorefrontProductPresenter
         return file_exists(public_path($trackedProductImage))
             ? '/'.$trackedProductImage
             : '/storage/'.ltrim($path, '/');
+    }
+
+    private function defaultProductImageUrl(): string
+    {
+        return $this->placeholder->imageUrl();
     }
 
     /**

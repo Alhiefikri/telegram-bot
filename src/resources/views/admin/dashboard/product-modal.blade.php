@@ -94,7 +94,7 @@
                             <div class="flex items-start justify-between gap-3">
                                 <div>
                                     <x-admin-dashboard.field-label for="product-image" class="text-sm normal-case tracking-normal">🖼️ Gambar produk</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">JPG, PNG, atau WebP. Otomatis dikompresi jadi WebP maksimal 1600px.</p>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">JPG, PNG, atau WebP. Jika belum ada gambar, default akan tampil di toko. Upload gambar untuk menggantinya; otomatis dikompresi jadi WebP maksimal 1600px.</p>
                                 </div>
                                 <div x-show="productImageUrl" class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
                                     <img x-bind:src="productImageUrl" alt="" class="h-full w-full object-cover">

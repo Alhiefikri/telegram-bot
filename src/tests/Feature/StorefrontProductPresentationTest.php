@@ -7,8 +7,10 @@ use App\Enums\PaymentStatus;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
@@ -151,6 +153,36 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame('Desain premium siap pakai.', $presentation->descriptionSnippet);
         $this->assertSame('/storage/products/canva.jpg', $presentation->cover->imageUrl);
         $this->assertSame('CANVA PREMIUM', $presentation->cover->theme['desc']);
+        $this->assertTrue($presentation->cover->hasImage());
+    }
+
+    public function test_product_without_custom_image_uses_default_placeholder(): void
+    {
+        $product = $this->availableProduct(['image_path' => null]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame(config('storefront.product_placeholder'), $presentation->cover->imageUrl);
+        $this->assertTrue($presentation->cover->hasImage());
+        $this->assertDatabaseHas('products', [
+            'id' => $product->id,
+            'image_path' => null,
+        ]);
+    }
+
+    public function test_product_without_custom_image_uses_dashboard_placeholder_image(): void
+    {
+        Storage::fake('public');
+        $path = 'storefront/placeholders/dashboard.webp';
+        Storage::disk('public')->put($path, 'placeholder');
+        StorefrontSetting::query()->firstOrFail()->update([
+            'product_placeholder_image_path' => $path,
+        ]);
+        $product = $this->availableProduct(['image_path' => null]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame('/storage/'.$path, $presentation->cover->imageUrl);
         $this->assertTrue($presentation->cover->hasImage());
     }
 
