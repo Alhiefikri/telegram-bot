@@ -34,6 +34,7 @@ final class PaidInvoiceOrderPresentationAdapter
         $order->loadMissing(['customer', 'orderItems', 'payments']);
 
         $payment = $this->canonicalPaidPayment($order);
+        $currency = $this->currency($payment, $order);
 
         return new PaidInvoicePresentation(
             invoiceId: $this->invoiceIdentifier($order),
@@ -41,12 +42,14 @@ final class PaidInvoiceOrderPresentationAdapter
             buyerName: $this->buyerNameMasker->mask($order->customer),
             paidAt: $this->paidAt($payment),
             paymentMethod: $this->paymentMethod($payment),
-            currency: $this->currency($payment, $order),
-            items: $this->snapshotItems($order),
+            currency: $currency,
+            itemCurrency: $currency === 'USDT'
+                ? $currency
+                : strtoupper(self::safeText((string) ($order->currency ?: $currency), 12) ?: $currency),
+            items: $this->snapshotItems($order, $currency),
             providerFee: max(0, (int) ($payment->provider_fee ?? 0)),
-            totalPaid: $payment->provider_total_payment !== null
-                ? max(0, (int) $payment->provider_total_payment)
-                : max(0, (int) $order->total_amount),
+            paymentSubtotal: $this->paymentSubtotal($payment, $currency),
+            totalPaid: $this->totalPaid($payment, $order, $currency),
         );
     }
 
@@ -72,25 +75,56 @@ final class PaidInvoiceOrderPresentationAdapter
     }
 
     /**
-     * @return list<array{product_name: string, quantity: int, unit_price: int, subtotal: int}>
+     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int}>
      */
-    private function snapshotItems(Order $order): array
+    private function snapshotItems(Order $order, string $currency): array
     {
         $items = $order->orderItems;
         if (! $items instanceof Collection) {
             throw new InvalidArgumentException('Paid invoice Order Items are not available.');
         }
 
+        $useUsdtSnapshot = $currency === 'USDT';
+
         return $items
             ->filter(static fn ($item): bool => $item instanceof OrderItem)
             ->values()
-            ->map(static fn (OrderItem $item): array => [
+            ->map(static fn (OrderItem $item) => [
                 'product_name' => (string) $item->product_name,
                 'quantity' => max(0, (int) $item->quantity),
-                'unit_price' => max(0, (int) $item->unit_price),
-                'subtotal' => max(0, (int) $item->subtotal),
+                'unit_price' => $useUsdtSnapshot
+                    ? ($item->usdt_unit_price === null ? null : max(0, (int) $item->usdt_unit_price))
+                    : max(0, (int) $item->unit_price),
+                'subtotal' => $useUsdtSnapshot
+                    ? ($item->usdt_subtotal === null ? null : max(0, (int) $item->usdt_subtotal))
+                    : max(0, (int) $item->subtotal),
             ])
             ->all();
+    }
+
+    private function paymentSubtotal(Payment $payment, string $currency): ?int
+    {
+        if ($currency !== 'USDT') {
+            return null;
+        }
+
+        if ($payment->method === 'USDT_BEP20'
+            && $payment->bscDetail !== null) {
+            return max(0, (int) $payment->bscDetail->base_amount_micro);
+        }
+
+        return max(0, (int) $payment->amount);
+    }
+
+    private function totalPaid(Payment $payment, Order $order, string $currency): int
+    {
+        if ($currency === 'USDT') {
+            return max(0, (int) $payment->amount);
+        }
+
+        return $payment->provider_total_payment !== null
+            ? max(0, (int) $payment->provider_total_payment)
+            : max(0, (int) $order->total_amount);
     }
 
     private function invoiceIdentifier(Order $order): string

@@ -170,7 +170,10 @@ class OrderCheckoutService
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
-            $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'delivery_note' => $product->delivery_note, 'delivery_note_snapshotted' => true, 'usage_guide_title' => $product->usage_guide_title, 'usage_guide_url' => $product->usage_guide_url, 'usage_guide_snapshotted' => true, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'subtotal' => $product->price_amount * $item->quantity]);
+            $usdtUnitPrice = $paymentPlan->paymentCurrency() === 'USDT'
+                ? $product->usdt_price_amount
+                : null;
+            $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'delivery_note' => $product->delivery_note, 'delivery_note_snapshotted' => true, 'usage_guide_title' => $product->usage_guide_title, 'usage_guide_url' => $product->usage_guide_url, 'usage_guide_snapshotted' => true, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'usdt_unit_price' => $usdtUnitPrice, 'subtotal' => $product->price_amount * $item->quantity, 'usdt_subtotal' => $usdtUnitPrice === null ? null : $usdtUnitPrice * $item->quantity]);
             $this->credentials->allocate($orderItem, $product, $item->quantity);
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }

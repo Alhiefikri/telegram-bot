@@ -15,7 +15,7 @@ use LogicException;
 final readonly class PaidInvoicePresentation
 {
     /**
-     * @param  list<array{product_name: string, quantity: int, unit_price: int, subtotal: int}>  $items
+     * @param  list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int}>  $items
      */
     public function __construct(
         public string $invoiceId,
@@ -28,6 +28,8 @@ final readonly class PaidInvoicePresentation
         public int $totalPaid,
         public string $status = 'PAID',
         public string $buyerName = 'Buyer',
+        public ?string $itemCurrency = null,
+        public ?int $paymentSubtotal = null,
     ) {
         if ($this->invoiceId === '' || $this->buyerIdentifier === '' || $this->paymentMethod === '') {
             throw new \InvalidArgumentException('Paid invoice presentation identifiers and labels are required.');
@@ -40,10 +42,14 @@ final readonly class PaidInvoicePresentation
         if ($this->status !== 'PAID') {
             throw new \InvalidArgumentException('Paid invoice presentation status must be PAID.');
         }
+
+        if ($this->paymentSubtotal !== null && $this->paymentSubtotal < 0) {
+            throw new \InvalidArgumentException('Paid invoice presentation payment subtotal cannot be negative.');
+        }
     }
 
     /**
-     * @return list<array{product_name: string, quantity: int, unit_price: int, subtotal: int}>
+     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int}>
      */
     public function displayItems(): array
     {
@@ -57,6 +63,10 @@ final readonly class PaidInvoicePresentation
 
     public function subtotal(): int
     {
+        if ($this->paymentSubtotal !== null) {
+            return max(0, $this->paymentSubtotal);
+        }
+
         return array_sum(array_map(
             static fn (array $item): int => max(0, (int) $item['subtotal']),
             $this->items,
@@ -81,6 +91,7 @@ final readonly class PaidInvoicePresentation
             'payment_method' => $this->paymentMethod,
             'status' => $this->status,
             'currency' => $this->currency,
+            'item_currency' => $this->itemCurrency ?? $this->currency,
             'items' => $this->items,
             'display_items' => $this->displayItems(),
             'additional_product_count' => $this->additionalProductCount(),

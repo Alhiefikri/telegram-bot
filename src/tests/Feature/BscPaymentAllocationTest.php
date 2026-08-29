@@ -102,6 +102,10 @@ class BscPaymentAllocationTest extends TestCase
         $this->assertSame('2500000000000000000', (string) $detail->expected_token_units);
         $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $detail->verification_status);
 
+        $orderItem = $order->orderItems->sole();
+        $this->assertSame(2_500_000, $orderItem->usdt_unit_price);
+        $this->assertSame(2_500_000, $orderItem->usdt_subtotal);
+
         $receiver->forceFill([
             'label' => 'Renamed receiver',
             'is_active' => false,

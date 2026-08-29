@@ -100,6 +100,7 @@ final class PaidInvoiceRenderer
         ];
         $displayItems = $presentation->displayItems();
         $currency = $presentation->currency;
+        $itemCurrency = $presentation->itemCurrency ?? $currency;
         $subtotal = $presentation->subtotal();
         $providerFee = max(0, $presentation->providerFee);
         $totalPaid = max(0, $presentation->totalPaid);
@@ -134,7 +135,7 @@ final class PaidInvoiceRenderer
                 $font,
                 $boldFont,
                 $layout,
-                $currency,
+                $itemCurrency,
                 $presentation->additionalProductCount(),
             );
             $summaryTop = max(474, $tableBottom + 12);
@@ -804,8 +805,11 @@ final class PaidInvoiceRenderer
         return implode('', $characters);
     }
 
-    private function money(int $amount, string $currency): string
+    private function money(?int $amount, string $currency): string
     {
+        if ($amount === null) {
+            return '—';
+        }
         if ($currency === 'USDT') {
             $value = rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
 

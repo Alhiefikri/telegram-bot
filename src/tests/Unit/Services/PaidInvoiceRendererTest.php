@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoicePresentation;
@@ -187,6 +188,78 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame('Buyer', $presentation->buyerName);
         $this->assertStringContainsString('Buyer: Buyer', $caption);
         $this->assertStringNotContainsString('Buyer ID:', $caption);
+    }
+
+    public function test_usdt_payment_invoice_uses_usdt_payment_and_order_item_snapshots(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-USDT-SNAPSHOT',
+            items: [[
+                'product_name' => 'Spotify Private',
+                'quantity' => 1,
+                'unit_price' => 15000,
+                'subtotal' => 15000,
+                'usdt_unit_price' => 1_000_000,
+                'usdt_subtotal' => 1_000_000,
+            ]],
+            payment: [
+                'method' => 'USDT_BEP20',
+                'amount' => 1_000_100,
+                'currency' => 'USDT',
+            ],
+        );
+        $payment = $order->payments->sole();
+        $payment->setRelation('bscDetail', new PaymentBscDetail([
+            'base_amount_micro' => 1_000_000,
+            'payable_amount_micro' => 1_000_100,
+        ]));
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+
+        $this->assertSame('USDT', $presentation->currency);
+        $this->assertSame('USDT', $presentation->itemCurrency);
+        $this->assertSame(1_000_000, $presentation->items[0]['subtotal']);
+        $this->assertSame(1_000_000, $presentation->subtotal());
+        $this->assertSame(1_000_100, $presentation->totalPaid);
+
+        $rendered = app(PaidInvoiceRenderer::class)->render($presentation);
+
+        $this->assertSame('USDT', $rendered->metadata['item_currency']);
+        $this->assertSame(1_000_000, $rendered->metadata['subtotal']);
+        $this->assertSame(1_000_100, $rendered->metadata['total_paid']);
+    }
+
+    public function test_legacy_usdt_payment_invoice_never_formats_idr_item_snapshots_as_usdt(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-USDT-LEGACY',
+            items: [[
+                'product_name' => 'Spotify Private',
+                'quantity' => 1,
+                'unit_price' => 15000,
+                'subtotal' => 15000,
+            ]],
+            payment: [
+                'method' => 'USDT_BEP20',
+                'amount' => 1_000_000,
+                'currency' => 'USDT',
+            ],
+        );
+        $payment = $order->payments->sole();
+        $payment->setRelation('bscDetail', new PaymentBscDetail([
+            'base_amount_micro' => 1_000_000,
+            'payable_amount_micro' => 1_000_000,
+        ]));
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+
+        $this->assertSame('USDT', $presentation->itemCurrency);
+        $this->assertNull($presentation->items[0]['unit_price']);
+        $this->assertNull($presentation->items[0]['subtotal']);
+        $this->assertSame(1_000_000, $presentation->subtotal());
+        $this->assertSame(1_000_000, $presentation->totalPaid);
     }
 
     public function test_synthetic_product_presentation_renders_without_persisted_order_or_payment(): void
