@@ -47,7 +47,7 @@ final class StorefrontCartPageBuilder
             'brand' => $this->storefront->brand(),
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
-            'shopUrl' => $this->storefront->catalogUrl(),
+            'shopUrl' => route('storefront.shop.index'),
             'supportHref' => $this->storefront->supportHref(),
             'supportDestination' => $this->storefront->supportDestination(),
             'supportContext' => $this->storefront->support()->general(),

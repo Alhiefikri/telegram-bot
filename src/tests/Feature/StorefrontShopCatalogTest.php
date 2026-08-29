@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\Cart;
+use App\Models\Category;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
@@ -34,13 +34,225 @@ class StorefrontShopCatalogTest extends TestCase
         ]);
     }
 
-    public function test_shop_redirects_to_the_landing_catalog_surface(): void
+    public function test_shop_renders_dedicated_catalog_surface_with_normalized_search(): void
     {
-        $this->get(route('storefront.shop.index'))
-            ->assertRedirect(url('/#products'));
+        Product::factory()->create(['name' => 'Shop Search Product', 'description' => 'Akun premium AI', 'stock' => 2, 'reserved_stock' => 0]);
 
-        $this->get(route('storefront.shop.index', ['q' => '  CHAT   GPT  ']))
-            ->assertRedirect(url('/?q=chat%20gpt#products'));
+        $this->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->assertSee('Katalog produk digital siap pakai')
+            ->assertSee('<link rel="canonical" href="'.route('storefront.shop.index').'">', false);
+
+        $this->get(route('storefront.shop.index', ['q' => '  SHOP   SEARCH  ']))
+            ->assertOk()
+            ->assertSee('value="shop search"', false)
+            ->assertSee('Shop Search Product');
+    }
+
+    public function test_shop_exposes_more_than_one_page_without_hiding_public_products(): void
+    {
+        foreach (range(1, 25) as $number) {
+            Product::factory()->create([
+                'name' => sprintf('Paginated Product %02d', $number),
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->assertSee('Katalog aktif · 25 produk publik')
+            ->assertSee('Paginated Product 01')
+            ->assertSee('Paginated Product 24')
+            ->assertDontSee('Paginated Product 25')
+            ->assertSee('href="'.route('storefront.shop.index', ['page' => 2]).'#products"', false)
+            ->assertSee('Berikutnya');
+
+        $this->get(route('storefront.shop.index', ['page' => 2]))
+            ->assertOk()
+            ->assertSee('Paginated Product 25')
+            ->assertDontSee('Paginated Product 01')
+            ->assertSee('Sebelumnya')
+            ->assertSee('href="'.route('storefront.shop.index').'#products"', false);
+    }
+
+    public function test_shop_renders_every_active_category_as_a_server_side_filter(): void
+    {
+        $categories = collect(range(1, 9))->map(fn (int $number) => Category::factory()->create([
+            'name' => sprintf('Shop Category %02d', $number),
+            'slug' => sprintf('shop-category-%02d', $number),
+            'sort_order' => $number,
+            'is_active' => true,
+        ]));
+
+        foreach ($categories as $number => $category) {
+            Product::factory()->create([
+                'category_id' => $category->id,
+                'name' => sprintf('Category Product %02d', $number + 1),
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->assertSee('Shop Category 01')
+            ->assertSee('Shop Category 09')
+            ->assertSee('category=shop-category-09', false)
+            ->assertSee('Category Product 01')
+            ->assertSee('Category Product 09');
+
+        $this->get(route('storefront.shop.index', ['category' => 'shop-category-09']))
+            ->assertOk()
+            ->assertSee('Category Product 09')
+            ->assertDontSee('Category Product 01')
+            ->assertSee('aria-current="page"', false);
+
+        $this->get(route('storefront.shop.index', ['category' => $categories->last()->id]))
+            ->assertOk()
+            ->assertSee('Category Product 09')
+            ->assertDontSee('Category Product 01')
+            ->assertSee('<link rel="canonical" href="'.url('/shop?category=shop-category-09').'">', false);
+    }
+
+    public function test_shop_applies_every_whitelisted_sort_server_side(): void
+    {
+        $old = Product::factory()->create([
+            'name' => 'Sort Old',
+            'price_amount' => 30000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'created_at' => now()->subDays(2),
+        ]);
+        $middle = Product::factory()->create([
+            'name' => 'Sort Middle',
+            'price_amount' => 20000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'created_at' => now()->subDay(),
+        ]);
+        $new = Product::factory()->create([
+            'name' => 'Sort New',
+            'price_amount' => 10000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'created_at' => now(),
+        ]);
+
+        $assertOrder = function (string $url, array $orderedNames): void {
+            $html = $this->get($url)->assertOk()->getContent();
+            $positions = array_map(fn (string $name): int => strpos($html, $name), $orderedNames);
+
+            $this->assertSame($positions, array_values(array_filter($positions, fn (int|false $position): bool => $position !== false)));
+            $this->assertTrue($positions[0] < $positions[1] && $positions[1] < $positions[2]);
+        };
+
+        $assertOrder(route('storefront.shop.index', ['sort' => 'newest']), [$new->name, $middle->name, $old->name]);
+        $assertOrder(route('storefront.shop.index', ['sort' => 'price_asc']), [$new->name, $middle->name, $old->name]);
+        $assertOrder(route('storefront.shop.index', ['sort' => 'price_desc']), [$old->name, $middle->name, $new->name]);
+
+        $this->get(route('storefront.shop.index', ['sort' => 'not-allowed']))
+            ->assertOk()
+            ->assertSee('value="recommended" selected', false);
+    }
+
+    public function test_shop_normalizes_invalid_query_values_and_keeps_public_visibility_closed(): void
+    {
+        $inactiveCategory = Category::factory()->create([
+            'slug' => 'inactive-shop-category',
+            'is_active' => false,
+        ]);
+        $deletedCategory = Category::factory()->create([
+            'slug' => 'deleted-shop-category',
+            'is_active' => true,
+        ]);
+        $deletedCategory->delete();
+
+        Product::factory()->create([
+            'category_id' => $inactiveCategory->id,
+            'name' => 'Inactive Category Secret',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'category_id' => $deletedCategory->id,
+            'name' => 'Deleted Category Secret',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Public Fallback Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.shop.index', [
+            'category' => 'inactive-shop-category',
+            'sort' => 'not-allowed',
+            'page' => 'not-a-page',
+        ]))
+            ->assertOk()
+            ->assertSee('Public Fallback Product')
+            ->assertDontSee('Inactive Category Secret')
+            ->assertDontSee('Deleted Category Secret')
+            ->assertSee('value="recommended" selected', false);
+
+        $this->get(route('storefront.shop.index', [
+            'q' => ['not' => 'a-string'],
+            'category' => ['not' => 'a-string'],
+            'sort' => ['not' => 'a-string'],
+            'page' => ['not' => 'a-number'],
+        ]))
+            ->assertOk()
+            ->assertSee('Public Fallback Product');
+    }
+
+    public function test_shop_pagination_preserves_search_category_sort_and_product_return_context(): void
+    {
+        $category = Category::factory()->create([
+            'slug' => 'context-category',
+            'name' => 'Context Category',
+            'is_active' => true,
+        ]);
+
+        foreach (range(1, 25) as $number) {
+            Product::factory()->create([
+                'category_id' => $category->id,
+                'name' => sprintf('Context Product %02d', $number),
+                'price_amount' => 10000 + $number,
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $query = [
+            'q' => '  CONTEXT  ',
+            'category' => $category->slug,
+            'sort' => 'price_desc',
+        ];
+        $response = $this->get(route('storefront.shop.index', $query + ['page' => 1]));
+        $nextUrl = route('storefront.shop.index', [
+            'q' => 'context',
+            'category' => $category->slug,
+            'sort' => 'price_desc',
+            'page' => 2,
+        ]).'#products';
+
+        $response
+            ->assertOk()
+            ->assertSee('href="'.e($nextUrl).'"', false)
+            ->assertSee('sort=price_desc', false)
+            ->assertSee('category=context-category', false);
+
+        $product = $category->products()->where('name', 'Context Product 01')->firstOrFail();
+        $returnUrl = route('storefront.shop.index', ['q' => 'context', 'category' => $category->slug, 'sort' => 'price_desc', 'page' => 2]).'#product-'.$product->id;
+        $pageTwo = $this->get(route('storefront.shop.index', $query + ['page' => 2]));
+
+        $pageTwo
+            ->assertOk()
+            ->assertSee('Context Product 01')
+            ->assertDontSee('Context Product 25')
+            ->assertSee('from='.urlencode($returnUrl), false);
     }
 
     public function test_landing_search_is_normalized_bounded_and_case_appropriate(): void

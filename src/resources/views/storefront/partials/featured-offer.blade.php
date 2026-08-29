@@ -3,7 +3,7 @@
         @php
             $featuredPresentation = $catalogPage->featuredProduct->presentation;
             $featuredPayload = $featuredPresentation->modalPayload();
-            $featuredReturnUrl = $storefront->catalogUrl($featuredPresentation->id, $catalogPage->search);
+            $featuredReturnUrl = $catalogPage->productReturnUrl($featuredPresentation->id);
             $featuredCheckoutUrl = $featuredPresentation->productUrl.(str_contains($featuredPresentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($featuredReturnUrl);
         @endphp
 

@@ -8,5 +8,7 @@ final readonly class StorefrontCatalogCategoryFilter
         public int $id,
         public string $name,
         public string $slug,
+        public string $url = '',
+        public bool $isActive = false,
     ) {}
 }

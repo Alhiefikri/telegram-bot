@@ -94,7 +94,7 @@ class StorefrontPresenter
             'brand' => $brand,
             'copy' => config('storefront'),
             'homeUrl' => $this->urls->catalogUrl(),
-            'shopUrl' => $this->urls->catalogUrl(),
+            'shopUrl' => route('storefront.shop.index'),
             'pageTitle' => $product->name.' | '.$brand,
             'pageDescription' => $this->descriptionSnippet($product),
             'canonicalUrl' => route('storefront.products.show', $product),

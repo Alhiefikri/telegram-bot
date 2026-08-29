@@ -187,6 +187,10 @@ Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 - Recovery Key order access: `/akses-pesanan`;
 - customer account/login link: `/akun/*`;
 - admin: `/admin/*` di balik `admin.access`.
+`GET /shop` renders the canonical full catalog. Its bounded query state is
+`q`, `category` (public slug or id), `sort` (`recommended`, `newest`,
+`price_asc`, or `price_desc`), and `page`; pagination and category links carry
+only normalized state. The homepage remains the curated, cached entry point.
 
 `StorefrontGuestCart` binds the active guest Cart to the server-side
 storefront session key and creates a fresh web Customer when the previous Cart

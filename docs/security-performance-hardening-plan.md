@@ -109,9 +109,9 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
 >
 > **Correctness basis:** `presentation->isAvailable` (`availableStock() > 0`) is exactly equivalent to the `availableForPurchase()` scope, and both queries share `storefrontOrder()` (available-first), so the first available entry in the fetched catalog == `availableForPurchase()->storefrontOrder()->first()` when unfiltered.
 >
-> **`/shop` caching = NON-ISSUE, do not attempt.** `StorefrontShopController` / `shopViewData()` are **dead code — not registered on any route** (verified: only self-reference in grep). The live `/shop` route just `redirect()`s to `catalogUrl()` which points at `/` (the home page), and `/` is already served through `StorefrontResponseCache`. There is no uncached shop page to cache. Adding a shop cache variant would be dead code. (If you ever wire up a real second catalog page, revisit then.)
-
-- **Verify:** `php artisan test --filter=StorefrontCatalogPageBuilderTest` (14 pass, incl. the 2 new ones); full suite 730/714 pass/16 skip/0 fail; Pint clean.
+> **Shop catalog boundary (updated for #378, 2026-08-29).** `StorefrontShopController` is now the live handler for `/shop`. It renders the dedicated catalog with a bounded 24-item page, validated `q`, `category`, `sort`, and `page` state, and intentionally stays uncached. `/` remains the curated homepage served through `StorefrontResponseCache`; arbitrary shop query values never become homepage cache-key inputs.
+>
+- **Verify:** focused storefront catalog tests cover the dedicated route, pagination, category navigation, sort state, invalid values, and product return context. Homepage cache tests remain in `StorefrontShopCatalogTest`.
 
 ---
 

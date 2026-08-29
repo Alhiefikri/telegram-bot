@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class StorefrontCatalogPageBuilder
@@ -38,6 +39,8 @@ class StorefrontCatalogPageBuilder
         'featured_rank',
     ];
 
+    private const HOME_PRODUCT_LIMIT = 24;
+
     public function __construct(
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontProductPresenter $products,
@@ -45,45 +48,53 @@ class StorefrontCatalogPageBuilder
         private readonly CheckoutMaintenance $maintenance,
     ) {}
 
-    public function home(?string $rawSearch): StorefrontCatalogPage
+    public function home(StorefrontCatalogQuery|string|null $query): StorefrontCatalogPage
     {
-        return $this->build(StorefrontCatalogPage::CONTEXT_HOME, $rawSearch);
+        return $this->build(StorefrontCatalogPage::CONTEXT_HOME, $this->coerceQuery($query));
     }
 
-    public function shop(?string $rawSearch): StorefrontCatalogPage
+    public function shop(StorefrontCatalogQuery|string|null $query): StorefrontCatalogPage
     {
-        return $this->build(StorefrontCatalogPage::CONTEXT_SHOP, $rawSearch);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function homeViewData(?string $rawSearch): array
-    {
-        return $this->home($rawSearch)->viewData();
+        return $this->build(StorefrontCatalogPage::CONTEXT_SHOP, $this->coerceQuery($query));
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function shopViewData(?string $rawSearch): array
+    public function homeViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        return $this->shop($rawSearch)->viewData();
+        return $this->home($query)->viewData();
     }
 
-    private function build(string $context, ?string $rawSearch): StorefrontCatalogPage
+    /**
+     * @return array<string, mixed>
+     */
+    public function shopViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        $search = StorefrontCatalogSearch::normalize($rawSearch);
+        return $this->shop($query)->viewData();
+    }
+
+    private function build(string $context, StorefrontCatalogQuery $query): StorefrontCatalogPage
+    {
+        $isShop = $context === StorefrontCatalogPage::CONTEXT_SHOP;
         $maintenance = $this->maintenance->current();
         $categories = $this->publicCategories();
-        $products = $this->publicProducts($search);
-        $catalogProducts = $this->catalogProducts($products, $maintenance);
+        $category = $this->publicCategory($query->category);
+        $query = $query->withCategory($category?->slug);
+        $listing = $this->publicProducts($query, paginate: $isShop);
+        $query = $query->withPage($listing['page']);
+        $catalogProducts = $this->catalogProducts($listing['products'], $maintenance);
         $featuredProduct = $context === StorefrontCatalogPage::CONTEXT_HOME
             ? $this->featuredProduct($maintenance)
             : null;
         $copy = config('storefront');
         $brand = $this->storefront->brand();
-        $isShop = $context === StorefrontCatalogPage::CONTEXT_SHOP;
+        $catalogReturnUrl = $isShop
+            ? $this->urls->shopCatalogUrl($query, withFragment: true)
+            : $this->urls->catalogUrl(search: $query->search !== '' ? $query->search : null);
+        $allCategoryUrl = $isShop
+            ? $this->urls->shopCatalogUrl($query->withoutCategory()->withoutPage(), withFragment: true)
+            : $this->urls->catalogUrl(search: $query->search !== '' ? $query->search : null);
 
         return new StorefrontCatalogPage(
             context: $context,
@@ -94,27 +105,40 @@ class StorefrontCatalogPageBuilder
             pageDescription: $isShop
                 ? 'Katalog produk digital Lhie Store untuk membeli produk digital dan akun premium langsung dari web dengan QRIS, invoice, dan akses pesanan mandiri.'
                 : $copy['meta']['description'],
-            canonicalUrl: $isShop ? route('storefront.shop.index') : url('/'),
+            canonicalUrl: $isShop
+                ? $this->urls->shopCatalogUrl($query, withFragment: false)
+                : url('/'),
             homeUrl: route('storefront.home'),
-            shopUrl: $this->urls->catalogUrl(),
+            shopUrl: route('storefront.shop.index'),
             supportHref: $this->storefront->supportHref(),
             supportDestination: $this->storefront->supportDestination(),
             supportContext: $this->storefront->support()->general(),
             hasPublicCategories: $categories->isNotEmpty(),
-            categoryFilters: $this->categoryFilters($categories, $catalogProducts),
+            categoryFilters: $this->categoryFilters($categories, $query, $isShop),
             products: $catalogProducts,
             popularProducts: $this->orderedPopularProducts($catalogProducts),
             featuredProduct: $featuredProduct,
-            search: $search,
+            search: $query->search,
             searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
-            searchAction: $this->urls->catalogUrl(),
-            clearSearchUrl: $this->urls->catalogUrl(),
+            searchAction: $isShop
+                ? route('storefront.shop.index')
+                : $this->urls->catalogUrl(),
+            clearSearchUrl: $isShop
+                ? $this->urls->shopCatalogUrl($query->withoutSearch()->withoutPage(), withFragment: true)
+                : $this->urls->catalogUrl(),
             emptyCategoryTitle: $copy['catalog']['empty_category_title'],
             emptyCategoryBody: $copy['catalog']['empty_category_body'],
             emptyProductsTitle: $isShop ? $copy['shop']['empty_title'] : $copy['catalog']['empty_title'],
             emptyProductsBody: $isShop ? $copy['shop']['empty_body'] : $copy['catalog']['empty_body'],
             checkoutMaintenance: $maintenance,
             popularEmptyMessage: $isShop ? null : $copy['hero']['popular_empty'],
+            selectedCategory: $query->category,
+            selectedSort: $query->sort,
+            currentPage: $query->page,
+            totalProducts: $listing['total'],
+            allCategoryUrl: $allCategoryUrl,
+            catalogReturnUrl: $catalogReturnUrl,
+            pagination: $isShop ? $this->pagination($listing['total'], $listing['lastPage'], $query) : [],
         );
     }
 
@@ -127,14 +151,62 @@ class StorefrontCatalogPageBuilder
             ->select(['id', 'name', 'slug', 'description', 'sort_order'])
             ->publicVisible()
             ->storefrontOrder()
-            ->limit(8)
             ->get();
     }
 
+    private function publicCategory(?string $category): ?Category
+    {
+        if ($category === null) {
+            return null;
+        }
+
+        $query = Category::query()
+            ->select(['id', 'name', 'slug'])
+            ->publicVisible();
+
+        return ctype_digit($category)
+            ? $query->whereKey((int) $category)->first()
+            : $query->where('slug', $category)->first();
+    }
+
     /**
-     * @return Collection<int, Product>
+     * @return array{products: Collection<int, Product>, total: int, page: int, lastPage: int}
      */
-    private function publicProducts(string $search): Collection
+    private function publicProducts(StorefrontCatalogQuery $query, bool $paginate): array
+    {
+        $productQuery = $this->publicProductQuery($query);
+        $this->orderProducts($productQuery, $query->sort);
+
+        if (! $paginate) {
+            $products = $productQuery->limit(self::HOME_PRODUCT_LIMIT)->get();
+
+            return [
+                'products' => $products,
+                'total' => $products->count(),
+                'page' => 1,
+                'lastPage' => 1,
+            ];
+        }
+
+        $total = (clone $productQuery)->reorder()->count();
+        $lastPage = max(1, (int) ceil($total / StorefrontCatalogQuery::PRODUCTS_PER_PAGE));
+        $page = min($query->page, $lastPage);
+        $products = $productQuery
+            ->forPage($page, StorefrontCatalogQuery::PRODUCTS_PER_PAGE)
+            ->get();
+
+        return [
+            'products' => $products,
+            'total' => $total,
+            'page' => $page,
+            'lastPage' => $lastPage,
+        ];
+    }
+
+    /**
+     * @return Builder<Product>
+     */
+    private function publicProductQuery(StorefrontCatalogQuery $query): Builder
     {
         return Product::query()
             ->select(self::PUBLIC_PRODUCT_COLUMNS)
@@ -145,10 +217,32 @@ class StorefrontCatalogPageBuilder
                     ->where('order_status', OrderStatus::Completed)
                     ->where('payment_status', PaymentStatus::Paid))], 'quantity')
             ->publicVisible()
-            ->tap(fn ($query) => StorefrontCatalogSearch::apply($query, $search))
-            ->storefrontOrder()
-            ->limit(24)
-            ->get();
+            ->when($query->category !== null, fn (Builder $productQuery) => $productQuery
+                ->whereHas('category', fn (Builder $categoryQuery) => $categoryQuery
+                    ->publicVisible()
+                    ->where('slug', $query->category)))
+            ->tap(fn (Builder $productQuery) => StorefrontCatalogSearch::apply($productQuery, $query->search));
+    }
+
+    /**
+     * @param  Builder<Product>  $query
+     */
+    private function orderProducts(Builder $query, string $sort): void
+    {
+        match ($sort) {
+            'newest' => $query
+                ->orderByDesc('created_at')
+                ->orderByDesc('id'),
+            'price_asc' => $query
+                ->orderBy('price_amount')
+                ->orderBy('name')
+                ->orderBy('id'),
+            'price_desc' => $query
+                ->orderByDesc('price_amount')
+                ->orderBy('name')
+                ->orderBy('id'),
+            default => $query->storefrontOrder(),
+        };
     }
 
     /**
@@ -203,23 +297,80 @@ class StorefrontCatalogPageBuilder
 
     /**
      * @param  Collection<int, Category>  $categories
-     * @param  Collection<int, StorefrontCatalogProduct>  $products
      * @return Collection<int, StorefrontCatalogCategoryFilter>
      */
-    private function categoryFilters(Collection $categories, Collection $products): Collection
+    private function categoryFilters(Collection $categories, StorefrontCatalogQuery $query, bool $isShop): Collection
     {
-        $categoryKeys = $products
-            ->map(fn (StorefrontCatalogProduct $product) => $product->presentation->categoryKey)
-            ->all();
-
         return $categories
-            ->filter(fn (Category $category) => in_array((string) $category->id, $categoryKeys, true))
-            ->map(fn (Category $category) => new StorefrontCatalogCategoryFilter(
+            ->map(fn (Category $category): StorefrontCatalogCategoryFilter => new StorefrontCatalogCategoryFilter(
                 id: (int) $category->id,
                 name: $category->name,
                 slug: $category->slug,
+                url: $isShop
+                    ? $this->urls->shopCatalogUrl($query->withCategory($category->slug)->withoutPage(), withFragment: true)
+                    : $this->urls->shopCatalogUrl(StorefrontCatalogQuery::fromSearch($query->search)->withCategory($category->slug), withFragment: true),
+                isActive: $query->category === $category->slug,
             ))
             ->values();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function pagination(int $total, int $lastPage, StorefrontCatalogQuery $query): array
+    {
+        $currentPage = $query->page;
+        $pageNumbers = $this->paginationPageNumbers($currentPage, $lastPage);
+        $pages = [];
+        $previousNumber = null;
+
+        foreach ($pageNumbers as $pageNumber) {
+            if ($previousNumber !== null && $pageNumber > $previousNumber + 1) {
+                $pages[] = ['ellipsis' => true, 'label' => '…'];
+            }
+
+            $pages[] = [
+                'ellipsis' => false,
+                'label' => (string) $pageNumber,
+                'number' => $pageNumber,
+                'url' => $this->urls->shopCatalogUrl($query->withPage($pageNumber), withFragment: true),
+                'current' => $pageNumber === $currentPage,
+            ];
+            $previousNumber = $pageNumber;
+        }
+
+        return [
+            'currentPage' => $currentPage,
+            'lastPage' => $lastPage,
+            'from' => $total === 0 ? null : (($currentPage - 1) * StorefrontCatalogQuery::PRODUCTS_PER_PAGE) + 1,
+            'to' => $total === 0 ? null : min($total, $currentPage * StorefrontCatalogQuery::PRODUCTS_PER_PAGE),
+            'total' => $total,
+            'perPage' => StorefrontCatalogQuery::PRODUCTS_PER_PAGE,
+            'hasPages' => $lastPage > 1,
+            'previousUrl' => $currentPage > 1
+                ? $this->urls->shopCatalogUrl($query->withPage($currentPage - 1), withFragment: true)
+                : null,
+            'nextUrl' => $currentPage < $lastPage
+                ? $this->urls->shopCatalogUrl($query->withPage($currentPage + 1), withFragment: true)
+                : null,
+            'pages' => $pages,
+        ];
+    }
+
+    /** @return list<int> */
+    private function paginationPageNumbers(int $currentPage, int $lastPage): array
+    {
+        if ($lastPage <= 7) {
+            return range(1, $lastPage);
+        }
+
+        return array_values(array_unique([
+            1,
+            max(1, $currentPage - 1),
+            $currentPage,
+            min($lastPage, $currentPage + 1),
+            $lastPage,
+        ]));
     }
 
     private function featuredProduct(CheckoutMaintenanceState $maintenance): ?StorefrontCatalogProduct
@@ -243,5 +394,10 @@ class StorefrontCatalogPageBuilder
         return $product
             ? new StorefrontCatalogProduct($this->products->present($product, maintenanceState: $maintenance))
             : null;
+    }
+
+    private function coerceQuery(StorefrontCatalogQuery|string|null $query): StorefrontCatalogQuery
+    {
+        return $query instanceof StorefrontCatalogQuery ? $query : StorefrontCatalogQuery::fromSearch($query);
     }
 }

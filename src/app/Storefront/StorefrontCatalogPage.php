@@ -14,6 +14,7 @@ final readonly class StorefrontCatalogPage
     /**
      * @param  array<string, mixed>  $copy
      * @param  array<string, mixed>  $supportContext
+     * @param  array<string, mixed>  $pagination
      * @param  Collection<int, StorefrontCatalogCategoryFilter>  $categoryFilters
      * @param  Collection<int, StorefrontCatalogProduct>  $products
      * @param  Collection<int, StorefrontCatalogProduct>  $popularProducts
@@ -46,6 +47,13 @@ final readonly class StorefrontCatalogPage
         public string $emptyProductsBody,
         public CheckoutMaintenanceState $checkoutMaintenance,
         public ?string $popularEmptyMessage = null,
+        public ?string $selectedCategory = null,
+        public string $selectedSort = StorefrontCatalogQuery::DEFAULT_SORT,
+        public int $currentPage = 1,
+        public int $totalProducts = 0,
+        public string $allCategoryUrl = '',
+        public string $catalogReturnUrl = '',
+        public array $pagination = [],
     ) {}
 
     public function isHome(): bool
@@ -61,6 +69,24 @@ final readonly class StorefrontCatalogPage
     public function productCount(): int
     {
         return $this->products->count();
+    }
+
+    public function totalProductCount(): int
+    {
+        return $this->totalProducts > 0 || $this->products->isEmpty()
+            ? $this->totalProducts
+            : $this->products->count();
+    }
+
+    public function hasPagination(): bool
+    {
+        return (bool) ($this->pagination['hasPages'] ?? false);
+    }
+
+    public function productReturnUrl(int $productId): string
+    {
+        return preg_replace('/#products$/', '#product-'.$productId, $this->catalogReturnUrl)
+            ?: $this->catalogReturnUrl;
     }
 
     /**

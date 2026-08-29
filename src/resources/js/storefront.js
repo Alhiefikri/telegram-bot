@@ -1,5 +1,3 @@
-const ACTIVE_CATEGORY_CLASSES = ["neo-filter-active"];
-const INACTIVE_CATEGORY_CLASSES = ["neo-filter-inactive"];
 const MODAL_FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const STOREFRONT_EVENT_URL = "/storefront/events";
@@ -187,63 +185,6 @@ function initMobileMenu() {
       event.preventDefault();
       first.focus();
     }
-  });
-}
-
-function initCategoryFilters() {
-  const categoryButtons = document.querySelectorAll(".category-btn");
-  const productCards = document.querySelectorAll(".product-card");
-
-  if (!categoryButtons.length || !productCards.length) {
-    return;
-  }
-
-  categoryButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const filterValue = button.getAttribute("data-filter");
-      const hidesFocusedCard = Array.from(productCards).some(
-        (card) =>
-          card.contains(document.activeElement) &&
-          filterValue !== "all" &&
-          card.getAttribute("data-category") !== filterValue
-      );
-
-      if (hidesFocusedCard) {
-        button.focus();
-      }
-
-      categoryButtons.forEach((otherButton) => {
-        otherButton.classList.remove(...ACTIVE_CATEGORY_CLASSES);
-        otherButton.classList.add(...INACTIVE_CATEGORY_CLASSES);
-        otherButton.setAttribute("aria-pressed", "false");
-      });
-
-      button.classList.remove(...INACTIVE_CATEGORY_CLASSES);
-      button.classList.add(...ACTIVE_CATEGORY_CLASSES);
-      button.setAttribute("aria-pressed", "true");
-
-      productCards.forEach((card, index) => {
-        const cardCategory = card.getAttribute("data-category");
-        const shouldShow =
-          filterValue === "all" || cardCategory === filterValue;
-
-        if (shouldShow) {
-          card.hidden = false;
-          window.setTimeout(
-            () => {
-              card.classList.remove("opacity-0");
-            },
-            50 + index * 40
-          );
-          return;
-        }
-
-        card.classList.add("opacity-0");
-        window.setTimeout(() => {
-          card.hidden = true;
-        }, 300);
-      });
-    });
   });
 }
 
@@ -1265,7 +1206,6 @@ export default function initStorefront() {
     document.body.classList.add("js-enabled");
 
     initMobileMenu();
-    initCategoryFilters();
     initCounters();
     initScrollProgress();
     initVerifiedPurchaseActivity();

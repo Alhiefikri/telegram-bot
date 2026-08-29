@@ -27,18 +27,20 @@
         </div>
 
     @if ($catalogPage->hasPublicCategories)
-        @if ($catalogPage->categoryFilters->isNotEmpty())
-            <div class="mb-12 flex flex-wrap justify-center gap-3" aria-label="Filter kategori produk">
-                <button type="button" class="category-btn hover-rubber-band neo-filter-active rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 focus:outline-none" data-filter="all" aria-pressed="true" aria-controls="storefront-product-grid">
-                    Semua
-                </button>
-                @foreach ($catalogPage->categoryFilters as $category)
-                    <button type="button" class="category-btn hover-rubber-band neo-filter-inactive rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)] focus:outline-none" data-filter="{{ $category->id }}" aria-pressed="false" aria-controls="storefront-product-grid">
-                        {{ $category->name }}
-                    </button>
-                @endforeach
-            </div>
-        @endif
+        <nav class="mb-12 flex flex-wrap justify-center gap-3" aria-label="Filter kategori produk">
+            <a href="{{ $catalogPage->allCategoryUrl }}" @class([
+                'category-btn hover-rubber-band rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                'neo-filter-active' => $catalogPage->selectedCategory === null,
+                'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => $catalogPage->selectedCategory !== null,
+            ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">Semua</a>
+            @foreach ($catalogPage->categoryFilters as $category)
+                <a href="{{ $category->url }}" @class([
+                    'category-btn hover-rubber-band rounded-full border-[3px] px-4 py-2 text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                    'neo-filter-active' => $category->isActive,
+                    'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => ! $category->isActive,
+                ]) data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">{{ $category->name }}</a>
+            @endforeach
+        </nav>
     @else
         <x-storefront.empty-state
             :title="$catalogPage->emptyCategoryTitle"

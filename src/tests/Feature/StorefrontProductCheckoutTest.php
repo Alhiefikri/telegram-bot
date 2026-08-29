@@ -199,6 +199,32 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Kembali ke katalog');
     }
 
+    public function test_shop_product_detail_back_navigation_preserves_full_catalog_context(): void
+    {
+        foreach (range(1, 25) as $number) {
+            Product::factory()->create([
+                'name' => sprintf('Shop Return Product %02d', $number),
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+        $product = Product::query()->where('name', 'Shop Return Product 25')->firstOrFail();
+        $returnUrl = route('storefront.shop.index', ['page' => 2]).'#product-'.$product->id;
+
+        $this->get(route('storefront.shop.index', ['page' => 2]))
+            ->assertOk()
+            ->assertSee('Shop Return Product 25')
+            ->assertSee(
+                'href="'.route('storefront.products.show', ['product' => $product]).'?from='.urlencode($returnUrl).'"',
+                false,
+            );
+
+        $this->get(route('storefront.products.show', ['product' => $product, 'from' => $returnUrl]))
+            ->assertOk()
+            ->assertSee('href="'.$returnUrl.'"', false)
+            ->assertSee('Kembali ke katalog');
+    }
+
     public function test_product_detail_disables_buy_button_for_empty_product(): void
     {
         $product = Product::factory()->create([

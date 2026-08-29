@@ -1,6 +1,6 @@
 @php
     $homeUrl = $homeUrl ?? route('storefront.home');
-    $shopUrl = $shopUrl ?? $storefront->catalogUrl();
+    $shopUrl = $shopUrl ?? route('storefront.shop.index');
     $cartUrl = $cartUrl ?? route('storefront.shop.cart');
     $supportDestination = $supportDestination ?? $storefront->supportDestination();
 @endphp

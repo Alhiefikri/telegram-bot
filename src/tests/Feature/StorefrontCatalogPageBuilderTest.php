@@ -20,7 +20,7 @@ class StorefrontCatalogPageBuilderTest extends TestCase
     use RefreshDatabase;
     use StorefrontProductScenarios;
 
-    public function test_shop_context_trims_search_and_filters_public_product_entries(): void
+    public function test_shop_context_trims_search_and_exposes_canonical_shop_urls(): void
     {
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -33,8 +33,9 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
         $this->assertTrue($page->isShop());
         $this->assertSame('chat', $page->search);
-        $this->assertSame(url('/#products'), $page->searchAction);
-        $this->assertSame(url('/#products'), $page->clearSearchUrl);
+        $this->assertSame(route('storefront.shop.index'), $page->searchAction);
+        $this->assertSame(route('storefront.shop.index').'#products', $page->clearSearchUrl);
+        $this->assertSame(route('storefront.shop.index', ['q' => 'chat']), $page->canonicalUrl);
         $this->assertSame(['Chat GPT Plus'], $page->products->map(fn ($entry) => $entry->presentation->name)->all());
         $this->assertTrue($page->products->first()->presentation->canOpenModal);
     }
@@ -94,7 +95,7 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame('Terjual: 4', $presentation->soldLabel);
     }
 
-    public function test_category_filters_preserve_public_limit_order_and_only_include_categories_with_products(): void
+    public function test_category_filters_expose_all_public_categories_in_storefront_order(): void
     {
         Category::factory()->create(['name' => 'Hidden', 'slug' => 'hidden', 'sort_order' => 0, 'is_active' => false]);
 
@@ -112,7 +113,9 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $page = app(StorefrontCatalogPageBuilder::class)->home(null);
 
         $this->assertTrue($page->hasPublicCategories);
-        $this->assertSame(['Category 01', 'Category 03'], $page->categoryFilters->pluck('name')->all());
+        $this->assertSame($categories->pluck('name')->all(), $page->categoryFilters->pluck('name')->all());
+        $this->assertSame($categories[8]->slug, $page->categoryFilters->last()->slug);
+        $this->assertStringContainsString('category=category-09', $page->categoryFilters->last()->url);
     }
 
     public function test_featured_product_requires_explicit_rank_and_skips_unavailable_entries(): void

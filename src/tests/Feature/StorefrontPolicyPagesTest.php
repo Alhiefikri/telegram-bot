@@ -58,7 +58,8 @@ class StorefrontPolicyPagesTest extends TestCase
         }
 
         $this->get(route('storefront.shop.index'))
-            ->assertRedirect(url('/#products'));
+            ->assertOk()
+            ->assertViewIs('storefront.shop');
     }
 
     public function test_recovery_surfaces_use_the_approved_support_boundary(): void

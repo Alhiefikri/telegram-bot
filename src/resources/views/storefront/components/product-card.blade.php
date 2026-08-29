@@ -2,7 +2,7 @@
     $catalogProduct = $catalogProduct ?? null;
     $presentation = $catalogProduct?->presentation ?? ($presentation ?? $storefront->productPresentation($product));
     $isPopular = $catalogProduct?->isPopular ?? ($isPopular ?? false);
-    $catalogReturnUrl = isset($catalogPage) ? $storefront->catalogUrl($presentation->id, $catalogPage->search) : $storefront->catalogUrl($presentation->id);
+    $catalogReturnUrl = isset($catalogPage) ? $catalogPage->productReturnUrl($presentation->id) : $storefront->catalogUrl($presentation->id);
     $productUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'from='.urlencode($catalogReturnUrl);
 @endphp
 

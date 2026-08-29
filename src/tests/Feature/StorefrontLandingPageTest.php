@@ -60,7 +60,7 @@ class StorefrontLandingPageTest extends TestCase
 
     public function test_landing_header_and_hero_expose_web_shop_and_order_access_paths(): void
     {
-        $shopUrl = url('/#products');
+        $shopUrl = route('storefront.shop.index');
         $accessUrl = route('storefront.order-access.create');
         $html = $this->get('/')->assertOk()->getContent();
         $headerHtml = $this->htmlBetween($html, '<header', '</header>');

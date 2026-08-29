@@ -17,6 +17,18 @@ class StorefrontUrl
         return $productId === null ? $url : preg_replace('/#products$/', '#product-'.$productId, $url);
     }
 
+    public function shopCatalogUrl(StorefrontCatalogQuery $query, bool $withFragment = false): string
+    {
+        $url = route('storefront.shop.index');
+        $parameters = $query->toUrlParameters();
+
+        if ($parameters !== []) {
+            $url .= '?'.http_build_query($parameters, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        return $withFragment ? $url.'#products' : $url;
+    }
+
     public function productUrl(Product $product, ?string $returnUrl = null, bool $checkout = false): string
     {
         $parameters = ['product' => $product];
