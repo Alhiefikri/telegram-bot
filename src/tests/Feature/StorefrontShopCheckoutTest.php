@@ -252,8 +252,8 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->followingRedirects()
             ->get(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertOk()
-            ->assertSee('data-checkout-product=', false)
-            ->assertSee('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
+            ->assertDontSee('data-checkout-product=', false)
+            ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.');
 
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS from homepage');
         Http::assertNothingSent();
@@ -261,6 +261,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_landing_catalog_renders_ready_modal_and_empty_stock_state(): void
     {
+        $this->manualPaymentModeIsActive();
         $ready = $this->availableProduct([
             'name' => 'Claude Pro Ready',
             'description' => 'Akun private siap dari dashboard',
@@ -284,7 +285,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Akun private siap dari dashboard')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 1')
-            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('Bayar via QR Manual')
             ->assertDontSee('Beli lewat Telegram')
             ->assertSee('STOK HABIS')
             ->assertSee('Restock segera')
@@ -302,6 +303,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
     public function test_landing_modal_uses_only_the_website_qris_checkout_action(): void
     {
+        $this->manualPaymentModeIsActive();
         $this->availableProduct([
             'name' => 'CapCut Pro Web',
             'stock' => 3,
@@ -314,7 +316,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertDontSee('Beli lewat Telegram')
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertSee('method="POST"', false)
-            ->assertSee('Bayar QRIS di Website');
+            ->assertSee('Bayar via QR Manual');
     }
 
     public function test_landing_modal_renders_accessible_native_checkout_controls(): void
@@ -343,12 +345,13 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('@keydown="handleModalKeydown($event)"', false)
             ->assertSee('type="radio"', false)
             ->assertSee('name="payment_choice"', false)
-            ->assertSee('Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.')
+            ->assertSee('Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.')
             ->assertSee('type="hidden" name="payment_method"', false);
     }
 
     public function test_failed_checkout_reopens_modal_state_and_renders_inline_buyer_error(): void
     {
+        $this->manualPaymentModeIsActive();
         $product = $this->availableProduct([
             'name' => 'Retry Checkout Product',
             'stock' => 3,

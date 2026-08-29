@@ -22,6 +22,10 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
     public function test_shop_context_trims_search_and_filters_public_product_entries(): void
     {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
         $this->availableProduct(['name' => 'Chat GPT Plus', 'description' => 'Premium model access.']);
         $this->availableProduct(['name' => 'Canva Pro', 'description' => 'Design tools.']);
 

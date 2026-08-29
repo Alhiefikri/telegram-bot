@@ -10,21 +10,26 @@ use App\Models\Product;
 use App\Services\Bsc\BscReadiness;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
+use App\Services\KlikQris\KlikQrisCheckoutSelector;
+use App\Support\PaymentProvider;
 
 class StorefrontProductPresenter
 {
     private ?bool $binancePayEnabled = null;
 
-    private ?bool $binanceOrderIdAvailable = null;
-
-    private ?bool $binanceAutomaticVerificationAvailable = null;
-
     private ?bool $bscRailAvailable = null;
+
+    private ?ManualPaymentSetting $paymentSetting = null;
+
+    private bool $paymentSettingResolved = false;
+
+    private ?StorefrontProductCheckoutReadiness $checkoutReadiness = null;
 
     public function __construct(
         private readonly StorefrontSupport $support,
         private readonly CheckoutMaintenance $maintenance,
         private readonly BscReadiness $bscReadiness,
+        private readonly KlikQrisCheckoutSelector $klikQrisCheckout,
         private readonly StorefrontProductPlaceholder $placeholder,
     ) {}
 
@@ -39,14 +44,22 @@ class StorefrontProductPresenter
                 : $this->soldQuantity($product);
         }
         $isAvailable = $stockAvailable > 0;
-        $isBuyable = $isAvailable && ! $maintenanceState->active;
-        $copy = config('storefront.shop');
+        $paymentSetting = $this->paymentSetting();
+        $checkoutReadiness = $this->readinessFor($paymentSetting);
+        $checkoutChoices = $isAvailable && ! $maintenanceState->active
+            ? $this->checkoutChoices($product, $paymentSetting, $checkoutReadiness)
+            : [];
+        $isBuyable = $isAvailable && ! $maintenanceState->active && $checkoutChoices !== [];
         $statusLabel = ! $isAvailable
             ? 'Restock segera'
-            : ($isBuyable ? 'Siap dibeli' : 'Checkout maintenance');
+            : ($maintenanceState->active
+                ? 'Checkout maintenance'
+                : ($isBuyable ? 'Siap dibeli' : $checkoutReadiness->label));
         $cardActionLabel = ! $isAvailable
             ? 'Stok kosong'
-            : ($isBuyable ? 'Pilih Checkout' : 'Checkout maintenance');
+            : ($maintenanceState->active
+                ? 'Checkout maintenance'
+                : ($isBuyable ? 'Pilih Checkout' : $checkoutReadiness->label));
 
         return new StorefrontProductPresentation(
             id: (int) $product->id,
@@ -59,7 +72,7 @@ class StorefrontProductPresenter
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,
             isBuyable: $isBuyable,
-            canOpenModal: $isAvailable,
+            canOpenModal: $isAvailable && ($isBuyable || $maintenanceState->active),
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
             stockLabel: $isAvailable ? 'Stok: '.$stockAvailable : 'Stok kosong',
             soldLabel: 'Terjual: '.$soldQuantity,
@@ -70,7 +83,8 @@ class StorefrontProductPresenter
                 theme: $this->coverForName($product->name),
                 imageUrl: $this->publicStorageUrl($product->image_path) ?? $this->defaultProductImageUrl(),
             ),
-            checkoutChoices: $isBuyable ? $this->checkoutChoices($product, $copy) : [],
+            checkoutChoices: $checkoutChoices,
+            checkoutReadiness: $checkoutReadiness,
             support: $this->support->prePurchase($product),
             checkoutMaintenanceActive: $maintenanceState->active,
             checkoutMaintenanceNotice: StorefrontCheckoutMaintenanceCopy::notice($maintenanceState),
@@ -118,29 +132,37 @@ class StorefrontProductPresenter
     }
 
     /**
-     * @param  array<string, string>  $copy
      * @return array<string, StorefrontProductCheckoutChoice>
      */
-    private function checkoutChoices(Product $product, array $copy): array
-    {
-        $choices = [
-            'website_qris' => new StorefrontProductCheckoutChoice(
+    private function checkoutChoices(
+        Product $product,
+        ?ManualPaymentSetting $setting,
+        StorefrontProductCheckoutReadiness $readiness,
+    ): array {
+        $choices = [];
+
+        if ($readiness->ready) {
+            $isManual = $readiness->provider === PaymentProvider::MANUAL;
+            $choices['website_qris'] = new StorefrontProductCheckoutChoice(
                 key: 'website_qris',
-                label: $copy['checkout_cta'] ?? 'Bayar QRIS di Website',
-                description: 'Checkout langsung dari website dengan QRIS.',
+                label: $isManual ? 'Bayar via QR Manual' : 'Bayar via KlikQRIS',
+                description: $isManual
+                    ? 'Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.'
+                    : 'QRIS otomatis dari KlikQRIS dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
                 enabled: true,
                 productId: (int) $product->id,
-            ),
-        ];
+                provider: $readiness->provider,
+            );
+        }
 
-        if ($product->usdt_price_amount === null) {
+        if ($product->usdt_price_amount === null || $setting === null) {
             return $choices;
         }
 
-        $binancePayAvailable = $this->binancePayEnabled();
-        $bscAvailable = $this->bscRailAvailable();
+        $binancePayAvailable = $this->binancePayEnabled($setting);
+        $bscAvailable = $this->bscRailAvailable($setting);
 
         if ($binancePayAvailable || $bscAvailable) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
@@ -161,7 +183,7 @@ class StorefrontProductPresenter
                 $choices['website_binance_pay_id'] = new StorefrontProductCheckoutChoice(
                     key: 'website_binance_pay_id',
                     label: 'Pay with Binance Pay ID',
-                    description: 'Send the exact USDT amount through Binance Pay ID. Existing Binance Pay verification rules remain unchanged.',
+                    description: 'Send the exact USDT amount through Binance Pay ID. Follow the payment and verification instructions on the invoice.',
                     url: route('storefront.shop.checkout'),
                     method: 'POST',
                     enabled: true,
@@ -173,7 +195,7 @@ class StorefrontProductPresenter
                 $choices['website_usdt_bep20'] = new StorefrontProductCheckoutChoice(
                     key: 'website_usdt_bep20',
                     label: 'Pay with USDT BEP20 (BSC)',
-                    description: 'Send the exact snapshotted amount on BNB Smart Chain (BEP20). Submit the transaction hash after paying.',
+                    description: 'Send the exact USDT amount on BNB Smart Chain (BEP20). Submit the transaction hash after paying.',
                     url: route('storefront.shop.checkout'),
                     method: 'POST',
                     enabled: true,
@@ -185,15 +207,70 @@ class StorefrontProductPresenter
         return $choices;
     }
 
-    private function binancePayEnabled(): bool
+    private function paymentSetting(): ?ManualPaymentSetting
+    {
+        if (! $this->paymentSettingResolved) {
+            $this->paymentSetting = ManualPaymentSetting::current();
+            $this->paymentSettingResolved = true;
+        }
+
+        return $this->paymentSetting;
+    }
+
+    private function readinessFor(?ManualPaymentSetting $setting): StorefrontProductCheckoutReadiness
+    {
+        if ($this->checkoutReadiness !== null) {
+            return $this->checkoutReadiness;
+        }
+
+        if ($setting === null) {
+            return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+                provider: null,
+                ready: false,
+                label: 'Checkout belum tersedia',
+                notice: 'Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.',
+            );
+        }
+
+        $provider = $setting->paymentProvider();
+        if ($provider === PaymentProvider::MANUAL) {
+            return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+                provider: $provider,
+                ready: true,
+                label: 'QR Manual',
+                notice: 'Pembayaran manual: scan QR pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.',
+            );
+        }
+
+        if ($provider === PaymentProvider::KLIKQRIS && $this->klikQrisCheckout->enabled()) {
+            return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+                provider: $provider,
+                ready: true,
+                label: 'QRIS otomatis (KlikQRIS)',
+                notice: 'QRIS otomatis dari KlikQRIS dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
+            );
+        }
+
+        if ($provider === PaymentProvider::KLIKQRIS) {
+            return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+                provider: $provider,
+                ready: false,
+                label: 'KlikQRIS belum siap',
+                notice: 'QRIS otomatis KlikQRIS sedang belum siap. Coba lagi nanti atau hubungi admin.',
+            );
+        }
+
+        return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+            provider: $provider,
+            ready: false,
+            label: 'Checkout belum tersedia',
+            notice: 'Provider pembayaran ini belum tersedia untuk checkout baru. Coba lagi nanti atau hubungi admin.',
+        );
+    }
+
+    private function binancePayEnabled(?ManualPaymentSetting $setting): bool
     {
         if ($this->binancePayEnabled === null) {
-            $setting = ManualPaymentSetting::current();
-            $mode = $setting?->binance_verification_mode;
-            $this->binanceOrderIdAvailable = $mode === 'order_id';
-            $this->binanceAutomaticVerificationAvailable = in_array($mode, ['amount_unique', 'order_id'], true)
-                && filled(config('services.binance.api_key'))
-                && filled(config('services.binance.api_secret'));
             $this->binancePayEnabled = (bool) $setting?->binance_pay_enabled
                 && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
         }
@@ -201,32 +278,17 @@ class StorefrontProductPresenter
         return $this->binancePayEnabled;
     }
 
-    private function binanceOrderIdAvailable(): bool
-    {
-        return $this->binanceOrderIdAvailable ?? false;
-    }
-
-    private function binanceAutomaticVerificationAvailable(): bool
-    {
-        return $this->binanceAutomaticVerificationAvailable ?? false;
-    }
-
-    private function bscRailAvailable(): bool
+    private function bscRailAvailable(?ManualPaymentSetting $setting): bool
     {
         if ($this->bscRailAvailable !== null) {
             return $this->bscRailAvailable;
         }
 
-        $setting = ManualPaymentSetting::current();
         if (! (bool) $setting?->bsc_payment_enabled) {
-            $this->bscRailAvailable = false;
-
-            return $this->bscRailAvailable;
+            return $this->bscRailAvailable = false;
         }
 
-        $this->bscRailAvailable = $this->bscReadiness->check($setting)->isReady();
-
-        return $this->bscRailAvailable;
+        return $this->bscRailAvailable = $this->bscReadiness->check($setting)->isReady();
     }
 
     /**

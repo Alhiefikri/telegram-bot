@@ -14,6 +14,11 @@
     $checkoutMaintenanceActive = (bool) ($checkoutMaintenanceState?->active);
     $checkoutMaintenanceNotice = $checkoutMaintenanceNotice
         ?? ($checkoutMaintenanceState ? \App\Storefront\StorefrontCheckoutMaintenanceCopy::notice($checkoutMaintenanceState) : '');
+    $modalCheckoutAvailable = isset($presentation)
+        ? $presentation->isBuyable
+        : (isset($catalogPage) && $catalogPage->products->contains(
+            fn ($catalogProduct): bool => $catalogProduct->presentation->isBuyable,
+        ));
 @endphp
 
 <div class="relative z-50" x-show="productModalOpen" x-cloak @keydown.window="if (productModalOpen && $event.key === 'Escape' && !$event.defaultPrevented) { $event.preventDefault(); closeProductModal(); }">
@@ -79,15 +84,14 @@
                             </div>
 
                             <div class="grid gap-4 pt-2">
-                                @if (! $checkoutMaintenanceActive)
+                                @if (! $checkoutMaintenanceActive && $modalCheckoutAvailable)
                                 <form method="POST"
                                       action="{{ route('storefront.shop.checkout') }}"
-                                      x-bind:action="selectedProduct && selectedProduct.checkout.websiteQris ? selectedProduct.checkout.websiteQris.url : '{{ route('storefront.shop.checkout') }}'"
+                                      x-bind:action="selectedCheckoutChoice()?.url || '{{ route('storefront.shop.checkout') }}'"
                                       class="grid gap-3">
                                     @csrf
-                                    <input type="hidden" name="product_id" x-bind:value="selectedProduct?.checkout?.websiteQris?.productId || selectedProduct?.id || ''">
+                                    <input type="hidden" name="product_id" x-bind:value="selectedCheckoutChoice()?.productId || selectedProduct?.id || ''">
                                     <input type="hidden" name="quantity" x-bind:value="quantity">
-
                                     @if ($modalCheckoutError)
                                         <p id="storefront-checkout-error" role="alert" class="rounded-md border-2 border-[var(--sf-border)] bg-[#ffd9df] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">
                                             {{ $modalCheckoutError }}
@@ -163,7 +167,7 @@
                                                        class="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border-2 border-[var(--sf-border)] px-3 py-2 text-left text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition peer-focus-visible:outline peer-focus-visible:outline-4 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--sf-blue)] peer-disabled:cursor-not-allowed peer-disabled:opacity-60">
                                                     <x-storefront.qris-mark
                                                         size="md"
-                                                        x-show="choice.key === 'website_qris'"
+                                                        x-show="choice.key === 'website_qris' && choice.provider === 'klikqris'"
                                                         x-cloak
                                                     />
                                                     <span class="min-w-0 flex-1">
@@ -189,11 +193,11 @@
                                             <p id="storefront-payment-method-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
                                     </fieldset>
-                                    <div x-show="paymentMethod === 'qris'" x-cloak class="flex items-start gap-3 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-3 text-[var(--sf-ink)]">
-                                        <x-storefront.qris-mark size="lg" />
+                                    <div x-show="paymentMethod === 'qris' && selectedCheckoutChoice()" x-cloak class="flex items-start gap-3 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-3 text-[var(--sf-ink)]">
+                                        <x-storefront.qris-mark size="lg" x-show="selectedCheckoutChoice()?.provider === 'klikqris'" x-cloak />
                                         <div class="min-w-0 pt-0.5">
-                                            <p class="font-display text-lg font-black leading-tight">Bayar dengan QRIS</p>
-                                            <p class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.</p>
+                                            <p class="font-display text-lg font-black leading-tight" x-text="selectedCheckoutChoice()?.label || 'Pembayaran QR'">Pembayaran QR</p>
+                                            <p class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]" x-text="selectedCheckoutChoice()?.description || 'Ikuti instruksi pembayaran pada invoice.'">Ikuti instruksi pembayaran pada invoice.</p>
                                         </div>
                                     </div>
                                     <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout.</p>
@@ -203,11 +207,11 @@
                                     </p>
 
                                     <button type="submit" data-storefront-checkout-submit x-bind:disabled="!selectedProduct || !selectedCheckoutChoice()?.enabled" class="neo-button neo-button-stable sticky bottom-0 z-10 flex h-12 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] disabled:cursor-not-allowed disabled:opacity-60">
-                                        <x-storefront.qris-mark size="xs" x-show="paymentMethod === 'qris'" x-cloak class="!border-white !shadow-none" />
-                                        <span x-text="selectedCheckoutChoice()?.label || @js($copy['shop']['checkout_cta'])">{{ $copy['shop']['checkout_cta'] }}</span>
+                                        <x-storefront.qris-mark size="xs" x-show="paymentMethod === 'qris' && selectedCheckoutChoice()?.provider === 'klikqris'" x-cloak class="!border-white !shadow-none" />
+                                        <span x-text="selectedCheckoutChoice()?.label || 'Pilih metode pembayaran'">Pilih metode pembayaran</span>
                                     </button>
                                 </form>
-                                @else
+                                @elseif ($checkoutMaintenanceActive)
                                     <div role="status" class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4 text-sm font-semibold leading-6 text-[var(--sf-ink)]">
                                         <p class="font-black uppercase tracking-wide">Checkout sedang maintenance</p>
                                         <p class="mt-2 whitespace-pre-line">{{ $checkoutMaintenanceNotice }}</p>

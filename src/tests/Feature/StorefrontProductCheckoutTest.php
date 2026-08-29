@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -12,6 +13,16 @@ use Tests\TestCase;
 class StorefrontProductCheckoutTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
 
     public function test_catalog_product_cards_open_modal_with_checkout_choices(): void
     {
@@ -33,9 +44,9 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('Rp85.000')
             ->assertDontSee('line-through', false)
             ->assertSee('Stok: 8')
-            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('Bayar via QR Manual')
             ->assertSee('data-storefront-qris-mark', false)
-            ->assertSee('Bayar dengan QRIS', false)
+            ->assertSee('Bayar via QR Manual', false)
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('&amp;quot;', false)
             ->assertSee('Habis');
@@ -76,12 +87,68 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('data-product=', false)
             ->assertSee('x-on:click.prevent="openProductModal', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
-            ->assertSee('Beli via Web QRIS')
+            ->assertSee('Bayar via QR Manual')
             ->assertSee(route('storefront.order-access.create'), false)
             ->assertSee('Akses Pesanan')
             ->assertDontSee('Checkout via Telegram Admin');
 
         $this->assertNoCheckoutSideEffects();
+    }
+
+    public function test_product_detail_shows_safe_unavailable_state_without_payment_setting(): void
+    {
+        ManualPaymentSetting::query()->delete();
+        $product = Product::factory()->create([
+            'name' => 'No Provider Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('Checkout belum tersedia')
+            ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.')
+            ->assertDontSee('Beli via Web QRIS')
+            ->assertDontSee('data-checkout-product=', false)
+            ->assertDontSee('x-on:click.prevent="openProductModal', false);
+    }
+
+    public function test_landing_hides_checkout_actions_without_payment_setting(): void
+    {
+        ManualPaymentSetting::query()->delete();
+        $product = Product::factory()->create([
+            'name' => 'No Provider Landing Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Checkout belum tersedia')
+            ->assertDontSee('data-product=', false)
+            ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertDontSee('Bayar via QR Manual')
+            ->assertDontSee('Bayar via KlikQRIS');
+    }
+
+    public function test_product_detail_disables_native_qris_when_klikqris_readiness_fails(): void
+    {
+        ManualPaymentSetting::current()->update(['payment_mode' => 'klikqris']);
+        config()->set('services.klikqris.sandbox_enabled', false);
+        config()->set('services.klikqris.production_enabled', false);
+        $product = Product::factory()->create([
+            'name' => 'KlikQRIS Unready Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('KlikQRIS belum siap')
+            ->assertSee('QRIS otomatis KlikQRIS sedang belum siap. Coba lagi nanti atau hubungi admin.')
+            ->assertDontSee('Bayar QRIS di Website')
+            ->assertDontSee('data-checkout-product=', false)
+            ->assertDontSee('x-on:click.prevent="openProductModal', false);
     }
 
     public function test_product_detail_back_navigation_preserves_catalog_search_context(): void

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Category;
+use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,6 +16,16 @@ use Tests\TestCase;
 class StorefrontLandingPageTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
 
     public function test_root_path_returns_public_storefront_without_admin_redirect(): void
     {

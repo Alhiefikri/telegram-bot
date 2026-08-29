@@ -13,6 +13,7 @@ final readonly class StorefrontProductCheckoutChoice
         public bool $enabled,
         public ?string $browserAction = null,
         public ?int $productId = null,
+        public ?string $provider = null,
     ) {}
 
     /**
@@ -28,6 +29,10 @@ final readonly class StorefrontProductCheckoutChoice
             'method' => $this->method,
             'enabled' => $this->enabled,
         ];
+
+        if ($this->provider !== null) {
+            $payload['provider'] = $this->provider;
+        }
 
         if ($this->browserAction !== null) {
             $payload['browserAction'] = $this->browserAction;

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\CheckoutMaintenanceSetting;
+use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Storefront\StorefrontCatalogSearch;
 use App\Storefront\StorefrontResponseCache;
@@ -14,6 +15,16 @@ use Tests\TestCase;
 class StorefrontShopCatalogTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
 
     public function test_shop_redirects_to_the_landing_catalog_surface(): void
     {
@@ -226,7 +237,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertSee('name="_token"', false)
             ->assertSee('name="product_id"', false)
-            ->assertSee("x-bind:value=\"selectedProduct?.checkout?.websiteQris?.productId || selectedProduct?.id || ''\"", false)
+            ->assertSee("x-bind:value=\"selectedCheckoutChoice()?.productId || selectedProduct?.id || ''\"", false)
             ->assertSee('name="quantity"', false)
             ->assertSee('x-bind:value="quantity"', false)
             ->assertSee('Nama pembeli')
@@ -236,7 +247,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('placeholder="Nama pembeli"', false)
             ->assertSee('Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.')
             ->assertSee('type="submit"', false)
-            ->assertSee('Bayar QRIS di Website')
+            ->assertSee('Bayar via QR Manual')
             ->assertDontSee('@click="checkoutManual()"', false)
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')

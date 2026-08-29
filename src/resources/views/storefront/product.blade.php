@@ -13,7 +13,7 @@
             'supportContactValue' => old('support_contact_value', ''),
             'paymentMethod' => old('payment_method'),
         ];
-        $checkoutPayload = $isAvailable ? $presentation->modalPayload() : null;
+        $checkoutPayload = $presentation->isBuyable ? $presentation->modalPayload() : null;
         $checkoutMaintenanceActive = $checkoutMaintenance->active;
     @endphp
 
@@ -68,44 +68,50 @@
                                     </div>
                                     <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
                                         <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Status</dt>
-                                        <dd class="mt-1 text-[var(--sf-ink)]">{{ $isAvailable ? 'Siap dibeli' : 'Restock segera' }}</dd>
+                                        <dd class="mt-1 text-[var(--sf-ink)]">{{ $presentation->statusLabel }}</dd>
                                     </div>
                                 </dl>
                             </div>
 
                             <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-                                @if ($isAvailable && ! $checkoutMaintenanceActive)
+                                @if ($presentation->isBuyable)
                                     <x-storefront.button
                                         :href="$checkoutUrl"
                                         id="product-checkout-cta"
                                         class="neo-button-stable flex-1"
                                         x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product), { opener: $el })"
-                                        data-product='@json($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'
+                                        data-product='{{ json_encode($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) }}'
                                     >
-                                        Beli via Web QRIS
+                                        {{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}
                                     </x-storefront.button>
                                 @elseif ($checkoutMaintenanceActive)
                                     <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
                                         Checkout sedang maintenance
                                     </x-storefront.button>
-                                @else
+                                @elseif (! $isAvailable)
                                     <x-storefront.button variant="danger" class="flex-1 cursor-not-allowed opacity-80" disabled>
                                         Habis
                                     </x-storefront.button>
+                                @else
+                                    <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
+                                        {{ $presentation->checkoutReadiness->label }}
+                                    </x-storefront.button>
+                                    <p role="status" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">
+                                        {{ $presentation->checkoutReadiness->notice }}
+                                    </p>
                                 @endif
 
                                 <x-storefront.button :href="route('storefront.order-access.create')" variant="secondary" class="flex-1">
                                     Akses Pesanan
                                 </x-storefront.button>
                             </div>
-
                             @include('storefront.partials.support-chooser', [
                                 'supportContext' => $supportContext,
                                 'supportId' => 'product-support',
                                 'supportClass' => 'mt-6',
                             ])
 
-                            @if ($isAvailable && ! $checkoutMaintenanceActive)
+                            @if ($presentation->isBuyable)
                                 <noscript>
                                     <form method="POST" action="{{ route('storefront.shop.checkout') }}" class="mt-6 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
                                         @csrf
@@ -130,7 +136,7 @@
                                             <input name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" class="neo-input h-12 bg-white px-3 text-base font-bold">
                                             <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['support_contact_help'] }}</p>
                                         </fieldset>
-                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Bayar QRIS di Website</button>
+                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">{{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}</button>
                                     </form>
                                 </noscript>
                             @endif

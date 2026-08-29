@@ -5,12 +5,14 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\CheckoutMaintenanceSetting;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
@@ -18,6 +20,16 @@ class StorefrontProductPresentationTest extends TestCase
 {
     use RefreshDatabase;
     use StorefrontProductScenarios;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
 
     public function test_available_product_presentation_is_buyable_and_opens_modal(): void
     {
@@ -54,6 +66,24 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $modalPayload['sold']);
         $this->assertTrue($modalPayload['availability']['isAvailable']);
         $this->assertTrue($modalPayload['availability']['canOpenModal']);
+        $this->assertSame('manual', $modalPayload['checkout']['websiteQris']['provider']);
+    }
+
+    public function test_in_stock_product_without_active_payment_setting_is_not_checkout_ready(): void
+    {
+        ManualPaymentSetting::query()->delete();
+        $product = $this->availableProduct(['name' => 'No Checkout Provider']);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertTrue($presentation->isAvailable);
+        $this->assertFalse($presentation->isBuyable);
+        $this->assertFalse($presentation->canOpenModal);
+        $this->assertFalse($presentation->checkoutReadiness->ready);
+        $this->assertNull($presentation->checkoutReadiness->provider);
+        $this->assertSame('Checkout belum tersedia', $presentation->statusLabel);
+        $this->assertSame([], $presentation->checkoutChoices);
+        $this->assertNull($presentation->modalPayload());
     }
 
     public function test_product_presentation_counts_paid_completed_sales_only(): void
@@ -128,13 +158,70 @@ class StorefrontProductPresentationTest extends TestCase
         $websiteQris = $presentation->checkoutChoice('website_qris');
 
         $this->assertNotNull($websiteQris);
-        $this->assertSame('Bayar QRIS di Website', $websiteQris->label);
+        $this->assertSame('Bayar via QR Manual', $websiteQris->label);
+        $this->assertStringContainsString('bukti pembayaran', $websiteQris->description);
         $this->assertSame('POST', $websiteQris->method);
         $this->assertSame(route('storefront.shop.checkout'), $websiteQris->url);
         $this->assertSame($product->id, $websiteQris->productId);
         $this->assertTrue($websiteQris->enabled);
 
         $this->assertNull($presentation->checkoutChoice('telegram_admin'));
+    }
+
+    public function test_unready_klikqris_hides_native_qris_checkout_choice(): void
+    {
+        ManualPaymentSetting::current()->update(['payment_mode' => 'klikqris']);
+        config()->set('services.klikqris.sandbox_enabled', false);
+        config()->set('services.klikqris.production_enabled', false);
+        $product = $this->availableProduct(['name' => 'KlikQRIS Not Ready']);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertFalse($presentation->checkoutReadiness->ready);
+        $this->assertSame('klikqris', $presentation->checkoutReadiness->provider);
+        $this->assertSame('KlikQRIS belum siap', $presentation->checkoutReadiness->label);
+        $this->assertFalse($presentation->isBuyable);
+        $this->assertSame([], $presentation->checkoutChoices);
+        $this->assertStringContainsString('QRIS otomatis KlikQRIS', $presentation->checkoutReadiness->notice);
+    }
+
+    public function test_ready_klikqris_uses_native_qris_copy(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::current()->update(['payment_mode' => 'klikqris']);
+        $product = $this->availableProduct(['name' => 'KlikQRIS Ready']);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+        $websiteQris = $presentation->checkoutChoice('website_qris');
+
+        $this->assertTrue($presentation->checkoutReadiness->ready);
+        $this->assertNotNull($websiteQris);
+        $this->assertSame('Bayar via KlikQRIS', $websiteQris->label);
+        $this->assertStringContainsString('KlikQRIS', $websiteQris->description);
+    }
+
+    public function test_binance_choice_exposes_only_configured_binance_pay_id_rail(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $product = $this->availableProduct([
+            'name' => 'Binance Pay Product',
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+        $payload = $presentation->modalPayload();
+
+        $this->assertNotNull($presentation->checkoutChoice('website_binance_pay'));
+        $this->assertNotNull($presentation->checkoutChoice('website_binance_pay_id'));
+        $this->assertNull($presentation->checkoutChoice('website_usdt_bep20'));
+        $this->assertSame([
+            'websiteQris',
+            'websiteBinancePay',
+            'websiteBinancePayId',
+        ], array_keys($payload['checkout']));
+        $this->assertSame('Pay with Binance Pay ID', $payload['checkout']['websiteBinancePayId']['label']);
+        $this->assertStringContainsString('Binance Pay ID', $payload['checkout']['websiteBinancePayId']['description']);
     }
 
     public function test_stock_description_and_cover_image_state_are_prepared_consistently(): void

@@ -28,6 +28,7 @@ final readonly class StorefrontProductPresentation
         public string $productUrl,
         public StorefrontProductCoverPresentation $cover,
         public array $checkoutChoices,
+        public StorefrontProductCheckoutReadiness $checkoutReadiness,
         public array $support,
         public bool $checkoutMaintenanceActive = false,
         public ?string $checkoutMaintenanceNotice = null,
@@ -36,6 +37,14 @@ final readonly class StorefrontProductPresentation
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice
     {
         return $this->checkoutChoices[$key] ?? null;
+    }
+
+    public function primaryCheckoutChoice(): ?StorefrontProductCheckoutChoice
+    {
+        return $this->checkoutChoice('website_qris')
+            ?? $this->checkoutChoice('website_binance_pay')
+            ?? array_values($this->checkoutChoices)[0]
+            ?? null;
     }
 
     /**
@@ -69,12 +78,12 @@ final readonly class StorefrontProductPresentation
                 'canOpenModal' => $this->canOpenModal,
             ],
             'cover' => $this->cover->toModalPayload(),
-            'checkout' => [
+            'checkout' => array_filter([
                 'websiteQris' => $this->checkoutChoice('website_qris')?->toModalPayload(),
                 'websiteBinancePay' => $this->checkoutChoice('website_binance_pay')?->toModalPayload(),
                 'websiteBinancePayId' => $this->checkoutChoice('website_binance_pay_id')?->toModalPayload(),
                 'websiteUsdtBep20' => $this->checkoutChoice('website_usdt_bep20')?->toModalPayload(),
-            ],
+            ], static fn (?array $choice): bool => $choice !== null && ($choice['enabled'] ?? false)),
             'maintenance' => [
                 'active' => $this->checkoutMaintenanceActive,
                 'notice' => $this->checkoutMaintenanceNotice,

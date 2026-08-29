@@ -6,8 +6,8 @@
     $productUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'from='.urlencode($catalogReturnUrl);
 @endphp
 
-@if ($presentation->canOpenModal)
-    <a href="{{ $productUrl }}" @unless ($presentation->checkoutMaintenanceActive) x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($presentation->modalPayload(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' @endunless id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block min-w-0 w-full transition-all duration-500" data-category="{{ $presentation->categoryKey }}">
+@if ($presentation->isAvailable)
+    <a href="{{ $productUrl }}" @if ($presentation->isBuyable) x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product))" data-product='@json($presentation->modalPayload(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' @endif id="product-{{ $presentation->id }}" class="product-card text-left reveal-item group block min-w-0 w-full transition-all duration-500" data-category="{{ $presentation->categoryKey }}">
         <article class="neo-panel relative flex h-full min-w-0 flex-col overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover">
             @include('storefront.components.product-cover', [
                 'presentation' => $presentation,
@@ -33,9 +33,11 @@
                         </span>
                     </div>
 
-                    <span class="neo-sheen inline-flex h-11 items-center justify-center gap-1.5 rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 text-xs font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)] sm:gap-2 sm:px-3 sm:text-sm">
+                    <span class="{{ $presentation->isBuyable ? 'neo-sheen inline-flex h-11 items-center justify-center gap-1.5 rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 text-xs font-black text-white transition-colors group-hover:bg-[var(--sf-accent-deep)] sm:gap-2 sm:px-3 sm:text-sm' : 'inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-black text-[var(--sf-ink)] sm:px-3 sm:text-sm' }}">
                         <span>{{ $presentation->cardActionLabel }}</span>
-                        <span aria-hidden="true" class="transition-transform duration-300 group-hover:translate-x-1">→</span>
+                        @if ($presentation->isBuyable)
+                            <span aria-hidden="true" class="transition-transform duration-300 group-hover:translate-x-1">→</span>
+                        @endif
                     </span>
                 </div>
             </div>
