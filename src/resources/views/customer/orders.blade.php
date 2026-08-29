@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<html lang="id" class="bg-[var(--sf-paper)]">
-<head>@include('storefront.partials.head')</head>
+<html lang="{{ $metadata->htmlLocale() }}" class="bg-[var(--sf-paper)]">
+<head>@include('storefront.partials.head', ['metadata' => $metadata])</head>
 <body class="text-[var(--sf-ink)]">
 <div class="storefront-shell min-h-screen">
     <div class="pt-4">@include('storefront.partials.header')</div>

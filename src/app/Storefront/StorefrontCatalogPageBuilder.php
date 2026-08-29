@@ -46,6 +46,7 @@ class StorefrontCatalogPageBuilder
         private readonly StorefrontProductPresenter $products,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly StorefrontSeo $seo,
     ) {}
 
     public function home(StorefrontCatalogQuery|string|null $query): StorefrontCatalogPage
@@ -95,19 +96,22 @@ class StorefrontCatalogPageBuilder
         $allCategoryUrl = $isShop
             ? $this->urls->shopCatalogUrl($query->withoutCategory()->withoutPage(), withFragment: true)
             : $this->urls->catalogUrl(search: $query->search !== '' ? $query->search : null);
+        $canonicalUrl = $isShop
+            ? $this->urls->shopCatalogUrl($query, withFragment: false)
+            : url('/');
+        $metadata = $isShop
+            ? $this->seo->catalog($query, $canonicalUrl)
+            : $this->seo->home($canonicalUrl, hasSearch: $query->search !== '');
 
         return new StorefrontCatalogPage(
             context: $context,
             storefront: $this->storefront,
             brand: $brand,
             copy: $copy,
-            pageTitle: $isShop ? 'Belanja Produk Digital | Lhie Store' : str_replace(':brand', $brand, $copy['meta']['title']),
-            pageDescription: $isShop
-                ? 'Katalog produk digital Lhie Store untuk membeli produk digital dan akun premium langsung dari web dengan QRIS, invoice, dan akses pesanan mandiri.'
-                : $copy['meta']['description'],
-            canonicalUrl: $isShop
-                ? $this->urls->shopCatalogUrl($query, withFragment: false)
-                : url('/'),
+            pageTitle: $metadata->title,
+            pageDescription: $metadata->description,
+            canonicalUrl: $metadata->canonicalUrl ?? $canonicalUrl,
+            metadata: $metadata,
             homeUrl: route('storefront.home'),
             shopUrl: route('storefront.shop.index'),
             supportHref: $this->storefront->supportHref(),

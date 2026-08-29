@@ -20,6 +20,9 @@ return [
     ],
 
     'product_placeholder' => '/assets/product-placeholder.svg',
+    'sitemap' => [
+        'max_urls' => (int) env('STOREFRONT_SITEMAP_MAX_URLS', 1000),
+    ],
 
     'guide_catalog' => [
         [

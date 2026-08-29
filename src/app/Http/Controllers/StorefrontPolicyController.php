@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Storefront\StorefrontPresenter;
+use App\Storefront\StorefrontSeo;
 use Illuminate\Http\Response;
 
 class StorefrontPolicyController extends Controller
 {
+    public function __construct(private readonly StorefrontSeo $seo) {}
+
     public function privacy(StorefrontPresenter $storefront): Response
     {
         return $this->render($storefront, 'privacy');
@@ -31,6 +34,7 @@ class StorefrontPolicyController extends Controller
     {
         $brand = $storefront->brand();
         $policy = config('storefront.policies.'.$key);
+        $metadata = $this->seo->policy($key, $policy, route('storefront.policies.'.$key));
 
         return response()->view('storefront.policy', [
             'storefront' => $storefront,
@@ -38,9 +42,10 @@ class StorefrontPolicyController extends Controller
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
             'shopUrl' => route('storefront.shop.index'),
-            'pageTitle' => $policy['title'].' | '.$brand,
-            'pageDescription' => $policy['description'],
-            'canonicalUrl' => route('storefront.policies.'.$key),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
             'policy' => $policy,
         ]);
     }

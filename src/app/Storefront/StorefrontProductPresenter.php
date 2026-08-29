@@ -118,7 +118,13 @@ class StorefrontProductPresenter
         }
 
         if (str_starts_with($path, '/')) {
-            return $path;
+            $publicPath = parse_url($path, PHP_URL_PATH);
+
+            return is_string($publicPath)
+                && $publicPath !== ''
+                && ! str_starts_with($publicPath, '//')
+                ? $publicPath
+                : null;
         }
 
         $trackedProductImage = 'storefront/products/'.basename($path);

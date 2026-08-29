@@ -9,6 +9,7 @@ use App\Services\Customer\CustomerAuthenticationService;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
 use App\Storefront\StorefrontPresenter;
+use App\Storefront\StorefrontSeo;
 use App\Storefront\StorefrontShopOrderPresenter;
 use App\Storefront\StorefrontShopPaymentStatusRefresh;
 use Illuminate\Http\JsonResponse;
@@ -18,20 +19,26 @@ use Illuminate\Http\Response;
 
 class CustomerAccountController extends Controller
 {
-    public function landing(Request $request, StorefrontPresenter $storefront): Response|RedirectResponse
+    public function landing(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response|RedirectResponse
     {
         if ($request->user('customer')) {
             return redirect()->route('customer.orders.index');
         }
+
+        $metadata = $seo->privatePage(
+            'Akun Pelanggan | '.$storefront->brand(),
+            'Masuk ke akun pelanggan menggunakan magic link email.',
+        );
 
         return $this->view($request, 'customer.account', [
             'storefront' => $storefront,
             'brand' => $storefront->brand(),
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
-            'pageTitle' => 'Akun Pelanggan | '.$storefront->brand(),
-            'pageDescription' => 'Masuk ke akun pelanggan menggunakan magic link email.',
-            'canonicalUrl' => route('customer.account'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
         ]);
     }
 
@@ -73,7 +80,7 @@ class CustomerAccountController extends Controller
         return redirect()->route('customer.account');
     }
 
-    public function orders(Request $request, StorefrontPresenter $storefront, CustomerOwnedOrderQuery $ordersQuery): Response
+    public function orders(Request $request, StorefrontPresenter $storefront, CustomerOwnedOrderQuery $ordersQuery, StorefrontSeo $seo): Response
     {
         $customer = $request->user('customer');
         $activeFilter = $ordersQuery->normalizeFilter($request->query('status'));
@@ -89,22 +96,26 @@ class CustomerAccountController extends Controller
             'url' => route('customer.orders.index', ['status' => $filter['key']]),
         ])->all();
 
+        $metadata = $seo->privatePage(
+            'Pesanan Saya | '.$storefront->brand(),
+            'Riwayat pesanan milik Anda. Halaman ini hanya tersedia setelah login.',
+        );
+
         return $this->view($request, 'customer.orders', [
             'storefront' => $storefront, 'brand' => $storefront->brand(), 'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'), 'orders' => $orders, 'customer' => $customer,
             'filters' => $filters, 'activeFilter' => $activeFilter,
-            'pageTitle' => 'Pesanan Saya | '.$storefront->brand(), 'pageDescription' => 'Riwayat semua pesanan milik Anda.',
-            'canonicalUrl' => route('customer.orders.index'),
+            'pageTitle' => $metadata->title, 'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl, 'metadata' => $metadata,
         ]);
     }
 
-    public function show(Request $request, string $order, StorefrontShopOrderPresenter $presenter, StorefrontPresenter $storefront): Response
+    public function show(Request $request, string $order, StorefrontShopOrderPresenter $presenter): Response
     {
         $ownedOrder = Order::query()->whereKey($order)->where('customer_id', $request->user('customer')->getKey())->firstOrFail();
 
         $data = $presenter->viewData($ownedOrder, canRevealCredentials: true, accessKey: null);
         $accountOrderUrl = route('customer.orders.show', $ownedOrder);
-        $data['canonicalUrl'] = $accountOrderUrl;
         $data['statusUrl'] = route('customer.orders.status', $ownedOrder);
         $data['redirectUrl'] = $accountOrderUrl;
 
@@ -126,12 +137,18 @@ class CustomerAccountController extends Controller
             ->header('Referrer-Policy', 'no-referrer');
     }
 
-    public function claimForm(Request $request, StorefrontPresenter $storefront): Response
+    public function claimForm(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
+        $metadata = $seo->privatePage(
+            'Klaim Pesanan | '.$storefront->brand(),
+            'Hubungkan pesanan guest ke akun pelanggan secara pribadi.',
+        );
+
         return $this->view($request, 'customer.claim', [
             'storefront' => $storefront, 'brand' => $storefront->brand(), 'copy' => config('storefront'),
-            'homeUrl' => route('storefront.home'), 'pageTitle' => 'Klaim Pesanan | '.$storefront->brand(),
-            'pageDescription' => 'Hubungkan pesanan guest ke akun pelanggan.', 'canonicalUrl' => route('customer.claim.create'),
+            'homeUrl' => route('storefront.home'), 'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description, 'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
         ]);
     }
 

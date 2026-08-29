@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
+<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
-    @include('storefront.partials.head')
+    @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
     @php
@@ -27,6 +27,7 @@
 
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
         <main class="flex-grow pb-20 pt-12">
+            @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog

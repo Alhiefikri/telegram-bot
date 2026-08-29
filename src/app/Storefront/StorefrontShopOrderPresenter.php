@@ -19,6 +19,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontUrl $urls,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
+        private readonly StorefrontSeo $seo,
     ) {}
 
     /**
@@ -45,6 +46,10 @@ class StorefrontShopOrderPresenter
             $pollIntervalMs,
             (int) config('services.storefront.payment_status_poll_max_duration_seconds', 180) * 1_000,
         );
+        $metadata = $this->seo->privatePage(
+            'Order | '.$brand,
+            'Status checkout dan akses pesanan di '.$brand.'.',
+        );
 
         return [
             'order' => $invoice->order,
@@ -57,9 +62,10 @@ class StorefrontShopOrderPresenter
             ],
             'copy' => config('storefront'),
             'homeUrl' => $this->urls->catalogUrl(),
-            'pageTitle' => 'Order '.$invoice->order->invoice_number.' | '.$brand,
-            'pageDescription' => 'Status checkout QRIS untuk invoice '.$invoice->order->invoice_number.'.',
-            'canonicalUrl' => $invoice->redirectUrl,
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
             'supportHref' => $this->storefront->supportHref(),
             'supportDestination' => $this->storefront->supportDestination(),
             'supportContext' => $this->support->order($invoice->order),

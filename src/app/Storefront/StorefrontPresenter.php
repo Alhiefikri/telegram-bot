@@ -12,6 +12,7 @@ class StorefrontPresenter
         private readonly StorefrontSupport $support,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly StorefrontSeo $seo,
     ) {}
 
     public function brand(): string
@@ -88,6 +89,8 @@ class StorefrontPresenter
         $maintenance = $this->maintenance->current();
         $presentation = $this->products->present($product, $stock, maintenanceState: $maintenance);
         $returnUrl ??= $this->urls->catalogUrl((int) $product->id);
+        $canonicalUrl = route('storefront.products.show', $product);
+        $metadata = $this->seo->product($product, $presentation, $canonicalUrl, $checkoutRequested);
 
         return [
             'storefront' => $this,
@@ -95,9 +98,10 @@ class StorefrontPresenter
             'copy' => config('storefront'),
             'homeUrl' => $this->urls->catalogUrl(),
             'shopUrl' => route('storefront.shop.index'),
-            'pageTitle' => $product->name.' | '.$brand,
-            'pageDescription' => $this->descriptionSnippet($product),
-            'canonicalUrl' => route('storefront.products.show', $product),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl ?? $canonicalUrl,
+            'metadata' => $metadata,
             'supportHref' => $this->supportHref(),
             'supportDestination' => $this->supportDestination(),
             'supportContext' => $this->support->prePurchase($product),

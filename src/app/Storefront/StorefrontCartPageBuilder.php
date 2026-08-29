@@ -16,6 +16,7 @@ final class StorefrontCartPageBuilder
         private readonly StorefrontProductPresenter $products,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly StorefrontSeo $seo,
     ) {}
 
     /**
@@ -30,6 +31,10 @@ final class StorefrontCartPageBuilder
         $usdtSubtotal = $items->isNotEmpty() && $items->every(fn (StorefrontCartItemPresentation $item): bool => $item->usdtUnitPrice !== null)
             ? $items->sum(fn (StorefrontCartItemPresentation $item): int => ($item->usdtUnitPrice ?? 0) * $item->quantity)
             : null;
+        $metadata = $this->seo->privatePage(
+            'Keranjang Belanja | '.$this->storefront->brand(),
+            'Tinjau produk digital pilihan Anda sebelum checkout di '.$this->storefront->brand().'.',
+        );
 
         return [
             'cart' => $cart,
@@ -51,9 +56,10 @@ final class StorefrontCartPageBuilder
             'supportHref' => $this->storefront->supportHref(),
             'supportDestination' => $this->storefront->supportDestination(),
             'supportContext' => $this->storefront->support()->general(),
-            'pageTitle' => 'Keranjang Belanja | '.$this->storefront->brand(),
-            'pageDescription' => 'Tinjau produk digital pilihan Anda sebelum checkout di Lhie Store.',
-            'canonicalUrl' => route('storefront.shop.cart'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
             'cartUrl' => route('storefront.shop.cart'),
             'checkoutUrl' => route('storefront.shop.checkout.start'),
         ];

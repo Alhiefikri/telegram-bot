@@ -1,2 +1,21 @@
 User-agent: *
-Disallow:
+Disallow: /shop/cart
+Disallow: /shop/checkout
+Disallow: /shop/orders/
+Disallow: /akses-pesanan
+Disallow: /akun
+Disallow: /akun/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /telegram-mini-app
+Disallow: /api/
+Disallow: /api/webhook/
+Disallow: /storefront/events
+Disallow: /*?q=
+Disallow: /*?*q=
+Disallow: /*?checkout=
+Disallow: /*?*checkout=
+Disallow: /*?from=
+Disallow: /*?*from=
+# The application route renders the configured HTTPS APP_URL in production.
+Sitemap: https://example.com/sitemap.xml

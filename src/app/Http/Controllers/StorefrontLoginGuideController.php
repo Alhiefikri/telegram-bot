@@ -3,12 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Storefront\StorefrontPresenter;
+use App\Storefront\StorefrontSeo;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 
 class StorefrontLoginGuideController extends Controller
 {
-    public function __construct(private readonly StorefrontPresenter $storefront) {}
+    public function __construct(
+        private readonly StorefrontPresenter $storefront,
+        private readonly StorefrontSeo $seo,
+    ) {}
 
     public function index(): View
     {
@@ -20,14 +24,17 @@ class StorefrontLoginGuideController extends Controller
             ])
             ->all();
 
+        $metadata = $this->seo->guides(route('storefront.guides.index'));
+
         return view('storefront.guides', [
             'brand' => $brand,
             'copy' => config('storefront'),
             'storefront' => $this->storefront,
             'guides' => $guides,
-            'pageTitle' => 'Pusat Panduan | '.$brand,
-            'pageDescription' => 'Pilih panduan penggunaan produk Lhie Store, termasuk login ChatGPT melalui Outlook, iCloud, dan MFA.',
-            'canonicalUrl' => route('storefront.guides.index'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
         ]);
     }
 
@@ -39,15 +46,21 @@ class StorefrontLoginGuideController extends Controller
         $returnUrl = $this->invoiceReturnUrl($request);
         $invoiceNumber = $this->invoiceNumber($request);
 
+        $metadata = $this->seo->loginGuide(
+            route('storefront.login-guide'),
+            privateContext: $returnUrl !== null || $invoiceNumber !== null,
+        );
+
         return view('storefront.login-guide', [
             'brand' => $brand,
             'copy' => config('storefront'),
             'guide' => $guide,
             'invoiceReturnUrl' => $returnUrl,
             'invoiceNumber' => $invoiceNumber,
-            'pageTitle' => 'Panduan Login ChatGPT | '.$brand,
-            'pageDescription' => 'Panduan masuk dan mengamankan akun ChatGPT dari Lhie Store memakai Outlook, iCloud, dan Google Authenticator.',
-            'canonicalUrl' => route('storefront.login-guide'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
         ]);
     }
 

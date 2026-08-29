@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
+<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
-    @include('storefront.partials.head')
+    @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
     @php
@@ -22,6 +22,7 @@
          data-checkout-restore='@json($checkoutRestore, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'>
         @include('storefront.partials.header')
 
+        @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
         <main class="flex-grow pb-24">
             @include('storefront.partials.checkout-maintenance')
             @include('storefront.partials.shop.checkout-error')

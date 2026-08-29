@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontPresenter;
+use App\Storefront\StorefrontSeo;
 use App\Storefront\StorefrontShopOrderPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,18 +16,23 @@ use Illuminate\Http\Response;
 
 class StorefrontOrderAccessController extends Controller
 {
-    public function create(StorefrontPresenter $storefront): Response
+    public function create(StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
         $brand = $storefront->brand();
+        $metadata = $seo->privatePage(
+            'Akses Pesanan | '.$brand,
+            'Buka kembali data pesanan menggunakan kredensial akses yang tersimpan secara pribadi.',
+        );
 
         return response()->view('storefront.order-access', [
             'storefront' => $storefront,
             'brand' => $brand,
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
-            'pageTitle' => 'Akses Pesanan | '.$brand,
-            'pageDescription' => 'Buka kembali data pesanan dengan nomor invoice dan recovery key.',
-            'canonicalUrl' => route('storefront.order-access.create'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
         ])->header('Cache-Control', 'no-store, private');
     }
 

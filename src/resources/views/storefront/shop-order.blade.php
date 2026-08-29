@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', $storefrontLocale ?? app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
+<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
-    @include('storefront.partials.head')
+    @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
