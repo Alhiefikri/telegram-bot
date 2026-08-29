@@ -162,6 +162,7 @@ class CheckoutMaintenanceTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'Web Buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'qris',
         ]);
 

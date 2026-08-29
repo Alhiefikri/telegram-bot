@@ -97,6 +97,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ]);
 
@@ -124,6 +125,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_disabled',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ])->assertRedirect()
             ->assertSessionHas('storefront_checkout_error', fn (string $message): bool => str_contains($message, 'BSC payment rail is not ready.'));
@@ -150,6 +152,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'rail_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'binance_pay_id',
         ])->assertRedirect();
 
@@ -157,6 +160,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'rail_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ])->assertRedirect();
 
@@ -180,6 +184,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_invoice',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ]);
         $order = Order::with('payments.bscDetail')->sole();
@@ -211,6 +216,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_snapshot',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ]);
         $order = Order::with('payments.bscDetail')->sole();
@@ -275,6 +281,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_states',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ]);
         $order = Order::with('payments.bscDetail')->sole();
@@ -309,6 +316,7 @@ class BinancePaymentRailSelectionTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_hash',
+            'terms_accepted' => '1',
             'payment_method' => 'usdt_bep20',
         ]);
         $order = Order::with('payments.bscDetail')->sole();

@@ -211,6 +211,7 @@ class StorefrontProductPresentationTest extends TestCase
 
         $presentation = app(StorefrontProductPresenter::class)->present($product);
         $payload = $presentation->modalPayload();
+        $this->assertSame(2_500_000, $payload['price']['usdtAmount']);
 
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay'));
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay_id'));

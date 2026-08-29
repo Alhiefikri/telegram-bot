@@ -13,6 +13,7 @@
             'supportContactValue' => old('support_contact_value', ''),
             'email' => old('email', ''),
             'paymentMethod' => old('payment_method'),
+            'termsAccepted' => in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true),
         ];
     @endphp
 

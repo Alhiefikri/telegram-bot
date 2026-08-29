@@ -48,21 +48,23 @@ class StorefrontShopCheckout
 
     public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
     {
+        $this->assertTermsAccepted($input);
+        $termsVersion = $this->currentTermsVersion();
         $paymentRail = $this->paymentRail($input->paymentMethod);
         $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail);
         if ($checkoutKey === null) {
-            return $this->startOnce($input, null);
+            return $this->startOnce($input, null, $termsVersion);
         }
 
         try {
             return Cache::lock('storefront:checkout:'.$checkoutKey, 45)
-                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $checkoutKey));
+                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $checkoutKey, $termsVersion));
         } catch (LockTimeoutException $exception) {
             throw new InvalidCheckout('Checkout sedang diproses. Tunggu sebentar lalu buka kembali invoice Anda.', previous: $exception);
         }
     }
 
-    private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
+    private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey, string $termsVersion): StorefrontShopCheckoutResult
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->guestOrderNotifications->capture($existing, $input->email);
@@ -104,7 +106,7 @@ class StorefrontShopCheckout
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
         }
 
-        $order = DB::transaction(function () use ($input, $product, $paymentIntent, $checkoutKey): Order {
+        $order = DB::transaction(function () use ($input, $product, $paymentIntent, $checkoutKey, $termsVersion): Order {
             $customer = Customer::create([
                 'telegram_id' => null,
                 'first_name' => $this->buyerName($input->buyerName),
@@ -114,7 +116,13 @@ class StorefrontShopCheckout
             $cart = $this->carts->activeCartFor($customer);
             $this->carts->setItemQuantity($cart, $product, $input->quantity);
 
-            return $this->orders->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey);
+            return $this->orders->checkout(
+                $cart,
+                $paymentIntent,
+                checkoutKey: $checkoutKey,
+                termsVersion: $termsVersion,
+                termsAcceptedAt: now(),
+            );
         });
         $this->guestOrderNotifications->capture($order, $input->email);
         $this->storeSupportContact($order, $input);
@@ -249,6 +257,23 @@ class StorefrontShopCheckout
     {
         return $payment->provider === PaymentProvider::KLIKQRIS
             && $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+    }
+
+    private function assertTermsAccepted(StorefrontShopCheckoutInput $input): void
+    {
+        if (! $input->termsAccepted) {
+            throw new InvalidCheckout('Setujui Syarat Penggunaan dan Kebijakan Refund untuk melanjutkan checkout.');
+        }
+    }
+
+    private function currentTermsVersion(): string
+    {
+        $version = config('storefront.policies.terms.version');
+        if (! is_string($version) || trim($version) === '') {
+            throw new InvalidCheckout('Checkout terms are not configured.');
+        }
+
+        return trim($version);
     }
 
     private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId, ?string $paymentRail = null): ?string

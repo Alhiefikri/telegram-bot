@@ -88,6 +88,7 @@ class StorefrontProductPresenter
             support: $this->support->prePurchase($product),
             checkoutMaintenanceActive: $maintenanceState->active,
             checkoutMaintenanceNotice: StorefrontCheckoutMaintenanceCopy::notice($maintenanceState),
+            usdtPriceAmount: $product->usdt_price_amount !== null ? (int) $product->usdt_price_amount : null,
         );
     }
 

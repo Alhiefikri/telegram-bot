@@ -65,6 +65,7 @@ class KlikQrisStorefrontTest extends TestCase
             productId: $product->id,
             quantity: 1,
             buyerName: 'Klik Buyer',
+            termsAccepted: true,
         ));
 
         $order = Order::with('payments')->firstOrFail();
@@ -304,6 +305,7 @@ class KlikQrisStorefrontTest extends TestCase
             productId: $product->id,
             quantity: 1,
             buyerName: 'Base64 Buyer',
+            termsAccepted: true,
         ));
         $payment = Payment::query()->where('provider', 'klikqris')->firstOrFail();
         $html = $this->get($result->redirectUrl)->assertOk()->getContent();

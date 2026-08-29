@@ -906,6 +906,7 @@ export function storefrontModal() {
     quantity: 1,
     notes: "",
     buyerName: "",
+    termsAccepted: false,
     email: "",
     supportContactChannel: "",
     supportContactValue: "",
@@ -954,6 +955,7 @@ export function storefrontModal() {
       this.quantityAnnouncement = "";
       this.notes = "";
       this.buyerName = options.buyerName || "";
+      this.termsAccepted = Boolean(options.termsAccepted);
       this.supportContactChannel = options.supportContactChannel || "";
       this.email = options.email || "";
       this.supportContactValue = options.supportContactValue || "";
@@ -1012,6 +1014,16 @@ export function storefrontModal() {
         (Number.parseInt(this.quantity, 10) || 1)
       );
     },
+    selectedUsdtTotal() {
+      if (!this.selectedProduct) {
+        return 0;
+      }
+
+      return (
+        (Number.parseInt(this.selectedProduct.price?.usdtAmount, 10) || 0) *
+        (Number.parseInt(this.quantity, 10) || 1)
+      );
+    },
     availableStock() {
       return Math.max(
         1,
@@ -1020,6 +1032,16 @@ export function storefrontModal() {
     },
     formatIdr(amount) {
       return `Rp${Number.parseInt(amount, 10).toLocaleString("id-ID")}`;
+    },
+    formatUsdt(amount) {
+      const microAmount = Number.parseInt(amount, 10);
+      if (!Number.isFinite(microAmount) || microAmount < 0) {
+        return "—";
+      }
+
+      return `${(microAmount / 1_000_000)
+        .toFixed(6)
+        .replace(/\.?0+$/, "")} USDT`;
     },
     orderedCheckoutChoices() {
       if (!this.selectedProduct) {
@@ -1199,10 +1221,10 @@ export function storefrontModal() {
               document.activeElement,
             quantity: this.restoreCheckout.quantity,
             buyerName: this.restoreCheckout.buyerName,
+            termsAccepted: Boolean(this.restoreCheckout.termsAccepted),
             supportContactChannel: this.restoreCheckout.supportContactChannel,
             email: this.restoreCheckout.email,
             supportContactValue: this.restoreCheckout.supportContactValue,
-            paymentMethod: this.restoreCheckout.paymentMethod,
             focusInvalid: true,
           }
         );

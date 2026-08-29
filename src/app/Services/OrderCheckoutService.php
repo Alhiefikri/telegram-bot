@@ -22,6 +22,7 @@ use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use DateTimeInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -38,9 +39,17 @@ class OrderCheckoutService
         private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
 
-    public function checkout(Cart $cart, ?CheckoutPaymentIntent $paymentIntent = null, ?string $checkoutKey = null): Order
-    {
+    public function checkout(
+        Cart $cart,
+        ?CheckoutPaymentIntent $paymentIntent = null,
+        ?string $checkoutKey = null,
+        ?string $termsVersion = null,
+        ?DateTimeInterface $termsAcceptedAt = null,
+    ): Order {
         $paymentIntent ??= $this->providerResolver->resolve()->paymentIntent;
+        if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
+            throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
+        }
         if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::PAKASIR) {
             throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }
@@ -55,7 +64,7 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt),
                     5,
                 );
 
@@ -75,6 +84,8 @@ class OrderCheckoutService
         CheckoutPaymentIntent $paymentIntent,
         ?string $checkoutKey,
         CheckoutPaymentPreflight $preflight,
+        ?string $termsVersion,
+        ?DateTimeInterface $termsAcceptedAt,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
@@ -153,7 +164,7 @@ class OrderCheckoutService
             preflight: $preflight,
         ));
 
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
+        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
 
         $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 

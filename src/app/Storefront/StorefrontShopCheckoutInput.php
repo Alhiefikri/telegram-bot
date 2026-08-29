@@ -12,10 +12,11 @@ final readonly class StorefrontShopCheckoutInput
         public ?string $supportContactValue = null,
         public string $paymentMethod = 'qris',
         public ?string $email = null,
+        public bool $termsAccepted = false,
     ) {}
 
     /**
-     * @param  array{product_id: int|string, quantity: int|string, buyer_name: string, support_contact_channel?: ?string, support_contact_value?: ?string, payment_method?: string, email?: ?string}  $validated
+     * @param  array{product_id: int|string, quantity: int|string, buyer_name: string, support_contact_channel?: ?string, support_contact_value?: ?string, payment_method?: string, email?: ?string, terms_accepted?: bool|string|int}  $validated
      */
     public static function fromValidated(array $validated): self
     {
@@ -27,6 +28,7 @@ final readonly class StorefrontShopCheckoutInput
             supportContactValue: $validated['support_contact_value'] ?? null,
             paymentMethod: $validated['payment_method'] ?? 'qris',
             email: $validated['email'] ?? null,
+            termsAccepted: (bool) ($validated['terms_accepted'] ?? false),
         );
     }
 }

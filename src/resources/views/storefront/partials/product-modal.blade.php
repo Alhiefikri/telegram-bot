@@ -1,6 +1,7 @@
 @php
     $modalCheckoutError = session('storefront_checkout_error')
         ?: $errors->first('product_id')
+        ?: $errors->first('terms_accepted')
         ?: $errors->first('payment_method')
         ?: $errors->first('email')
         ?: $errors->first('support_contact_channel')
@@ -12,6 +13,8 @@
     $supportContactDescribedBy = 'storefront-support-contact-help'.($supportContactHasError ? ' storefront-support-contact-error' : '');
     $emailHasError = $errors->has('email');
     $emailDescribedBy = 'storefront-email-help'.($emailHasError ? ' storefront-email-error' : '');
+    $termsAcceptedHasError = $errors->has('terms_accepted');
+    $termsAcceptedDescribedBy = 'storefront-terms-accepted-help'.($termsAcceptedHasError ? ' storefront-terms-accepted-error' : '');
     $checkoutMaintenanceState = $checkoutMaintenance
         ?? (isset($catalogPage) ? $catalogPage->checkoutMaintenance : null);
     $checkoutMaintenanceActive = (bool) ($checkoutMaintenanceState?->active);
@@ -80,11 +83,22 @@
                                     <button type="button" x-on:click="increaseQuantity()" x-bind:disabled="selectedProduct && quantity >= selectedProduct.stock.available" class="grid h-11 w-11 place-items-center rounded-md border-[3px] border-[var(--sf-border)] bg-white font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform duration-100 hover:enabled:-translate-x-0.5 hover:enabled:-translate-y-0.5 active:enabled:translate-x-[3px] active:enabled:shadow-[4px_4px_0_var(--sf-shadow)] disabled:cursor-not-allowed disabled:opacity-50" aria-label="Tambah jumlah">+</button>
                                 </div>
                                 <p class="sr-only" aria-live="polite" x-text="quantityAnnouncement"></p>
-                                <div class="flex items-center justify-between border-t-2 border-dashed border-[var(--sf-border)] pt-3 text-sm font-black text-[var(--sf-ink)] sm:col-span-2">
-                                    <span>Total produk</span>
-                                    <span x-text="formatIdr(selectedTotal())">Rp0</span>
+                                <div class="flex items-center justify-between border-t-2 border-dashed border-[var(--sf-border)] pt-3 text-sm font-black text-[var(--sf-ink)]">
+                                    <div x-show="paymentMethod === 'qris'" class="w-full">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <span>Subtotal produk (IDR)</span>
+                                            <span x-text="formatIdr(selectedTotal())">Rp0</span>
+                                        </div>
+                                        <p x-show="paymentMethod === 'qris'" x-cloak class="mt-2 text-sm font-bold leading-6 text-[var(--sf-muted)]">Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.</p>
+                                    </div>
+                                    <div x-show="paymentMethod === 'binance_pay'" x-cloak class="w-full">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <span>USDT dasar / estimasi</span>
+                                            <span x-text="formatUsdt(selectedUsdtTotal())">0 USDT</span>
+                                        </div>
+                                        <p class="mt-2 text-sm font-bold leading-6 text-[var(--sf-muted)]">Nominal USDT final, termasuk penyesuaian unik bila berlaku, ditetapkan pada invoice setelah checkout. Ikuti nominal pada invoice.</p>
+                                    </div>
                                 </div>
-                            </div>
 
                             <div class="grid gap-4 pt-2">
                                 @if (! $checkoutMaintenanceActive && $modalCheckoutAvailable)
@@ -222,6 +236,22 @@
                                         </div>
                                     </div>
                                     <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout.</p>
+                                    <label for="storefront-terms-accepted" class="flex items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
+                                        <input id="storefront-terms-accepted"
+                                               name="terms_accepted"
+                                               type="checkbox"
+                                               value="1"
+                                               required
+                                               x-model="termsAccepted"
+                                               aria-describedby="{{ $termsAcceptedDescribedBy }}"
+                                               @if ($termsAcceptedHasError) aria-invalid="true" @endif
+                                               class="mt-1 h-5 w-5 shrink-0 accent-[var(--sf-accent)]">
+                                        <span>Saya telah membaca dan menyetujui <a href="{{ route('storefront.policies.terms') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['terms']['title'] }}</a> dan <a href="{{ route('storefront.policies.refund') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['refund']['title'] }}</a>.</span>
+                                    </label>
+                                    <p id="storefront-terms-accepted-help" class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['terms_consent_help'] }}</p>
+                                    @error('terms_accepted')
+                                        <p id="storefront-terms-accepted-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                    @enderror
 
                                     <p x-show="selectedProduct && !selectedProduct.availability.isAvailable" class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-center text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct?.stock?.emptyLabel || 'Stok kosong'">
                                         Stok kosong

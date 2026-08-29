@@ -32,6 +32,7 @@ final readonly class StorefrontProductPresentation
         public array $support,
         public bool $checkoutMaintenanceActive = false,
         public ?string $checkoutMaintenanceNotice = null,
+        public ?int $usdtPriceAmount = null,
     ) {}
 
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice
@@ -61,9 +62,10 @@ final readonly class StorefrontProductPresentation
             'name' => $this->name,
             'description' => $this->description,
             'descriptionSnippet' => $this->descriptionSnippet,
-            'price' => [
+            'price' => array_filter([
                 'amount' => $this->priceAmount,
-            ],
+                'usdtAmount' => $this->usdtPriceAmount,
+            ], static fn (mixed $value): bool => $value !== null),
             'stock' => [
                 'available' => $this->stockAvailable,
                 'label' => $this->stockLabel,

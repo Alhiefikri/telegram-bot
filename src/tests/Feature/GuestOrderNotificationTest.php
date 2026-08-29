@@ -44,6 +44,7 @@ class GuestOrderNotificationTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'No Email Buyer',
+            'terms_accepted' => '1',
         ]);
 
         $response->assertRedirect();
@@ -67,6 +68,7 @@ class GuestOrderNotificationTest extends TestCase
             'quantity' => 1,
             'buyer_name' => 'Email Buyer',
             'email' => ' Buyer@Example.TEST ',
+            'terms_accepted' => '1',
         ]);
 
         $response->assertRedirect();
@@ -90,6 +92,7 @@ class GuestOrderNotificationTest extends TestCase
             'quantity' => 1,
             'buyer_name' => 'Invalid Email Buyer',
             'email' => 'not-an-email',
+            'terms_accepted' => '1',
         ])->assertSessionHasErrors('email');
 
         $this->assertSame(0, Order::query()->count());
@@ -105,6 +108,7 @@ class GuestOrderNotificationTest extends TestCase
             productId: $product->id,
             quantity: 1,
             buyerName: 'Repeat Buyer',
+            termsAccepted: true,
             email: 'repeat@example.test',
         );
 
@@ -133,6 +137,7 @@ class GuestOrderNotificationTest extends TestCase
             productId: $product->id,
             quantity: 1,
             buyerName: 'Fixture Buyer',
+            termsAccepted: true,
             email: 'buyer@example.test',
         ), 'milestone-session');
         $order = Order::query()->sole();
@@ -243,6 +248,7 @@ class GuestOrderNotificationTest extends TestCase
             productId: $productId,
             quantity: 1,
             buyerName: 'Fixture Buyer',
+            termsAccepted: true,
             email: $email,
         ), $sessionId);
 

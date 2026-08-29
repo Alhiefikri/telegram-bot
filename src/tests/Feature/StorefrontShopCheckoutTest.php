@@ -87,6 +87,99 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertRedirect(route('storefront.shop.index'));
     }
 
+    public function test_shop_checkout_rejects_missing_or_false_terms_consent_before_any_side_effect(): void
+    {
+        $product = $this->availableProduct(['stock' => 1]);
+        Http::fake();
+
+        foreach ([null, false] as $termsAccepted) {
+            $payload = [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'buyer_test',
+            ];
+            if ($termsAccepted !== null) {
+                $payload['terms_accepted'] = $termsAccepted;
+            }
+
+            $this->from(route('storefront.home'))
+                ->post(route('storefront.shop.checkout'), $payload)
+                ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+                ->assertSessionHasErrors('terms_accepted');
+
+            $this->assertNoLocalCheckoutRowsCreated('terms consent rejection');
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_checkout_service_rejects_unaccepted_terms_before_any_side_effect(): void
+    {
+        $product = $this->availableProduct(['stock' => 1]);
+        Http::fake();
+
+        try {
+            app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerName: 'Direct Buyer',
+            ));
+            $this->fail('Expected checkout without terms consent to be rejected.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame('Setujui Syarat Penggunaan dan Kebijakan Refund untuk melanjutkan checkout.', $exception->getMessage());
+        }
+
+        $this->assertNoLocalCheckoutRowsCreated('direct terms consent rejection');
+        Http::assertNothingSent();
+    }
+
+    public function test_checkout_service_rejects_when_the_current_terms_version_is_not_configured(): void
+    {
+        $this->manualPaymentModeIsActive();
+        config()->set('storefront.policies.terms.version', '');
+        $product = $this->availableProduct(['stock' => 1]);
+        Http::fake();
+
+        try {
+            app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+                productId: $product->id,
+                quantity: 1,
+                buyerName: 'Unversioned Buyer',
+                termsAccepted: true,
+            ));
+            $this->fail('Expected checkout without a current terms version to be rejected.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame('Checkout terms are not configured.', $exception->getMessage());
+        }
+
+        $this->assertNoLocalCheckoutRowsCreated('missing terms version');
+        Http::assertNothingSent();
+    }
+
+    public function test_web_checkout_snapshots_the_current_terms_version_and_acceptance_time(): void
+    {
+        $this->manualPaymentModeIsActive();
+        config()->set('storefront.policies.terms.version', '2026-08-29-v1');
+        $product = $this->availableProduct(['stock' => 1]);
+        $before = now()->subSecond();
+
+        $this->postStorefrontShopCheckout($product, 1, 'terms_buyer')->assertRedirect();
+
+        $after = now()->addSecond();
+        $order = Order::query()->sole();
+        $acceptedAt = $order->terms_accepted_at;
+
+        $this->assertSame('2026-08-29-v1', $order->terms_version);
+        $this->assertNotNull($acceptedAt);
+        $this->assertTrue($acceptedAt->betweenIncluded($before, $after));
+
+        config()->set('storefront.policies.terms.version', '2026-09-01-v2');
+        $order->refresh();
+
+        $this->assertSame('2026-08-29-v1', $order->terms_version);
+        $this->assertTrue($order->terms_accepted_at->equalTo($acceptedAt));
+    }
+
     public function test_new_checkout_rejects_retired_pakasir_setting_without_side_effects(): void
     {
         ManualPaymentSetting::create([
@@ -105,6 +198,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 productId: $product->id,
                 quantity: 1,
                 buyerName: 'Retired Provider Buyer',
+                termsAccepted: true,
             ));
         } finally {
             $this->assertSame(0, Order::query()->count());
@@ -142,6 +236,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 productId: $product->id,
                 quantity: 1,
                 buyerName: $data['input'],
+                termsAccepted: true,
             ));
             $order = Order::latest('id')->firstOrFail();
 
@@ -175,6 +270,7 @@ class StorefrontShopCheckoutTest extends TestCase
                     productId: $product->id,
                     quantity: 1,
                     buyerName: 'Web Buyer',
+                    termsAccepted: true,
                 ));
                 $this->fail('Expected checkout to reject '.$case.'.');
             } catch (InsufficientStock $exception) {
@@ -197,6 +293,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 productId: $product->id,
                 quantity: 1,
                 buyerName: 'Web Buyer',
+                termsAccepted: true,
             ));
             $this->fail('Expected checkout to reject disabled native QRIS before validating availability.');
         } catch (InvalidCheckout $exception) {
@@ -218,6 +315,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'product_id' => 999_999,
                 'quantity' => 1,
                 'buyer_name' => 'buyer_test',
+                'terms_accepted' => '1',
             ]);
 
         $response
@@ -242,6 +340,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'buyer_test',
+                'terms_accepted' => '1',
             ]);
 
         $response
@@ -363,6 +462,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'product_id' => $product->id,
                 'quantity' => 2,
                 'buyer_name' => 'x',
+                'terms_accepted' => '1',
                 'payment_method' => 'qris',
             ])
             ->assertOk()
@@ -396,6 +496,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 2,
             'buyer_name' => 'international_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'binance_pay',
         ]);
 
@@ -447,6 +548,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'automatic_binance_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'binance_pay',
         ]);
 
@@ -486,6 +588,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'automatic_amount_buyer',
+            'terms_accepted' => '1',
             'payment_method' => 'binance_pay',
         ]);
 
@@ -511,6 +614,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
             'payment_method' => 'manual;DROP TABLE payments',
+            'terms_accepted' => '1',
         ])->assertSessionHasErrors('payment_method');
 
         $this->assertNoLocalCheckoutRowsCreated('invalid payment method');
@@ -534,6 +638,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
             'payment_method' => 'binance_pay',
+            'terms_accepted' => '1',
         ])->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
 
@@ -554,6 +659,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
+            'terms_accepted' => '1',
             'payment_method' => 'binance_pay',
         ];
 
@@ -575,7 +681,12 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::fake([SendAdminOrderPendingNotification::class]);
         $product = $this->availableProduct(['name' => 'Retryable Cancelled Checkout', 'price_amount' => 15000, 'stock' => 3]);
         $this->manualPaymentModeIsActive();
-        $payload = ['product_id' => $product->id, 'quantity' => 1, 'buyer_name' => 'buyer_test'];
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'buyer_test',
+            'terms_accepted' => '1',
+        ];
         $session = ['storefront.checkout_client_key' => 'cancel-retry-session'];
 
         $first = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
@@ -612,6 +723,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
+            'terms_accepted' => '1',
         ];
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
             ->from(route('storefront.home'))
@@ -642,6 +754,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
+            'terms_accepted' => '1',
         ];
         $session = ['storefront.checkout_client_key' => 'completed-browser-session'];
         $first = $this->withSession($session)
@@ -724,6 +837,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
+            'terms_accepted' => '1',
         ];
         $first = $this->withSession($session)
             ->from(route('storefront.home'))
@@ -840,6 +954,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'Guest Buyer',
+            'terms_accepted' => '1',
             'support_contact_channel' => 'instagram',
             'support_contact_value' => '@buyer',
         ])->assertSessionHasErrors('support_contact_channel');

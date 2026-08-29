@@ -13,6 +13,7 @@
             'supportContactValue' => old('support_contact_value', ''),
             'email' => old('email', ''),
             'paymentMethod' => old('payment_method'),
+            'termsAccepted' => in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true),
         ];
         $checkoutPayload = $presentation->isBuyable ? $presentation->modalPayload() : null;
         $checkoutMaintenanceActive = $checkoutMaintenance->active;
@@ -137,6 +138,25 @@
                                             <input name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" class="neo-input h-12 bg-white px-3 text-base font-bold">
                                             <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['support_contact_help'] }}</p>
                                         </fieldset>
+                                        <div class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
+                                            <p class="font-black text-[var(--sf-ink)]">Ringkasan pembayaran</p>
+                                            <p>Subtotal produk (IDR): {{ $storefront->idr($product->price_amount) }} × jumlah.</p>
+                                            <p>Biaya dan total QRIS final ditentukan provider setelah checkout. Bayar hanya nominal total pada invoice QRIS.</p>
+                                        </div>
+                                        <label for="storefront-nojs-terms-accepted" class="flex items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
+                                            <input id="storefront-nojs-terms-accepted"
+                                                   name="terms_accepted"
+                                                   type="checkbox"
+                                                   value="1"
+                                                   required
+                                                   @checked(in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true))
+                                                   class="mt-1 h-5 w-5 shrink-0 accent-[var(--sf-accent)]">
+                                            <span>Saya telah membaca dan menyetujui <a href="{{ route('storefront.policies.terms') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['terms']['title'] }}</a> dan <a href="{{ route('storefront.policies.refund') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['refund']['title'] }}</a>.</span>
+                                        </label>
+                                        <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['terms_consent_help'] }}</p>
+                                        @error('terms_accepted')
+                                            <p role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                        @enderror
                                         <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">{{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}</button>
                                     </form>
                                 </noscript>

@@ -81,6 +81,7 @@ return [
         'support_contact_help' => 'Diisi hanya jika Anda ingin support punya kanal follow-up. Kontak ini bukan bukti kepemilikan pesanan; akses tetap memakai invoice dan Recovery Key.',
         'email_label' => 'Email untuk notifikasi (opsional)',
         'email_help' => 'Dengan mengisi email, Anda menyetujui notifikasi transaksional tentang pesanan ini. Email bukan bukti kepemilikan; akses tetap mengikuti kebijakan pesanan.',
+        'terms_consent_help' => 'Persetujuan ini disimpan bersama order agar kebijakan yang berlaku saat checkout tetap tercatat.',
         'checkout_cta' => 'Bayar QRIS di Website',
     ],
 
@@ -241,6 +242,7 @@ return [
             'eyebrow' => 'Syarat',
             'title' => 'Syarat Penggunaan',
             'description' => 'Aturan transaksi produk digital, akses pesanan, support, dan batas tanggung jawab Lhie Store.',
+            'version' => env('STOREFRONT_TERMS_VERSION', '2026-07-20'),
             'updated' => '20 Juli 2026',
             'sections' => [
                 [

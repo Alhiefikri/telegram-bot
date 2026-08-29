@@ -90,9 +90,35 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Bayar via QR Manual')
             ->assertSee(route('storefront.order-access.create'), false)
             ->assertSee('Akses Pesanan')
+            ->assertSee('name="terms_accepted"', false)
+            ->assertSee('id="storefront-nojs-terms-accepted"', false)
+            ->assertSee('Subtotal produk (IDR)')
+            ->assertSee('Syarat Penggunaan')
+            ->assertSee('Kebijakan Refund')
             ->assertDontSee('Checkout via Telegram Admin');
 
         $this->assertNoCheckoutSideEffects();
+    }
+
+    public function test_crypto_product_detail_exposes_usdt_context_and_payment_disclaimers(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $product = Product::factory()->create([
+            'name' => 'Binance Checkout Product',
+            'price_amount' => 45000,
+            'usdt_price_amount' => 2_500_000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('usdtAmount', false)
+            ->assertSee('2500000', false)
+            ->assertSee('USDT dasar / estimasi')
+            ->assertSee('Nominal USDT final, termasuk penyesuaian unik bila berlaku, ditetapkan pada invoice setelah checkout.')
+            ->assertSee('Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.');
     }
 
     public function test_product_detail_shows_safe_unavailable_state_without_payment_setting(): void

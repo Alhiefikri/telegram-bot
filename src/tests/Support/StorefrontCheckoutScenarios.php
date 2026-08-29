@@ -69,6 +69,7 @@ trait StorefrontCheckoutScenarios
             'product_id' => $product->id,
             'quantity' => $quantity,
             'buyer_name' => $buyerName,
+            'terms_accepted' => '1',
         ];
 
         if ($supportContactChannel !== null || $supportContactValue !== null) {
