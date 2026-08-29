@@ -3,12 +3,20 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
+use App\Models\Cart;
 use App\Models\CheckoutMaintenanceSetting;
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Product;
+use App\Services\CartService;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Storefront\StorefrontCatalogSearch;
 use App\Storefront\StorefrontResponseCache;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -105,12 +113,165 @@ class StorefrontShopCatalogTest extends TestCase
         );
 
         Product::factory()->create(['name' => 'Invalidated Homepage Product', 'stock' => 2, 'reserved_stock' => 0]);
+
         app(StorefrontResponseCache::class)->invalidate();
 
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Cached Homepage Product')
             ->assertSee('Invalidated Homepage Product');
+    }
+
+    public function test_product_update_invalidates_homepage_once(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Single Invalidation Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Single Invalidation Product');
+        $versionBeforeUpdate = (int) Cache::get('storefront.response.version');
+
+        $product->update(['name' => 'Renamed Invalidation Product']);
+
+        $this->assertSame($versionBeforeUpdate + 1, (int) Cache::get('storefront.response.version'));
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Renamed Invalidation Product')
+            ->assertDontSee('Single Invalidation Product');
+    }
+
+    public function test_committed_checkout_reservation_invalidates_homepage_cache(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Reservation Cache Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Reservation Cache Product')
+            ->assertSee('Stok: 1');
+
+        $this->checkoutProduct($product);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Reservation Cache Product')
+            ->assertSee('Stok kosong')
+            ->assertDontSee('Stok: 1');
+    }
+
+    public function test_committed_cancellation_release_invalidates_homepage_cache(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Cancellation Cache Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $order = $this->checkoutProduct($product);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Stok kosong');
+
+        app(OrderStateMachine::class)->applyPendingCancellation($order);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Cancellation Cache Product')
+            ->assertSee('Stok: 1');
+    }
+
+    public function test_committed_expiry_release_invalidates_homepage_cache(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Expiry Cache Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $order = $this->checkoutProduct($product);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Stok kosong');
+
+        $order->update(['expires_at' => now()->subMinute()]);
+        app(OrderStateMachine::class)->applyPendingExpiry($order->fresh());
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Expiry Cache Product')
+            ->assertSee('Stok: 1');
+    }
+
+    public function test_committed_paid_sale_refreshes_homepage_stock_and_sold_projection(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Paid Sale Cache Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $order = $this->checkoutProduct($product);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Stok kosong')
+            ->assertSee('Terjual: 0');
+
+        app(OrderStateMachine::class)->applyManualCompletion($order);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Paid Sale Cache Product')
+            ->assertSee('Stok kosong')
+            ->assertSee('Terjual: 1');
+    }
+
+    public function test_rolled_back_checkout_does_not_invalidate_homepage_cache(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Rollback Cache Product',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product);
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Rollback Cache Product')
+            ->assertSee('Stok: 1');
+
+        try {
+            DB::transaction(function () use ($cart): void {
+                app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+
+                throw new \RuntimeException('roll back checkout');
+            });
+            $this->fail('Expected the transaction to roll back.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('roll back checkout', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+
+        $productQueries = 0;
+        DB::listen(static function ($query) use (&$productQueries): void {
+            if (str_contains(strtolower($query->sql), 'products')) {
+                $productQueries++;
+            }
+        });
+
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('Rollback Cache Product')
+            ->assertSee('Stok: 1');
+
+        $this->assertSame(0, $productQueries, 'A rolled-back transition must retain the cached homepage.');
     }
 
     public function test_unfiltered_landing_cache_reflects_maintenance_version_changes(): void
@@ -326,6 +487,24 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Belanja produk digital dalam tiga langkah.')
             ->assertDontSee('Katalog produk digital siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
+    }
+
+    private function checkoutProduct(Product $product): Order
+    {
+        return app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::manualQris(),
+        );
+    }
+
+    private function cartForProduct(Product $product): Cart
+    {
+        $customer = Customer::factory()->create();
+        $cartService = app(CartService::class);
+        $cart = $cartService->activeCartFor($customer);
+        $cartService->setItemQuantity($cart, $product, 1);
+
+        return $cart;
     }
 
     private function productArticleHtml(string $html, Product $product): string

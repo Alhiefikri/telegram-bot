@@ -11,17 +11,23 @@ use Illuminate\Database\Eloquent\Model;
 
 class StorefrontCacheInvalidationObserver implements ShouldHandleEventsAfterCommit
 {
-    public function saved(Model $model): void
+    /**
+     * Use mutation-specific events so atomic increment/decrement updates are
+     * invalidated without duplicating the save or restore paths.
+     *
+     * Restores persist through save(), so updated is the single restore hook.
+     */
+    public function created(Model $model): void
+    {
+        $this->invalidate($model);
+    }
+
+    public function updated(Model $model): void
     {
         $this->invalidate($model);
     }
 
     public function deleted(Model $model): void
-    {
-        $this->invalidate($model);
-    }
-
-    public function restored(Model $model): void
     {
         $this->invalidate($model);
     }
