@@ -11,6 +11,7 @@
             'buyerName' => old('buyer_name', ''),
             'supportContactChannel' => old('support_contact_channel', ''),
             'supportContactValue' => old('support_contact_value', ''),
+            'email' => old('email', ''),
             'paymentMethod' => old('payment_method'),
         ];
     @endphp

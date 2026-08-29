@@ -79,6 +79,8 @@ return [
         'buyer_name_help' => 'Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.',
         'support_contact_label' => 'Kontak bantuan opsional',
         'support_contact_help' => 'Diisi hanya jika Anda ingin support punya kanal follow-up. Kontak ini bukan bukti kepemilikan pesanan; akses tetap memakai invoice dan Recovery Key.',
+        'email_label' => 'Email untuk notifikasi (opsional)',
+        'email_help' => 'Dengan mengisi email, Anda menyetujui notifikasi transaksional tentang pesanan ini. Email bukan bukti kepemilikan; akses tetap mengikuti kebijakan pesanan.',
         'checkout_cta' => 'Bayar QRIS di Website',
     ],
 

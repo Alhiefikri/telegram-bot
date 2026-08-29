@@ -18,6 +18,7 @@ use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\GuestOrderNotificationService;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
@@ -38,6 +39,7 @@ class StorefrontShopCheckout
         private readonly PaymentProviderResolver $providerResolver,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
+        private readonly GuestOrderNotificationService $guestOrderNotifications,
         private readonly StorefrontFunnelEvents $events,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
@@ -63,6 +65,7 @@ class StorefrontShopCheckout
     private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey): StorefrontShopCheckoutResult
     {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            $this->guestOrderNotifications->capture($existing, $input->email);
             $this->storeSupportContact($existing, $input);
             $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
 
@@ -113,6 +116,7 @@ class StorefrontShopCheckout
 
             return $this->orders->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey);
         });
+        $this->guestOrderNotifications->capture($order, $input->email);
         $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 

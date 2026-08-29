@@ -28,6 +28,7 @@ trait StorefrontCheckoutScenarios
         string $buyerName,
         ?string $supportContactChannel = null,
         ?string $supportContactValue = null,
+        ?string $email = null,
     ): array {
         KlikQrisSandboxScenarios::configureReadySandbox();
         ManualPaymentSetting::query()->create([
@@ -47,7 +48,7 @@ trait StorefrontCheckoutScenarios
             },
         ]);
 
-        $response = $this->postStorefrontShopCheckout($product, $quantity, $buyerName, $supportContactChannel, $supportContactValue);
+        $response = $this->postStorefrontShopCheckout($product, $quantity, $buyerName, $supportContactChannel, $supportContactValue, $email);
 
         $order = Order::with(['customer', 'cart', 'payments', 'orderItems.stockItems'])->firstOrFail();
         $payment = $order->payments->first();
@@ -62,6 +63,7 @@ trait StorefrontCheckoutScenarios
         string $buyerName,
         ?string $supportContactChannel = null,
         ?string $supportContactValue = null,
+        ?string $email = null,
     ): TestResponse {
         $payload = [
             'product_id' => $product->id,
@@ -72,6 +74,9 @@ trait StorefrontCheckoutScenarios
         if ($supportContactChannel !== null || $supportContactValue !== null) {
             $payload['support_contact_channel'] = $supportContactChannel;
             $payload['support_contact_value'] = $supportContactValue;
+        }
+        if ($email !== null) {
+            $payload['email'] = $email;
         }
 
         return $this

@@ -906,6 +906,7 @@ export function storefrontModal() {
     quantity: 1,
     notes: "",
     buyerName: "",
+    email: "",
     supportContactChannel: "",
     supportContactValue: "",
     supportContactOpen: false,
@@ -954,6 +955,7 @@ export function storefrontModal() {
       this.notes = "";
       this.buyerName = options.buyerName || "";
       this.supportContactChannel = options.supportContactChannel || "";
+      this.email = options.email || "";
       this.supportContactValue = options.supportContactValue || "";
       this.supportContactOpen = Boolean(
         this.supportContactChannel || this.supportContactValue
@@ -1198,6 +1200,7 @@ export function storefrontModal() {
             quantity: this.restoreCheckout.quantity,
             buyerName: this.restoreCheckout.buyerName,
             supportContactChannel: this.restoreCheckout.supportContactChannel,
+            email: this.restoreCheckout.email,
             supportContactValue: this.restoreCheckout.supportContactValue,
             paymentMethod: this.restoreCheckout.paymentMethod,
             focusInvalid: true,

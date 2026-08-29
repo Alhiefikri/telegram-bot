@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
@@ -28,6 +29,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly ?TelegramOutboundEffectService $outboundEffects = null,
         private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
         private readonly ?BscConfirmationGrace $bscConfirmationGrace = null,
+        private readonly ?GuestOrderNotificationService $guestOrderNotifications = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -90,6 +92,7 @@ class OrderStateMachine implements OrderLifecycle
 
                 $lockedOrder->refresh();
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
+                $this->recordGuestNotification($lockedOrder, GuestOrderNotificationEvent::FulfillmentCompleted);
 
                 $completed = $lockedOrder->fresh(['payments']);
 
@@ -149,6 +152,7 @@ class OrderStateMachine implements OrderLifecycle
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
                     && $order->payment_status === PaymentStatus::Refunded;
 
+                $wasAlreadyCancelled = $order->order_status === OrderStatus::Cancelled;
                 if (! $wasAlreadyRefunded) {
                     $this->releaseRefundedOrderResources($order);
                 }
@@ -162,6 +166,9 @@ class OrderStateMachine implements OrderLifecycle
                     $updates['order_status'] = OrderStatus::Cancelled;
                 }
                 $order->update($updates);
+                if ($order->order_status === OrderStatus::Cancelled && ! $wasAlreadyCancelled) {
+                    $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderCancelled);
+                }
 
                 $refunded = $order->fresh(['payments']);
 
@@ -280,6 +287,10 @@ class OrderStateMachine implements OrderLifecycle
             'payment_status' => PaymentStatus::Paid,
             'order_status' => $this->paidOrderStatus($payment),
         ]);
+        $this->recordGuestNotification($order, GuestOrderNotificationEvent::PaymentConfirmed);
+        if ($order->order_status === OrderStatus::Completed) {
+            $this->recordGuestNotification($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+        }
         $this->dispatchAdminPendingNotificationDelete($order);
 
         $salesProofEnabled = (bool) StoreChannelSetting::current()->sales_proof_enabled;
@@ -363,6 +374,7 @@ class OrderStateMachine implements OrderLifecycle
 
         if ($changed) {
             $this->dispatchAdminPendingNotificationDelete($order);
+            $this->recordGuestNotification($order, GuestOrderNotificationEvent::PaymentConfirmed);
         }
 
         $latePaid = $order->fresh(['payments']);
@@ -438,6 +450,11 @@ class OrderStateMachine implements OrderLifecycle
             'payment_status' => $paymentStatus,
             ...($orderStatus === OrderStatus::Cancelled ? ['checkout_key' => null] : []),
         ]);
+        if ($orderStatus === OrderStatus::Expired) {
+            $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderExpired);
+        } elseif ($orderStatus === OrderStatus::Cancelled) {
+            $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderCancelled);
+        }
         $this->dispatchAdminPendingNotificationDelete($order);
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
             $this->recordAndDispatchAdminOrderExpired($order);
@@ -485,6 +502,11 @@ class OrderStateMachine implements OrderLifecycle
     private function bscConfirmationGrace(): BscConfirmationGrace
     {
         return $this->bscConfirmationGrace ?? app(BscConfirmationGrace::class);
+    }
+
+    private function recordGuestNotification(Order $order, GuestOrderNotificationEvent $eventType): void
+    {
+        ($this->guestOrderNotifications ?? app(GuestOrderNotificationService::class))->record($order, $eventType);
     }
 
     private function dispatchAdminPendingNotificationDelete(Order $order): void

@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
@@ -11,6 +12,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
@@ -27,6 +29,7 @@ class ManualFulfillmentResolutionService
         private readonly ProductCredentialAllocator $credentials,
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
+        private readonly GuestOrderNotificationService $guestOrderNotifications,
     ) {}
 
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
@@ -72,6 +75,7 @@ class ManualFulfillmentResolutionService
                 $this->credentials->allocate($item, $product, $item->quantity);
             }
             $order->update(['order_status' => OrderStatus::Completed]);
+            $this->guestOrderNotifications->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
         }
 
         $order->refresh();

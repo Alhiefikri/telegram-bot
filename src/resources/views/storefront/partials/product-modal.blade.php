@@ -2,6 +2,7 @@
     $modalCheckoutError = session('storefront_checkout_error')
         ?: $errors->first('product_id')
         ?: $errors->first('payment_method')
+        ?: $errors->first('email')
         ?: $errors->first('support_contact_channel')
         ?: $errors->first('support_contact_value')
         ?: $errors->first('quantity');
@@ -9,6 +10,8 @@
     $buyerNameDescribedBy = 'storefront-buyer-name-help'.($buyerNameHasError ? ' storefront-buyer-name-error' : '');
     $supportContactHasError = $errors->has('support_contact_channel') || $errors->has('support_contact_value');
     $supportContactDescribedBy = 'storefront-support-contact-help'.($supportContactHasError ? ' storefront-support-contact-error' : '');
+    $emailHasError = $errors->has('email');
+    $emailDescribedBy = 'storefront-email-help'.($emailHasError ? ' storefront-email-error' : '');
     $checkoutMaintenanceState = $checkoutMaintenance
         ?? (isset($catalogPage) ? $catalogPage->checkoutMaintenance : null);
     $checkoutMaintenanceActive = (bool) ($checkoutMaintenanceState?->active);
@@ -114,6 +117,24 @@
                                         </p>
                                         @error('buyer_name')
                                             <p id="storefront-buyer-name-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+                                    <div class="grid gap-2">
+                                        <label for="storefront-email" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['email_label'] }}</label>
+                                        <input id="storefront-email"
+                                               name="email"
+                                               type="email"
+                                               autocomplete="email"
+                                               x-model.trim="email"
+                                               placeholder="nama@contoh.com"
+                                               aria-describedby="{{ $emailDescribedBy }}"
+                                               @if ($emailHasError) aria-invalid="true" @endif
+                                               class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] placeholder:text-[var(--sf-muted)]">
+                                        <p id="storefront-email-help" class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">
+                                            {{ $copy['shop']['email_help'] }}
+                                        </p>
+                                        @error('email')
+                                            <p id="storefront-email-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
                                         @enderror
                                     </div>
 
