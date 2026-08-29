@@ -72,6 +72,51 @@
                                 <span class="rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-sm font-black text-[var(--sf-ink)]" x-text="selectedProduct.stock.label"></span>
                             </div>
 
+                            <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" aria-labelledby="modal-product-details-title">
+                                <h4 id="modal-product-details-title" class="font-display text-base font-black text-[var(--sf-ink)]">Detail produk</h4>
+                                <p class="mt-2 whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]" x-text="selectedProduct?.description || selectedProduct?.descriptionSnippet || 'Deskripsi produk segera dilengkapi.'">Deskripsi produk segera dilengkapi.</p>
+                                <dl x-show="selectedProduct?.merchandising?.hasDetails" x-cloak class="mt-3 grid gap-2 text-sm">
+                                    <template x-if="selectedProduct?.merchandising?.productType">
+                                        <div><dt class="font-black text-[var(--sf-muted)]">Tipe produk</dt><dd class="break-words font-bold text-[var(--sf-ink)]" x-text="selectedProduct.merchandising.productType"></dd></div>
+                                    </template>
+                                    <template x-if="selectedProduct?.merchandising?.accessDuration">
+                                        <div><dt class="font-black text-[var(--sf-muted)]">Durasi akses</dt><dd class="break-words font-bold text-[var(--sf-ink)]" x-text="selectedProduct.merchandising.accessDuration"></dd></div>
+                                    </template>
+                                    <template x-if="selectedProduct?.merchandising?.region">
+                                        <div><dt class="font-black text-[var(--sf-muted)]">Region / negara</dt><dd class="break-words font-bold text-[var(--sf-ink)]" x-text="selectedProduct.merchandising.region"></dd></div>
+                                    </template>
+                                    <template x-if="selectedProduct?.merchandising?.accountType">
+                                        <div><dt class="font-black text-[var(--sf-muted)]">Tipe akun</dt><dd class="break-words font-bold text-[var(--sf-ink)]" x-text="selectedProduct.merchandising.accountType"></dd></div>
+                                    </template>
+                                    <template x-if="selectedProduct?.merchandising?.deviceLimit">
+                                        <div><dt class="font-black text-[var(--sf-muted)]">Batas perangkat / seat</dt><dd class="break-words font-bold text-[var(--sf-ink)]" x-text="selectedProduct.merchandising.deviceLimit"></dd></div>
+                                    </template>
+                                </dl>
+                                <template x-if="(selectedProduct?.merchandising?.includedItems || []).length">
+                                    <div class="mt-3">
+                                        <p class="font-black text-[var(--sf-muted)]">Yang termasuk</p>
+                                        <ul class="mt-1 list-inside list-disc space-y-1 text-sm font-bold text-[var(--sf-ink)]">
+                                            <template x-for="item in selectedProduct.merchandising.includedItems" :key="item">
+                                                <li class="break-words" x-text="item"></li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </template>
+                                <template x-if="(selectedProduct?.merchandising?.limitations || []).length">
+                                    <div class="mt-3">
+                                        <p class="font-black text-[var(--sf-muted)]">Batasan penggunaan</p>
+                                        <ul class="mt-1 list-inside list-disc space-y-1 text-sm font-bold text-[var(--sf-ink)]">
+                                            <template x-for="limitation in selectedProduct.merchandising.limitations" :key="limitation">
+                                                <li class="break-words" x-text="limitation"></li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </template>
+                                <p x-show="selectedProduct?.merchandising?.fulfillmentExpectation" x-cloak class="mt-3 whitespace-pre-line break-words text-sm font-bold text-[var(--sf-ink)]"><span class="font-black text-[var(--sf-muted)]">Ekspektasi pemenuhan: </span><span x-text="selectedProduct.merchandising.fulfillmentExpectation"></span></p>
+                                <p x-show="selectedProduct?.merchandising?.warrantyPolicy" x-cloak class="mt-2 whitespace-pre-line break-words text-sm font-bold text-[var(--sf-ink)]"><span class="font-black text-[var(--sf-muted)]">Garansi: </span><span x-text="selectedProduct.merchandising.warrantyPolicy"></span></p>
+                                <p x-show="selectedProduct?.merchandising?.supportPolicy" x-cloak class="mt-2 whitespace-pre-line break-words text-sm font-bold text-[var(--sf-ink)]"><span class="font-black text-[var(--sf-muted)]">Dukungan: </span><span x-text="selectedProduct.merchandising.supportPolicy"></span></p>
+                            </section>
+
                             <div class="grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
                                 <div>
                                     <p class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Jumlah</p>

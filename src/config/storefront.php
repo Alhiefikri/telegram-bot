@@ -36,8 +36,8 @@ return [
         'primary_cta' => 'Lihat Produk',
         'secondary_cta' => 'Cara beli',
         'tertiary_cta' => 'Lihat Produk',
-        'popular_label' => 'Produk aktif dari database',
-        'popular_empty' => 'Produk populer akan tampil setelah stok aktif tersedia.',
+        'popular_label' => 'Produk terlaris berdasarkan penjualan berbayar',
+        'popular_empty' => 'Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.',
     ],
 
     'trust_indicators' => [
@@ -86,9 +86,9 @@ return [
     ],
 
     'featured' => [
-        'eyebrow' => 'Pilihan hari ini',
-        'empty_title' => 'Promo pilihan menunggu stok siap.',
-        'empty_body' => 'Belum ada produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca dan diperiksa lagi saat stok diperbarui.',
+        'eyebrow' => 'Pilihan utama dari admin',
+        'empty_title' => 'Belum ada pilihan utama.',
+        'empty_body' => 'Admin belum memilih produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca dan diperiksa lagi saat stok diperbarui.',
         'empty_cta' => 'Minta rekomendasi ke support',
     ],
 

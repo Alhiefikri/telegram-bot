@@ -60,7 +60,92 @@
                             </div>
 
                             <h1 class="font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $product->name }}</h1>
-                            <p class="mt-4 max-w-xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $storefront->descriptionSnippet($product) }}</p>
+                            @if (trim($presentation->description) !== '')
+                                <p class="mt-4 max-w-2xl whitespace-pre-line break-words text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->description }}</p>
+                            @else
+                                <p class="mt-4 max-w-xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->descriptionSnippet }}</p>
+                            @endif
+
+                            @if ($presentation->merchandising->hasDetails())
+                                <section class="mt-6 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4" aria-labelledby="product-merchandising-title">
+                                    <h2 id="product-merchandising-title" class="font-display text-lg font-black text-[var(--sf-ink)]">Detail produk</h2>
+                                    <dl class="mt-3 grid gap-3 text-sm font-bold sm:grid-cols-2">
+                                        @if ($presentation->merchandising->productType)
+                                            <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
+                                                <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Tipe produk</dt>
+                                                <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->productType }}</dd>
+                                            </div>
+                                        @endif
+                                        @if ($presentation->merchandising->accessDuration)
+                                            <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
+                                                <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Durasi akses</dt>
+                                                <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->accessDuration }}</dd>
+                                            </div>
+                                        @endif
+                                        @if ($presentation->merchandising->region)
+                                            <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
+                                                <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Region / negara</dt>
+                                                <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->region }}</dd>
+                                            </div>
+                                        @endif
+                                        @if ($presentation->merchandising->accountType)
+                                            <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
+                                                <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Tipe akun</dt>
+                                                <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->accountType }}</dd>
+                                            </div>
+                                        @endif
+                                        @if ($presentation->merchandising->deviceLimit)
+                                            <div class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3">
+                                                <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Batas perangkat / seat</dt>
+                                                <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->deviceLimit }}</dd>
+                                            </div>
+                                        @endif
+                                    </dl>
+
+                                    @if ($presentation->merchandising->includedItems !== [])
+                                        <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold">
+                                            <h3 class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Yang termasuk</h3>
+                                            <ul class="mt-2 list-inside list-disc space-y-1 text-[var(--sf-ink)]">
+                                                @foreach ($presentation->merchandising->includedItems as $item)
+                                                    <li class="break-words">{{ $item }}</li>
+                                                @endforeach
+                                            </ul>
+                                        </div>
+                                    @endif
+
+                                    @if ($presentation->merchandising->limitations !== [])
+                                        <div class="mt-3 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold">
+                                            <h3 class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Batasan penggunaan</h3>
+                                            <ul class="mt-2 list-inside list-disc space-y-1 text-[var(--sf-ink)]">
+                                                @foreach ($presentation->merchandising->limitations as $limitation)
+                                                    <li class="break-words">{{ $limitation }}</li>
+                                                @endforeach
+                                            </ul>
+                                        </div>
+                                    @endif
+
+                                    @if ($presentation->merchandising->fulfillmentExpectation)
+                                        <div class="mt-3 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold">
+                                            <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Ekspektasi pemenuhan</dt>
+                                            <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->fulfillmentExpectation }}</dd>
+                                        </div>
+                                    @endif
+
+                                    @if ($presentation->merchandising->warrantyPolicy)
+                                        <div class="mt-3 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold">
+                                            <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Kebijakan garansi</dt>
+                                            <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->warrantyPolicy }}</dd>
+                                        </div>
+                                    @endif
+
+                                    @if ($presentation->merchandising->supportPolicy)
+                                        <div class="mt-3 rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold">
+                                            <dt class="text-[10px] font-black uppercase tracking-wider text-[var(--sf-muted)]">Dukungan pelanggan</dt>
+                                            <dd class="mt-1 whitespace-pre-line break-words text-[var(--sf-ink)]">{{ $presentation->merchandising->supportPolicy }}</dd>
+                                        </div>
+                                    @endif
+                                </section>
+                            @endif
 
                             <div class="mt-6 border-y-[3px] border-dashed border-[var(--sf-border)] py-5">
                                 <dl class="grid gap-3 text-sm font-bold sm:grid-cols-2">

@@ -7,6 +7,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -49,6 +50,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Bayar via QR Manual', false)
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('&amp;quot;', false)
+            ->assertDontSee('POPULER')
+            ->assertDontSee('Best')
             ->assertSee('Habis');
     }
 
@@ -211,6 +214,62 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee(route('storefront.products.show', ['product' => $product, 'checkout' => 1]), false)
             ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('Checkout via Telegram Admin');
+    }
+
+    public function test_product_detail_renders_complete_merchandising_without_private_fulfillment_data(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Detail Lengkap',
+            'description' => "Akun premium siap pakai.\nBaca informasi sebelum checkout.",
+            'product_type' => 'Akun premium',
+            'access_duration' => '30 hari',
+            'region' => 'Indonesia',
+            'account_type' => 'Private',
+            'device_limit' => '1 perangkat',
+            'included_items' => "Akun siap pakai\nPanduan login",
+            'limitations' => "Tidak untuk dijual kembali\nSatu perangkat",
+            'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
+            'warranty_policy' => 'Garansi login 7 hari.',
+            'support_policy' => 'Support pada jam operasional.',
+            'delivery_note' => 'PRIVATE DELIVERY NOTE',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'private-credential@example.test|private-password',
+        ]);
+
+        $html = $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('Akun premium siap pakai.')
+            ->assertSee('Baca informasi sebelum checkout.')
+            ->assertSee('Detail produk')
+            ->assertSee('Tipe produk')
+            ->assertSee('Akun premium')
+            ->assertSee('Durasi akses')
+            ->assertSee('30 hari')
+            ->assertSee('Region / negara')
+            ->assertSee('Indonesia')
+            ->assertSee('Tipe akun')
+            ->assertSee('Private')
+            ->assertSee('Batas perangkat / seat')
+            ->assertSee('1 perangkat')
+            ->assertSee('Yang termasuk')
+            ->assertSee('Panduan login')
+            ->assertSee('Batasan penggunaan')
+            ->assertSee('Tidak untuk dijual kembali')
+            ->assertSee('Ekspektasi pemenuhan')
+            ->assertSee('Dikirim setelah pembayaran terverifikasi.')
+            ->assertSee('Kebijakan garansi')
+            ->assertSee('Garansi login 7 hari.')
+            ->assertSee('Dukungan pelanggan')
+            ->assertSee('Support pada jam operasional.')
+            ->getContent();
+
+        $this->assertStringNotContainsString('PRIVATE DELIVERY NOTE', $html);
+        $this->assertStringNotContainsString('private-credential@example.test', $html);
+        $this->assertStringNotContainsString('private-password', $html);
     }
 
     private function assertNoCheckoutSideEffects(): void

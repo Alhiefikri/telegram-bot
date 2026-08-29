@@ -34,13 +34,14 @@ class AdminProductUpdateController extends Controller
                 }
 
                 $locked = Product::query()->whereKey($product->getKey())->lockForUpdate()->firstOrFail();
-                $oldValues = $locked->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
+                $oldValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $oldImagePath = $oldValues['image_path'] ?? null;
 
                 $locked->fill([
                     'category_id' => $validated['category_id'] ?? null,
                     'name' => $validated['name'],
                     'description' => $validated['description'],
+                    ...$request->merchandisingAttributes(),
                     'delivery_note' => $validated['delivery_note'] ?? null,
                     'usage_guide_title' => $validated['usage_guide_title'] ?? null,
                     'usage_guide_url' => $validated['usage_guide_url'] ?? null,
@@ -55,7 +56,7 @@ class AdminProductUpdateController extends Controller
                 }
                 $locked->save();
 
-                $newValues = $locked->only(['category_id', 'name', 'description', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'stock', 'reserved_stock']);
+                $newValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
 
                 $auditLogger->log(
                     'product.updated',

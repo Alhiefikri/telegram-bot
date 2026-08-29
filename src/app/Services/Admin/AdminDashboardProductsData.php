@@ -50,7 +50,7 @@ final class AdminDashboardProductsData
     {
         $paginator = Product::query()
             ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'created_at'])
+            ->select(['id', 'category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
             ->latest()
@@ -104,6 +104,16 @@ final class AdminDashboardProductsData
                     'category_id' => $product->category_id,
                     'name' => $product->name,
                     'description' => $product->description,
+                    'product_type' => $product->product_type,
+                    'access_duration' => $product->access_duration,
+                    'region' => $product->region,
+                    'account_type' => $product->account_type,
+                    'device_limit' => $product->device_limit,
+                    'included_items' => $product->included_items,
+                    'limitations' => $product->limitations,
+                    'fulfillment_expectation' => $product->fulfillment_expectation,
+                    'warranty_policy' => $product->warranty_policy,
+                    'support_policy' => $product->support_policy,
                     'delivery_note' => $product->delivery_note,
                     'usage_guide_title' => $product->usage_guide_title,
                     'usage_guide_url' => $product->usage_guide_url,
@@ -118,6 +128,8 @@ final class AdminDashboardProductsData
                     'stock_items_truncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                     'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
+                    'featured_rank' => $product->featured_rank,
+                    'featured_label' => $product->featured_rank !== null ? 'Pilihan utama #'.$product->featured_rank : null,
                     'status_label' => $product->is_active ? 'Aktif' : 'Pause',
                     'status_badge' => $this->productStatusBadge($product->is_active),
                     'visibility_label' => $product->is_active ? '● Tampil di toko' : '○ Tidak tampil',
@@ -150,9 +162,20 @@ final class AdminDashboardProductsData
                         'usdtPriceAmount' => $this->formatUsdtPrice($product->usdt_price_amount),
                         'categoryId' => $product->category_id,
                         'description' => $product->description,
+                        'productType' => $product->product_type,
+                        'accessDuration' => $product->access_duration,
+                        'region' => $product->region,
+                        'accountType' => $product->account_type,
+                        'deviceLimit' => $product->device_limit,
+                        'includedItems' => $product->included_items,
+                        'limitations' => $product->limitations,
+                        'fulfillmentExpectation' => $product->fulfillment_expectation,
+                        'warrantyPolicy' => $product->warranty_policy,
+                        'supportPolicy' => $product->support_policy,
                         'deliveryNote' => $product->delivery_note,
                         'usageGuideTitle' => $product->usage_guide_title,
                         'usageGuideUrl' => $product->usage_guide_url,
+                        'featuredRank' => $product->featured_rank,
                         'isActive' => $product->is_active,
                         'imageUrl' => $imageUrl,
                         'updateUrl' => $updateUrl,

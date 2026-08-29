@@ -309,6 +309,105 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertTrue($product->is_active);
     }
 
+    public function test_admin_can_create_and_edit_customer_merchandising_fields_and_featured_rank(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Merchandising Product',
+                'price_amount' => '75000',
+                'description' => 'Deskripsi customer yang lengkap.',
+                'product_type' => 'Akun premium',
+                'access_duration' => '30 hari',
+                'region' => 'Indonesia',
+                'account_type' => 'Private',
+                'device_limit' => '1 perangkat',
+                'included_items' => "Akun siap pakai\nPanduan login\n\nDukungan awal",
+                'limitations' => "Tidak untuk dijual kembali\nSatu perangkat",
+                'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
+                'warranty_policy' => 'Garansi login 7 hari.',
+                'support_policy' => 'Support pada jam operasional.',
+                'featured_rank' => '2',
+                'delivery_note' => 'PRIVATE DELIVERY NOTE',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-1');
+
+        $product = Product::query()->where('name', 'Merchandising Product')->firstOrFail();
+        $this->assertSame('Akun premium', $product->product_type);
+        $this->assertSame('30 hari', $product->access_duration);
+        $this->assertSame('Indonesia', $product->region);
+        $this->assertSame('Private', $product->account_type);
+        $this->assertSame('1 perangkat', $product->device_limit);
+        $this->assertSame("Akun siap pakai\nPanduan login\nDukungan awal", $product->included_items);
+        $this->assertSame("Tidak untuk dijual kembali\nSatu perangkat", $product->limitations);
+        $this->assertSame('Dikirim setelah pembayaran terverifikasi.', $product->fulfillment_expectation);
+        $this->assertSame('Garansi login 7 hari.', $product->warranty_policy);
+        $this->assertSame('Support pada jam operasional.', $product->support_policy);
+        $this->assertSame(2, $product->featured_rank);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Merchandising Product',
+                'price_amount' => '80000',
+                'description' => 'Deskripsi customer yang diperbarui.',
+                'product_type' => 'Lisensi software',
+                'access_duration' => 'Lifetime',
+                'region' => 'Global',
+                'account_type' => 'Personal',
+                'device_limit' => '2 perangkat',
+                'included_items' => "Lisensi resmi\nUpdate produk",
+                'limitations' => 'Tidak dapat dipindahtangankan.',
+                'fulfillment_expectation' => 'Kode dikirim setelah pembayaran terverifikasi.',
+                'warranty_policy' => 'Garansi aktivasi 14 hari.',
+                'support_policy' => 'Support melalui Telegram pada jam operasional.',
+                'featured_rank' => '1',
+                'delivery_note' => 'PRIVATE UPDATED DELIVERY NOTE',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $product->refresh();
+        $this->assertSame('Lisensi software', $product->product_type);
+        $this->assertSame('Lifetime', $product->access_duration);
+        $this->assertSame('Global', $product->region);
+        $this->assertSame('Personal', $product->account_type);
+        $this->assertSame('2 perangkat', $product->device_limit);
+        $this->assertSame("Lisensi resmi\nUpdate produk", $product->included_items);
+        $this->assertSame('Tidak dapat dipindahtangankan.', $product->limitations);
+        $this->assertSame('Kode dikirim setelah pembayaran terverifikasi.', $product->fulfillment_expectation);
+        $this->assertSame('Garansi aktivasi 14 hari.', $product->warranty_policy);
+        $this->assertSame('Support melalui Telegram pada jam operasional.', $product->support_policy);
+        $this->assertSame(1, $product->featured_rank);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Detail yang dilihat pelanggan')
+            ->assertSee('Pratinjau publik')
+            ->assertSee('Lisensi software')
+            ->assertSee('Pilihan utama #1');
+    }
+
+    public function test_product_merchandising_validation_rejects_invalid_lengths_and_featured_rank(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Invalid Merchandising Product',
+                'price_amount' => '25000',
+                'description' => 'Produk untuk validasi merchandising.',
+                'product_type' => str_repeat('A', 101),
+                'included_items' => implode("\n", array_fill(0, 21, 'Item')),
+                'featured_rank' => '0',
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['product_type', 'included_items', 'featured_rank'], null, 'productCreate');
+
+        $this->assertDatabaseCount('products', 0);
+    }
+
     public function test_admin_can_update_and_delete_product_from_dashboard_modal(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

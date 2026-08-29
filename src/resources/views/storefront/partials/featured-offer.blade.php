@@ -15,7 +15,7 @@
                         <svg class="neo-spin-slow" viewBox="0 0 100 100" fill="var(--sf-violet)" stroke="var(--sf-ink)" stroke-width="3" stroke-linejoin="round">
                             <polygon points="98,50 84.8,59.3 91.6,74 75.5,75.5 74,91.6 59.3,84.8 50,98 40.7,84.8 26,91.6 24.5,75.5 8.4,74 15.2,59.3 2,50 15.2,40.7 8.4,26 24.5,24.5 26,8.4 40.7,15.2 50,2 59.3,15.2 74,8.4 75.5,24.5 91.6,26 84.8,40.7" />
                         </svg>
-                        <span class="text-xs uppercase tracking-wide text-white">Best</span>
+                        <span class="text-xs uppercase tracking-wide text-white">Pilihan admin</span>
                     </div>
                     @include('storefront.components.product-cover', [
                         'presentation' => $featuredPresentation,
@@ -61,8 +61,8 @@
         </div>
     @else
         <div class="neo-panel mx-auto flex w-full max-w-xl flex-col items-center border-dashed bg-[var(--sf-surface)] p-10 text-center">
-            <h2 class="font-display text-xl font-black text-[var(--sf-ink)] sm:text-2xl">Belum ada produk tersedia.</h2>
-            <p class="mt-3 max-w-sm text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">Saat ini belum ada produk aktif dengan stok tersedia. Lihat katalog untuk ketersediaan terbaru.</p>
+            <h2 class="font-display text-xl font-black text-[var(--sf-ink)] sm:text-2xl">Belum ada pilihan utama.</h2>
+            <p class="mt-3 max-w-sm text-xs font-semibold leading-relaxed text-[var(--sf-muted)]">Admin belum memilih produk aktif dengan stok tersedia untuk area ini. Lihat katalog untuk ketersediaan terbaru.</p>
             <a href="{{ $storefront->catalogUrl() }}" class="neo-button mt-6 inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-6 text-xs font-black text-white">
                 <span>Lihat katalog</span>
             </a>

@@ -8,6 +8,7 @@ use App\Models\CheckoutMaintenanceSetting;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -290,6 +291,7 @@ class StorefrontProductPresentationTest extends TestCase
             'name',
             'description',
             'descriptionSnippet',
+            'merchandising',
             'price',
             'stock',
             'sold',
@@ -302,6 +304,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertFalse($payload['maintenance']['active']);
         $this->assertSame('', $payload['maintenance']['notice']);
         $this->assertSame('Deskripsi produk segera dilengkapi.', $payload['descriptionSnippet']);
+        $this->assertFalse($payload['merchandising']['hasDetails']);
         $this->assertSame('', $payload['description']);
         $this->assertSame(['amount' => 42000], $payload['price']);
         $this->assertSame([
@@ -331,5 +334,52 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertTrue($payload['maintenance']['active']);
         $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload['maintenance']['notice']);
         $this->assertStringContainsString('Admin sedang sinkronisasi.', $payload['maintenance']['notice']);
+    }
+
+    public function test_merchandising_payload_contains_approved_public_details_only(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Public Merchandising Product',
+            'description' => "Akun premium siap pakai.\nBaca batasan sebelum checkout.",
+            'product_type' => 'Akun premium',
+            'access_duration' => '30 hari',
+            'region' => 'Indonesia',
+            'account_type' => 'Private',
+            'device_limit' => '1 perangkat',
+            'included_items' => "Akun siap pakai\nPanduan login\n\nDukungan awal",
+            'limitations' => "Tidak untuk dijual kembali\nSatu perangkat",
+            'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
+            'warranty_policy' => 'Garansi login 7 hari.',
+            'support_policy' => 'Support pada jam operasional.',
+            'delivery_note' => 'PRIVATE DELIVERY NOTE',
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'credential-secret@example.test|private-password',
+        ]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+        $payload = $presentation->modalPayload();
+        $serialized = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $this->assertSame([
+            'productType' => 'Akun premium',
+            'accessDuration' => '30 hari',
+            'region' => 'Indonesia',
+            'accountType' => 'Private',
+            'deviceLimit' => '1 perangkat',
+            'includedItems' => ['Akun siap pakai', 'Panduan login', 'Dukungan awal'],
+            'limitations' => ['Tidak untuk dijual kembali', 'Satu perangkat'],
+            'fulfillmentExpectation' => 'Dikirim setelah pembayaran terverifikasi.',
+            'warrantyPolicy' => 'Garansi login 7 hari.',
+            'supportPolicy' => 'Support pada jam operasional.',
+            'hasDetails' => true,
+        ], $payload['merchandising']);
+        $this->assertSame("Akun premium siap pakai.\nBaca batasan sebelum checkout.", $payload['description']);
+        $this->assertStringNotContainsString('PRIVATE DELIVERY NOTE', $serialized);
+        $this->assertStringNotContainsString('credential-secret@example.test', $serialized);
+        $this->assertStringNotContainsString('private-password', $serialized);
+        $this->assertArrayNotHasKey('delivery_note', $payload);
+        $this->assertArrayNotHasKey('deliveryNote', $payload);
     }
 }

@@ -33,6 +33,12 @@
                                 <x-admin-dashboard.badge tone="purple">
                                     {{ $product['category'] }}
                                 </x-admin-dashboard.badge>
+
+                                @if ($product['featured_label'])
+                                    <x-admin-dashboard.badge tone="amber">
+                                        {{ $product['featured_label'] }}
+                                    </x-admin-dashboard.badge>
+                                @endif
                             </div>
 
                             {{-- Price --}}

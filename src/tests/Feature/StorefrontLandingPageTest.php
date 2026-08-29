@@ -218,7 +218,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Katalog publik sedang disiapkan')
             ->assertSee('Kategori akan segera hadir')
             ->assertSee('Cek kembali katalog saat stok produk yang Anda cari tersedia.')
-            ->assertSee('Produk populer akan tampil');
+            ->assertSee('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.');
     }
 
     public function test_active_products_render_while_inactive_and_deleted_products_stay_hidden(): void
@@ -371,6 +371,7 @@ class StorefrontLandingPageTest extends TestCase
             'stock' => 4,
             'reserved_stock' => 1,
             'is_active' => true,
+            'featured_rank' => 1,
         ]);
 
         $html = $this->get('/')
@@ -414,7 +415,7 @@ class StorefrontLandingPageTest extends TestCase
 
         $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
 
-        $this->assertStringContainsString('Belum ada produk tersedia.', $featuredHtml);
+        $this->assertStringContainsString('Belum ada pilihan utama.', $featuredHtml);
         $this->assertStringContainsString('Lihat katalog', $featuredHtml);
         $this->assertStringNotContainsString('Pesan via Admin', $featuredHtml);
         $this->assertStringNotContainsString('Akun Habis', $featuredHtml);

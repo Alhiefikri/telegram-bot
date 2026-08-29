@@ -68,6 +68,7 @@ class StorefrontProductPresenter
             description: (string) $product->description,
             descriptionSnippet: $this->descriptionSnippet($product),
             priceAmount: (int) $product->price_amount,
+            merchandising: StorefrontProductMerchandising::fromProduct($product),
             stockAvailable: $stockAvailable,
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,

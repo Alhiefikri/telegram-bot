@@ -14,6 +14,7 @@ final readonly class StorefrontProductPresentation
         public string $name,
         public string $description,
         public string $descriptionSnippet,
+        public StorefrontProductMerchandising $merchandising,
         public int $priceAmount,
         public int $stockAvailable,
         public int $soldQuantity,
@@ -62,6 +63,7 @@ final readonly class StorefrontProductPresentation
             'name' => $this->name,
             'description' => $this->description,
             'descriptionSnippet' => $this->descriptionSnippet,
+            'merchandising' => $this->merchandising->toPublicPayload(),
             'price' => array_filter([
                 'amount' => $this->priceAmount,
                 'usdtAmount' => $this->usdtPriceAmount,

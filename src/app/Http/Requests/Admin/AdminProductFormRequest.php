@@ -2,16 +2,43 @@
 
 namespace App\Http\Requests\Admin;
 
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 abstract class AdminProductFormRequest extends FormRequest
 {
+    /** @var list<string> */
+    private const MERCHANDISING_FIELDS = [
+        'product_type',
+        'access_duration',
+        'region',
+        'account_type',
+        'device_limit',
+        'included_items',
+        'limitations',
+        'fulfillment_expectation',
+        'warranty_policy',
+        'support_policy',
+        'featured_rank',
+    ];
+
     protected function prepareForValidation(): void
     {
         $this->merge([
             'usage_guide_title' => $this->nullableTrimmedString('usage_guide_title'),
             'usage_guide_url' => $this->nullableTrimmedString('usage_guide_url'),
+            'product_type' => $this->nullableTrimmedString('product_type'),
+            'access_duration' => $this->nullableTrimmedString('access_duration'),
+            'region' => $this->nullableTrimmedString('region'),
+            'account_type' => $this->nullableTrimmedString('account_type'),
+            'device_limit' => $this->nullableTrimmedString('device_limit'),
+            'included_items' => $this->normalizedLineList('included_items'),
+            'limitations' => $this->normalizedLineList('limitations'),
+            'fulfillment_expectation' => $this->nullableTrimmedString('fulfillment_expectation'),
+            'warranty_policy' => $this->nullableTrimmedString('warranty_policy'),
+            'support_policy' => $this->nullableTrimmedString('support_policy'),
+            'featured_rank' => $this->nullableTrimmedString('featured_rank'),
         ]);
 
         $value = trim((string) $this->input('usdt_price_amount', ''));
@@ -44,6 +71,31 @@ abstract class AdminProductFormRequest extends FormRequest
             'usdt_price_amount' => ['nullable', 'integer', 'min:0'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string', 'max:1000'],
+            'product_type' => ['nullable', 'string', 'max:100'],
+            'access_duration' => ['nullable', 'string', 'max:100'],
+            'region' => ['nullable', 'string', 'max:120'],
+            'account_type' => ['nullable', 'string', 'max:100'],
+            'device_limit' => ['nullable', 'string', 'max:100'],
+            'included_items' => [
+                'nullable',
+                'string',
+                'max:2000',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $this->validateLineList($value, $fail, 'Item yang termasuk');
+                },
+            ],
+            'limitations' => [
+                'nullable',
+                'string',
+                'max:2000',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $this->validateLineList($value, $fail, 'Batasan');
+                },
+            ],
+            'fulfillment_expectation' => ['nullable', 'string', 'max:1000'],
+            'warranty_policy' => ['nullable', 'string', 'max:1000'],
+            'support_policy' => ['nullable', 'string', 'max:1000'],
+            'featured_rank' => ['nullable', 'integer', 'min:1', 'max:999'],
             'delivery_note' => ['nullable', 'string', 'max:2000'],
             'usage_guide_title' => ['nullable', 'string', 'max:160', 'required_with:usage_guide_url'],
             'usage_guide_url' => [
@@ -51,7 +103,7 @@ abstract class AdminProductFormRequest extends FormRequest
                 'string',
                 'max:2048',
                 'required_with:usage_guide_title',
-                function (string $attribute, mixed $value, \Closure $fail): void {
+                function (string $attribute, mixed $value, Closure $fail): void {
                     if (! is_string($value) || ! $this->isSafeUsageGuideUrl($value)) {
                         $fail('URL panduan harus berupa URL HTTP/HTTPS atau path lokal yang diawali satu garis miring.');
                     }
@@ -59,6 +111,21 @@ abstract class AdminProductFormRequest extends FormRequest
             ],
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function merchandisingAttributes(): array
+    {
+        $validated = $this->validated();
+        $attributes = [];
+
+        foreach (self::MERCHANDISING_FIELDS as $field) {
+            $attributes[$field] = $validated[$field] ?? null;
+        }
+
+        return $attributes;
     }
 
     /**
@@ -72,6 +139,19 @@ abstract class AdminProductFormRequest extends FormRequest
             'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
             'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 3 desimal.',
             'description.required' => 'Deskripsi singkat wajib diisi.',
+            'product_type.max' => 'Tipe produk maksimal 100 karakter.',
+            'access_duration.max' => 'Durasi akses maksimal 100 karakter.',
+            'region.max' => 'Region atau negara maksimal 120 karakter.',
+            'account_type.max' => 'Tipe akun maksimal 100 karakter.',
+            'device_limit.max' => 'Batas perangkat atau seat maksimal 100 karakter.',
+            'included_items.max' => 'Daftar yang termasuk maksimal 2000 karakter.',
+            'limitations.max' => 'Daftar batasan maksimal 2000 karakter.',
+            'fulfillment_expectation.max' => 'Ekspektasi pemenuhan maksimal 1000 karakter.',
+            'warranty_policy.max' => 'Kebijakan garansi maksimal 1000 karakter.',
+            'support_policy.max' => 'Kebijakan dukungan maksimal 1000 karakter.',
+            'featured_rank.integer' => 'Urutan pilihan utama harus berupa angka.',
+            'featured_rank.min' => 'Urutan pilihan utama minimal 1.',
+            'featured_rank.max' => 'Urutan pilihan utama maksimal 999.',
             'delivery_note.max' => 'Catatan pengiriman rahasia maksimal 2000 karakter.',
             'usage_guide_title.required_with' => 'Judul panduan wajib diisi jika URL panduan diisi.',
             'usage_guide_title.max' => 'Judul panduan maksimal 160 karakter.',
@@ -86,11 +166,51 @@ abstract class AdminProductFormRequest extends FormRequest
         ];
     }
 
-    private function nullableTrimmedString(string $key): ?string
+    private function nullableTrimmedString(string $key): mixed
     {
-        $value = trim((string) $this->input($key, ''));
+        $value = $this->input($key, '');
+
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function normalizedLineList(string $key): mixed
+    {
+        $value = $this->input($key, '');
+
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $lines = preg_split('/\R/u', trim($value)) ?: [];
+        $lines = array_map(static fn (string $line): string => trim($line), $lines);
+        $lines = array_filter($lines, static fn (string $line): bool => $line !== '');
+
+        return $lines === [] ? null : implode("\n", $lines);
+    }
+
+    private function validateLineList(mixed $value, Closure $fail, string $label): void
+    {
+        if (! is_string($value)) {
+            return;
+        }
+
+        $lines = preg_split('/\R/u', $value) ?: [];
+        if (count($lines) > 20) {
+            $fail($label.' maksimal 20 baris.');
+        }
+
+        foreach ($lines as $line) {
+            if (mb_strlen($line, 'UTF-8') > 160) {
+                $fail($label.' maksimal 160 karakter per baris.');
+                break;
+            }
+        }
     }
 
     private function isSafeUsageGuideUrl(string $value): bool

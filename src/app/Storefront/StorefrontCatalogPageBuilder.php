@@ -12,6 +12,32 @@ use Illuminate\Support\Collection;
 
 class StorefrontCatalogPageBuilder
 {
+    /** @var list<string> */
+    private const PUBLIC_PRODUCT_COLUMNS = [
+        'id',
+        'category_id',
+        'name',
+        'description',
+        'product_type',
+        'access_duration',
+        'region',
+        'account_type',
+        'device_limit',
+        'included_items',
+        'limitations',
+        'fulfillment_expectation',
+        'warranty_policy',
+        'support_policy',
+        'price_amount',
+        'usdt_price_amount',
+        'currency',
+        'stock',
+        'reserved_stock',
+        'image_path',
+        'is_active',
+        'featured_rank',
+    ];
+
     public function __construct(
         private readonly StorefrontPresenter $storefront,
         private readonly StorefrontProductPresenter $products,
@@ -52,9 +78,9 @@ class StorefrontCatalogPageBuilder
         $categories = $this->publicCategories();
         $products = $this->publicProducts($search);
         $catalogProducts = $this->catalogProducts($products, $maintenance);
-        $featuredProduct = $search === ''
-            ? $this->featuredFromCatalog($catalogProducts)
-            : $this->featuredProduct($maintenance);
+        $featuredProduct = $context === StorefrontCatalogPage::CONTEXT_HOME
+            ? $this->featuredProduct($maintenance)
+            : null;
         $copy = config('storefront');
         $brand = $this->storefront->brand();
         $isShop = $context === StorefrontCatalogPage::CONTEXT_SHOP;
@@ -77,7 +103,7 @@ class StorefrontCatalogPageBuilder
             hasPublicCategories: $categories->isNotEmpty(),
             categoryFilters: $this->categoryFilters($categories, $catalogProducts),
             products: $catalogProducts,
-            popularProducts: $catalogProducts->filter->isPopular->values(),
+            popularProducts: $this->orderedPopularProducts($catalogProducts),
             featuredProduct: $featuredProduct,
             search: $search,
             searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
@@ -111,7 +137,7 @@ class StorefrontCatalogPageBuilder
     private function publicProducts(string $search): Collection
     {
         return Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(self::PUBLIC_PRODUCT_COLUMNS)
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->withAvailability()
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
@@ -131,22 +157,48 @@ class StorefrontCatalogPageBuilder
      */
     private function catalogProducts(Collection $products, CheckoutMaintenanceState $maintenance): Collection
     {
-        $presentations = $products
-            ->map(fn (Product $product) => $this->products->present($product, maintenanceState: $maintenance))
-            ->values();
+        $presentations = $products->mapWithKeys(
+            fn (Product $product): array => [
+                (int) $product->id => $this->products->present($product, maintenanceState: $maintenance),
+            ],
+        );
 
+        /*
+         * POPULER is based only on observed paid completed sales. Available
+         * products with more sales rank first; name and id make ties stable.
+         */
         $popularIds = $presentations
-            ->filter(fn (StorefrontProductPresentation $presentation) => $presentation->isAvailable)
+            ->filter(fn (StorefrontProductPresentation $presentation): bool => $presentation->isAvailable && $presentation->soldQuantity > 0)
+            ->sort(fn (StorefrontProductPresentation $left, StorefrontProductPresentation $right): int => $this->comparePopular($left, $right))
             ->take(3)
-            ->map(fn (StorefrontProductPresentation $presentation) => $presentation->id)
+            ->keys()
             ->all();
 
         return $presentations
-            ->map(fn (StorefrontProductPresentation $presentation) => new StorefrontCatalogProduct(
+            ->map(fn (StorefrontProductPresentation $presentation): StorefrontCatalogProduct => new StorefrontCatalogProduct(
                 presentation: $presentation,
                 isPopular: in_array($presentation->id, $popularIds, true),
             ))
             ->values();
+    }
+
+    /**
+     * @param  Collection<int, StorefrontCatalogProduct>  $catalogProducts
+     * @return Collection<int, StorefrontCatalogProduct>
+     */
+    private function orderedPopularProducts(Collection $catalogProducts): Collection
+    {
+        return $catalogProducts
+            ->filter(fn (StorefrontCatalogProduct $product): bool => $product->isPopular)
+            ->sort(fn (StorefrontCatalogProduct $left, StorefrontCatalogProduct $right): int => $this->comparePopular($left->presentation, $right->presentation))
+            ->values();
+    }
+
+    private function comparePopular(StorefrontProductPresentation $left, StorefrontProductPresentation $right): int
+    {
+        return ($right->soldQuantity <=> $left->soldQuantity)
+            ?: strcmp($left->name, $right->name)
+            ?: ($left->id <=> $right->id);
     }
 
     /**
@@ -170,31 +222,10 @@ class StorefrontCatalogPageBuilder
             ->values();
     }
 
-    /**
-     * Reuse the already-fetched catalog for the featured slot when the catalog is
-     * unfiltered. storefrontOrder() sorts available products first and the
-     * presentation's isAvailable flag mirrors the availableForPurchase() scope, so
-     * the first available entry equals featuredProduct()->first() without a second
-     * products query. Search results keep the global featuredProduct() query so the
-     * featured slot stays independent of the active filter.
-     *
-     * @param  Collection<int, StorefrontCatalogProduct>  $catalogProducts
-     */
-    private function featuredFromCatalog(Collection $catalogProducts): ?StorefrontCatalogProduct
-    {
-        $featured = $catalogProducts->first(
-            fn (StorefrontCatalogProduct $product): bool => $product->presentation->isAvailable,
-        );
-
-        return $featured !== null
-            ? new StorefrontCatalogProduct($featured->presentation)
-            : null;
-    }
-
     private function featuredProduct(CheckoutMaintenanceState $maintenance): ?StorefrontCatalogProduct
     {
         $product = Product::query()
-            ->select(['id', 'category_id', 'name', 'description', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path'])
+            ->select(self::PUBLIC_PRODUCT_COLUMNS)
             ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
             ->withAvailability()
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
@@ -203,7 +234,10 @@ class StorefrontCatalogPageBuilder
                     ->where('payment_status', PaymentStatus::Paid))], 'quantity')
             ->publicVisible()
             ->availableForPurchase()
-            ->storefrontOrder()
+            ->whereNotNull('featured_rank')
+            ->orderBy('featured_rank')
+            ->orderBy('name')
+            ->orderBy('id')
             ->first();
 
         return $product

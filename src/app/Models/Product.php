@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['category_id', 'name', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active'])]
+#[Fillable(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
@@ -17,7 +17,7 @@ class Product extends Model
 
     protected function casts(): array
     {
-        return ['category_id' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean'];
+        return ['category_id' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
     }
 
     /**

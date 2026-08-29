@@ -48,7 +48,7 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(url('/#products'), $page->searchAction);
         $this->assertSame(url('/#products'), $page->clearSearchUrl);
         $this->assertSame('Katalog publik sedang disiapkan.', $page->emptyProductsTitle);
-        $this->assertSame('Produk populer akan tampil setelah stok aktif tersedia.', $page->popularEmptyMessage);
+        $this->assertSame('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.', $page->popularEmptyMessage);
     }
 
     public function test_shop_context_exposes_catalog_empty_state_inputs(): void
@@ -115,11 +115,32 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(['Category 01', 'Category 03'], $page->categoryFilters->pluck('name')->all());
     }
 
+    public function test_featured_product_requires_explicit_rank_and_skips_unavailable_entries(): void
+    {
+        $this->availableProduct(['name' => 'Legacy Ready']);
+        $this->unavailableProduct(['name' => 'Ranked Empty', 'featured_rank' => 1]);
+        Product::factory()->create([
+            'name' => 'Ranked Inactive',
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => false,
+            'featured_rank' => 2,
+        ]);
+        $this->availableProduct(['name' => 'Ranked Ready', 'featured_rank' => 3]);
+
+        $featuredProduct = app(StorefrontCatalogPageBuilder::class)->home(null)->featuredProduct;
+
+        $this->assertNotNull($featuredProduct);
+        $this->assertSame('Ranked Ready', $featuredProduct->presentation->name);
+        $this->assertTrue($featuredProduct->presentation->isAvailable);
+    }
+
     public function test_featured_product_is_available_public_product_only(): void
     {
+
         $this->unavailableProduct(['name' => 'Akun Habis']);
         Product::factory()->create(['name' => 'Produk Nonaktif Siap', 'stock' => 5, 'reserved_stock' => 0, 'is_active' => false]);
-        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5, 'featured_rank' => 1]);
 
         $featuredProduct = app(StorefrontCatalogPageBuilder::class)->home(null)->featuredProduct;
 
@@ -141,18 +162,18 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->availableProduct([
             'name' => 'Canva Ready',
             'stock' => 2,
+            'featured_rank' => 1,
         ]);
-
         $featuredProduct = app(StorefrontCatalogPageBuilder::class)->home(null)->featuredProduct;
 
         $this->assertNotNull($featuredProduct);
         $this->assertSame('Canva Ready', $featuredProduct->presentation->name);
     }
 
-    public function test_featured_product_reuses_catalog_without_a_second_products_query(): void
+    public function test_featured_product_uses_explicit_rank_and_is_independent_of_catalog_order(): void
     {
         $this->unavailableProduct(['name' => 'Akun Habis']);
-        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5, 'featured_rank' => 1]);
 
         DB::flushQueryLog();
         DB::enableQueryLog();
@@ -162,14 +183,14 @@ class StorefrontCatalogPageBuilderTest extends TestCase
             ->count();
         DB::disableQueryLog();
 
-        $this->assertSame(1, $productListingQueries);
+        $this->assertSame(2, $productListingQueries);
         $this->assertNotNull($page->featuredProduct);
         $this->assertSame('Canva Ready', $page->featuredProduct->presentation->name);
     }
 
     public function test_featured_product_stays_global_when_search_filters_it_out(): void
     {
-        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5]);
+        $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5, 'featured_rank' => 1]);
         $this->availableProduct(['name' => 'Chat GPT Plus', 'stock' => 5]);
 
         $page = app(StorefrontCatalogPageBuilder::class)->home('chat');
@@ -202,17 +223,33 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(['Z Managed Ready', 'A Managed Numeric Only', 'B Numeric Empty'], $products->map(fn ($entry) => $entry->presentation->name)->all());
     }
 
-    public function test_popular_products_are_prepared_available_entries_from_current_product_list(): void
+    public function test_popular_products_require_paid_completed_sales_and_rank_by_quantity(): void
     {
-        $this->availableProduct(['name' => 'Alpha Ready', 'stock' => 2]);
-        $this->availableProduct(['name' => 'Bravo Ready', 'stock' => 2]);
-        $this->availableProduct(['name' => 'Charlie Ready', 'stock' => 2]);
-        $this->availableProduct(['name' => 'Delta Ready', 'stock' => 2]);
-        $this->unavailableProduct(['name' => 'Echo Empty']);
+        $alpha = $this->availableProduct(['name' => 'Alpha Ready', 'stock' => 2]);
+        $bravo = $this->availableProduct(['name' => 'Bravo Ready', 'stock' => 2]);
+        $charlie = $this->availableProduct(['name' => 'Charlie Ready', 'stock' => 2]);
+        $delta = $this->availableProduct(['name' => 'Delta Ready', 'stock' => 2]);
+        $echo = $this->unavailableProduct(['name' => 'Echo Empty']);
+        $paidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $alpha->id, 'quantity' => 2]);
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $bravo->id, 'quantity' => 5]);
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $charlie->id, 'quantity' => 3]);
+        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $echo->id, 'quantity' => 9]);
 
         $page = app(StorefrontCatalogPageBuilder::class)->home(null);
+        $this->assertSame([
+            'Alpha Ready' => 2,
+            'Bravo Ready' => 5,
+            'Charlie Ready' => 3,
+            'Delta Ready' => 0,
+            'Echo Empty' => 9,
+        ], $page->products->mapWithKeys(fn ($entry) => [$entry->presentation->name => $entry->presentation->soldQuantity])->all());
 
-        $this->assertSame(['Alpha Ready', 'Bravo Ready', 'Charlie Ready'], $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all());
+        $this->assertSame(['Bravo Ready', 'Charlie Ready', 'Alpha Ready'], $page->popularProducts->map(fn ($entry) => $entry->presentation->name)->all());
         $this->assertSame([
             'Alpha Ready' => true,
             'Bravo Ready' => true,
